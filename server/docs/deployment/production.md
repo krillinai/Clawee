@@ -25,7 +25,7 @@ sudo find /etc/clawee/ops -type f -exec chmod 600 {} +
 
 ```bash
 docker run --rm --name mcp-gateway \
-  -p 127.0.0.1:1904:1904 \
+  -p 0.0.0.0:1904:1904 \
   -e CLAWEE_OPS_DIR=/run/clawee-ops \
   -v /etc/clawee/ops:/run/clawee-ops:ro \
   -v claw-mcp-data:/app/data \
@@ -40,7 +40,7 @@ docker run --rm --name mcp-gateway \
 
 ```bash
 export CLAWEE_OPS_DIR="$HOME/clawee-container-ops"
-npm run init -- --ops-dir "$CLAWEE_OPS_DIR" --container --gateway https://agent.example.com
+pnpm run init --ops-dir "$CLAWEE_OPS_DIR" --container --gateway https://agent.example.com
 docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml build
 ```
 
@@ -54,7 +54,7 @@ docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml ru
 docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml up -d gateway
 ```
 
-Gateway 仅映射 `127.0.0.1:1904`，数据库不映射宿主机端口。使用 HTTPS Origin 初始化时会开启 Secure Cookie，因此应先将 HTTPS 代理限制到部署者可访问的网络，完成首个管理员注册后再扩大访问范围。镜像内服务监听 `0.0.0.0:1904`，不要与宿主机 loopback 配置混淆。
+Gateway 映射宿主机 `0.0.0.0:1904`，数据库不映射宿主机端口。镜像内服务也监听 `0.0.0.0:1904`。使用 HTTPS Origin 初始化时会开启 Secure Cookie；通过防火墙限制 Gateway 端口，并将 HTTPS 代理限制到部署者可访问的网络，完成首个管理员注册后再扩大访问范围。客户端填写实际域名，不填写 `0.0.0.0`。
 
 发行后可使用 `ghcr.io/krillinai/clawee-server:1.1.0`，并根据实际发行摘要锁定镜像。尚未发布的版本应先本地构建，不能假定镜像已存在。
 

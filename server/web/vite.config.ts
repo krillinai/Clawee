@@ -25,12 +25,16 @@ export default defineConfig({
       : null
   ],
   server: {
+    host: "0.0.0.0",
     port: devPort,
     proxy: {
       "/api/v1/auth": backendURL,
       "/api/v1/app": backendURL,
       "/api/v1/admin": backendURL
     }
+  },
+  preview: {
+    host: "0.0.0.0"
   },
   build: {
     outDir: "../internal/server/webdist/dist",

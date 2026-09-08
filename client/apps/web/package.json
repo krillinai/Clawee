@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "pnpm --filter @clawee/desktop prepare:codex-runtime && pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite",
     "prebuild": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
     "build": "tsc -p tsconfig.json && vite build",
     "pretypecheck": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",

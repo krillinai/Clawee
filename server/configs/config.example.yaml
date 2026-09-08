@@ -1,5 +1,5 @@
 server:
-  addr: "127.0.0.1:1904"
+  addr: "0.0.0.0:1904"
   enable_pprof: false
 
 database:

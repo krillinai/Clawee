@@ -10,25 +10,29 @@ Clawee 是可自托管的 Agent 工作台，包含桌面客户端、本地执行
 
 需要 Node.js 24、Corepack、Go 1.25 或更新兼容版本，以及 Docker Compose。客户端与管理台分别使用锁定的 pnpm 版本，由 Corepack 选择。Windows 服务端源码脚本请在 WSL2 中执行。
 
+统一使用 `pnpm run <脚本名>`；其中 `setup`、`init` 必须保留 `run`，避免执行 pnpm 自带的同名命令。根目录和客户端使用 pnpm 9.15.0，管理台使用 10.33.3，首次使用先执行 `corepack enable pnpm`。
+
 在仓库根目录运行：
 
 ```bash
-npm run setup
+pnpm run setup
 export CLAWEE_OPS_DIR="$HOME/clawee-ops"
-npm run init -- --ops-dir "$CLAWEE_OPS_DIR"
+pnpm run init --ops-dir "$CLAWEE_OPS_DIR"
 docker compose -f server/deploy/docker-compose.yaml up -d --wait
-npm run db:migrate
-npm run server:dev
+pnpm run db:migrate
+pnpm run server:dev
 ```
 
-初始化命令在仓库外生成随机密钥和权限为 `0600` 的配置，重复运行不会覆盖已有配置。开发数据库仅监听 `127.0.0.1:15932`，使用本机 trust 认证，仅用于开发。Gateway 与内嵌管理台默认位于 `http://127.0.0.1:1904`。
+初始化命令在仓库外生成随机密钥和权限为 `0600` 的配置，重复运行不会覆盖已有配置。开发数据库仅监听 `127.0.0.1:15932`，使用本机 trust 认证，仅用于开发。Gateway 与内嵌管理台监听 `0.0.0.0:1904`，管理台开发页面监听 `0.0.0.0:5904`，客户端 Web 开发页面监听 `0.0.0.0:19860`。本机访问 `http://127.0.0.1:<端口>`，其他设备使用本机实际 IP 或域名；`0.0.0.0` 是监听地址，不是客户端连接地址。
 
-首次部署应保持本机访问，由部署者完成首个账号注册；该账号会获得管理员权限。完成初始化后再通过 HTTPS 反向代理开放服务。普通用户的注册、权限和 MCP 上游由部署者管理。
+已有运维配置保持不变。如需明确覆盖 Gateway 监听地址，启动前设置 `CLAW_MCP_SERVER_ADDR=0.0.0.0:1904`，或在外部配置中将 `server.addr` 设为相同值。本地 daemon 继续只监听回环地址；客户端 Web 开发页面会代理访问该 daemon，仅用于受信开发网络。
+
+首次部署应通过防火墙或访问控制限制到部署者，由部署者完成首个账号注册；该账号会获得管理员权限。完成初始化后再通过 HTTPS 反向代理开放服务。普通用户的注册、权限和 MCP 上游由部署者管理。
 
 另开终端，在根目录启动桌面：
 
 ```bash
-npm run client:dev
+pnpm run client:dev
 ```
 
 在登录页面设置自己的 Gateway 地址，登录后填写模型服务地址、模型名和 API Key，再创建任务。远程 Gateway 必须使用 HTTPS；本机 HTTP 可用于开发。切换 Gateway 前需退出登录并结束任务，登录凭据按地址隔离。
@@ -47,12 +51,12 @@ npm run client:dev
 | `scripts` | 整合项目的安装、初始化与命令入口 |
 
 ```bash
-npm test                         # 初始化与根脚本测试
-npm run client:test              # 客户端测试
-npm run server:test              # 服务端测试
-npm run web:dev                  # 客户端 Web 开发模式
-npm run admin:dev                # 管理台开发服务器
-npm run desktop:preflight:local  # 提交前完整桌面预检
+pnpm run test                         # 初始化与根脚本测试
+pnpm run client:test              # 客户端测试
+pnpm run server:test              # 服务端测试
+pnpm run web:dev                  # 客户端 Web 开发模式
+pnpm run admin:dev                # 管理台开发服务器
+pnpm run desktop:preflight:local  # 提交前完整桌面预检
 ```
 
 服务端 PostgreSQL 集成测试必须使用独立、名称以 `_test` 结尾的数据库，并设置 `CLAW_MCP_TEST_DATABASE_URL`。它们会修改测试数据，不能指向日常开发或生产数据库。
@@ -74,6 +78,8 @@ CLAWEE_EXTERNAL_MODEL_CONFIG="$HOME/clawee-test-model.json" node scripts/contain
 
 ## 部署与开发资料
 
+- [功能验证与操作指南](docs/validation-and-operations.md)：原仓库命令对应、启动、功能验收与部署步骤
+- [正式发布前待处理事项](docs/pre-release-checklist.md)：功能验证后再处理 CI、仓库设置、签名及正式发行
 - [服务端开发](server/docs/getting-started/development.md)
 - [配置参考](server/docs/getting-started/configuration.md)
 - [生产部署与备份](server/docs/deployment/production.md)

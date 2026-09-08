@@ -39,12 +39,12 @@ export default defineConfig({
     ...(DESKTOP_HOSTED ? [] : [claweeRuntimeDevPlugin()])
   ],
   server: {
-    host: '127.0.0.1',
+    host: '0.0.0.0',
     port: 19_860,
     strictPort: true
   },
   preview: {
-    host: '127.0.0.1',
+    host: '0.0.0.0',
     port: 4173
   }
 });

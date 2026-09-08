@@ -15,9 +15,9 @@
 公开仓库只提供 `configs/config.example.yaml`。首次使用时复制到独立的私有运维目录：
 
 ```bash
-# 从整合仓库根目录执行；已完成 npm run setup。
+# 从整合仓库根目录执行；已完成 pnpm run setup。
 export CLAWEE_OPS_DIR="$HOME/clawee-ops"
-npm run init -- --ops-dir "$CLAWEE_OPS_DIR"
+pnpm run init --ops-dir "$CLAWEE_OPS_DIR"
 ```
 
 初始化会生成两个独立随机密钥，并拒绝向源码目录写入配置。JWT 签名密钥至少为 32 个 ASCII 字符，Agent Token 加密密钥必须恰好为 32 个 ASCII 字符。`--container` 生成容器网络数据库地址及仓库外 `.env` 中的随机数据库密码；重复执行不会转换或覆盖已有配置。

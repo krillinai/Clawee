@@ -8,7 +8,7 @@ run: db-migrate-up
 	go run ./cmd/claw-mcp serve
 
 run-web:
-	pnpm --dir web dev --host 0.0.0.0
+	cd web && pnpm dev --host 0.0.0.0
 
 dev:
 	./scripts/dev.sh

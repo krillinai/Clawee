@@ -246,8 +246,8 @@ func TestLoadDefaultsIncludeMCPAuth(t *testing.T) {
 	if !cfg.MCP.Auth.Enabled {
 		t.Fatal("MCP auth should be enabled by default")
 	}
-	if cfg.Server.Addr != ":1904" {
-		t.Fatalf("server.addr = %q, want :1904", cfg.Server.Addr)
+	if cfg.Server.Addr != "0.0.0.0:1904" {
+		t.Fatalf("server.addr = %q, want 0.0.0.0:1904", cfg.Server.Addr)
 	}
 	if cfg.MCP.Auth.Resource != "http://localhost:1904/mcp" {
 		t.Fatalf("MCP auth resource = %q, want http://localhost:1904/mcp", cfg.MCP.Auth.Resource)

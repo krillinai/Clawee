@@ -4,7 +4,7 @@
 
 - Go 1.25 或与 `go.mod` 一致的版本；
 - Node.js 24；
-- pnpm 10；
+- Corepack；管理台使用锁定的 pnpm 10.33.3；
 - Docker 与 Docker Compose；
 - PostgreSQL 16（也可使用 Compose 启动）。
 
@@ -13,7 +13,7 @@
 先指定独立于源码仓库的私有运维目录。仓库内的示例配置只用于初始化，不会被程序直接读取：
 
 ```bash
-# 在整合仓库根目录先运行 npm run setup，然后进入 server/：
+# 在整合仓库根目录先运行 pnpm run setup，然后进入 server/：
 export CLAWEE_OPS_DIR="$HOME/clawee-ops"
 node ../scripts/clawee.mjs init --ops-dir "$CLAWEE_OPS_DIR"
 ```
@@ -52,6 +52,8 @@ make db-migrate-up
 - 后端：`http://127.0.0.1:1904`
 - Web 开发服务器：`http://127.0.0.1:5904`
 
+Gateway 和管理台开发服务器默认监听 `0.0.0.0`，其他设备用开发机实际 IP 或域名访问。上面的回环地址用于本机访问。已有外部配置不会被初始化命令覆盖；可通过 `CLAW_MCP_SERVER_ADDR=0.0.0.0:1904` 显式覆盖 Gateway 监听，`WEB_DEV_HOST` 可覆盖联合开发脚本的页面监听。
+
 也可以分别启动：
 
 ```bash
@@ -83,8 +85,9 @@ go test ./...
 仅运行前端测试：
 
 ```bash
-pnpm --dir web install --frozen-lockfile
-pnpm --dir web test
+cd web
+pnpm install --frozen-lockfile
+pnpm test
 ```
 
 ## 开发数据

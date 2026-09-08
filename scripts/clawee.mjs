@@ -67,7 +67,7 @@ if (command === 'setup') {
     console.log(`已有配置，未覆盖：${configPath}`);
   } else {
     const container = args.includes('--container');
-    config.server.addr = container ? '0.0.0.0:1904' : '127.0.0.1:1904';
+    config.server.addr = '0.0.0.0:1904';
     if (container) {
       const password = randomBytes(32).toString('hex');
       config.database.url = `postgres://claw_mcp:${password}@postgres:5432/claw_mcp?sslmode=disable`;

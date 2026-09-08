@@ -19,6 +19,7 @@ test('初始化生成独立密钥、外部数据路径，重复执行不覆盖�
     const path = join(directory, 'configs/config.yaml');
     const raw = readFileSync(path, 'utf8');
     const config = yaml.parse(raw);
+    assert.equal(config.server.addr, '0.0.0.0:1904');
     assert.equal(config.model_access.mode, 'enterprise_managed');
     assert.equal(config.security.agent_token_encryption_key.length, 32);
     assert.equal(config.security.user_jwt_signing_key.length, 64);

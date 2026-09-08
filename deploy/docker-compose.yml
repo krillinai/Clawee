@@ -24,7 +24,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - 127.0.0.1:1904:1904
+      - 0.0.0.0:1904:1904
     volumes:
       - ${CLAWEE_OPS_DIR:?请指定外部配置目录}/configs/config.yaml:/run/clawee-ops/configs/config.yaml:ro
       - gateway-data:/app/data

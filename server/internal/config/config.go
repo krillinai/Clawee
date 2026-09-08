@@ -397,7 +397,7 @@ func loadOpsDotEnv() error {
 }
 
 func setDefaults(v *viper.Viper) {
-	v.SetDefault("server.addr", ":1904")
+	v.SetDefault("server.addr", "0.0.0.0:1904")
 	v.SetDefault("server.enable_pprof", false)
 	v.SetDefault("database.url", "")
 	v.SetDefault("admin.token", "")

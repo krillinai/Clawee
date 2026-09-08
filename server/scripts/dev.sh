@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/require-ops-dir.sh"
 require_clawee_ops_dir
 
-WEB_DEV_HOST="${WEB_DEV_HOST:-127.0.0.1}"
+WEB_DEV_HOST="${WEB_DEV_HOST:-0.0.0.0}"
 WEB_DEV_PORT="${WEB_DEV_PORT:-5904}"
 
 cleanup() {
