@@ -1,11 +1,11 @@
 FROM node:24-alpine AS web-builder
-WORKDIR /src
-RUN corepack enable && corepack prepare pnpm@10.33.3 --activate
-COPY server/web/package.json server/web/pnpm-lock.yaml ./web/
-RUN pnpm --dir web install --frozen-lockfile
-COPY server/web ./web
-COPY server/internal/server/webdist/embed.go ./internal/server/webdist/embed.go
-RUN pnpm --dir web build
+WORKDIR /src/web
+RUN corepack enable
+COPY server/web/package.json server/web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY server/web ./
+COPY server/internal/server/webdist/embed.go /src/internal/server/webdist/embed.go
+RUN pnpm build
 
 FROM golang:1.25 AS backend-builder
 ARG GOPROXY=https://proxy.golang.org,direct

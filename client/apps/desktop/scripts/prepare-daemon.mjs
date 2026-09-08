@@ -57,6 +57,7 @@ await runStage('部署 Daemon 生产依赖', 'pnpm', [
   '--filter',
   '@clawee/daemon',
   'deploy',
+  '--legacy',
   '--prod',
   targetDir
 ], {

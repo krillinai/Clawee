@@ -16,10 +16,11 @@ APP_PID_FILE="${CLAW_MCP_PID_FILE:-$ROOT_DIR/tmp/claw-mcp.pid}"
 APP_LOG_FILE="${CLAW_MCP_LOG_FILE:-$ROOT_DIR/tmp/claw-mcp.log}"
 
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16}"
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-claw-mcp-postgres}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-clawee-postgres}"
+POSTGRES_VOLUME="${POSTGRES_VOLUME:-clawee-postgres-data}"
 POSTGRES_DB="${POSTGRES_DB:-claw_mcp}"
 POSTGRES_USER="${POSTGRES_USER:-claw_mcp}"
-POSTGRES_PORT="${POSTGRES_PORT:-5932}"
+POSTGRES_PORT="${POSTGRES_PORT:-15932}"
 
 export CLAW_MCP_SERVER_ADDR="$APP_ADDR"
 
@@ -87,7 +88,7 @@ ensure_postgres() {
       -e POSTGRES_USER="$POSTGRES_USER" \
       -e POSTGRES_HOST_AUTH_METHOD=trust \
       -p "127.0.0.1:${POSTGRES_PORT}:5432" \
-      -v "${POSTGRES_CONTAINER}-data:/var/lib/postgresql/data" \
+      -v "$POSTGRES_VOLUME:/var/lib/postgresql/data" \
       "$POSTGRES_IMAGE" >/dev/null
   fi
 

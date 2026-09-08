@@ -38,7 +38,7 @@
 | claw-mcp | `main` 分支，HEAD `08a1d7d`，工作区干净；配置外置化已提交 | 直接使用该提交的筛选后快照，真实配置已从最新源码移除 |
 | 客户端组成 | Electron 桌面外壳、React Web、本地 Fastify daemon、protocol 和 skill-market 包 | “客户端”实际上包含本地执行服务，不能把 daemon 当成 Go 服务端的重复实现删除 |
 | 服务端组成 | Go/Gin、PostgreSQL、React 管理台、MCP Gateway、权限审计、Collector、Skill Hub 等 | 服务端管理台与客户端 Web 是两种界面，应保留独立用途 |
-| 客户端工具链 | pnpm 9.15、Node 24、React 18、Vite 6、Vitest 3 | 保留独立锁文件，已按漏洞审计更新必要依赖 |
+| 客户端工具链 | pnpm 10.33.3、Node 24、React 18、Vite 6、Vitest 3 | pnpm 后续由 9.15.0 统一升级；仍保留独立锁文件，已按漏洞审计更新必要依赖 |
 | 服务端工具链 | Go 1.25、Web 使用 pnpm 10.33.3、Node 24、React 19、Vite 7、Vitest 4 | 不宜直接塞入客户端现有 pnpm workspace 并同时升级依赖 |
 | 开源文件 | 两仓库已跟踪文件中均未找到 LICENSE、NOTICE 或 COPYING | 公开前需要确认权利并补齐许可说明 |
 
@@ -240,7 +240,7 @@ PR 检查不依赖生产 Secret；发布工作流使用独立受保护的 releas
 
 本轮追加验收已通过：真实模型配置保存在仓库外，隔离桌面通过实际 Gateway 登录，使用包内 Runtime 完成模型任务并显示回复。`scripts/container-smoke.mjs` 可复跑空库初始化、账号登录、MCP 能力同步、授权前拒绝、授权后转发、撤销后拒绝和重启持久化；提供 `CLAWEE_EXTERNAL_MODEL_CONFIG` 时还会执行真实模型桌面用例，临时数据在结束后清理。
 
-该验收发现并修复了上游 MCP 未声明输出 Schema 时被错误补成对象类型的问题；已通过 Go 回归测试及严格 MCP 客户端的实际纯文本调用。根命令还修复了服务端 make 参数转发，并为子进程准备临时 Corepack 入口，验证客户端使用 pnpm 9.15.0、管理台使用 10.33.3，避免全局 pnpm 版本干扰构建。修改后的完整 `desktop:preflight:local` 再次通过测试、类型检查、实际 macOS arm64 App、内嵌 Web 哈希及 3 项包内 Runtime E2E。
+该验收发现并修复了上游 MCP 未声明输出 Schema 时被错误补成对象类型的问题；已通过 Go 回归测试及严格 MCP 客户端的实际纯文本调用。根命令还修复了服务端 make 参数转发，并为子进程准备临时 Corepack 入口；当时验证客户端使用 pnpm 9.15.0、管理台使用 10.33.3，避免全局 pnpm 版本干扰构建，后续两端已统一为 pnpm 10.33.3。修改后的完整 `desktop:preflight:local` 再次通过测试、类型检查、实际 macOS arm64 App、内嵌 Web 哈希及 3 项包内 Runtime E2E。
 
 追加产物审计覆盖解包后的 ASAR、App 资源和服务端镜像 19 个文件层；Gitleaks 与真实测试凭据精确匹配均为 0 命中。扫描报告仅保存在仓库外。Go 许可清单已按六个平台目标合并为 76 个模块，补齐 Linux 专用的 procfs 和 Go 标准库许可；实际服务端与六个平台 Collector 共 7 个二进制的模块依赖均已匹配该清单。
 

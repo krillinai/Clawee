@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "repository": "https://github.com/krillinai/Clawee",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.33.3",
   "engines": { "node": ">=24" },
   "scripts": {
     "setup": "node scripts/clawee.mjs setup",

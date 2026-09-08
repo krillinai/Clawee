@@ -3,6 +3,7 @@ name: clawee-development
 services:
   postgres:
     image: postgres:16
+    container_name: clawee-postgres
     restart: always
     environment:
       POSTGRES_DB: claw_mcp
@@ -20,3 +21,4 @@ services:
 
 volumes:
   postgres-data:
+    name: clawee-postgres-data

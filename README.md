@@ -8,9 +8,9 @@ Clawee 是可自托管的 Agent 工作台，包含桌面客户端、本地执行
 
 ## 本地启动
 
-需要 Node.js 24、Corepack、Go 1.25 或更新兼容版本，以及 Docker Compose。客户端与管理台分别使用锁定的 pnpm 版本，由 Corepack 选择。Windows 服务端源码脚本请在 WSL2 中执行。
+需要 Node.js 24、Corepack、Go 1.25 或更新兼容版本，以及 Docker Compose。根目录、客户端与管理台统一使用锁定的 pnpm 10.33.3，由 Corepack 选择。Windows 服务端源码脚本请在 WSL2 中执行。
 
-统一使用 `pnpm run <脚本名>`；其中 `setup`、`init` 必须保留 `run`，避免执行 pnpm 自带的同名命令。根目录和客户端使用 pnpm 9.15.0，管理台使用 10.33.3，首次使用先执行 `corepack enable pnpm`。
+统一使用 `pnpm run <脚本名>`；其中 `setup`、`init` 必须保留 `run`，避免执行 pnpm 自带的同名命令。首次使用先执行 `corepack enable pnpm`。
 
 在仓库根目录运行：
 

@@ -31,8 +31,8 @@
 当前需要注意的差异：
 
 - 私有运维配置通过仓库外的 `CLAWEE_OPS_DIR` 提供，不复制旧仓库真实配置。
-- 客户端 pnpm 为 `9.15.0`，管理台为 `10.33.3`，不能用同一个固定全局版本替代。根入口会给子进程准备 Corepack；直接执行原命令时需先启用 Corepack。
-- 根目录也固定 pnpm `9.15.0`，脚本统一使用 `pnpm run`，尤其不要省略 `setup`、`init` 前的 `run`。管理台命令进入 `server/web/` 再运行，保证 Corepack 根据该目录选择版本。
+- 根目录、客户端和管理台统一使用 pnpm `10.33.3`。各组件仍保留独立的 `packageManager` 声明和锁文件，由 Corepack 选择相同版本；直接执行原命令时需先启用 Corepack。
+- 根目录脚本统一使用 `pnpm run`，尤其不要省略 `setup`、`init` 前的 `run`。根入口会给子进程准备 Corepack，管理台命令仍进入 `server/web/` 运行。
 - Gateway 默认 `http://127.0.0.1:1904`，模型使用自带服务模式，模型凭据由验收者在界面填写。
 - 不回退整合阶段已提交的依赖调整；从当前锁文件继续验证，不执行依赖升级。
 
@@ -56,7 +56,7 @@ corepack enable pnpm
 pnpm run setup
 ```
 
-在 `client/` 执行 `pnpm --version` 应为 `9.15.0`；在 `server/web/` 执行应为 `10.33.3`。若系统目录不允许启用 Corepack，使用表中的根入口，不用更换依赖来绕过工具链问题。
+在仓库根目录、`client/` 和 `server/web/` 执行 `pnpm --version` 均应为 `10.33.3`。若系统目录不允许启用 Corepack，使用表中的根入口，不用更换依赖来绕过工具链问题。
 
 准备独立环境：
 

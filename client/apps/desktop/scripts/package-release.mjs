@@ -228,6 +228,7 @@ await runStage('部署 Desktop 主进程生产依赖', 'pnpm', [
   '--filter',
   '@clawee/desktop',
   'deploy',
+  '--legacy',
   '--prod',
   desktopRuntimeDeployStage
 ], {
@@ -237,6 +238,18 @@ await runStage('部署 Desktop 主进程生产依赖', 'pnpm', [
 });
 materializeDesktopRuntimeDependencies();
 assertDesktopRuntimeDependencies();
+await runStage('准备 Electron Runtime 与许可文件', process.execPath, [
+  resolve(desktopDir, 'node_modules/electron/install.js')
+], {
+  cwd: desktopDir,
+  env: {
+    ...env,
+    ELECTRON_INSTALL_PLATFORM: platform,
+    ELECTRON_INSTALL_ARCH: arch,
+    electron_config_cache: env.ELECTRON_CACHE
+  },
+  timeoutMs: 20 * 60_000
+});
 const candidates = packageRootCandidates(platform, arch);
 for (const path of candidates) rmSync(path, { recursive: true, force: true });
 

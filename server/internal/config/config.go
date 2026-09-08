@@ -21,7 +21,6 @@ const (
 type Config struct {
 	Server      ServerConfig      `mapstructure:"server"`
 	Database    DatabaseConfig    `mapstructure:"database"`
-	Admin       AdminConfig       `mapstructure:"admin"`
 	Security    SecurityConfig    `mapstructure:"security"`
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Static      StaticConfig      `mapstructure:"static"`
@@ -125,16 +124,11 @@ func (cfg DingTalkConfig) Validate() (time.Duration, time.Duration, error) {
 }
 
 type ServerConfig struct {
-	Addr        string `mapstructure:"addr"`
-	EnablePprof bool   `mapstructure:"enable_pprof"`
+	Addr string `mapstructure:"addr"`
 }
 
 type DatabaseConfig struct {
 	URL string `mapstructure:"url"`
-}
-
-type AdminConfig struct {
-	Token string `mapstructure:"token"`
 }
 
 type SecurityConfig struct {
@@ -189,8 +183,7 @@ type LoggingConfig struct {
 }
 
 type StaticConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Dir     string `mapstructure:"dir"`
+	Dir string `mapstructure:"dir"`
 }
 
 type OfficeConfig struct {
@@ -398,9 +391,7 @@ func loadOpsDotEnv() error {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.addr", "0.0.0.0:1904")
-	v.SetDefault("server.enable_pprof", false)
 	v.SetDefault("database.url", "")
-	v.SetDefault("admin.token", "")
 	v.SetDefault("security.session_cookie_name", "claw_front_token")
 	v.SetDefault("security.admin_session_cookie_name", "claw_admin_token")
 	v.SetDefault("security.session_cookie_secure", false)
@@ -412,7 +403,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.output", "stdout")
 	v.SetDefault("logging.access_enabled", true)
 	v.SetDefault("logging.error_response_body", false)
-	v.SetDefault("static.enabled", true)
 	v.SetDefault("static.dir", "")
 	v.SetDefault("office.install.public_base_url", "")
 	v.SetDefault("office.install.collector_binary_root", "public/collectors")
@@ -457,9 +447,7 @@ func setDefaults(v *viper.Viper) {
 func bindEnv(v *viper.Viper) {
 	keys := []string{
 		"server.addr",
-		"server.enable_pprof",
 		"database.url",
-		"admin.token",
 		"security.session_cookie_name",
 		"security.admin_session_cookie_name",
 		"security.session_cookie_secure",
@@ -471,7 +459,6 @@ func bindEnv(v *viper.Viper) {
 		"logging.output",
 		"logging.access_enabled",
 		"logging.error_response_body",
-		"static.enabled",
 		"static.dir",
 		"office.install.public_base_url",
 		"office.install.collector_binary_root",

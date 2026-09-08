@@ -4,7 +4,7 @@
 
 - Go 1.25 或与 `go.mod` 一致的版本；
 - Node.js 24；
-- Corepack；管理台使用锁定的 pnpm 10.33.3；
+- Corepack；仓库根目录、客户端和管理台统一使用锁定的 pnpm 10.33.3；
 - Docker 与 Docker Compose；
 - PostgreSQL 16（也可使用 Compose 启动）。
 
