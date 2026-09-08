@@ -1,0 +1,11 @@
+{
+  "name": "@rollup/rollup-darwin-arm64",
+  "version": "4.60.4",
+  "sources": [
+    {
+      "file": "LICENSE.md",
+      "source": "https://github.com/rollup/rollup/blob/d311a84b0bb4d4a6f50d19ffd2c29cca28660c88/LICENSE.md",
+      "gitBlob": "7b806824370697048284c1726fc4d1b567bfea68"
+    }
+  ]
+}

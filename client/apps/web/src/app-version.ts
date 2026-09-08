@@ -1,0 +1,1 @@
+export const CLAWEE_APP_VERSION = __CLAWEE_APP_VERSION__;

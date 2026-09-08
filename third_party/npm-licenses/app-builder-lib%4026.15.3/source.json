@@ -1,0 +1,16 @@
+{
+  "name": "app-builder-lib",
+  "version": "26.15.3",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://github.com/electron-userland/electron-builder/blob/512a57ec9bcda593d3e0970bd2b9a33a63beeb57/LICENSE",
+      "gitBlob": "7d8fa01c28f3b5888f349b062cf3fff47baf1c0a"
+    },
+    {
+      "file": "packages__app-builder-lib__src__util__license.ts",
+      "source": "https://github.com/electron-userland/electron-builder/blob/512a57ec9bcda593d3e0970bd2b9a33a63beeb57/packages/app-builder-lib/src/util/license.ts",
+      "gitBlob": "7b9f06eeee6bce399019f7910b9ee00f73dca4f8"
+    }
+  ]
+}

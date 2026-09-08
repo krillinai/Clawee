@@ -1,0 +1,11 @@
+{
+  "name": "filelist",
+  "version": "1.0.6",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://github.com/mde/filelist/blob/7032f94d04ad905b4f32b92d2278785859e1d55f/LICENSE",
+      "gitBlob": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+    }
+  ]
+}

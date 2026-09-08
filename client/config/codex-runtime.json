@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "runtimeId": "codex-rust-v0.151.0-layout-1",
+  "codexVersion": "0.151.0",
+  "releaseTag": "rust-v0.151.0",
+  "sourceCommit": "78c290807ce710180111df227df3b7a4fe845452",
+  "variant": "codex",
+  "layoutVersion": 1,
+  "minimumClaweeVersion": "1.0.0",
+  "previousSupportedReleaseTag": "rust-v0.146.0",
+  "schemas": {
+    "stable": {
+      "path": "config/codex-app-server-schema/rust-v0.151.0/stable.json",
+      "sha256": "424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541"
+    },
+    "experimental": {
+      "path": "config/codex-app-server-schema/rust-v0.151.0/experimental.json",
+      "sha256": "31ae67beb2c94cc9509f6a71968600062dc8c6d7fe45437ed3a9129838f4d2d9"
+    }
+  },
+  "targets": {
+    "aarch64-apple-darwin": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "targetTriple": "aarch64-apple-darwin",
+      "assetName": "codex-package-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "cb6e78eba80c1bc310a533f6f1c6c948377733bc06f9e837949334e04abde9c6",
+      "expectedFiles": [
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "codex-path/rg",
+        "codex-resources/zsh/bin/zsh",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "apple-code-signing",
+        "signingIdentity": "Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2)",
+        "teamIdentifier": "2DC432GLL2",
+        "certificateSha256": "04f747c40a6e9b8739fe59da61cc41d9519544659a1009c5f5629577ed57edd5",
+        "signedFiles": [
+          "bin/codex",
+          "bin/codex-code-mode-host",
+          "codex-path/rg",
+          "codex-resources/zsh/bin/zsh"
+        ],
+        "entitlements": {
+          "bin/codex": {
+            "com.apple.security.cs.allow-jit": true,
+            "com.apple.security.cs.allow-unsigned-executable-memory": true
+          },
+          "bin/codex-code-mode-host": {
+            "com.apple.security.cs.allow-jit": true,
+            "com.apple.security.cs.allow-unsigned-executable-memory": true
+          }
+        }
+      },
+      "formalRelease": true
+    },
+    "x86_64-apple-darwin": {
+      "platform": "darwin",
+      "arch": "x64",
+      "targetTriple": "x86_64-apple-darwin",
+      "assetName": "codex-package-x86_64-apple-darwin.tar.gz",
+      "archiveSha256": "e8348e1192f155edb21bdbaaf3231c2321087910bb1472b1306f94fb1108ad70",
+      "expectedFiles": [
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "codex-path/rg",
+        "codex-resources/zsh/bin/zsh",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "apple-code-signing",
+        "signingIdentity": "Developer ID Application: OpenAI OpCo, LLC (2DC432GLL2)",
+        "teamIdentifier": "2DC432GLL2",
+        "certificateSha256": "04f747c40a6e9b8739fe59da61cc41d9519544659a1009c5f5629577ed57edd5",
+        "signedFiles": [
+          "bin/codex",
+          "bin/codex-code-mode-host",
+          "codex-path/rg",
+          "codex-resources/zsh/bin/zsh"
+        ],
+        "entitlements": {
+          "bin/codex": {
+            "com.apple.security.cs.allow-jit": true,
+            "com.apple.security.cs.allow-unsigned-executable-memory": true
+          },
+          "bin/codex-code-mode-host": {
+            "com.apple.security.cs.allow-jit": true,
+            "com.apple.security.cs.allow-unsigned-executable-memory": true
+          }
+        }
+      },
+      "formalRelease": true
+    },
+    "x86_64-pc-windows-msvc": {
+      "platform": "win32",
+      "arch": "x64",
+      "targetTriple": "x86_64-pc-windows-msvc",
+      "assetName": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "archiveSha256": "e3aebb4f5e8812c19a9df9af2d5caf2c79e4b43a4603403fe6f99a95f3207c6f",
+      "expectedFiles": [
+        "bin/codex.exe",
+        "bin/codex-code-mode-host.exe",
+        "codex-path/rg.exe",
+        "codex-resources/codex-command-runner.exe",
+        "codex-resources/codex-windows-sandbox-setup.exe",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "authenticode",
+        "subject": "C=US, ST=California, L=San Francisco, O=OpenAI OpCo, LLC, CN=OpenAI OpCo, LLC",
+        "certificateSha256": "7739b5e12238e81000febdb3aa6c895a2f986ee48bae027d6639bea92d8f9e67",
+        "signedFiles": [
+          "bin/codex.exe",
+          "bin/codex-code-mode-host.exe",
+          "codex-resources/codex-command-runner.exe",
+          "codex-resources/codex-windows-sandbox-setup.exe"
+        ],
+        "unsignedFiles": {
+          "codex-path/rg.exe": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680"
+        }
+      },
+      "formalRelease": true
+    },
+    "aarch64-pc-windows-msvc": {
+      "platform": "win32",
+      "arch": "arm64",
+      "targetTriple": "aarch64-pc-windows-msvc",
+      "assetName": "codex-package-aarch64-pc-windows-msvc.tar.gz",
+      "archiveSha256": "4a7ee2ea3f3f6e29e5e8c60f0b22209c99348b09cff660814f68c4cb11e7c633",
+      "expectedFiles": [
+        "bin/codex.exe",
+        "bin/codex-code-mode-host.exe",
+        "codex-path/rg.exe",
+        "codex-resources/codex-command-runner.exe",
+        "codex-resources/codex-windows-sandbox-setup.exe",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "authenticode",
+        "subject": "C=US, ST=California, L=San Francisco, O=OpenAI OpCo, LLC, CN=OpenAI OpCo, LLC",
+        "certificateSha256": "7739b5e12238e81000febdb3aa6c895a2f986ee48bae027d6639bea92d8f9e67",
+        "signedFiles": [
+          "bin/codex.exe",
+          "bin/codex-code-mode-host.exe",
+          "codex-resources/codex-command-runner.exe",
+          "codex-resources/codex-windows-sandbox-setup.exe"
+        ],
+        "unsignedFiles": {
+          "codex-path/rg.exe": "d33a29a9ef03c9f4c03be9e8d88498e6e2d2e566d64cdbdef97f9afc8f13120c"
+        }
+      },
+      "formalRelease": false
+    },
+    "aarch64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "arm64",
+      "targetTriple": "aarch64-unknown-linux-musl",
+      "assetName": "codex-package-aarch64-unknown-linux-musl.tar.gz",
+      "archiveSha256": "c64ad6e4f82609552a37069365b50528ef49e986aeab24a538781a18a402773d",
+      "expectedFiles": [
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "codex-path/rg",
+        "codex-resources/bwrap",
+        "codex-resources/zsh/bin/zsh",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "sigstore",
+        "issuer": "https://token.actions.githubusercontent.com",
+        "identity": "https://github.com/openai/codex/.github/workflows/rust-release.yml@refs/tags/rust-v0.151.0",
+        "sourceCommit": "78c290807ce710180111df227df3b7a4fe845452",
+        "signedFiles": [
+          "bin/codex",
+          "bin/codex-code-mode-host",
+          "codex-resources/bwrap"
+        ],
+        "unsignedFiles": {
+          "codex-path/rg": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b",
+          "codex-resources/zsh/bin/zsh": "7feeacd883e1dc749847936948c378653c80a69ec4a9542f0f126b411882c179"
+        }
+      },
+      "formalRelease": false
+    },
+    "x86_64-unknown-linux-musl": {
+      "platform": "linux",
+      "arch": "x64",
+      "targetTriple": "x86_64-unknown-linux-musl",
+      "assetName": "codex-package-x86_64-unknown-linux-musl.tar.gz",
+      "archiveSha256": "6e35ac60b86c0e8c7f8bcf797be8b92206199f6253200b66ff0547276f8cfa5c",
+      "expectedFiles": [
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "codex-path/rg",
+        "codex-resources/bwrap",
+        "codex-resources/zsh/bin/zsh",
+        "codex-package.json"
+      ],
+      "trust": {
+        "kind": "sigstore",
+        "issuer": "https://token.actions.githubusercontent.com",
+        "identity": "https://github.com/openai/codex/.github/workflows/rust-release.yml@refs/tags/rust-v0.151.0",
+        "sourceCommit": "78c290807ce710180111df227df3b7a4fe845452",
+        "signedFiles": [
+          "bin/codex",
+          "bin/codex-code-mode-host",
+          "codex-resources/bwrap"
+        ],
+        "unsignedFiles": {
+          "codex-path/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+          "codex-resources/zsh/bin/zsh": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3"
+        }
+      },
+      "formalRelease": false
+    }
+  }
+}

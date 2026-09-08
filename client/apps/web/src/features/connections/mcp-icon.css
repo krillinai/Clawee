@@ -1,0 +1,138 @@
+.mcp-icon {
+  --mcp-icon-color: #3182ce;
+  position: relative;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--mcp-icon-color) 28%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mcp-icon-color) 15%, var(--surface));
+  color: color-mix(in srgb, var(--mcp-icon-color) 76%, var(--text));
+}
+
+.mcp-icon--default {
+  width: 38px;
+  height: 38px;
+}
+
+.mcp-icon--compact {
+  width: 22px;
+  height: 22px;
+}
+
+.mcp-icon[data-kind='computer-use'],
+.mcp-icon[data-kind='node-repl'] {
+  border-color: transparent;
+  overflow: hidden;
+}
+
+.mcp-icon[data-kind='computer-use'] {
+  background: #f15d50;
+  color: #fff7e8;
+}
+
+.mcp-icon__computer-mark {
+  position: relative;
+  width: 76%;
+  height: 76%;
+  display: grid;
+  place-items: center;
+}
+
+.mcp-icon__computer-screen {
+  width: 100%;
+  height: 100%;
+  stroke-width: 2.2;
+}
+
+.mcp-icon__computer-pointer {
+  position: absolute;
+  right: -13%;
+  bottom: -8%;
+  width: 48%;
+  height: 48%;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #087e8b 62%, #ffffff);
+  border-radius: 50%;
+  background: #0b9da8;
+  color: #fff7e8;
+}
+
+.mcp-icon__computer-pointer svg {
+  width: 62%;
+  height: 62%;
+}
+
+.mcp-icon[data-kind='node-repl'] {
+  background: #163f3b;
+}
+
+.mcp-icon__node-mark {
+  position: relative;
+  width: 82%;
+  height: 82%;
+  display: grid;
+  place-items: center;
+  color: #72c74b;
+}
+
+.mcp-icon__node-mark svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  color: #72c74b;
+}
+
+.mcp-icon__node-mark span {
+  position: relative;
+  z-index: 1;
+  color: #ffe36e;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mcp-icon--compact .mcp-icon__node-mark span {
+  font-size: 6px;
+}
+
+.mcp-icon[data-tone='amber'] {
+  --mcp-icon-color: #d08a1d;
+}
+
+.mcp-icon[data-tone='blue'] {
+  --mcp-icon-color: #3182ce;
+}
+
+.mcp-icon[data-tone='coral'] {
+  --mcp-icon-color: #e2553d;
+}
+
+.mcp-icon[data-tone='cyan'] {
+  --mcp-icon-color: #0797b5;
+}
+
+.mcp-icon[data-tone='green'] {
+  --mcp-icon-color: #27965a;
+}
+
+.mcp-icon[data-tone='pink'] {
+  --mcp-icon-color: #d9467a;
+}
+
+.mcp-icon[data-tone='teal'] {
+  --mcp-icon-color: #149887;
+}
+
+.mcp-icon[data-tone='violet'] {
+  --mcp-icon-color: #7b61d9;
+}
+
+:root[data-theme='light'] .mcp-icon {
+  background: color-mix(in srgb, var(--mcp-icon-color) 12%, #ffffff);
+  color: color-mix(in srgb, var(--mcp-icon-color) 82%, #18181b);
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@esbuild/darwin-arm64",
+  "version": "0.28.1",
+  "sources": [
+    {
+      "file": "LICENSE.md",
+      "source": "https://github.com/evanw/esbuild/blob/bb9db84c02433fbe37b3509f53f9f3e3cc48725e/LICENSE.md",
+      "gitBlob": "2027e8dcf3787f5aac9fcd835e2b80cb75a39211"
+    }
+  ]
+}

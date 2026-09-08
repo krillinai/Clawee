@@ -1,0 +1,12 @@
+.dashboard-page__inner {
+  width: 100%;
+  margin: 0;
+  padding: 38px clamp(18px, 2.4vw, 32px) 56px;
+}
+
+@media (max-width: 600px) {
+  .dashboard-page__inner {
+    width: 100%;
+    padding: 24px 14px 56px;
+  }
+}

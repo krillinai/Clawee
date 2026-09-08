@@ -1,0 +1,209 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  statuses: read
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 验证版本标签
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const desktopPackage = JSON.parse(
+            readFileSync('apps/desktop/package.json', 'utf8')
+          );
+          const expectedTag = `v${desktopPackage.version}`;
+          if (process.env.GITHUB_REF_NAME !== expectedTag) {
+            throw new Error(
+              `Desktop release tag ${process.env.GITHUB_REF_NAME} does not `
+              + `match package version ${desktopPackage.version}; `
+              + `expected ${expectedTag}`
+            );
+          }
+          NODE
+      - name: 验证同提交 Desktop Preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          state="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/status" \
+              --jq '[.statuses[] | select(.context == "desktop-preflight")][0].state // "missing"'
+          )"
+          if [[ "$state" != 'success' ]]; then
+            echo "::error::Commit ${target_sha} 的 Desktop Preflight 状态为 ${state}，禁止正式发布。"
+            exit 1
+          fi
+      - name: 验证 macOS 正式签名凭据
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            MACOS_CERTIFICATE \
+            MACOS_CERTIFICATE_PASSWORD \
+            APPLE_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::release Environment 缺少 macOS 签名 Secret：${missing[*]}"
+            exit 1
+          fi
+    defaults:
+      run:
+        working-directory: client
+
+  package:
+    needs: gate
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-x64
+            os: macos-15-intel
+            platform: mac
+            arch: x64
+          - name: macos-arm64
+            os: macos-14
+            platform: mac
+            arch: arm64
+          - name: windows-x64
+            os: windows-latest
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    environment: release
+    env:
+      CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
+      CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
+      CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
+      CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
+      CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MACOS_CERTIFICATE || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+      CLAWEE_APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+      CLAWEE_OFFICIAL_RELEASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: |
+            client/apps/desktop/.cache/electron
+            client/apps/desktop/.cache/electron-builder
+            client/apps/desktop/.cache/node-gyp
+            client/apps/desktop/.cache/npm
+            client/apps/desktop/.cache/codex-runtime
+          key: desktop-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('client/pnpm-lock.yaml', 'client/apps/desktop/package.json', 'client/config/codex-runtime.json') }}
+          restore-keys: |
+            desktop-build-${{ runner.os }}-${{ matrix.arch }}-
+      - name: 生成 macOS 正式签名安装包
+        if: matrix.platform == 'mac'
+        run: pnpm desktop:release
+      - name: 生成 Windows 未签名安装包
+        if: matrix.platform == 'win'
+        run: pnpm desktop:dist
+      - name: 验证包内 Codex Runtime E2E
+        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
+      - name: 验证包内 Codex 真实会话
+        env:
+          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
+        run: pnpm --filter @clawee/desktop e2e:real-codex
+      - name: 上传 Runtime E2E 证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawee-desktop-runtime-e2e-${{ matrix.name }}
+          path: |
+            client/test-results/clawee-desktop-embedded-runtime-e2e.json
+            client/test-results/clawee-desktop-runtime-tool-loop-e2e.json
+            client/test-results/clawee-desktop-real-codex-smoke.json
+            client/test-results/desktop-embedded-runtime-playwright
+            client/test-results/desktop-embedded-runtime-playwright-report
+            client/test-results/desktop-real-codex-playwright
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clawee-desktop-release-${{ matrix.name }}
+          path: |
+            client/apps/desktop/release/*.dmg
+            client/apps/desktop/release/*.exe
+            client/apps/desktop/release/clawee-desktop-build-manifest-*.json
+            client/apps/desktop/release/*.zip
+            client/apps/desktop/release/*.blockmap
+            client/apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+    defaults:
+      run:
+        working-directory: client
+
+  server:
+    needs: package
+    uses: ./.github/workflows/server-release.yml
+    permissions:
+      contents: read
+      packages: write
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: clawee-*-release-*
+          merge-multiple: true
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --generate-notes --draft --verify-tag
+          find artifacts -type f -print0 | xargs -0 gh release upload "$TAG"
+          gh release edit "$TAG" --draft=false --latest

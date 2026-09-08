@@ -1,0 +1,21 @@
+name: clawee-test
+
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: claw_mcp_test
+      POSTGRES_USER: claw_mcp
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:5933:5432"
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claw_mcp -d claw_mcp_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-test-data:

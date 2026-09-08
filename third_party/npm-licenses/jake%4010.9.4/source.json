@@ -1,0 +1,11 @@
+{
+  "name": "jake",
+  "version": "10.9.4",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://github.com/jakejs/jake/blob/28a9960b506d3259dd2f708ea9bc82f615be91b5/LICENSE",
+      "gitBlob": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+    }
+  ]
+}

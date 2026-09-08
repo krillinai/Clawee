@@ -1,0 +1,13 @@
+{
+  "name": "abstract-logging",
+  "version": "2.0.1",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://jsumners.mit-license.org/",
+      "retrieved": "2026-09-07",
+      "sourceSha256": "3b5440b281e74294a8d87eacfd6bfbb0c2a7ffc3ebb4585e3492ef2bf98ba86e",
+      "note": "该版本 README 明确链接的作者许可页面。年份由上游页面动态产生，按检索时原文保留。"
+    }
+  ]
+}

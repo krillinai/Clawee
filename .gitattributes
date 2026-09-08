@@ -1,0 +1,4 @@
+client/config/codex-runtime.json text eol=lf
+client/config/codex-app-server-schema/**/*.json text eol=lf
+*.sh text eol=lf
+

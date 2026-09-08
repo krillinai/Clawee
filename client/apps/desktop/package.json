@@ -1,0 +1,59 @@
+{
+  "name": "@clawee/desktop",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Clawee 本地 Codex 桌面工作台",
+  "author": "Clawee",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "prebuild": "pnpm --filter @clawee/protocol build",
+    "build:main": "node scripts/clean-main-dist.mjs && tsc -p tsconfig.main.json",
+    "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node22 --external:electron --outfile=dist/preload/index.cjs",
+    "build:bootstrap": "vite build --config vite.bootstrap.config.ts",
+    "build": "pnpm build:main && pnpm build:preload && pnpm build:bootstrap",
+    "prepare:daemon": "node scripts/prepare-daemon.mjs",
+    "prepare:codex-runtime": "node scripts/prepare-codex-runtime.mjs",
+    "notary:setup": "node scripts/setup-macos-notarization-2026-08-18.mjs",
+    "release:doctor": "node scripts/check-macos-release-credentials-2026-08-18.mjs",
+    "package": "node scripts/package-release.mjs --dir",
+    "dist": "node scripts/package-release.mjs --dist",
+    "release": "node scripts/package-release.mjs --release",
+    "verify:package": "node scripts/verify-package.mjs",
+    "e2e": "playwright test --config playwright.config.ts",
+    "e2e:package": "playwright test --config playwright.config.ts",
+    "e2e:embedded-runtime": "playwright test --config playwright.embedded-runtime.config.ts",
+    "e2e:real-codex": "playwright test --config playwright.real.config.ts",
+    "pretypecheck": "pnpm --filter @clawee/protocol build",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.test.json",
+    "pretest": "pnpm --filter @clawee/protocol build",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@clawee/protocol": "workspace:*",
+    "@iarna/toml": "2.2.5",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@electron/asar": "^3.4.1",
+    "@electron/fuses": "1.8.0",
+    "@types/node": "^22.10.7",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.0",
+    "tar": "7.5.21",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^3.2.7"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krillinai/Clawee.git",
+    "directory": "client/apps/desktop"
+  }
+}

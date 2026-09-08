@@ -1,0 +1,12 @@
+{
+  "name": "keyv",
+  "version": "4.5.4",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://github.com/jaredwray/keyv/blob/e02ef9b9271fe48d8e1da6561f18e055995bfb1f/LICENSE",
+      "gitBlob": "a6bad1d22eee07f080af7cfd70e9958d556d9303",
+      "note": "所用版本声明 MIT；补充该版本发布之前的上游完整许可原文，不采用当前缺少授权条款的文件。"
+    }
+  ]
+}

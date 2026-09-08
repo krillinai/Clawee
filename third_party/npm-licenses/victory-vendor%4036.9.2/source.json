@@ -1,0 +1,11 @@
+{
+  "name": "victory-vendor",
+  "version": "36.9.2",
+  "sources": [
+    {
+      "file": "LICENSE.txt",
+      "source": "https://github.com/FormidableLabs/victory/blob/dd86278d205f3f306e2ab38c317a6f9c56f0a6f8/LICENSE.txt",
+      "gitBlob": "4d33f1aba85636b665016cabb1b991209177c606"
+    }
+  ]
+}

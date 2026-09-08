@@ -1,0 +1,12 @@
+{
+  "name": "react-remove-scroll-bar",
+  "version": "2.3.8",
+  "note": "发布包仅声明许可；补充同一上游仓库现有许可原文，来源 blob 固定。",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://api.github.com/repos/theKashey/react-remove-scroll-bar/git/blobs/7c08c3990396ecefd90f99ff5d9a34f26f5b5616",
+      "gitBlob": "7c08c3990396ecefd90f99ff5d9a34f26f5b5616"
+    }
+  ]
+}

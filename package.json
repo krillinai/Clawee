@@ -1,0 +1,26 @@
+{
+  "name": "clawee",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/krillinai/Clawee",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "setup": "node scripts/clawee.mjs setup",
+    "init": "node scripts/clawee.mjs init",
+    "client:dev": "node scripts/clawee.mjs client desktop:dev",
+    "web:dev": "node scripts/clawee.mjs client web:dev",
+    "server:dev": "node scripts/clawee.mjs server dev-backend",
+    "admin:dev": "node scripts/clawee.mjs admin dev",
+    "db:migrate": "node scripts/clawee.mjs server db-migrate-up",
+    "client:test": "node scripts/clawee.mjs client test",
+    "server:test": "node scripts/clawee.mjs server test",
+    "test": "node --test scripts/*.test.mjs",
+    "client:build": "node scripts/clawee.mjs client build",
+    "server:build": "node scripts/clawee.mjs server build",
+    "desktop:preflight:local": "node scripts/clawee.mjs client desktop:preflight:local",
+    "desktop:preflight:release": "node scripts/clawee.mjs client desktop:preflight:release",
+    "desktop:tag:check": "node scripts/clawee.mjs client desktop:tag:check"
+  }
+}

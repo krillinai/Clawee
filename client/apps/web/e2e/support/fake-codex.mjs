@@ -1,0 +1,660 @@
+#!/usr/bin/env node
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync
+} from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+
+const args = process.argv.slice(2);
+
+if (handleCapabilityProbe(args)) {
+  process.exit(0);
+}
+
+if (args.length === 3 && args[0] === 'mcp' && args[1] === 'list' && args[2] === '--json') {
+  process.stdout.write('[]');
+  process.exit(0);
+}
+
+const outputFlagIndex = args.indexOf('--output-last-message');
+if (args[0] === 'exec' && outputFlagIndex >= 0) {
+  const prompt = await readStdin();
+  const marker = prompt.match(/CLAWEE_READY_[a-f0-9]+/)?.[0];
+  const response = marker === undefined
+    ? 'hello from fake Codex'
+    : `hello from fake Codex ${marker}`;
+  const outputPath = args[outputFlagIndex + 1];
+  if (outputPath !== undefined) writeFileSync(outputPath, response);
+  process.stdout.write(`${JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: response }
+  })}\n`);
+  process.exit(0);
+}
+
+if (!args.includes('app-server') || !args.includes('--stdio')) {
+  process.stderr.write(`Unsupported fake Codex invocation: ${args.join(' ')}\n`);
+  process.exit(2);
+}
+
+const configPath = requireEnvironment('CLAWEE_E2E_FAKE_CODEX_CONFIG');
+const stateDir = requireEnvironment('CLAWEE_E2E_FAKE_CODEX_STATE_DIR');
+mkdirSync(stateDir, { recursive: true });
+
+const invocationCountPath = resolve(stateDir, 'invocation-count.txt');
+const messagesPath = resolve(stateDir, 'messages.ndjson');
+const runtimeConfigStatePath = resolve(stateDir, 'runtime-config.json');
+const runtimeConfigVersion = 'sha256:fake-web-e2e-runtime-configuration';
+const readline = createInterface({ input: process.stdin });
+const send = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+let invocationIndex;
+let invocation = {};
+let threadId = 'codex-e2e-session-provider';
+let turnId = 'turn-e2e-session-provider';
+let approvalRequestId;
+let turnFinished = false;
+let turnStartedAt = 0;
+let currentPrompt;
+let currentAgentMessage;
+
+readline.on('line', line => {
+  const message = JSON.parse(line);
+  appendFileSync(messagesPath, `${JSON.stringify({
+    invocationIndex: invocationIndex ?? null,
+    message
+  })}\n`);
+
+  if (message.method === 'initialize') {
+    send({
+      id: message.id,
+      result: {
+        userAgent: 'clawee-e2e',
+        codexHome: process.env.CODEX_HOME,
+        platformFamily: 'unix',
+        platformOs: 'test'
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'initialized') {
+    return;
+  }
+
+  if (message.method === 'config/batchWrite') {
+    const codexHome = requireEnvironment('CODEX_HOME');
+    const configPath = resolve(codexHome, 'config.toml');
+    const state = applyRuntimeConfigEdits(
+      readRuntimeConfigState(),
+      message.params?.edits
+    );
+    writeFileSync(runtimeConfigStatePath, JSON.stringify(state));
+    writeFileSync(configPath, runtimeConfigToml(state));
+    send({
+      id: message.id,
+      result: {
+        status: 'ok',
+        version: runtimeConfigVersion,
+        filePath: configPath,
+        overriddenMetadata: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'config/read') {
+    const codexHome = requireEnvironment('CODEX_HOME');
+    const configPath = resolve(codexHome, 'config.toml');
+    const state = readRuntimeConfigState();
+    const origin = {
+      name: {
+        type: 'user',
+        file: configPath,
+        profile: null
+      },
+      version: runtimeConfigVersion
+    };
+    send({
+      id: message.id,
+      result: {
+        config: {
+          agents: {
+            enabled: state.agents_enabled
+          },
+          features: {
+            multi_agent: state.multi_agent,
+            multi_agent_v2: state.multi_agent_v2
+          },
+          ...(state.model === undefined
+            ? {}
+            : {
+                model: state.model,
+                model_catalog_json: state.model_catalog_json,
+                model_provider: state.model_provider,
+                model_providers: {
+                  clawee: {
+                    name: state.model_provider_name,
+                    base_url: state.model_provider_base_url,
+                    wire_api: state.model_provider_wire_api,
+                    requires_openai_auth:
+                      state.model_provider_requires_openai_auth,
+                    env_key: state.model_provider_env_key
+                  }
+                }
+              })
+        },
+        origins: {
+          'agents.enabled': origin,
+          'features.multi_agent': origin,
+          'features.multi_agent_v2.enabled': origin,
+          ...(state.model === undefined
+            ? {}
+            : {
+                model: origin,
+                model_catalog_json: origin,
+                model_provider: origin,
+                'model_providers.clawee.name': origin,
+                'model_providers.clawee.base_url': origin,
+                'model_providers.clawee.wire_api': origin,
+                'model_providers.clawee.requires_openai_auth': origin,
+                'model_providers.clawee.env_key': origin
+              })
+        },
+        layers: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'thread/list') {
+    const config = readConfig(configPath);
+    send({
+      id: message.id,
+      result: {
+        data: Array.isArray(config.threads) ? config.threads : [],
+        nextCursor: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'model/list') {
+    const state = readRuntimeConfigState();
+    const model = state.model;
+    send({
+      id: message.id,
+      result: {
+        data: typeof model === 'string' && model.length > 0
+          ? [{
+              id: model,
+              model,
+              displayName: model,
+              description: 'Configured by the Clawee model service.',
+              supportedReasoningEfforts: [],
+              defaultReasoningEffort: null,
+              inputModalities: ['text'],
+              isDefault: true,
+              hidden: false
+            }]
+          : [],
+        nextCursor: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'thread/turns/list') {
+    const turns = readTurns(message.params?.threadId);
+    const limit = Number(message.params?.limit ?? turns.length);
+    send({
+      id: message.id,
+      result: {
+        data: turns.slice(-limit).reverse(),
+        nextCursor: null,
+        backwardsCursor: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'thread/search') {
+    const config = readConfig(configPath);
+    const searchTerm = String(message.params?.searchTerm ?? '').toLocaleLowerCase();
+    const configured = Array.isArray(config.searchResults)
+      ? config.searchResults
+      : [];
+    send({
+      id: message.id,
+      result: {
+        data: configured.filter(result => (
+          searchTerm.length === 0
+          || String(result.snippet ?? '').toLocaleLowerCase().includes(searchTerm)
+          || String(result.thread?.name ?? '').toLocaleLowerCase().includes(searchTerm)
+          || String(result.thread?.preview ?? '').toLocaleLowerCase().includes(searchTerm)
+        )),
+        nextCursor: null,
+        backwardsCursor: null
+      }
+    });
+    return;
+  }
+
+  if (message.method === 'thread/start') {
+    ensureInvocation();
+    send({ id: message.id, result: { thread: { id: threadId } } });
+    return;
+  }
+
+  if (message.method === 'config/mcpServer/reload') {
+    send({ id: message.id, result: {} });
+    return;
+  }
+
+  if (message.method === 'thread/resume') {
+    ensureInvocation();
+    threadId = message.params?.threadId ?? threadId;
+    send({ id: message.id, result: { thread: { id: threadId } } });
+    return;
+  }
+
+  if (message.method === 'turn/start') {
+    ensureInvocation();
+    turnStartedAt = Date.now();
+    send({ id: message.id, result: { turn: { id: turnId, status: 'inProgress' } } });
+    send({
+      method: 'turn/started',
+      params: {
+        threadId,
+        turn: { id: turnId, status: 'inProgress' }
+      }
+    });
+    void beginInvocation(message);
+    return;
+  }
+
+  if (message.method === 'turn/interrupt') {
+    send({ id: message.id, result: {} });
+    finishTurn('interrupted');
+    return;
+  }
+
+  if (approvalRequestId !== undefined && message.id === approvalRequestId) {
+    void finishApproval(message);
+  }
+});
+
+async function beginInvocation(message) {
+  currentPrompt = message.params?.input?.find?.(item => item?.type === 'text')?.text;
+  await sleep(invocation.initialDelayMs);
+  if (invocation.agentSchedule !== undefined) {
+    await createAgentSchedule(invocation.agentSchedule);
+  }
+  writeWorkspaceFiles(invocation.files);
+
+  if (invocation.approval === true) {
+    const command = invocation.command ?? 'node protected-task.mjs';
+    const itemId = `item-approval-${invocationIndex + 1}`;
+    send({
+      method: 'item/started',
+      params: {
+        threadId,
+        turnId,
+        item: {
+          type: 'commandExecution',
+          id: itemId,
+          command,
+          cwd: process.cwd(),
+          status: 'inProgress',
+          commandActions: []
+        }
+      }
+    });
+    approvalRequestId = `approval-rpc-${invocationIndex + 1}`;
+    send({
+      id: approvalRequestId,
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId,
+        turnId,
+        itemId,
+        startedAtMs: Date.now(),
+        command,
+        cwd: process.cwd(),
+        reason: 'e2e protected operation'
+      }
+    });
+    return;
+  }
+
+  await finishNormalInvocation(message);
+}
+
+async function finishNormalInvocation(message) {
+  const prompt = message.params?.input?.find?.(item => item?.type === 'text')?.text;
+  appendFileSync(
+    resolve(stateDir, 'prompts.ndjson'),
+    `${JSON.stringify({ invocationIndex, prompt })}\n`
+  );
+  if (typeof invocation.message === 'string') {
+    sendAgentMessage(invocation.message);
+  }
+  await sleep(invocation.completionDelayMs);
+  finishTurn(invocation.turnStatus ?? 'completed');
+}
+
+async function finishApproval(message) {
+  const accepted = message.result?.decision === 'accept';
+  const itemId = `item-approval-${invocationIndex + 1}`;
+  send({
+    method: 'serverRequest/resolved',
+    params: { threadId, requestId: approvalRequestId }
+  });
+  send({
+    method: 'item/completed',
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: 'commandExecution',
+        id: itemId,
+        command: invocation.command ?? 'node protected-task.mjs',
+        cwd: process.cwd(),
+        status: accepted ? 'completed' : 'declined',
+        commandActions: [],
+        aggregatedOutput: accepted ? 'approved by e2e' : '',
+        exitCode: accepted ? 0 : null
+      }
+    }
+  });
+  if (accepted && typeof invocation.message === 'string') {
+    sendAgentMessage(invocation.message);
+  }
+  await sleep(invocation.completionDelayMs);
+  finishTurn('completed');
+}
+
+function sendAgentMessage(text) {
+  currentAgentMessage = text;
+  send({
+    method: 'item/completed',
+    params: {
+      threadId,
+      turnId,
+      item: {
+        type: 'agentMessage',
+        id: `item-message-${invocationIndex + 1}`,
+        text
+      }
+    }
+  });
+}
+
+function finishTurn(status) {
+  if (turnFinished) return;
+  turnFinished = true;
+  persistTurn(status);
+  send({
+    method: 'turn/completed',
+    params: {
+      threadId,
+      turn: { id: turnId, status }
+    }
+  });
+}
+
+function persistTurn(status) {
+  if (typeof currentPrompt !== 'string' || currentPrompt.trim().length === 0) return;
+  const turns = readTurns(threadId);
+  const items = [{
+    type: 'userMessage',
+    id: `user-${turnId}`,
+    clientId: null,
+    content: [{ type: 'text', text: currentPrompt, text_elements: [] }]
+  }];
+  if (typeof currentAgentMessage === 'string') {
+    items.push({
+      type: 'agentMessage',
+      id: `assistant-${turnId}`,
+      text: currentAgentMessage,
+      phase: 'final_answer',
+      memoryCitation: null
+    });
+  }
+  turns.push({
+    id: turnId,
+    status: status === 'interrupted'
+      ? 'interrupted'
+      : status === 'failed'
+        ? 'failed'
+        : 'completed',
+    startedAt: Math.floor((turnStartedAt || Date.now()) / 1_000),
+    completedAt: Math.floor(Date.now() / 1_000),
+    itemsView: 'summary',
+    items,
+    error: status === 'failed' ? { message: 'failed' } : null,
+    durationMs: Math.max(0, Date.now() - turnStartedAt)
+  });
+  writeFileSync(turnsPath(threadId), JSON.stringify(turns));
+}
+
+function readTurns(targetThreadId) {
+  if (typeof targetThreadId !== 'string' || targetThreadId.length === 0) return [];
+  const path = turnsPath(targetThreadId);
+  if (!existsSync(path)) return [];
+  const value = JSON.parse(readFileSync(path, 'utf8'));
+  return Array.isArray(value) ? value : [];
+}
+
+function turnsPath(targetThreadId) {
+  return resolve(
+    stateDir,
+    `turns-${Buffer.from(targetThreadId, 'utf8').toString('base64url')}.json`
+  );
+}
+
+async function createAgentSchedule(schedule) {
+  const baseUrl = readAgentToolBaseUrl();
+  const token = requireEnvironment('CLAWEE_AGENT_CAPABILITY_TOKEN');
+  const response = await fetch(`${baseUrl}/internal/agent-tools/schedules`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(schedule)
+  });
+  if (!response.ok) {
+    throw new Error(`Agent schedule creation failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+function readAgentToolBaseUrl() {
+  const legacyBaseUrl = process.env.CLAWEE_AGENT_TOOL_URL;
+  if (typeof legacyBaseUrl === 'string' && legacyBaseUrl.length > 0) {
+    return legacyBaseUrl.replace(/\/+$/, '');
+  }
+
+  const mcpUrl = readCodexConfigValue('mcp_servers.clawee_schedule.url');
+  const route = '/internal/agent-tools/mcp';
+  const parsed = new URL(mcpUrl);
+  if (!parsed.pathname.endsWith(route)) {
+    throw new Error(`Unexpected Clawee schedule MCP URL: ${mcpUrl}`);
+  }
+  parsed.pathname = parsed.pathname.slice(0, -route.length) || '/';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/+$/, '');
+}
+
+function readCodexConfigValue(key) {
+  for (let index = 0; index < args.length - 1; index += 1) {
+    if (args[index] !== '-c') continue;
+    const config = args[index + 1];
+    const prefix = `${key}=`;
+    if (!config.startsWith(prefix)) continue;
+    const value = config.slice(prefix.length);
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  throw new Error(`Missing Codex config value: ${key}`);
+}
+
+function writeWorkspaceFiles(files) {
+  if (files === undefined || files === null || typeof files !== 'object') return;
+  const root = resolve(process.cwd());
+  for (const [relativePath, content] of Object.entries(files)) {
+    const target = resolve(root, relativePath);
+    if (target !== root && !target.startsWith(`${root}/`)) {
+      throw new Error(`Refusing to write outside workspace: ${relativePath}`);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, String(content));
+  }
+}
+
+function readConfig(path) {
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function readRuntimeConfigState() {
+  return existsSync(runtimeConfigStatePath)
+    ? JSON.parse(readFileSync(runtimeConfigStatePath, 'utf8'))
+    : {
+        agents_enabled: false,
+        multi_agent: false,
+        multi_agent_v2: false
+      };
+}
+
+function applyRuntimeConfigEdits(current, edits) {
+  const next = { ...current };
+  if (!Array.isArray(edits)) return next;
+  const fields = {
+    'agents.enabled': 'agents_enabled',
+    'features.multi_agent': 'multi_agent',
+    'features.multi_agent_v2': 'multi_agent_v2',
+    model: 'model',
+    model_catalog_json: 'model_catalog_json',
+    model_provider: 'model_provider',
+    'model_providers.clawee.name': 'model_provider_name',
+    'model_providers.clawee.base_url': 'model_provider_base_url',
+    'model_providers.clawee.wire_api': 'model_provider_wire_api',
+    'model_providers.clawee.requires_openai_auth':
+      'model_provider_requires_openai_auth',
+    'model_providers.clawee.env_key': 'model_provider_env_key'
+  };
+  for (const edit of edits) {
+    const field = fields[edit?.keyPath];
+    if (field !== undefined) next[field] = edit.value;
+  }
+  return next;
+}
+
+function runtimeConfigToml(state) {
+  const lines = [
+    '[agents]',
+    `enabled = ${state.agents_enabled}`,
+    '',
+    '[features]',
+    `multi_agent = ${state.multi_agent}`,
+    `multi_agent_v2 = ${state.multi_agent_v2}`
+  ];
+  if (state.model !== undefined) {
+    lines.unshift(
+      `model = ${JSON.stringify(state.model)}`,
+      `model_catalog_json = ${JSON.stringify(state.model_catalog_json)}`,
+      `model_provider = ${JSON.stringify(state.model_provider)}`,
+      ''
+    );
+    lines.push(
+      '',
+      '[model_providers.clawee]',
+      `name = ${JSON.stringify(state.model_provider_name)}`,
+      `base_url = ${JSON.stringify(state.model_provider_base_url)}`,
+      `wire_api = ${JSON.stringify(state.model_provider_wire_api)}`,
+      `requires_openai_auth = ${state.model_provider_requires_openai_auth}`,
+      `env_key = ${JSON.stringify(state.model_provider_env_key)}`
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function ensureInvocation() {
+  if (invocationIndex !== undefined) return;
+  invocationIndex = existsSync(invocationCountPath)
+    ? Number(readFileSync(invocationCountPath, 'utf8'))
+    : 0;
+  writeFileSync(invocationCountPath, String(invocationIndex + 1));
+  const config = readConfig(configPath);
+  const invocations = Array.isArray(config.invocations) ? config.invocations : [];
+  invocation = invocations[
+    Math.min(invocationIndex, Math.max(0, invocations.length - 1))
+  ] ?? {};
+  threadId = invocation.threadId ?? `codex-e2e-thread-${invocationIndex + 1}`;
+  turnId = `turn-e2e-${invocationIndex + 1}`;
+}
+
+function sleep(value) {
+  const delay = Number(value ?? 0);
+  return delay <= 0
+    ? Promise.resolve()
+    : new Promise(resolveSleep => setTimeout(resolveSleep, delay));
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function requireEnvironment(name) {
+  const value = process.env[name];
+  if (value === undefined || value.length === 0) {
+    throw new Error(`Missing environment variable: ${name}`);
+  }
+  return value;
+}
+
+function handleCapabilityProbe(probeArgs) {
+  if (probeArgs.length === 1 && probeArgs[0] === '--version') {
+    process.stdout.write('codex-cli 0.0.0-e2e\n');
+    return true;
+  }
+  if (
+    probeArgs.length === 3
+    && probeArgs[0] === 'debug'
+    && probeArgs[1] === 'models'
+    && probeArgs[2] === '--bundled'
+  ) {
+    process.stdout.write(JSON.stringify({
+      models: [{
+        slug: 'gpt-5.4',
+        display_name: 'GPT-5.4',
+        base_instructions: 'Clawee Web E2E model instructions.'
+      }]
+    }));
+    return true;
+  }
+  if (probeArgs[0] === 'exec' && probeArgs.at(-1) === '--help') {
+    process.stdout.write(probeArgs[1] === 'resume'
+      ? 'Usage: codex exec resume [SESSION_ID] --json --last --model --config --cd --profile --sandbox --image\n'
+      : 'Usage: codex exec [PROMPT] --json --profile --cd --sandbox --image --skip-git-repo-check\n');
+    return true;
+  }
+  if (probeArgs[0] === 'mcp' && probeArgs.at(-1) === '--help') {
+    process.stdout.write('Commands:\n  list\n  get\n  add\n  remove\n  login\n  logout\n');
+    return true;
+  }
+  if (probeArgs[0] === 'app-server' && probeArgs.at(-1) === '--help') {
+    process.stdout.write('Run the app server\ngenerate-json-schema\ngenerate-ts\n');
+    return true;
+  }
+  return false;
+}

@@ -1,0 +1,25 @@
+title = "Clawee 源码凭据扫描"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "公开 GitHub Open Graph 图片的缓存标识，不是认证凭据"
+condition = "AND"
+paths = ['''client/apps/web/src/features/plugins/SkillMarketCover\.tsx$''']
+regexes = ['''^23d7b9595ae1f6dd0e2cdfe74393932763af58e35606729e825c6d65b2429725$''']
+
+[[rules.allowlists]]
+description = "浏览器导航状态的 localStorage 键"
+condition = "AND"
+paths = ['''client/apps/web/src/app/AppController\.tsx$''']
+regexes = ['''^clawee\.navigation\.v3$''']
+
+[[rules.allowlists]]
+description = "MCP progress token 数值校验表达式"
+condition = "AND"
+paths = ['''server/internal/mcpgateway/upstream_client\.go$''']
+regexes = ['''^maxInt64Exclusive$''']

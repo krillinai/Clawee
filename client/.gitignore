@@ -1,0 +1,17 @@
+node_modules/
+dist/
+apps/desktop/.pack/
+apps/desktop/.cache/
+apps/desktop/release/
+/release/server/
+.runtime/
+.codegraph/
+coverage/
+*.log
+test-results/
+.superpowers/
+codex-main/
+open-design-main/
+.gstack/
+.worktrees/
+**/.DS_Store

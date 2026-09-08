@@ -1,0 +1,34 @@
+{
+  "client": [
+    "@electron-internal/extract-zip@1.0.4",
+    "chromium-pickle-js@0.2.0",
+    "compare-version@0.1.2",
+    "cross-dirname@0.1.0",
+    "err-code@2.0.3",
+    "lazy-val@1.0.5",
+    "node-api-version@0.2.1",
+    "read-binary-file-arch@1.0.6",
+    "stackback@0.0.2",
+    "temp-file@3.4.0",
+    "tmp-promise@3.0.3",
+    "truncate-utf8-bytes@1.0.2"
+  ],
+  "admin": [
+    "dlv@1.1.3",
+    "stackback@0.0.2"
+  ],
+  "go": [],
+  "goTargets": [
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64",
+    "windows/amd64",
+    "windows/arm64"
+  ],
+  "inputs": {
+    "client/pnpm-lock.yaml": "0576ced4ad4c5abb884bbfa208d43236a5f42b08fca06d919bd4308aa3e790fd",
+    "server/web/pnpm-lock.yaml": "ae837cd0dff66ce9b8fbf52e92f93d0c062d81e11ca823de5adc7eee33eed1b3",
+    "server/go.sum": "7772e30594175b7f0d131db3be5fd3ee7570079717979f6b0b83e8bf8b141368"
+  }
+}

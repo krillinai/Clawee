@@ -1,0 +1,36 @@
+name: clawee
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: claw_mcp
+      POSTGRES_USER: claw_mcp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请使用初始化生成的外部 .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U claw_mcp -d claw_mcp]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  gateway:
+    image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-1.1.0}
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:1904:1904
+    volumes:
+      - ${CLAWEE_OPS_DIR:?请指定外部配置目录}/configs/config.yaml:/run/clawee-ops/configs/config.yaml:ro
+      - gateway-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+volumes:
+  postgres-data:
+  gateway-data:

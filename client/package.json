@@ -1,0 +1,71 @@
+{
+  "name": "clawee-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "pretypecheck": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test && node --test test/server-package/server-package.test.mjs",
+    "e2e": "playwright test",
+    "perf:measure": "playwright test apps/web/e2e/scheduled-task-performance.spec.ts",
+    "typecheck": "pnpm -r typecheck",
+    "codex:runtime:verify": "node scripts/codex-runtime/manifest.mjs && node scripts/codex-runtime/schema-compatibility.mjs && node --test test/codex-runtime/manifest.test.mjs test/codex-runtime/schema-compatibility.test.mjs test/codex-runtime/app-server-release-contract.test.mjs",
+    "codex:runtime:contract": "node scripts/codex-runtime/app-server-release-contract.mjs",
+    "smoke:ci": "pnpm --filter @clawee/daemon test -- test/unit/codex-smoke.test.ts",
+    "perf:check": "node scripts/check-performance-baseline.mjs",
+    "release:verify-scheduled-task-upgrade": "pnpm --filter @clawee/daemon verify:schedule-upgrade",
+    "daemon:dev": "pnpm --filter @clawee/daemon dev",
+    "server:start": "pnpm --filter @clawee/web build && pnpm --filter @clawee/daemon server:start",
+    "server:package": "node scripts/server-package.mjs",
+    "server:deploy:source": "bash scripts/deploy-server-source.sh",
+    "web:dev": "pnpm --filter @clawee/web dev",
+    "harness": "pnpm --filter @clawee/harness start",
+    "desktop:dev": "pnpm --filter @clawee/desktop dev",
+    "desktop:build": "pnpm --filter @clawee/desktop build",
+    "desktop:package": "pnpm --filter @clawee/desktop package",
+    "desktop:dist": "pnpm --filter @clawee/desktop dist",
+    "desktop:release": "pnpm --filter @clawee/desktop release",
+    "desktop:preflight:local": "node scripts/desktop-local-preflight.mjs",
+    "desktop:preflight:release": "node scripts/desktop-local-preflight.mjs --release",
+    "desktop:tag:check": "node scripts/desktop-tag-check.mjs",
+    "desktop:notary:setup": "pnpm --filter @clawee/desktop notary:setup",
+    "desktop:release:doctor": "pnpm --filter @clawee/desktop release:doctor",
+    "desktop:test": "pnpm --filter @clawee/desktop test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.10.7",
+    "tar": "7.5.21",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici@>=7.0.0 <7.29.0": "7.29.0",
+      "ip-address@>=10.0.0 <=10.3.0": "10.3.1",
+      "find-my-way@<=9.6.0": "9.7.0",
+      "brace-expansion@<1.1.18": "1.1.18",
+      "brace-expansion@>=2.0.0 <2.1.4": "2.1.4",
+      "brace-expansion@>=4.0.0 <5.0.9": "5.0.9",
+      "js-yaml@>=4.0.0 <4.3.1": "4.3.1",
+      "nanoid@>=3.0.0 <3.3.18": "3.3.18",
+      "fast-uri@>=3.0.0 <3.1.6": "3.1.6",
+      "browserslist@<4.28.7": "4.28.7",
+      "postcss@<8.5.23": "8.5.23",
+      "undici@>=6.0.0 <6.28.0": "6.28.0",
+      "hono@<4.12.34": "4.12.34",
+      "@hono/node-server@<1.19.15": "1.19.15",
+      "qs@<6.16.0": "6.16.0",
+      "@xmldom/xmldom@<0.8.15": "0.8.15"
+    }
+  },
+  "version": "1.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krillinai/Clawee.git",
+    "directory": "client"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "saxes",
+  "version": "6.0.0",
+  "sources": [
+    {
+      "file": "LICENSE",
+      "source": "https://github.com/lddubeau/saxes/blob/211fa0ebec9b628affc09219199639887174bfc3/LICENSE",
+      "gitBlob": "187f3ba399862022f4e670b2a3a1dbc6d7e6a800"
+    }
+  ]
+}

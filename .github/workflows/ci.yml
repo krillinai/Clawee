@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    tags-ignore:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm codex:runtime:verify
+      - run: pnpm test
+      - run: pnpm release:verify-scheduled-task-upgrade
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm smoke:ci
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm perf:measure
+      - run: pnpm perf:check
+        env:
+          CLAWEE_PERFORMANCE_RESULTS_REQUIRED: '1'
+      - run: pnpm audit --audit-level high
+    defaults:
+      run:
+        working-directory: client

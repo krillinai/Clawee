@@ -1,0 +1,7792 @@
+import type {
+  AttachmentResponse,
+  ApprovalDecisionResponse,
+  CodexModelListResponse,
+  CodexMcpListResponse,
+  CodexProfileListResponse,
+  CodexSkillListResponse,
+  CodexSkillMarketInstallRecordResponse,
+  ConversationSearchResult,
+  CreateMemoryRequest,
+  CreateThreadRequest,
+  EnterpriseDingTalkLoginPrepareResponse,
+  EnterpriseKnowledgeBaseResponse,
+  EnterpriseKnowledgeDocumentResponse,
+  EnterpriseLoginRequest,
+  EnterpriseMcpCatalogResponse,
+  EnterpriseRegisterRequest,
+  EnterpriseSessionResponse,
+  EnterpriseSharedFileResponse,
+  EnterpriseSharedSpaceResponse,
+  EnterpriseSkillDetailResponse,
+  EnterpriseSkillResponse,
+  ModelAccessState,
+  RunDiagnosticsResponse,
+  RunContextResponse,
+  RunResponse,
+  RunSubmissionMode,
+  SandboxMode,
+  ScheduleResponse,
+  TaskItem,
+  ThreadHistoryItem,
+  ThreadResponse
+} from '@clawee/protocol';
+import { skillMarketCatalog } from '@clawee/skill-market';
+import type {
+  CSSProperties,
+  DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  WheelEvent as ReactWheelEvent
+} from 'react';
+import { FolderInput } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { ConfirmDialog } from '../components/dialogs/ConfirmDialog.js';
+import { WorkbenchLayout } from '../components/layout/WorkbenchLayout.js';
+import { beginPaneResize } from '../components/layout/pane-resize-2026-07-29.js';
+import { Timeline, type TimelineHandle } from '../components/timeline/Timeline.js';
+import { eventToTimelineItem, type TimelineItem } from '../components/timeline/timeline-model.js';
+import type { CapabilitiesViewProps } from '../features/capabilities/CapabilitiesView.js';
+import {
+  ConversationEmptyState,
+  ConversationStarterTags
+} from '../features/conversation/ConversationEmptyState.js';
+import {
+  useEnterpriseActivity
+} from '../features/activity/useEnterpriseActivity-2026-08-18.js';
+import {
+  useEnterpriseBilling
+} from '../features/activity/useEnterpriseBilling-2026-08-28.js';
+import { ConversationHeader } from '../features/conversation/ConversationHeader.js';
+import { MemorySuggestion } from '../features/conversation/MemorySuggestion.js';
+import { ApprovalPanel } from '../features/approvals/ApprovalPanel.js';
+import { shouldShowComposerProjectSelector } from '../features/conversation/composer-visibility.js';
+import { useThreadHistory } from '../features/conversation/use-thread-history.js';
+import { DetailPanel } from '../features/details/DetailPanel.js';
+import {
+  ModelAccessStatusPage,
+  ModelServiceSetupPage
+} from '../features/setup/ModelServiceSetupPage.js';
+import { getSkillMarketDisplayTitle } from '../features/plugins/skill-market-model.js';
+import {
+  collectTaskTransitions,
+  createTaskNotification,
+  shouldAutoSubscribeTask,
+  shouldSendSystemNotification
+} from '../features/tasks/task-monitor.js';
+import type {
+  SkillMarketOperation,
+  SkillMarketUseError
+} from '../features/plugins/SkillMarketView.js';
+import type {
+  EnterpriseSkillOperation,
+  EnterpriseSkillUseError
+} from '../features/plugins/EnterpriseSkillHubView-2026-07-30.js';
+import type {
+  KnowledgeUploadState
+} from '../features/knowledge/KnowledgePage.js';
+import { collectConversationFilePaths } from '../features/files/conversation-file-paths.js';
+import type {
+  SharedDriveOperationState
+} from '../features/drive/SharedDrivePage.js';
+import {
+  findProjectById,
+  groupThreadsByPurpose,
+  sortProjectConversations,
+  parseLegacyLocalStorageProjects,
+  PROJECTS_STORAGE_KEY,
+  type ClaweeConversation,
+  type ClaweeProject,
+  type ProjectPermission
+} from '../features/projects/project-model.js';
+import { CreateProjectDialog } from '../features/projects/CreateProjectDialog.js';
+import { ProjectManagementDialog } from '../features/projects/ProjectManagementDialog.js';
+import {
+  Composer,
+  type ComposerAttachment,
+  type ComposerConnector,
+  type ComposerDraftRequest,
+  type ComposerQueuedItem,
+  type ComposerRunConfig,
+  type ComposerSkillRequest,
+  type ComposerSlashCommand
+} from '../features/runs/Composer.js';
+import { RunDetailPanel } from '../features/runs/RunDetailPanel.js';
+import { createScheduleTaskSummaries } from '../features/schedules/schedule-task-model.js';
+import {
+  getRunCancelState,
+  getThreadActiveRun,
+  initialRunRegistryState,
+  runRegistryReducer,
+  type RunSubscriptionState
+} from '../features/runs/run-registry.js';
+import {
+  createRunEventController,
+  type RunEventController,
+  type RunEventControllerState
+} from '../features/runs/run-event-controller.js';
+import {
+  createRunReplayDeduper,
+  mergeTimelineHistoryWithCache
+} from '../features/runs/run-event-replay.js';
+import type {
+  DefaultPermissionPreference,
+  RuntimeStatus
+} from '../features/settings/ClaweeSettingsView.js';
+import type { McpCapabilities } from '../features/settings/McpSettingsView.js';
+import { ClaweeSidebar } from '../features/shell/ClaweeSidebar.js';
+import {
+  createScheduleDraftSidebarSummaries,
+  createSidebarTaskSummaries
+} from '../features/shell/sidebar-task-model.js';
+import type { SidebarTaskSummary } from '../features/shell/sidebar-task-model.js';
+import { browserBridge } from '../host/browser-bridge.js';
+import type {
+  HostBridge,
+  ProjectDirectorySelectionPurpose
+} from '../host/bridge.js';
+import { ApiClientError, RuntimeClient } from '../runtime/client.js';
+import { createFrameBatcher, type FrameBatcher } from '../runtime/frame-batcher.js';
+import { subscribeRunEvents as defaultSubscribeRunEvents, type SubscribeRunEventsInput } from '../runtime/sse.js';
+import type { ConnectionConfig } from '../runtime/types.js';
+import { createCapabilityService } from '../services/capability-service.js';
+import { createAttachmentService } from '../services/attachment-service.js';
+import { createApprovalService } from '../services/approval-service.js';
+import { createConnectionService, type ConnectionState } from '../services/connection-service.js';
+import { createCleanupService } from '../services/cleanup-service.js';
+import { createDiagnosticsService } from '../services/diagnostics-service.js';
+import { createEnterpriseService } from '../services/enterprise-service-2026-07-30.js';
+import { createMockFileService } from '../services/file-service.js';
+import type { FileTreeNode, WorkspaceFile } from '../services/file-service.js';
+import { createProjectService } from '../services/project-service.js';
+import { createMcpService } from '../services/mcp-service.js';
+import { createMemoryService } from '../services/memory-service.js';
+import {
+  createModelServiceConfigurationService
+} from '../services/model-service-configuration-service.js';
+import {
+  createModelService,
+  readCachedModelCatalog,
+  readRecentModelConfig,
+  writeRecentModelConfig,
+  type RecentModelConfig
+} from '../services/model-service-2026-08-05.js';
+import { createNotificationService } from '../services/notification-service.js';
+import { createProfileService } from '../services/profile-service.js';
+import { createRunService } from '../services/run-service.js';
+import { createScheduleService } from '../services/schedule-service.js';
+import { createSearchService } from '../services/search-service.js';
+import { createSkillMarketService } from '../services/skill-market-service.js';
+import { createTaskService } from '../services/task-service.js';
+import { createThreadService } from '../services/thread-service.js';
+import { createWorkspaceFileService } from '../services/workspace-file-service.js';
+import { readJsonFromStorage, writeJsonToStorage } from '../storage/browser-storage.js';
+import {
+  applyAccentColor,
+  normalizeHexColor,
+  readAccentColorPreference,
+  readCustomAccentColorPreference,
+  type AccentColor,
+  writeAccentColorPreference,
+  writeCustomAccentColorPreference
+} from '../styles/accent-color.js';
+import {
+  applyColorMode,
+  readColorModePreference,
+  type ColorMode,
+  writeColorModePreference
+} from '../styles/color-mode.js';
+import { initialAppState, reduceAppState, type ActiveView, type AppState } from './app-state.js';
+import { formatRoute, type AppRoute } from './routes.js';
+
+type AppFileService = {
+  listTree(): Promise<FileTreeNode[]>;
+  openFile(path: string): Promise<WorkspaceFile>;
+  saveFile(path: string, content: string): Promise<WorkspaceFile>;
+};
+
+type CapabilityService = ReturnType<typeof createCapabilityService>;
+type SkillMarketService = ReturnType<typeof createSkillMarketService>;
+type EnterpriseService = ReturnType<typeof createEnterpriseService>;
+type ThreadService = ReturnType<typeof createThreadService>;
+type ScheduleService = ReturnType<typeof createScheduleService>;
+type SearchService = ReturnType<typeof createSearchService>;
+type ProjectService = ReturnType<typeof createProjectService>;
+type PendingRunStart = {
+  id: string;
+  threadId?: string;
+  cancelRequested: boolean;
+};
+type PendingRunStartsById = Record<string, PendingRunStart | undefined>;
+type ActiveRunEventController = {
+  threadId: string;
+  controller: RunEventController;
+};
+
+const CONVERSATION_PANE_MIN_WIDTH = 420;
+const FILE_WORKSPACE_MIN_WIDTH = 280;
+const CONVERSATION_FILE_RESIZE_HANDLE_WIDTH = 6;
+const DESKTOP_SIDEBAR_EXPANDED_WIDTH = 248;
+const MOBILE_NAVIGATION_MAX_WIDTH = 920;
+const WORKSPACE_AUTO_COLLAPSE_MAX_WIDTH =
+  DESKTOP_SIDEBAR_EXPANDED_WIDTH
+  + CONVERSATION_PANE_MIN_WIDTH
+  + CONVERSATION_FILE_RESIZE_HANDLE_WIDTH
+  + FILE_WORKSPACE_MIN_WIDTH;
+const WORKSPACE_AUTO_COLLAPSE_MEDIA_QUERY =
+  `(min-width: ${MOBILE_NAVIGATION_MAX_WIDTH + 1}px) and (max-width: ${WORKSPACE_AUTO_COLLAPSE_MAX_WIDTH}px)`;
+const RESIZE_KEY_STEP = 32;
+const HISTORY_LOADING_DELAY_MS = 120;
+function canScrollVertically(
+  target: EventTarget | null,
+  boundary: HTMLElement,
+  deltaY: number
+): boolean {
+  if (!(target instanceof Element) || deltaY === 0) return false;
+
+  let element: Element | null = target;
+  while (element !== null && boundary.contains(element)) {
+    if (element instanceof HTMLElement) {
+      const overflowY = window.getComputedStyle(element).overflowY;
+      const scrollableOverflow =
+        overflowY === 'auto'
+        || overflowY === 'scroll'
+        || overflowY === 'overlay';
+      if (scrollableOverflow && element.scrollHeight > element.clientHeight) {
+        if (deltaY < 0 && element.scrollTop > 0) return true;
+        if (
+          deltaY > 0
+          && element.scrollTop + element.clientHeight < element.scrollHeight - 1
+        ) {
+          return true;
+        }
+      }
+    }
+    element = element.parentElement;
+  }
+
+  return false;
+}
+const DEFAULT_PERMISSION_STORAGE_KEY = 'clawee.preferences.defaultPermission';
+const DEFAULT_PERMISSION_PREFERENCE: DefaultPermissionPreference = 'danger-full-access';
+const GLOBAL_MODEL_SELECTION_MIGRATION_KEY =
+  'clawee.models.global-selection-migrated.v1';
+const NAVIGATION_STORAGE_KEY = 'clawee.navigation.v3';
+const SCHEDULE_DRAFT_TITLE = '任务草稿';
+const SCHEDULE_CREATION_DRAFT =
+  '我们一起来设置一个定时任务吧。首先，说明定时任务在 Clawee 中的工作方式。然后询问我需要安排什么，以及应该在什么时间运行。';
+const CapabilitiesPage = lazy(() => import('../features/capabilities/CapabilitiesPage.js'));
+const EnterpriseAccountPage = lazy(
+  () => import('../features/account/EnterpriseAccountPage-2026-07-30.js')
+);
+const FilesPage = lazy(() => import('../features/files/FilesPage.js'));
+const PluginsPage = lazy(() => import('../features/plugins/PluginsPage.js'));
+const ConnectionsPage = lazy(async () => {
+  const module = await import('../features/connections/ConnectionsPage.js');
+  return { default: module.ConnectionsPage };
+});
+const KnowledgePage = lazy(async () => {
+  const module = await import('../features/knowledge/KnowledgePage.js');
+  return { default: module.KnowledgePage };
+});
+const SharedDrivePage = lazy(async () => {
+  const module = await import('../features/drive/SharedDrivePage.js');
+  return { default: module.SharedDrivePage };
+});
+const DashboardPage = lazy(async () => {
+  const module = await import('../features/dashboard/DashboardPage.js');
+  return { default: module.DashboardPage };
+});
+const ScheduleThreadHeader = lazy(async () => {
+  const module = await import('../features/schedules/ScheduleThreadHeader.js');
+  return { default: module.ScheduleThreadHeader };
+});
+const SchedulesPage = lazy(() => import('../features/schedules/SchedulesPage.js'));
+const SearchPage = lazy(() => import('../features/search/SearchPage.js'));
+const SettingsPage = lazy(() => import('../features/settings/SettingsPage.js'));
+const TaskCenterPage = lazy(() => import('../features/tasks/TaskCenterPage.js'));
+const ActivityPage = lazy(async () => {
+  const module = await import('../features/activity/ActivityPage.js');
+  return { default: module.ActivityPage };
+});
+const RechargeRecordsPage = lazy(async () => {
+  const module = await import('../features/activity/RechargeRecordsPage.js');
+  return { default: module.RechargeRecordsPage };
+});
+
+type PersistedNavigation = {
+  currentProjectId?: string;
+  selectedThreadId?: string;
+};
+
+export type AppControllerProps = {
+  fileService?: AppFileService;
+  capabilitiesView?: CapabilitiesViewProps;
+  hostBridge?: HostBridge;
+  requireEnterpriseLogin?: boolean;
+  runtimeFetch?: typeof fetch;
+  subscribeRunEvents?: (input: SubscribeRunEventsInput) => Promise<void>;
+  route: AppRoute;
+  onNavigate: (route: AppRoute, options?: { replace?: boolean }) => void;
+};
+
+export function AppController(props: AppControllerProps) {
+  const persistedNavigation = useMemo(readPersistedNavigation, []);
+  const initialState = useMemo(
+    () => createInitialState(props.route, persistedNavigation),
+    []
+  );
+  const [state, dispatch] = useReducer(reduceAppState, initialState);
+  const [runRegistry, dispatchRunRegistry] = useReducer(
+    runRegistryReducer,
+    initialRunRegistryState
+  );
+  const [projects, setProjects] = useState<ClaweeProject[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<ClaweeProject[]>([]);
+  const defaultFileService = useMemo(() => createMockFileService(), []);
+  const fileService = props.fileService ?? defaultFileService;
+  const hostBridge = props.hostBridge ?? browserBridge;
+  const integratedTitleBar = hostBridge.windowChrome;
+  const appShellStyle = integratedTitleBar === undefined
+    ? undefined
+    : {
+        '--clawee-titlebar-height': `${integratedTitleBar.titleBarHeight}px`,
+        '--clawee-traffic-light-inset': `${integratedTitleBar.trafficLightInset}px`
+      } as CSSProperties;
+  const runtimeFetch = useMemo(() => props.runtimeFetch ?? globalThis.fetch.bind(globalThis), [props.runtimeFetch]);
+  const subscribeRunEvents = props.subscribeRunEvents ?? defaultSubscribeRunEvents;
+  const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
+  const [treeLoadError, setTreeLoadError] = useState<string>();
+  const [timelineItems, setTimelineItemsState] = useState<TimelineItem[]>([]);
+  const [resolvingApprovalIds, setResolvingApprovalIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, string | undefined>>({});
+  const [connectionConfig, setConnectionConfig] = useState<ConnectionConfig | null>(null);
+  const [runtimeThreads, setRuntimeThreads] = useState<ThreadResponse[]>([]);
+  const [runtimeSchedules, setRuntimeSchedules] = useState<ScheduleResponse[]>([]);
+  const [runtimeTasks, setRuntimeTasks] = useState<TaskItem[]>([]);
+  const [runtimeWorkspaceReady, setRuntimeWorkspaceReady] = useState(false);
+  const [threadLoadError, setThreadLoadError] = useState<string>();
+  const [projectLoadError, setProjectLoadError] = useState<string>();
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [projectManagementOpen, setProjectManagementOpen] = useState(false);
+  const [codexHomeConfirmationOpen, setCodexHomeConfirmationOpen] = useState(false);
+  const [projectManagementProjectId, setProjectManagementProjectId] = useState<string>();
+  const [projectMutationBusy, setProjectMutationBusy] = useState(false);
+  const [projectDropActive, setProjectDropActive] = useState(false);
+  const [unassignedThreads, setUnassignedThreads] = useState<ThreadResponse[]>([]);
+  const [threadHistoryLoadError, setThreadHistoryLoadError] = useState<string>();
+  const [historyLoadingThreadId, setHistoryLoadingThreadId] = useState<string>();
+  const [historyLoadingOverlayThreadId, setHistoryLoadingOverlayThreadId] =
+    useState<string>();
+  const [historyLoadedThreadId, setHistoryLoadedThreadId] = useState<string>();
+  const [threadConfigUpdateError, setThreadConfigUpdateError] = useState<string>();
+  const [connectionState, setConnectionState] = useState<ConnectionState>({
+    status: 'disconnected',
+    message: '正在等待本地服务'
+  });
+  const [modelAccessState, setModelAccessState] = useState<ModelAccessState>({
+    status: 'resolving'
+  });
+  const [enterpriseSession, setEnterpriseSession] = useState<EnterpriseSessionResponse>({
+    status: 'signed_out',
+    transportSecurity: 'secure_https'
+  });
+  const [enterpriseCheckingTimedOut, setEnterpriseCheckingTimedOut] = useState(false);
+  const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
+  const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
+  const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
+  const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
+  const [enterpriseSkillsLoadError, setEnterpriseSkillsLoadError] = useState<string>();
+  const [enterpriseSkillOperation, setEnterpriseSkillOperation] =
+    useState<EnterpriseSkillOperation>();
+  const [enterpriseSkillUseError, setEnterpriseSkillUseError] =
+    useState<EnterpriseSkillUseError>();
+  const [enterpriseSkillsReloadKey, setEnterpriseSkillsReloadKey] = useState(0);
+  const [enterpriseKnowledgeBases, setEnterpriseKnowledgeBases] =
+    useState<EnterpriseKnowledgeBaseResponse[]>();
+  const [enterpriseKnowledgeBasesLoading, setEnterpriseKnowledgeBasesLoading] =
+    useState(false);
+  const [enterpriseKnowledgeBasesError, setEnterpriseKnowledgeBasesError] =
+    useState<string>();
+  const [selectedEnterpriseKnowledgeBaseId, setSelectedEnterpriseKnowledgeBaseId] =
+    useState<string>();
+  const [enterpriseKnowledgeDocuments, setEnterpriseKnowledgeDocuments] =
+    useState<EnterpriseKnowledgeDocumentResponse[]>();
+  const [enterpriseKnowledgeDocumentsLoading, setEnterpriseKnowledgeDocumentsLoading] =
+    useState(false);
+  const [enterpriseKnowledgeDocumentsError, setEnterpriseKnowledgeDocumentsError] =
+    useState<string>();
+  const [enterpriseKnowledgeUpload, setEnterpriseKnowledgeUpload] =
+    useState<KnowledgeUploadState>();
+  const [enterpriseKnowledgeUploadNotice, setEnterpriseKnowledgeUploadNotice] =
+    useState<string>();
+  const [enterpriseKnowledgeBasesReloadKey, setEnterpriseKnowledgeBasesReloadKey] =
+    useState(0);
+  const [enterpriseKnowledgeDocumentsReloadKey, setEnterpriseKnowledgeDocumentsReloadKey] =
+    useState(0);
+  const [enterpriseSharedSpaces, setEnterpriseSharedSpaces] =
+    useState<EnterpriseSharedSpaceResponse[]>();
+  const [enterpriseSharedSpacesLoading, setEnterpriseSharedSpacesLoading] = useState(false);
+  const [enterpriseSharedSpacesError, setEnterpriseSharedSpacesError] = useState<string>();
+  const [enterpriseSharedSpacesMeta, setEnterpriseSharedSpacesMeta] = useState({
+    nextCursor: '',
+    hasNext: false,
+    maxFileSizeBytes: 1024 * 1024 * 1024
+  });
+  const [selectedEnterpriseSharedSpaceId, setSelectedEnterpriseSharedSpaceId] =
+    useState<string>();
+  const [enterpriseSharedFiles, setEnterpriseSharedFiles] =
+    useState<EnterpriseSharedFileResponse[]>();
+  const [enterpriseSharedFilesLoading, setEnterpriseSharedFilesLoading] = useState(false);
+  const [enterpriseSharedFilesError, setEnterpriseSharedFilesError] = useState<string>();
+  const [enterpriseSharedFilesMeta, setEnterpriseSharedFilesMeta] = useState({
+    nextCursor: '',
+    hasNext: false
+  });
+  const [enterpriseSharedQuery, setEnterpriseSharedQuery] = useState('');
+  const [enterpriseSharedOperation, setEnterpriseSharedOperation] =
+    useState<SharedDriveOperationState>();
+  const [enterpriseSharedNotice, setEnterpriseSharedNotice] = useState<string>();
+  const [enterpriseSharedSpacesReloadKey, setEnterpriseSharedSpacesReloadKey] = useState(0);
+  const [enterpriseSharedFilesReloadKey, setEnterpriseSharedFilesReloadKey] = useState(0);
+  const [runDiagnosticsById, setRunDiagnosticsById] = useState<Record<string, RunDiagnosticsResponse | undefined>>({});
+  const [runAttachmentsById, setRunAttachmentsById] = useState<Record<string, AttachmentResponse[] | undefined>>({});
+  const [runContextById, setRunContextById] = useState<Record<string, RunContextResponse | undefined>>({});
+  const [pendingMemorySuggestion, setPendingMemorySuggestion] = useState<{ id: number; content: string }>();
+  const [composerRunConfig, setComposerRunConfig] = useState<ComposerRunConfig | null>(null);
+  const [composerPromptByScope, setComposerPromptByScope] =
+    useState<Record<string, string>>({});
+  const [recentComposerModelConfig, setRecentComposerModelConfig] =
+    useState<RecentModelConfig | null>(readRecentModelConfig);
+  const [codexModels, setCodexModels] = useState<CodexModelListResponse | undefined>(
+    readCachedModelCatalog
+  );
+  const [codexModelsLoading, setCodexModelsLoading] = useState(false);
+  const [codexModelsLoadError, setCodexModelsLoadError] = useState<string>();
+  const [codexModelsNotice, setCodexModelsNotice] = useState<string>();
+  const [codexSkills, setCodexSkills] = useState<CodexSkillListResponse>();
+  const [codexMcp, setCodexMcp] = useState<CodexMcpListResponse>();
+  const [enterpriseMcpCatalog, setEnterpriseMcpCatalog] =
+    useState<EnterpriseMcpCatalogResponse>();
+  const [codexProfiles, setCodexProfiles] = useState<CodexProfileListResponse>();
+  const [skillMarketInstallRecords, setSkillMarketInstallRecords] = useState<CodexSkillMarketInstallRecordResponse[]>();
+  const [skillMarketLoading, setSkillMarketLoading] = useState(false);
+  const [skillMarketLoadError, setSkillMarketLoadError] = useState<string>();
+  const [skillMarketOperation, setSkillMarketOperation] = useState<SkillMarketOperation>();
+  const [skillMarketUseError, setSkillMarketUseError] = useState<SkillMarketUseError>();
+  const [pendingComposerDraft, setPendingComposerDraft] = useState<
+    { threadId: string; request: ComposerDraftRequest } | undefined
+  >();
+  const [pendingComposerSkill, setPendingComposerSkill] = useState<{
+    projectId: string | undefined;
+    threadId: string | undefined;
+    request: ComposerSkillRequest;
+  }>();
+  const [starterSkillBusyName, setStarterSkillBusyName] = useState<string>();
+  const [starterSkillError, setStarterSkillError] = useState<string>();
+  const [pendingComposerFocusRequestId, setPendingComposerFocusRequestId] = useState<number>();
+  const activePluginSource =
+    props.route.view === 'plugins' && props.route.source === 'public'
+      ? 'public'
+      : 'enterprise';
+
+  useEffect(() => {
+    if (threadConfigUpdateError === undefined) return;
+    const timeoutId = window.setTimeout(() => {
+      setThreadConfigUpdateError(undefined);
+    }, 4200);
+    return () => window.clearTimeout(timeoutId);
+  }, [threadConfigUpdateError]);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
+  const [capabilitiesLoadError, setCapabilitiesLoadError] = useState<string>();
+  const [pendingRunStartsById, setPendingRunStartsById] = useState<PendingRunStartsById>({});
+  const [runsLoadingThreadId, setRunsLoadingThreadId] = useState<string>();
+  const [runsLoadedThreadId, setRunsLoadedThreadId] = useState<string>();
+  const [savedFileByPath, setSavedFileByPath] = useState<Record<string, WorkspaceFile>>({});
+  const [draftContentByPath, setDraftContentByPath] = useState<Record<string, string>>({});
+  const [loadingFilePath, setLoadingFilePath] = useState<string>(state.selectedFilePath);
+  const [loadErrorByPath, setLoadErrorByPath] = useState<Record<string, string | undefined>>({});
+  const [saveErrorByPath, setSaveErrorByPath] = useState<Record<string, string | undefined>>({});
+  const [savingFilePaths, setSavingFilePaths] = useState<Set<string>>(() => new Set());
+  const [conversationPaneWidth, setConversationPaneWidth] = useState<number>();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [defaultPermission, setDefaultPermission] = useState(readDefaultPermissionPreference);
+  const [defaultPermissionSyncError, setDefaultPermissionSyncError] = useState<string>();
+  const [colorMode, setColorMode] = useState(readColorModePreference);
+  const [accentColor, setAccentColor] = useState(readAccentColorPreference);
+  const [customAccentColor, setCustomAccentColor] = useState(
+    readCustomAccentColorPreference
+  );
+  const [threadHistoryReloadKey, setThreadHistoryReloadKey] = useState(0);
+  const [searchHistoryTarget, setSearchHistoryTarget] = useState<
+    { threadId: string; itemId: string } | undefined
+  >();
+  const [timelineRunTarget, setTimelineRunTarget] = useState<
+    { threadId: string; runId: string } | undefined
+  >(() => (
+    props.route.view === 'thread' && props.route.runId !== undefined
+      ? { threadId: props.route.threadId, runId: props.route.runId }
+      : undefined
+  ));
+  const [timelineApprovalTarget, setTimelineApprovalTarget] = useState<
+    { threadId: string; approvalId: string } | undefined
+  >(() => (
+    props.route.view === 'thread' && props.route.approvalId !== undefined
+      ? { threadId: props.route.threadId, approvalId: props.route.approvalId }
+      : undefined
+  ));
+  const timelineIdSequenceRef = useRef(0);
+  const timelineItemsRef = useRef<TimelineItem[]>([]);
+  const timelineRef = useRef<TimelineHandle>(null);
+  const timelineItemsByThreadIdRef = useRef<Record<string, TimelineItem[] | undefined>>({});
+  const timelineThreadIdRef = useRef<string | undefined>(initialState.selectedThreadId);
+  const mountedRef = useRef(true);
+  const selectedFilePathRef = useRef(state.selectedFilePath);
+  const savedFileByPathRef = useRef<Record<string, WorkspaceFile>>({});
+  const draftContentByPathRef = useRef<Record<string, string>>({});
+  const openRequestByPathRef = useRef<Record<string, number>>({});
+  const fileRevisionByPathRef = useRef<Record<string, number>>({});
+  const savingFilePathsRef = useRef(new Set<string>());
+  const connectionConfigRef = useRef<ConnectionConfig | null>(null);
+  const connectionConfigVersionRef = useRef(0);
+  const runEventControllersRef = useRef(new Map<string, ActiveRunEventController>());
+  const replayedTargetRunKeyRef = useRef<string>();
+  const timelineEventBatchersByThreadIdRef = useRef(new Map<string, FrameBatcher<TimelineItem>>());
+  const runRegistryRef = useRef(runRegistry);
+  const runsLoadedThreadIdsRef = useRef(new Set<string>());
+  const pendingRunStartsByIdRef = useRef<PendingRunStartsById>({});
+  const conversationFileLayoutRef = useRef<HTMLElement | null>(null);
+  const allowInitialRuntimeProjectFocusRef = useRef(
+    props.route.view === 'home' && persistedNavigation === null
+  );
+
+  useEffect(() => {
+    applyColorMode(colorMode);
+  }, [colorMode]);
+  useEffect(() => {
+    applyAccentColor(accentColor, customAccentColor);
+  }, [accentColor, customAccentColor]);
+  const navigationPersistenceReadyRef = useRef(
+    persistedNavigation !== null || props.route.view !== 'home'
+  );
+  const restoredThreadIdRef = useRef(initialState.selectedThreadId);
+  const initialRouteKeyRef = useRef(formatRoute(props.route));
+  const pendingRouteKeyRef = useRef<string>();
+  const skipNextHistoryLoadForThreadRef = useRef<string>();
+  const skillMarketMutationInFlightRef = useRef(false);
+  const skillMarketUseInFlightRef = useRef(false);
+  const skillMarketRuntimeGenerationRef = useRef(0);
+  const enterpriseRuntimeGenerationRef = useRef(0);
+  const enterpriseHubGenerationRef = useRef(0);
+  const enterpriseKnowledgeGenerationRef = useRef(0);
+  const enterpriseSharedDriveGenerationRef = useRef(0);
+  const capabilityLoadGenerationRef = useRef<number>();
+  const profileLoadGenerationRef = useRef<number>();
+  const skillMarketLoadGenerationRef = useRef<number>();
+  const enterpriseSkillMutationInFlightRef = useRef(false);
+  const starterSkillInFlightRef = useRef(false);
+  const codexHomeConfirmationResolverRef = useRef<((confirmed: boolean) => void)>();
+  const enterpriseKnowledgeUploadInFlightRef = useRef(false);
+  const enterpriseSharedSpacesLoadInFlightRef = useRef(false);
+  const enterpriseSharedFilesLoadInFlightRef = useRef(false);
+  const enterpriseSharedMutationInFlightRef = useRef(false);
+  const mobileSidebarHistoryEntryRef = useRef(false);
+  const defaultPermissionSyncEnabledRef = useRef(
+    hasPersistedDefaultPermissionPreference()
+  );
+  const defaultPermissionAppliedByThreadRef = useRef(new Map<string, SandboxMode>());
+  const defaultPermissionSyncFailuresRef = useRef(new Set<string>());
+  const projectDirectorySelectionInFlightRef = useRef(false);
+  const capabilityServiceRef = useRef<CapabilityService | null>(null);
+  const skillMarketServiceRef = useRef<SkillMarketService | null>(null);
+  const enterpriseServiceRef = useRef<EnterpriseService | null>(null);
+  const enterpriseSessionRef = useRef(enterpriseSession);
+  const enterpriseReturnRouteRef = useRef<AppRoute>();
+  const threadServiceRef = useRef<ThreadService | null>(null);
+  const scheduleServiceRef = useRef<ScheduleService | null>(null);
+  const runtimeThreadsRef = useRef(runtimeThreads);
+  const currentProjectIdRef = useRef(state.currentProjectId);
+  const connectionStatusRef = useRef<ConnectionState['status']>(connectionState.status);
+  const activeViewRef = useRef(state.activeView);
+  const selectedThreadIdRef = useRef(state.selectedThreadId);
+  const taskStatusesRef = useRef(new Map<string, TaskItem['status']>());
+  const taskBaselineReadyRef = useRef(false);
+  const nextComposerDraftIdRef = useRef(0);
+  const nextComposerSkillIdRef = useRef(0);
+  const nextComposerFocusRequestIdRef = useRef(0);
+  const composerAttachmentDraftIdsRef = useRef(new Map<string, string>());
+  const globalModelSelectionMigratedRef = useRef(
+    readGlobalModelSelectionMigrated()
+  );
+  const retainedAttachmentPreviewUrlsRef = useRef(new Map<string, string>());
+  const attachmentPreviewLoadsRef = useRef(new Set<string>());
+  const codexModelsRef = useRef(codexModels);
+  runRegistryRef.current = runRegistry;
+  runtimeThreadsRef.current = runtimeThreads;
+  currentProjectIdRef.current = state.currentProjectId;
+  enterpriseSessionRef.current = enterpriseSession;
+  codexModelsRef.current = codexModels;
+
+  const runtimeClient = useMemo(
+    () => connectionConfig === null ? null : new RuntimeClient({ ...connectionConfig, fetchImpl: runtimeFetch }),
+    [connectionConfig, runtimeFetch]
+  );
+  const connectionService = useMemo(
+    () => runtimeClient === null ? null : createConnectionService(runtimeClient),
+    [runtimeClient]
+  );
+  const runService = useMemo(() => runtimeClient === null ? null : createRunService(runtimeClient), [runtimeClient]);
+  const attachmentService = useMemo(
+    () => runtimeClient === null ? null : createAttachmentService(runtimeClient),
+    [runtimeClient]
+  );
+  const approvalService = useMemo(
+    () => runtimeClient === null ? null : createApprovalService(runtimeClient),
+    [runtimeClient]
+  );
+  const threadService = useMemo(
+    () => runtimeClient === null ? null : createThreadService(runtimeClient),
+    [runtimeClient]
+  );
+  const projectService: ProjectService | null = useMemo(
+    () => runtimeClient === null ? null : createProjectService(runtimeClient),
+    [runtimeClient]
+  );
+  const searchService: SearchService | null = useMemo(
+    () => runtimeClient === null ? null : createSearchService(runtimeClient),
+    [runtimeClient]
+  );
+  const scheduleService = useMemo(
+    () => runtimeClient === null ? null : createScheduleService(runtimeClient),
+    [runtimeClient]
+  );
+  const mcpService = useMemo(
+    () => runtimeClient === null ? null : createMcpService(runtimeClient),
+    [runtimeClient]
+  );
+  const profileService = useMemo(
+    () => runtimeClient === null ? null : createProfileService(runtimeClient),
+    [runtimeClient]
+  );
+  const modelService = useMemo(
+    () => runtimeClient === null ? null : createModelService(runtimeClient),
+    [runtimeClient]
+  );
+  const modelServiceConfigurationService = useMemo(
+    () => runtimeClient === null
+      ? null
+      : createModelServiceConfigurationService(runtimeClient),
+    [runtimeClient]
+  );
+  const diagnosticsService = useMemo(
+    () => runtimeClient === null ? null : createDiagnosticsService(runtimeClient),
+    [runtimeClient]
+  );
+  const cleanupService = useMemo(
+    () => runtimeClient === null ? null : createCleanupService(runtimeClient),
+    [runtimeClient]
+  );
+  const memoryService = useMemo(
+    () => runtimeClient === null ? null : createMemoryService(runtimeClient),
+    [runtimeClient]
+  );
+  const capabilityService = useMemo(
+    () => runtimeClient === null ? null : createCapabilityService(runtimeClient),
+    [runtimeClient]
+  );
+  const skillMarketService = useMemo(
+    () => runtimeClient === null ? null : createSkillMarketService(runtimeClient),
+    [runtimeClient]
+  );
+  const enterpriseService = useMemo(
+    () => runtimeClient === null ? null : createEnterpriseService(runtimeClient),
+    [runtimeClient]
+  );
+  const handleEnterpriseSessionExpired = useCallback(() => {
+    setEnterpriseSession({
+      status: 'signed_out',
+      reason: 'session_expired',
+      transportSecurity: enterpriseSessionRef.current.transportSecurity
+    });
+  }, []);
+  const leaveEnterpriseActivity = () => {
+    closeMobileSidebar();
+    dispatch({ type: 'set_active_view', activeView: 'conversation' });
+    navigateToRoute(
+      routeForConversation(selectedThreadIdRef.current),
+      { replace: true }
+    );
+  };
+  const enterpriseActivity = useEnterpriseActivity({
+    connected: connectionState.status === 'connected',
+    session: enterpriseSession,
+    service: enterpriseService,
+    route: props.route,
+    onNavigate: navigateToRoute,
+    onLeave: leaveEnterpriseActivity,
+    onUnauthorized: handleEnterpriseSessionExpired
+  });
+  const enterpriseBilling = useEnterpriseBilling({
+    connected: connectionState.status === 'connected',
+    session: enterpriseSession,
+    modelAccess: modelAccessState,
+    capability: enterpriseActivity.capability,
+    route: props.route,
+    service: enterpriseService,
+    onUnauthorized: handleEnterpriseSessionExpired,
+    onForbidden() {
+      enterpriseActivity.refreshCapability();
+      leaveEnterpriseActivity();
+    }
+  });
+  const workspaceFileService = useMemo(
+    () => runtimeClient === null ? null : createWorkspaceFileService(runtimeClient),
+    [runtimeClient]
+  );
+  const taskService = useMemo(
+    () => runtimeClient === null ? null : createTaskService(runtimeClient),
+    [runtimeClient]
+  );
+  const notificationService = useMemo(
+    () => createNotificationService({
+      hostBridge,
+      ...(typeof Notification === 'undefined' ? {} : { notificationApi: Notification })
+    }),
+    [hostBridge]
+  );
+  const [notificationSettings, setNotificationSettings] = useState(
+    () => notificationService.getSettings()
+  );
+  const [desktopCloseBehavior, setDesktopCloseBehavior] = useState<
+    'hide' | 'quit' | undefined
+  >(undefined);
+  const [unreadTaskIds, setUnreadTaskIds] = useState<Set<string>>(
+    () => notificationService.getUnreadIds()
+  );
+  const visibleRuntimeThreads = useMemo(
+    () => runtimeThreads.filter(shouldShowThreadInSidebar),
+    [runtimeThreads]
+  );
+  const visibleThreadGroups = useMemo(
+    () => groupThreadsByPurpose(visibleRuntimeThreads),
+    [visibleRuntimeThreads]
+  );
+  const conversations = useMemo(
+    () => sortProjectConversations(
+      visibleThreadGroups.conversationThreads.map(
+        thread => mapThreadToConversation(thread)
+      ).filter((conversation): conversation is ClaweeConversation => conversation !== undefined)
+    ),
+    [projects, visibleThreadGroups.conversationThreads]
+  );
+  const scheduleTaskSummaries = useMemo(
+    () => createScheduleTaskSummaries(runtimeSchedules, runtimeThreads, runRegistry),
+    [runRegistry, runtimeSchedules, runtimeThreads]
+  );
+  const runningThreadIds = useMemo(
+    () => new Set(
+      Object.entries(runRegistry.activeRunIdByThreadId)
+        .filter(([, runId]) => runId !== undefined)
+        .map(([threadId]) => threadId)
+    ),
+    [runRegistry.activeRunIdByThreadId]
+  );
+  const scheduleDraftSidebarTasks = useMemo(
+    () => createScheduleDraftSidebarSummaries(
+      visibleThreadGroups.scheduleDraftThreads,
+      runtimeTasks,
+      unreadTaskIds,
+      runningThreadIds
+    ),
+    [
+      runningThreadIds,
+      runtimeTasks,
+      unreadTaskIds,
+      visibleThreadGroups.scheduleDraftThreads
+    ]
+  );
+  const scheduleSidebarTasks = useMemo(
+    () => createSidebarTaskSummaries(
+      scheduleTaskSummaries,
+      runtimeTasks,
+      unreadTaskIds
+    ),
+    [runtimeTasks, scheduleTaskSummaries, unreadTaskIds]
+  );
+  const sidebarTasks = useMemo(
+    () => [...scheduleDraftSidebarTasks, ...scheduleSidebarTasks],
+    [scheduleDraftSidebarTasks, scheduleSidebarTasks]
+  );
+  const runningConversationIds = runningThreadIds;
+  const selectedThreadExists = state.selectedThreadId !== undefined
+    && runtimeThreads.some(thread => thread.id === state.selectedThreadId);
+  const selectedThread = runtimeThreads.find(
+    thread => thread.id === state.selectedThreadId
+  );
+  const globalModelMigrationThread = selectedThread?.model !== null
+    && selectedThread?.model !== undefined
+    ? selectedThread
+    : runtimeThreads.find(thread =>
+        thread.purpose === 'conversation'
+        && thread.model !== null
+        && thread.model !== undefined
+      );
+  useEffect(() => {
+    if (
+      globalModelSelectionMigratedRef.current
+      || globalModelMigrationThread === undefined
+    ) {
+      return;
+    }
+    globalModelSelectionMigratedRef.current = true;
+    markGlobalModelSelectionMigrated();
+    const config: RecentModelConfig = {
+      model: globalModelMigrationThread.model!,
+      reasoning: globalModelMigrationThread.reasoning ?? null
+    };
+    setRecentComposerModelConfig(config);
+    writeRecentModelConfig(config);
+    setComposerRunConfig(current => (
+      current === null ? current : { ...current, ...config }
+    ));
+  }, [globalModelMigrationThread]);
+  activeViewRef.current = state.activeView;
+  selectedThreadIdRef.current = state.selectedThreadId;
+  const consumeSkipInitialHistoryLoad = useCallback((threadId: string) => {
+    if (skipNextHistoryLoadForThreadRef.current !== threadId) return false;
+    skipNextHistoryLoadForThreadRef.current = undefined;
+    return true;
+  }, []);
+  const handleComposerDraftApplied = useCallback((draftId: number) => {
+    setPendingComposerDraft(currentDraft =>
+      currentDraft !== undefined
+        && currentDraft.threadId === selectedThreadIdRef.current
+        && currentDraft.request.id === draftId
+        ? undefined
+        : currentDraft
+    );
+  }, []);
+  const handleComposerSkillApplied = useCallback((requestId: number) => {
+    setPendingComposerSkill(currentRequest =>
+      currentRequest !== undefined
+        && currentRequest.projectId === currentProjectIdRef.current
+        && currentRequest.threadId === selectedThreadIdRef.current
+        && currentRequest.request.id === requestId
+        ? undefined
+        : currentRequest
+    );
+  }, []);
+  const requestCodexHomeConfirmation = useCallback(() => {
+    if (codexHomeConfirmationResolverRef.current !== undefined) {
+      return Promise.resolve(false);
+    }
+    return new Promise<boolean>(resolve => {
+      codexHomeConfirmationResolverRef.current = resolve;
+      setCodexHomeConfirmationOpen(true);
+    });
+  }, []);
+  const settleCodexHomeConfirmation = useCallback((confirmed: boolean) => {
+    const resolve = codexHomeConfirmationResolverRef.current;
+    codexHomeConfirmationResolverRef.current = undefined;
+    setCodexHomeConfirmationOpen(false);
+    resolve?.(confirmed);
+  }, []);
+  const handleComposerFocusRequestApplied = useCallback((requestId: number) => {
+    setPendingComposerFocusRequestId(currentRequestId =>
+      currentRequestId === requestId ? undefined : currentRequestId
+    );
+  }, []);
+  const editUserMessage = useCallback((
+    item: Extract<TimelineItem, { kind: 'user_message' }>
+  ) => {
+    const threadId = selectedThreadIdRef.current;
+    if (threadId === undefined) return;
+    nextComposerDraftIdRef.current += 1;
+    setPendingComposerDraft({
+      threadId,
+      request: {
+        id: nextComposerDraftIdRef.current,
+        text: item.text
+      }
+    });
+  }, []);
+  const threadHistory = useThreadHistory({
+    threadId: state.selectedThreadId,
+    targetItemId:
+      searchHistoryTarget !== undefined
+      && searchHistoryTarget.threadId === state.selectedThreadId
+        ? searchHistoryTarget.itemId
+        : undefined,
+    enabled:
+      connectionState.status === 'connected'
+      && selectedThreadExists,
+    service: threadService,
+    reloadKey: threadHistoryReloadKey,
+    consumeSkipInitialLoad: consumeSkipInitialHistoryLoad
+  });
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      codexHomeConfirmationResolverRef.current?.(false);
+      codexHomeConfirmationResolverRef.current = undefined;
+      for (const batcher of timelineEventBatchersByThreadIdRef.current.values()) {
+        batcher.clear();
+      }
+      timelineEventBatchersByThreadIdRef.current.clear();
+      stopAllRunEventSubscriptions(false);
+      for (const url of retainedAttachmentPreviewUrlsRef.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      retainedAttachmentPreviewUrlsRef.current.clear();
+      attachmentPreviewLoadsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleBrowserBack() {
+      mobileSidebarHistoryEntryRef.current = false;
+      setMobileSidebarOpen(false);
+    }
+
+    window.addEventListener('popstate', handleBrowserBack);
+    return () => window.removeEventListener('popstate', handleBrowserBack);
+  }, []);
+
+  useEffect(() => {
+    const routeKey = formatRoute(props.route);
+    if (initialRouteKeyRef.current === routeKey) {
+      initialRouteKeyRef.current = '';
+      return;
+    }
+    if (pendingRouteKeyRef.current === routeKey) {
+      pendingRouteKeyRef.current = undefined;
+      return;
+    }
+    applyRouteFromLocation(props.route);
+  }, [props.route]);
+
+  useEffect(() => {
+    selectedFilePathRef.current = state.selectedFilePath;
+  }, [state.selectedFilePath]);
+
+  useEffect(() => {
+    if (timelineThreadIdRef.current === state.selectedThreadId) return;
+    showTimelineForThread(state.selectedThreadId, [], false);
+  }, [state.selectedThreadId]);
+
+  useEffect(() => {
+    if (!navigationPersistenceReadyRef.current) return;
+    writePersistedNavigation({
+      currentProjectId: state.currentProjectId,
+      selectedThreadId: state.selectedThreadId
+    });
+  }, [state.currentProjectId, state.selectedThreadId]);
+
+  useEffect(() => {
+    connectionConfigRef.current = connectionConfig;
+  }, [connectionConfig]);
+
+  useEffect(() => {
+    setNotificationSettings(notificationService.getSettings());
+    setUnreadTaskIds(notificationService.getUnreadIds());
+  }, [notificationService]);
+
+  useEffect(() => {
+    let active = true;
+    if (
+      hostBridge.kind !== 'desktop'
+      || hostBridge.readDesktopPreferences === undefined
+    ) {
+      setDesktopCloseBehavior(undefined);
+      return () => {
+        active = false;
+      };
+    }
+    void hostBridge.readDesktopPreferences()
+      .then(preferences => {
+        if (active) setDesktopCloseBehavior(preferences.closeBehavior);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [hostBridge]);
+
+  useEffect(() => {
+    const connection = connectionState.status === 'connected'
+      ? connectionConfig
+      : null;
+    void notificationService.syncBackground(connection);
+  }, [
+    connectionConfig,
+    connectionState.status,
+    notificationService,
+    notificationSettings.enabled
+  ]);
+
+  useEffect(() => {
+    if (timelineApprovalTarget === undefined) return;
+    const task = runtimeTasks.find(item => (
+      item.threadId === timelineApprovalTarget.threadId
+      && item.pendingApproval?.id === timelineApprovalTarget.approvalId
+    ));
+    const approval = task?.pendingApproval;
+    if (approval === undefined) return;
+    appendTimelineItemsForThread(timelineApprovalTarget.threadId, [{
+      kind: 'approval',
+      id: `restored_${approval.id}`,
+      runId: approval.runId,
+      approval,
+      source: 'runtime'
+    }]);
+  }, [runtimeTasks, timelineApprovalTarget]);
+
+  useEffect(() => {
+    let canceled = false;
+    taskStatusesRef.current = new Map();
+    taskBaselineReadyRef.current = false;
+
+    if (connectionState.status !== 'connected' || taskService === null) {
+      setRuntimeTasks([]);
+      return () => {
+        canceled = true;
+      };
+    }
+    const activeTaskService = taskService;
+
+    async function refreshTasks() {
+      try {
+        const response = await activeTaskService.list({ status: 'all', limit: 50 });
+        if (canceled) return;
+        setRuntimeTasks(response.tasks);
+        const result = collectTaskTransitions(
+          taskStatusesRef.current,
+          response.tasks,
+          taskBaselineReadyRef.current
+        );
+        const transitionedTaskIds = new Set(result.transitions.map(task => task.id));
+        const selectedThreadId = selectedThreadIdRef.current;
+        const unseenSelectedTask = selectedThreadId === undefined
+          ? undefined
+            : response.tasks.find(task => (
+              task.threadId === selectedThreadId
+              && shouldAutoSubscribeTask(task, transitionedTaskIds.has(task.id))
+              && runRegistryRef.current.runsById[task.runId] === undefined
+            ));
+        if (
+          unseenSelectedTask !== undefined
+          && unseenSelectedTask.threadId !== undefined
+        ) {
+          void refreshThreadRunState(unseenSelectedTask.threadId);
+          const config = connectionConfigRef.current;
+          if (config !== null) {
+            subscribeToRunEvents(
+              unseenSelectedTask.runId,
+              unseenSelectedTask.threadId,
+              config
+            );
+          }
+        }
+        taskStatusesRef.current = result.statuses;
+        taskBaselineReadyRef.current = true;
+        if (result.transitions.length === 0) return;
+
+        setUnreadTaskIds(current => {
+          const next = new Set(current);
+          for (const task of result.transitions) next.add(task.id);
+          notificationService.setUnreadIds(next);
+          return next;
+        });
+
+        for (const task of result.transitions) {
+          if (!notificationService.shouldNotifyInForeground(task.createdBy)) continue;
+          if (!shouldSendSystemNotification(
+            task,
+            activeViewRef.current,
+            selectedThreadIdRef.current
+          )) continue;
+          const message = createTaskNotification(task);
+          void notificationService.notify(message).catch(() => undefined);
+        }
+      } catch {
+        return;
+      }
+    }
+
+    void refreshTasks();
+    const interval = window.setInterval(() => void refreshTasks(), 5_000);
+    return () => {
+      canceled = true;
+      window.clearInterval(interval);
+    };
+  }, [connectionState.status, notificationService, taskService]);
+
+  useEffect(() => {
+    if (connectionState.status === 'connected') return;
+    stopAllRunEventSubscriptions(false);
+    dispatchRunRegistry({ type: 'reset' });
+    runsLoadedThreadIdsRef.current.clear();
+    setRunsLoadingThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+  }, [connectionState.status]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (connectionState.status !== 'connected' || modelService === null) {
+      setCodexModels(current => current ?? readCachedModelCatalog());
+      setCodexModelsLoading(false);
+      setCodexModelsLoadError(undefined);
+      setCodexModelsNotice(undefined);
+      return () => {
+        canceled = true;
+      };
+    }
+
+    const cachedModels = readCachedModelCatalog();
+    if (cachedModels !== undefined) setCodexModels(cachedModels);
+    setCodexModelsLoading(true);
+    setCodexModelsLoadError(undefined);
+    setCodexModelsNotice(undefined);
+    modelService
+      .listModels()
+      .then(response => {
+        if (!canceled) {
+          setCodexModels(response);
+          setCodexModelsNotice(undefined);
+        }
+      })
+      .catch(() => {
+        if (!canceled) {
+          const fallbackModels = readCachedModelCatalog()
+            ?? codexModelsRef.current;
+          if (fallbackModels !== undefined && fallbackModels.models.length > 0) {
+            setCodexModels(fallbackModels);
+            setCodexModelsNotice('模型目录刷新失败，当前使用本地缓存');
+          } else {
+            setCodexModels(undefined);
+            setCodexModelsLoadError('无法加载模型列表');
+          }
+        }
+      })
+      .finally(() => {
+        if (!canceled) setCodexModelsLoading(false);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [connectionState.status, modelService]);
+
+  useEffect(() => {
+    let canceled = false;
+    const loadVersion = connectionConfigVersionRef.current;
+
+    readHostRuntimeConfig(loadVersion, () => canceled);
+    const unsubscribe = hostBridge.subscribeConnectionConfig?.(config => {
+      if (canceled) return;
+      connectionConfigVersionRef.current += 1;
+      setConnectionConfig(config);
+      if (config === null) {
+        setConnectionState({ status: 'disconnected', message: '正在恢复本地服务连接' });
+      }
+    });
+
+    return () => {
+      canceled = true;
+      unsubscribe?.();
+    };
+  }, [hostBridge]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    fileService
+      .listTree()
+      .then(nodes => {
+        if (!canceled) {
+          setTreeNodes(nodes);
+          setTreeLoadError(undefined);
+        }
+      })
+      .catch(() => {
+        if (!canceled) setTreeLoadError('无法加载项目文件');
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [fileService]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (connectionService === null) {
+      setConnectionState({ status: 'disconnected', message: '正在等待本地服务' });
+      return () => {
+        canceled = true;
+      };
+    }
+
+    connectionService
+      .check()
+      .then(nextState => {
+        if (canceled) return;
+        setConnectionState(nextState);
+      })
+      .catch(() => {
+        if (canceled) return;
+        setConnectionState({ status: 'disconnected', message: '本地服务连接失败' });
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [connectionService]);
+
+  const availabilityProbeStatus = connectionState.status === 'connected'
+    ? connectionState.codexStatus.availabilityProbe?.status
+    : undefined;
+  const modelAccessStatus = connectionState.status === 'configuration_required'
+    ? connectionState.configuration.status
+    : undefined;
+
+  useEffect(() => {
+    let canceled = false;
+    if (connectionState.status === 'configuration_required') {
+      setModelAccessState(connectionState.configuration);
+      return () => {
+        canceled = true;
+      };
+    }
+    if (
+      connectionState.status !== 'connected'
+      || modelServiceConfigurationService === null
+    ) {
+      setModelAccessState({ status: 'resolving' });
+      return () => {
+        canceled = true;
+      };
+    }
+    setModelAccessState({ status: 'resolving' });
+    void modelServiceConfigurationService.read()
+      .then(state => {
+        if (!canceled) setModelAccessState(state);
+      })
+      .catch(() => {
+        if (!canceled) {
+          setModelAccessState({
+            status: 'unavailable',
+            code: 'MODEL_ACCESS_STATE_UNAVAILABLE'
+          });
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    connectionState.status === 'configuration_required'
+      ? connectionState.configuration
+      : undefined,
+    enterpriseSession.status,
+    enterpriseSession.account?.subjectId,
+    modelServiceConfigurationService
+  ]);
+
+  useEffect(() => {
+    if (
+      connectionService === null
+      || connectionState.status !== 'connected'
+      || availabilityProbeStatus !== 'pending'
+    ) {
+      return;
+    }
+    let canceled = false;
+    const refresh = () => {
+      void connectionService.check()
+        .then(nextState => {
+          if (!canceled) setConnectionState(nextState);
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      canceled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    availabilityProbeStatus,
+    connectionService,
+    connectionState.status
+  ]);
+
+  useEffect(() => {
+    if (
+      connectionService === null
+      || enterpriseService === null
+      || modelAccessStatus !== 'resolving'
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+    let canceled = false;
+    const refresh = () => {
+      void Promise.all([
+        connectionService.check(),
+        enterpriseService.getSession()
+      ]).then(([nextState, nextSession]) => {
+        if (canceled) return;
+        setConnectionState(nextState);
+        setEnterpriseSession(nextSession);
+      }).catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 500);
+    return () => {
+      canceled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    connectionService,
+    enterpriseService,
+    modelAccessStatus,
+    enterpriseSession.status
+  ]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (
+      connectionState.status !== 'connected'
+      || projectService === null
+      || threadService === null
+    ) {
+      setRuntimeWorkspaceReady(false);
+      if (connectionState.status !== 'connected') {
+        setProjects([]);
+        setArchivedProjects([]);
+        setRuntimeThreads([]);
+      }
+      return () => {
+        canceled = true;
+      };
+    }
+
+    setRuntimeWorkspaceReady(false);
+    const activeProjectService = projectService;
+    const activeThreadService = threadService;
+    async function loadRuntimeWorkspace() {
+      try {
+        const legacyProjects = parseLegacyLocalStorageProjects(
+          readJsonFromStorage<unknown>(PROJECTS_STORAGE_KEY)
+        );
+        const migration = await activeProjectService.migrateLocalStorageV1({
+          projects: legacyProjects
+        });
+        let [activeResponse, allResponse] = await Promise.all([
+          activeProjectService.listProjects('active'),
+          activeProjectService.listProjects('all')
+        ]);
+        if (canceled) return;
+
+        let initialProjectError: string | undefined;
+        if (allResponse.projects.length === 0) {
+          try {
+            await activeProjectService.ensureDefaultProject();
+            [activeResponse, allResponse] = await Promise.all([
+              activeProjectService.listProjects('active'),
+              activeProjectService.listProjects('all')
+            ]);
+            if (canceled) return;
+          } catch (error) {
+            initialProjectError = getRuntimeErrorMessage(
+              error,
+              '无法自动创建默认项目，请手动添加项目'
+            );
+          }
+        }
+
+        const activeProjects = activeResponse.projects;
+        setProjects(activeProjects);
+        setArchivedProjects(
+          allResponse.projects.filter(project => project.status === 'archived')
+        );
+        setProjectLoadError(initialProjectError);
+
+        const previousProjectId =
+          persistedNavigation?.currentProjectId ?? currentProjectIdRef.current;
+        const migratedProjectId = previousProjectId === undefined
+          ? undefined
+          : migration.projectIdMap[previousProjectId] ?? previousProjectId;
+        const nextProjectId = activeProjects.some(project => project.id === migratedProjectId)
+          ? migratedProjectId
+          : activeProjects[0]?.id;
+        dispatch({ type: 'set_current_project', projectId: nextProjectId });
+        navigationPersistenceReadyRef.current = true;
+
+        const response = await activeThreadService.listActiveThreads();
+        if (canceled) return;
+        setRuntimeThreads(response.threads);
+        setThreadLoadError(undefined);
+
+        const restoredThreadId = restoredThreadIdRef.current;
+        restoredThreadIdRef.current = undefined;
+        if (
+          restoredThreadId === undefined
+          || response.threads.some(thread => thread.id === restoredThreadId)
+        ) return;
+
+        try {
+          const restored = await activeThreadService.getThread(restoredThreadId);
+          if (canceled) return;
+          if (restored.thread.status !== 'active' || !shouldShowThreadInSidebar(restored.thread)) {
+            dispatch({ type: 'new_conversation' });
+            return;
+          }
+          setRuntimeThreads(previous => upsertThread(previous, restored.thread));
+        } catch (error) {
+          if (canceled) return;
+          if (error instanceof ApiClientError && error.status === 404) {
+            dispatch({ type: 'new_conversation' });
+            return;
+          }
+          setThreadLoadError('无法恢复上次打开的历史会话');
+        }
+      } catch {
+        if (canceled) return;
+        setProjects([]);
+        setArchivedProjects([]);
+        setRuntimeThreads([]);
+        dispatch({ type: 'set_current_project', projectId: undefined });
+        setProjectLoadError('无法迁移或加载项目，请稍后重试');
+        setThreadLoadError(undefined);
+      } finally {
+        if (!canceled) setRuntimeWorkspaceReady(true);
+      }
+    }
+
+    void loadRuntimeWorkspace();
+
+    return () => {
+      canceled = true;
+    };
+  }, [connectionState.status, hostBridge, projectService, threadService]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (connectionState.status !== 'connected' || scheduleService === null) {
+      if (connectionState.status !== 'connected') setRuntimeSchedules([]);
+      return () => {
+        canceled = true;
+      };
+    }
+
+    scheduleService
+      .listSchedules()
+      .then(response => {
+        if (!canceled) setRuntimeSchedules(response.schedules);
+      })
+      .catch(() => {
+        if (!canceled) setRuntimeSchedules([]);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [connectionState.status, scheduleService]);
+
+  useEffect(() => {
+    connectionStatusRef.current = connectionState.status;
+    capabilityServiceRef.current = capabilityService;
+    skillMarketServiceRef.current = skillMarketService;
+    enterpriseServiceRef.current = enterpriseService;
+    threadServiceRef.current = threadService;
+    scheduleServiceRef.current = scheduleService;
+    skillMarketRuntimeGenerationRef.current += 1;
+    enterpriseRuntimeGenerationRef.current += 1;
+    enterpriseKnowledgeGenerationRef.current += 1;
+    enterpriseSharedDriveGenerationRef.current += 1;
+    skillMarketMutationInFlightRef.current = false;
+    skillMarketUseInFlightRef.current = false;
+    enterpriseKnowledgeUploadInFlightRef.current = false;
+    enterpriseSharedSpacesLoadInFlightRef.current = false;
+    enterpriseSharedFilesLoadInFlightRef.current = false;
+    enterpriseSharedMutationInFlightRef.current = false;
+    setSkillMarketOperation(undefined);
+    setSkillMarketUseError(undefined);
+    setEnterpriseKnowledgeUpload(undefined);
+    setEnterpriseKnowledgeUploadNotice(undefined);
+    setEnterpriseSharedOperation(undefined);
+    setEnterpriseSharedNotice(undefined);
+  }, [
+    capabilityService,
+    connectionState.status,
+    enterpriseService,
+    scheduleService,
+    skillMarketService,
+    threadService
+  ]);
+
+  useEffect(() => {
+    const generation = enterpriseRuntimeGenerationRef.current;
+    setEnterpriseCheckingTimedOut(false);
+    setEnterpriseSessionInitialized(false);
+
+    if (
+      !runtimeSupportsEnterpriseSession(connectionState)
+      || enterpriseService === null
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const activeEnterpriseService = enterpriseService;
+
+    void pollEnterpriseSessionUntilSettled({
+      signal: controller.signal,
+      readSession: () => activeEnterpriseService.getSession(),
+      onSession(response) {
+        if (
+          enterpriseRuntimeGenerationRef.current !== generation
+          || enterpriseServiceRef.current !== activeEnterpriseService
+        ) {
+          return;
+        }
+        setEnterpriseSession(response);
+        setEnterpriseCheckingTimedOut(false);
+        setEnterpriseSessionInitialized(true);
+      },
+      onTimeout() {
+        if (
+          enterpriseRuntimeGenerationRef.current !== generation
+          || enterpriseServiceRef.current !== activeEnterpriseService
+        ) {
+          return;
+        }
+        setEnterpriseCheckingTimedOut(true);
+      },
+      onError() {
+        if (
+          enterpriseRuntimeGenerationRef.current !== generation
+          || enterpriseServiceRef.current !== activeEnterpriseService
+        ) {
+          return;
+        }
+        setEnterpriseCheckingTimedOut(false);
+        setEnterpriseSessionInitialized(true);
+        setEnterpriseSession(previous => ({
+          status: 'service_unavailable',
+          ...(previous.agentId === undefined ? {} : { agentId: previous.agentId }),
+          ...(previous.account === undefined ? {} : { account: previous.account }),
+          reason: 'service_unavailable',
+          transportSecurity: previous.transportSecurity
+        }));
+      }
+    });
+    return () => {
+      controller.abort();
+    };
+  }, [
+    connectionState.status,
+    enterpriseService,
+    enterpriseSessionProbeKey
+  ]);
+
+  useEffect(() => {
+    enterpriseHubGenerationRef.current += 1;
+    enterpriseKnowledgeGenerationRef.current += 1;
+    enterpriseSharedDriveGenerationRef.current += 1;
+    enterpriseSkillMutationInFlightRef.current = false;
+    enterpriseKnowledgeUploadInFlightRef.current = false;
+    enterpriseSharedSpacesLoadInFlightRef.current = false;
+    enterpriseSharedFilesLoadInFlightRef.current = false;
+    enterpriseSharedMutationInFlightRef.current = false;
+    setEnterpriseSkillOperation(undefined);
+    setEnterpriseSkillUseError(undefined);
+    setEnterpriseKnowledgeUpload(undefined);
+    setEnterpriseKnowledgeUploadNotice(undefined);
+    setEnterpriseSharedOperation(undefined);
+    setEnterpriseSharedNotice(undefined);
+
+    if (
+      connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      setEnterpriseSkills(undefined);
+      setEnterpriseSkillsLoading(false);
+      setEnterpriseSkillsLoadError(undefined);
+      setEnterpriseKnowledgeBases(undefined);
+      setEnterpriseKnowledgeBasesLoading(false);
+      setEnterpriseKnowledgeBasesError(undefined);
+      setSelectedEnterpriseKnowledgeBaseId(undefined);
+      setEnterpriseKnowledgeDocuments(undefined);
+      setEnterpriseKnowledgeDocumentsLoading(false);
+      setEnterpriseKnowledgeDocumentsError(undefined);
+      setEnterpriseSharedSpaces(undefined);
+      setEnterpriseSharedSpacesLoading(false);
+      setEnterpriseSharedSpacesError(undefined);
+      setSelectedEnterpriseSharedSpaceId(undefined);
+      setEnterpriseSharedFiles(undefined);
+      setEnterpriseSharedFilesLoading(false);
+      setEnterpriseSharedFilesError(undefined);
+    }
+  }, [
+    connectionState.status,
+    enterpriseService,
+    enterpriseSession.status
+  ]);
+
+  useEffect(() => {
+    if (
+      state.activeView !== 'plugins'
+      || activePluginSource !== 'enterprise'
+      || connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+
+    const generation = enterpriseHubGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    setEnterpriseSkillsLoading(true);
+    setEnterpriseSkillsLoadError(undefined);
+
+    void activeEnterpriseService.listSkills()
+      .then(response => {
+        if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+        setEnterpriseSkills(response.skills);
+      })
+      .catch(error => {
+        if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+        if (isEnterpriseUnauthorized(error)) {
+          setEnterpriseSession({
+            status: 'signed_out',
+            reason: 'session_expired',
+            transportSecurity: enterpriseSessionRef.current.transportSecurity
+          });
+          setEnterpriseSkills(undefined);
+        } else {
+          setEnterpriseSkillsLoadError(formatEnterpriseSkillError(
+            error,
+            '企业 Skill 目录加载失败'
+          ));
+        }
+      })
+      .finally(() => {
+        if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+          setEnterpriseSkillsLoading(false);
+        }
+      });
+  }, [
+    activePluginSource,
+    connectionState.status,
+    enterpriseService,
+    enterpriseSession.status,
+    enterpriseSkillsReloadKey,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      state.activeView !== 'knowledge'
+      || connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    const generation = enterpriseKnowledgeGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    setEnterpriseKnowledgeBasesLoading(true);
+    setEnterpriseKnowledgeBasesError(undefined);
+
+    void activeEnterpriseService.listKnowledgeBases()
+      .then(response => {
+        if (
+          canceled
+          || !isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          return;
+        }
+        setEnterpriseKnowledgeBases(response.knowledgeBases);
+        setSelectedEnterpriseKnowledgeBaseId(previous => (
+          previous !== undefined
+          && response.knowledgeBases.some(
+            item => item.knowledgeBaseId === previous
+          )
+            ? previous
+            : response.knowledgeBases[0]?.knowledgeBaseId
+        ));
+      })
+      .catch(error => {
+        if (
+          canceled
+          || !isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          return;
+        }
+        setEnterpriseKnowledgeBases(undefined);
+        setSelectedEnterpriseKnowledgeBaseId(undefined);
+        setEnterpriseKnowledgeDocuments(undefined);
+        if (isEnterpriseUnauthorized(error)) {
+          setEnterpriseSession({
+            status: 'signed_out',
+            reason: 'session_expired',
+            transportSecurity: enterpriseSessionRef.current.transportSecurity
+          });
+        } else {
+          setEnterpriseKnowledgeBasesError(
+            formatEnterpriseKnowledgeError(
+              error,
+              '企业知识库加载失败'
+            )
+          );
+        }
+      })
+      .finally(() => {
+        if (
+          !canceled
+          && isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          setEnterpriseKnowledgeBasesLoading(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    enterpriseKnowledgeBasesReloadKey,
+    enterpriseService,
+    enterpriseSession.status,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      state.activeView !== 'drive'
+      || connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    enterpriseSharedSpacesLoadInFlightRef.current = true;
+    setEnterpriseSharedSpaces(undefined);
+    setEnterpriseSharedSpacesLoading(true);
+    setEnterpriseSharedSpacesError(undefined);
+
+    void activeEnterpriseService.listSharedSpaces({ limit: 100 })
+      .then(response => {
+        if (canceled || !isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) return;
+        setEnterpriseSharedSpaces(response.spaces);
+        setEnterpriseSharedSpacesMeta(response.meta);
+        setSelectedEnterpriseSharedSpaceId(previous => (
+          previous === undefined
+          || response.spaces.some(space => space.spaceId === previous)
+          || response.meta.hasNext
+            ? previous
+            : undefined
+        ));
+      })
+      .catch(error => {
+        if (canceled || !isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) return;
+        setEnterpriseSharedSpaces(undefined);
+        setSelectedEnterpriseSharedSpaceId(undefined);
+        setEnterpriseSharedFiles(undefined);
+        if (isEnterpriseUnauthorized(error)) {
+          handleEnterpriseSessionExpired();
+        } else {
+          setEnterpriseSharedSpacesError(
+            formatEnterpriseSharedDriveError(error, '共享空间加载失败')
+          );
+        }
+      })
+      .finally(() => {
+        if (!canceled && isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) {
+          enterpriseSharedSpacesLoadInFlightRef.current = false;
+          setEnterpriseSharedSpacesLoading(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    enterpriseService,
+    enterpriseSession.status,
+    enterpriseSharedSpacesReloadKey,
+    handleEnterpriseSessionExpired,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      state.activeView !== 'drive'
+      || connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    enterpriseSharedFilesLoadInFlightRef.current = true;
+    setEnterpriseSharedFiles(undefined);
+    setEnterpriseSharedFilesLoading(true);
+    setEnterpriseSharedFilesError(undefined);
+
+    void activeEnterpriseService.listSharedFiles({
+      ...(selectedEnterpriseSharedSpaceId === undefined
+        ? {}
+        : { spaceId: selectedEnterpriseSharedSpaceId }),
+      ...(enterpriseSharedQuery.length === 0 ? {} : { query: enterpriseSharedQuery }),
+      limit: 100
+    })
+      .then(response => {
+        if (canceled || !isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) return;
+        setEnterpriseSharedFiles(response.files);
+        setEnterpriseSharedFilesMeta(response.meta);
+      })
+      .catch(error => {
+        if (canceled || !isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) return;
+        setEnterpriseSharedFiles(undefined);
+        if (isEnterpriseUnauthorized(error)) {
+          handleEnterpriseSessionExpired();
+        } else if (
+          error instanceof ApiClientError
+          && error.code === 'ENTERPRISE_SHARED_SPACE_NOT_FOUND'
+        ) {
+          setSelectedEnterpriseSharedSpaceId(undefined);
+          setEnterpriseSharedSpacesReloadKey(current => current + 1);
+          setEnterpriseSharedFilesError('该共享空间已不可访问，正在刷新授权列表');
+        } else {
+          setEnterpriseSharedFilesError(
+            formatEnterpriseSharedDriveError(error, '共享文件加载失败')
+          );
+        }
+      })
+      .finally(() => {
+        if (!canceled && isCurrentEnterpriseSharedDriveRuntime(
+          generation,
+          activeEnterpriseService
+        )) {
+          enterpriseSharedFilesLoadInFlightRef.current = false;
+          setEnterpriseSharedFilesLoading(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    enterpriseService,
+    enterpriseSession.status,
+    enterpriseSharedFilesReloadKey,
+    enterpriseSharedQuery,
+    handleEnterpriseSessionExpired,
+    selectedEnterpriseSharedSpaceId,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      state.activeView !== 'knowledge'
+      || connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+      || selectedEnterpriseKnowledgeBaseId === undefined
+    ) {
+      if (selectedEnterpriseKnowledgeBaseId === undefined) {
+        setEnterpriseKnowledgeDocuments(undefined);
+        setEnterpriseKnowledgeDocumentsLoading(false);
+        setEnterpriseKnowledgeDocumentsError(undefined);
+      }
+      return;
+    }
+
+    let canceled = false;
+    const generation = enterpriseKnowledgeGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    const knowledgeBaseId = selectedEnterpriseKnowledgeBaseId;
+    setEnterpriseKnowledgeDocuments(undefined);
+    setEnterpriseKnowledgeDocumentsLoading(true);
+    setEnterpriseKnowledgeDocumentsError(undefined);
+
+    void activeEnterpriseService.listKnowledgeDocuments(knowledgeBaseId)
+      .then(response => {
+        if (
+          canceled
+          || !isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          return;
+        }
+        setEnterpriseKnowledgeDocuments(response.documents);
+      })
+      .catch(error => {
+        if (
+          canceled
+          || !isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          return;
+        }
+        setEnterpriseKnowledgeDocuments(undefined);
+        if (isEnterpriseUnauthorized(error)) {
+          setEnterpriseSession({
+            status: 'signed_out',
+            reason: 'session_expired',
+            transportSecurity: enterpriseSessionRef.current.transportSecurity
+          });
+        } else if (
+          error instanceof ApiClientError
+          && error.code === 'ENTERPRISE_KNOWLEDGE_BASE_NOT_FOUND'
+        ) {
+          setSelectedEnterpriseKnowledgeBaseId(undefined);
+          setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+          setEnterpriseKnowledgeDocumentsError(
+            '该知识库已不可访问，正在刷新授权列表'
+          );
+        } else {
+          setEnterpriseKnowledgeDocumentsError(
+            formatEnterpriseKnowledgeError(
+              error,
+              '知识库文档加载失败'
+            )
+          );
+        }
+      })
+      .finally(() => {
+        if (
+          !canceled
+          && isCurrentEnterpriseKnowledgeRuntime(
+            generation,
+            activeEnterpriseService
+          )
+        ) {
+          setEnterpriseKnowledgeDocumentsLoading(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    enterpriseKnowledgeDocumentsReloadKey,
+    enterpriseService,
+    enterpriseSession.status,
+    selectedEnterpriseKnowledgeBaseId,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      defaultPermission === 'follow-project'
+      || !defaultPermissionSyncEnabledRef.current
+      || connectionState.status !== 'connected'
+      || threadService === null
+    ) {
+      defaultPermissionAppliedByThreadRef.current.clear();
+      if (
+        defaultPermission === 'follow-project'
+        || !defaultPermissionSyncEnabledRef.current
+      ) {
+        defaultPermissionSyncFailuresRef.current.clear();
+        setDefaultPermissionSyncError(undefined);
+      }
+      return;
+    }
+
+    const sandbox = toRuntimeSandbox(defaultPermission);
+    for (const thread of runtimeThreads) {
+      if (thread.purpose !== 'conversation') continue;
+      if (defaultPermissionAppliedByThreadRef.current.get(thread.id) === sandbox) continue;
+
+      defaultPermissionAppliedByThreadRef.current.set(thread.id, sandbox);
+      defaultPermissionSyncFailuresRef.current.delete(thread.id);
+      if (thread.sandbox === sandbox) continue;
+
+      void threadService
+        .updateThread(thread.id, { sandbox })
+        .then(response => {
+          if (
+            !mountedRef.current
+            || defaultPermissionAppliedByThreadRef.current.get(thread.id) !== sandbox
+          ) {
+            return;
+          }
+          defaultPermissionSyncFailuresRef.current.delete(thread.id);
+          setRuntimeThreads(previous => upsertThread(previous, response.thread));
+          setDefaultPermissionSyncError(
+            defaultPermissionSyncFailuresRef.current.size > 0
+              ? '部分普通会话的全局权限同步失败，重新打开会话后会重试'
+              : undefined
+          );
+        })
+        .catch(() => {
+          if (defaultPermissionAppliedByThreadRef.current.get(thread.id) === sandbox) {
+            defaultPermissionAppliedByThreadRef.current.delete(thread.id);
+          }
+          if (!mountedRef.current) return;
+          defaultPermissionSyncFailuresRef.current.add(thread.id);
+          setDefaultPermissionSyncError('部分普通会话的全局权限同步失败，重新打开会话后会重试');
+        });
+    }
+  }, [
+    connectionState.status,
+    defaultPermission,
+    runtimeThreads,
+    state.selectedThreadId,
+    threadService
+  ]);
+
+  useEffect(() => {
+    if (connectionState.status !== 'connected' || capabilityService === null || skillMarketService === null) {
+      skillMarketMutationInFlightRef.current = false;
+      skillMarketUseInFlightRef.current = false;
+      capabilityLoadGenerationRef.current = undefined;
+      profileLoadGenerationRef.current = undefined;
+      skillMarketLoadGenerationRef.current = undefined;
+      setCodexSkills(undefined);
+      setCodexMcp(undefined);
+      setCodexProfiles(undefined);
+      setSkillMarketInstallRecords(undefined);
+      setCapabilitiesLoading(false);
+      setSkillMarketLoading(false);
+      setCapabilitiesLoadError(undefined);
+      setSkillMarketLoadError(undefined);
+      setSkillMarketOperation(undefined);
+      setSkillMarketUseError(undefined);
+    }
+  }, [capabilityService, connectionState.status, skillMarketService]);
+
+  useEffect(() => {
+    if (
+      connectionState.status !== 'connected'
+      || capabilityService === null
+      || state.activeView !== 'conversation'
+    ) {
+      return;
+    }
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+    if (capabilityLoadGenerationRef.current === generation) {
+      if (codexSkills !== undefined && codexMcp !== undefined) {
+        setCapabilitiesLoadError(undefined);
+      }
+      return;
+    }
+
+    capabilityLoadGenerationRef.current = generation;
+    setCapabilitiesLoading(true);
+    setCapabilitiesLoadError(undefined);
+    const activeCapabilityService = capabilityService;
+
+    Promise.allSettled([
+      codexSkills === undefined
+        ? Promise.resolve().then(() => activeCapabilityService.listSkills())
+        : Promise.resolve(codexSkills),
+      codexMcp === undefined
+        ? Promise.resolve().then(() => activeCapabilityService.listMcp())
+        : Promise.resolve(codexMcp)
+    ])
+      .then(results => {
+        if (!isCurrentCapabilityRuntime(generation, activeCapabilityService)) return;
+        const [skillsResult, mcpResult] = results;
+        if (skillsResult?.status === 'fulfilled') setCodexSkills(skillsResult.value);
+        else setCodexSkills(undefined);
+        if (mcpResult?.status === 'fulfilled') setCodexMcp(mcpResult.value);
+        else setCodexMcp(undefined);
+        if (skillsResult?.status === 'rejected' || mcpResult?.status === 'rejected') {
+          setCapabilitiesLoadError('本机能力检测失败');
+        }
+      })
+      .finally(() => {
+        if (isCurrentCapabilityRuntime(generation, activeCapabilityService)) {
+          setCapabilitiesLoading(false);
+        }
+      });
+  }, [capabilityService, codexMcp, codexSkills, connectionState.status, state.activeView]);
+
+  useEffect(() => {
+    if (
+      connectionState.status !== 'connected'
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      setEnterpriseMcpCatalog(undefined);
+      return;
+    }
+    if (state.activeView !== 'conversation') return;
+
+    let canceled = false;
+    void enterpriseService.listMcpConnections()
+      .then(async catalog => {
+        if (canceled) return;
+        setEnterpriseMcpCatalog(catalog);
+        if (capabilityService === null) return;
+        try {
+          const refreshedMcp = await capabilityService.listMcp();
+          if (!canceled) setCodexMcp(refreshedMcp);
+        } catch {
+          if (!canceled) {
+            setCodexMcp(undefined);
+            setCapabilitiesLoadError('本机能力检测失败');
+          }
+        }
+      })
+      .catch(error => {
+        if (canceled) return;
+        setEnterpriseMcpCatalog(undefined);
+        if (isEnterpriseUnauthorized(error)) handleEnterpriseSessionExpired();
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    connectionState.status,
+    capabilityService,
+    enterpriseService,
+    enterpriseSession.status,
+    handleEnterpriseSessionExpired,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (
+      connectionState.status !== 'connected'
+      || capabilityService === null
+      || state.activeView !== 'conversation'
+    ) {
+      return;
+    }
+
+    let refreshing = false;
+    const generation = skillMarketRuntimeGenerationRef.current;
+    const activeCapabilityService = capabilityService;
+    const refreshCapabilities = () => {
+      if (refreshing || !isCurrentCapabilityRuntime(generation, activeCapabilityService)) return;
+      refreshing = true;
+      void Promise.allSettled([
+        activeCapabilityService.listSkills(),
+        activeCapabilityService.listMcp()
+      ])
+        .then(([skillsResult, mcpResult]) => {
+          if (!isCurrentCapabilityRuntime(generation, activeCapabilityService)) return;
+          if (skillsResult?.status === 'fulfilled') setCodexSkills(skillsResult.value);
+          if (mcpResult?.status === 'fulfilled') setCodexMcp(mcpResult.value);
+          if (skillsResult?.status === 'fulfilled' && mcpResult?.status === 'fulfilled') {
+            setCapabilitiesLoadError(undefined);
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          refreshing = false;
+        });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshCapabilities();
+    };
+
+    window.addEventListener('focus', refreshCapabilities);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', refreshCapabilities);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [capabilityService, connectionState.status, state.activeView]);
+
+  useEffect(() => {
+    if (
+      connectionState.status !== 'connected'
+      || capabilityService === null
+      || (state.activeView !== 'conversation' && state.activeView !== 'schedules')
+    ) {
+      return;
+    }
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+    if (profileLoadGenerationRef.current === generation || codexProfiles !== undefined) {
+      profileLoadGenerationRef.current = generation;
+      return;
+    }
+
+    profileLoadGenerationRef.current = generation;
+    const activeCapabilityService = capabilityService;
+    Promise.resolve()
+      .then(() => activeCapabilityService.listProfiles())
+      .then(response => {
+        if (isCurrentCapabilityRuntime(generation, activeCapabilityService)) {
+          setCodexProfiles(response);
+        }
+      })
+      .catch(() => {
+        if (isCurrentCapabilityRuntime(generation, activeCapabilityService)) {
+          setCodexProfiles(undefined);
+        }
+      });
+  }, [capabilityService, codexProfiles, connectionState.status, state.activeView]);
+
+  useEffect(() => {
+    if (
+      connectionState.status !== 'connected'
+      || capabilityService === null
+      || skillMarketService === null
+      || state.activeView !== 'plugins'
+      || activePluginSource !== 'public'
+    ) {
+      return;
+    }
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+    if (skillMarketLoadGenerationRef.current === generation) {
+      if (codexSkills !== undefined && skillMarketInstallRecords !== undefined) {
+        setSkillMarketLoadError(undefined);
+      }
+      return;
+    }
+
+    skillMarketLoadGenerationRef.current = generation;
+    setSkillMarketLoading(true);
+    setSkillMarketLoadError(undefined);
+    const activeCapabilityService = capabilityService;
+    const activeSkillMarketService = skillMarketService;
+
+    Promise.allSettled([
+      codexSkills === undefined
+        ? Promise.resolve().then(() => activeCapabilityService.listSkills())
+        : Promise.resolve(codexSkills),
+      Promise.resolve().then(() => activeSkillMarketService.listInstallRecords())
+    ])
+      .then(results => {
+        if (!isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) return;
+        const [skillsResult, recordsResult] = results;
+        if (skillsResult?.status === 'fulfilled') setCodexSkills(skillsResult.value);
+        else setCodexSkills(undefined);
+        if (recordsResult?.status === 'fulfilled') setSkillMarketInstallRecords(recordsResult.value.records);
+        else setSkillMarketInstallRecords(undefined);
+        const marketErrors: string[] = [];
+        if (skillsResult?.status === 'rejected') marketErrors.push('Skill 状态加载失败');
+        if (recordsResult?.status === 'rejected') marketErrors.push('安装记录加载失败');
+        setSkillMarketLoadError(marketErrors.length > 0 ? marketErrors.join('；') : undefined);
+      })
+      .finally(() => {
+        if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+          setSkillMarketLoading(false);
+        }
+      });
+  }, [
+    capabilityService,
+    activePluginSource,
+    codexSkills,
+    connectionState.status,
+    skillMarketInstallRecords,
+    skillMarketService,
+    state.activeView
+  ]);
+
+  useEffect(() => {
+    if (!allowInitialRuntimeProjectFocusRef.current) return;
+    if (state.activeView !== 'conversation' || state.selectedThreadId !== undefined) return;
+    if (conversations.length === 0) return;
+
+    const firstRuntimeProjectId = conversations[0]?.projectId;
+    allowInitialRuntimeProjectFocusRef.current = false;
+    if (firstRuntimeProjectId === undefined) return;
+
+    navigationPersistenceReadyRef.current = true;
+    if (firstRuntimeProjectId === state.currentProjectId) {
+      writePersistedNavigation({ currentProjectId: firstRuntimeProjectId });
+      return;
+    }
+
+    dispatch({ type: 'select_project', projectId: firstRuntimeProjectId });
+  }, [conversations, state.activeView, state.currentProjectId, state.selectedThreadId]);
+
+  useEffect(() => {
+    const selectedThreadId = state.selectedThreadId;
+    if (selectedThreadId === undefined || threadHistory.threadId !== selectedThreadId) {
+      setThreadHistoryLoadError(undefined);
+      setHistoryLoadingThreadId(undefined);
+      setHistoryLoadedThreadId(undefined);
+      return;
+    }
+
+    if (threadHistory.initialLoading) {
+      const cachedItems = timelineItemsByThreadIdRef.current[selectedThreadId];
+      setThreadHistoryLoadError(undefined);
+      if (cachedItems === undefined) {
+        setHistoryLoadingThreadId(selectedThreadId);
+        setHistoryLoadedThreadId(undefined);
+        showTimelineForThread(selectedThreadId, [], false);
+      } else {
+        setHistoryLoadingThreadId(undefined);
+        setHistoryLoadedThreadId(selectedThreadId);
+        showTimelineForThread(selectedThreadId, cachedItems, false);
+      }
+      return;
+    }
+
+    if (!threadHistory.loaded) {
+      setHistoryLoadingThreadId(undefined);
+      setHistoryLoadedThreadId(undefined);
+      return;
+    }
+
+    if (
+      threadHistory.codexThreadId !== undefined
+      && threadHistory.codexThreadId !== null
+    ) {
+      setRuntimeThreads(previous => {
+        let changed = false;
+        const nextThreads = previous.map(thread => {
+          if (
+            thread.id !== selectedThreadId
+            || thread.codexThreadId === threadHistory.codexThreadId
+          ) {
+            return thread;
+          }
+          changed = true;
+          return { ...thread, codexThreadId: threadHistory.codexThreadId };
+        });
+        return changed ? nextThreads : previous;
+      });
+    }
+
+    const historyItems = mapHistoryItemsToTimelineItems(threadHistory.items);
+    const cachedItems = timelineItemsByThreadIdRef.current[selectedThreadId] ?? [];
+    const mergedItems = mergeTimelineHistoryWithCache(historyItems, cachedItems);
+    showTimelineForThread(
+      selectedThreadId,
+      mergedItems,
+      true
+    );
+    hydrateTimelineAttachmentPreviews(selectedThreadId, mergedItems);
+    setThreadHistoryLoadError(threadHistory.error);
+    setHistoryLoadingThreadId(undefined);
+    setHistoryLoadedThreadId(selectedThreadId);
+  }, [
+    state.selectedThreadId,
+    threadHistory.codexThreadId,
+    threadHistory.error,
+    threadHistory.initialLoading,
+    threadHistory.items,
+    threadHistory.loaded,
+    threadHistory.threadId
+  ]);
+
+  useEffect(() => {
+    let canceled = false;
+    const controller = new AbortController();
+    const selectedThreadId = state.selectedThreadId;
+
+    if (
+      selectedThreadId === undefined
+      || threadService === null
+      || connectionState.status !== 'connected'
+      || !selectedThreadExists
+    ) {
+      setRunsLoadingThreadId(undefined);
+      setRunsLoadedThreadId(undefined);
+      return () => {
+        canceled = true;
+      };
+    }
+
+    const runsAlreadyLoaded = runsLoadedThreadIdsRef.current.has(selectedThreadId);
+    setRunsLoadingThreadId(runsAlreadyLoaded ? undefined : selectedThreadId);
+    setRunsLoadedThreadId(runsAlreadyLoaded ? selectedThreadId : undefined);
+    const knownRunIdsAtRequestStart = [
+      ...(runRegistryRef.current.runIdsByThreadId[selectedThreadId] ?? [])
+    ];
+    threadService
+      .listThreadRuns(selectedThreadId, { signal: controller.signal })
+      .then(response => {
+        if (canceled) return;
+        setRunAttachmentsById(previous => {
+          const next = { ...previous };
+          for (const run of response.runs) next[run.id] = run.attachments ?? [];
+          return next;
+        });
+        dispatchRunRegistry({
+          type: 'merge_thread_runs',
+          threadId: selectedThreadId,
+          knownRunIdsAtRequestStart,
+          runs: response.runs
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!canceled) {
+          runsLoadedThreadIdsRef.current.add(selectedThreadId);
+          setRunsLoadingThreadId(current => (
+            current === selectedThreadId ? undefined : current
+          ));
+          setRunsLoadedThreadId(selectedThreadId);
+        }
+      });
+
+    return () => {
+      canceled = true;
+      controller.abort();
+    };
+  }, [connectionState.status, state.selectedThreadId, selectedThreadExists, threadService]);
+
+  useEffect(() => {
+    const selectedThreadId = state.selectedThreadId;
+    if (
+      selectedThreadId === undefined
+      || connectionConfig === null
+      || connectionState.status !== 'connected'
+      || historyLoadedThreadId !== selectedThreadId
+      || runsLoadedThreadId !== selectedThreadId
+    ) return;
+
+    const activeRun = getThreadActiveRun(runRegistry, selectedThreadId);
+    if (activeRun === undefined) return;
+    if (runEventControllersRef.current.has(activeRun.id)) return;
+
+    subscribeToRunEvents(activeRun.id, selectedThreadId, connectionConfig);
+  }, [
+    connectionConfig,
+    connectionState.status,
+    historyLoadedThreadId,
+    runRegistry,
+    runsLoadedThreadId,
+    state.selectedThreadId
+  ]);
+
+  useEffect(() => {
+    const target = timelineRunTarget;
+    if (target === undefined) {
+      replayedTargetRunKeyRef.current = undefined;
+      return;
+    }
+    const targetKey = `${target.threadId}:${target.runId}`;
+    if (
+      target.threadId !== state.selectedThreadId
+      || connectionConfig === null
+      || connectionState.status !== 'connected'
+      || runsLoadedThreadId !== target.threadId
+      || runRegistry.runsById[target.runId] === undefined
+      || replayedTargetRunKeyRef.current === targetKey
+    ) {
+      return;
+    }
+
+    replayedTargetRunKeyRef.current = targetKey;
+    subscribeToRunEvents(target.runId, target.threadId, connectionConfig);
+  }, [
+    connectionConfig,
+    connectionState.status,
+    runRegistry,
+    runsLoadedThreadId,
+    state.selectedThreadId,
+    timelineRunTarget
+  ]);
+
+  useEffect(() => {
+    for (const [runId, subscription] of runEventControllersRef.current.entries()) {
+      const run = runRegistry.runsById[runId];
+      if (run === undefined || !isTerminalRunStatus(run.status)) continue;
+      const consumedSeq = runRegistry.lastSeqByRunId[runId] ?? 0;
+      if (consumedSeq < (run.lastEventSeq ?? 0)) continue;
+      runEventControllersRef.current.delete(runId);
+      subscription.controller.stop();
+      timelineEventBatchersByThreadIdRef.current.get(subscription.threadId)?.flush();
+    }
+  }, [runRegistry.runsById]);
+
+  useEffect(() => {
+    const path = state.selectedFilePath;
+    const requestId = (openRequestByPathRef.current[path] ?? 0) + 1;
+    const openRevision = fileRevisionByPathRef.current[path] ?? 0;
+    openRequestByPathRef.current[path] = requestId;
+
+    setLoadingFilePath(path);
+    setLoadErrorByPath(previous => ({ ...previous, [path]: undefined }));
+
+    fileService
+      .openFile(path)
+      .then(file => {
+        if (
+          !mountedRef.current ||
+          openRequestByPathRef.current[path] !== requestId ||
+          openRevision !== (fileRevisionByPathRef.current[path] ?? 0)
+        ) {
+          return;
+        }
+
+        const previousSavedFile = savedFileByPathRef.current[path];
+        const hasExistingDraft = hasOwnPath(draftContentByPathRef.current, path);
+        const existingDraft = draftContentByPathRef.current[path];
+        const shouldRefreshDraft =
+          !hasExistingDraft || (previousSavedFile !== undefined && existingDraft === previousSavedFile.content);
+
+        const nextSavedFiles = { ...savedFileByPathRef.current, [path]: file };
+        savedFileByPathRef.current = nextSavedFiles;
+        setSavedFileByPath(nextSavedFiles);
+
+        if (shouldRefreshDraft) {
+          const nextDrafts = { ...draftContentByPathRef.current, [path]: file.content };
+          draftContentByPathRef.current = nextDrafts;
+          setDraftContentByPath(nextDrafts);
+        }
+        setLoadErrorByPath(previous => ({ ...previous, [path]: undefined }));
+
+        if (selectedFilePathRef.current === path) {
+          setLoadingFilePath('');
+        }
+      })
+      .catch(() => {
+        if (
+          !mountedRef.current ||
+          openRequestByPathRef.current[path] !== requestId ||
+          openRevision !== (fileRevisionByPathRef.current[path] ?? 0)
+        ) {
+          return;
+        }
+
+        setLoadErrorByPath(previous => ({ ...previous, [path]: '无法加载文件' }));
+        if (selectedFilePathRef.current === path) {
+          setLoadingFilePath('');
+        }
+      });
+  }, [fileService, state.selectedFilePath]);
+
+  const selectedFilePath = state.selectedFilePath;
+  const currentFile = savedFileByPath[selectedFilePath];
+  const selectedDraftContent = draftContentByPath[selectedFilePath] ?? currentFile?.content ?? '';
+  const loadingSelectedFile = loadingFilePath === selectedFilePath && currentFile === undefined;
+  const loadError = loadErrorByPath[selectedFilePath];
+  const saveError = saveErrorByPath[selectedFilePath];
+  const runDiagnostics = state.selectedRunId === undefined ? undefined : runDiagnosticsById[state.selectedRunId];
+  const selectedRunAttachments =
+    state.selectedRunId === undefined ? undefined : runAttachmentsById[state.selectedRunId];
+  const selectedRunContext =
+    state.selectedRunId === undefined ? undefined : runContextById[state.selectedRunId];
+  const currentProject = findProjectById(projects, state.currentProjectId);
+  const currentProjectName = currentProject?.name ?? '未选择项目';
+  const selectedConversation = conversations.find(conversation => conversation.id === state.selectedThreadId);
+  const selectedScheduleTask = scheduleTaskSummaries.find(
+    task => task.threadId === state.selectedThreadId
+  );
+  const selectedSchedule = selectedScheduleTask === undefined
+    ? undefined
+    : runtimeSchedules.find(schedule => schedule.id === selectedScheduleTask.scheduleId);
+  const selectedSidebarTask = selectedScheduleTask === undefined
+    ? undefined
+    : scheduleSidebarTasks.find(task => task.id === selectedScheduleTask.scheduleId);
+  const selectedActiveRun = getThreadActiveRun(runRegistry, state.selectedThreadId);
+  const selectedPendingRunStart = findPendingRunStart(
+    pendingRunStartsById,
+    state.selectedThreadId
+  );
+  const currentRunBusy = selectedActiveRun !== undefined || selectedPendingRunStart !== undefined;
+  const currentRunCanceling = selectedActiveRun === undefined
+    ? selectedPendingRunStart?.cancelRequested === true
+    : getRunCancelState(runRegistry, selectedActiveRun.id) === 'requested';
+  const runtimeStatus = mapRuntimeStatus(connectionState);
+  const slashCommands = useMemo(
+    () => buildComposerSlashCommands(codexSkills, codexMcp, enterpriseMcpCatalog),
+    [codexMcp, codexSkills, enterpriseMcpCatalog]
+  );
+  const composerConnectors = useMemo(
+    () => codexMcp === undefined
+      ? undefined
+      : buildComposerMcpConnectors(codexMcp, enterpriseMcpCatalog),
+    [codexMcp, enterpriseMcpCatalog]
+  );
+  const toggleComposerConnector = useCallback(async (
+    connectorId: string,
+    enabled: boolean
+  ): Promise<ComposerConnector[]> => {
+    if (mcpService === null || codexMcp === undefined) {
+      throw new Error('本机 MCP 尚未加载');
+    }
+    if (!connectorId.startsWith('mcp:')) {
+      throw new Error('无法识别本机 MCP');
+    }
+    const name = connectorId.slice('mcp:'.length);
+    if (!codexMcp.servers.some(server => server.name === name)) {
+      throw new Error(`本机 MCP ${name} 不存在`);
+    }
+    const requiresConfirmation = codexMcp.requiresWriteConfirmation === true;
+    if (
+      requiresConfirmation
+      && !(await requestCodexHomeConfirmation())
+    ) {
+      return buildComposerMcpConnectors(codexMcp, enterpriseMcpCatalog);
+    }
+    const response = await mcpService.setServerEnabled(
+      name,
+      enabled,
+      requiresConfirmation
+    );
+    const next = {
+      ...codexMcp,
+      servers: codexMcp.servers.map(server => (
+        server.name === name ? response.server : server
+      ))
+    };
+    setCodexMcp(next);
+    return buildComposerMcpConnectors(next, enterpriseMcpCatalog);
+  }, [codexMcp, enterpriseMcpCatalog, mcpService, requestCodexHomeConfirmation]);
+  const composerQueuedItems = useMemo<ComposerQueuedItem[]>(
+    () => timelineItems.flatMap(item => (
+      item.kind === 'user_message'
+      && item.runStatus === 'queued'
+      && item.runId !== undefined
+      && getRunCancelState(runRegistry, item.runId) !== 'requested'
+        ? [{
+            runId: item.runId,
+            text: item.text,
+            queuePosition: item.queuePosition
+          }]
+        : []
+    )),
+    [runRegistry, timelineItems]
+  );
+  const composerAttachmentScope = `${state.currentProjectId}:${state.selectedThreadId ?? 'new'}`;
+  const handleComposerPromptChange = useCallback((prompt: string) => {
+    setComposerPromptByScope(current => {
+      if (current[composerAttachmentScope] === prompt) return current;
+      if (prompt.length === 0) {
+        if (!Object.prototype.hasOwnProperty.call(current, composerAttachmentScope)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[composerAttachmentScope];
+        return next;
+      }
+      return { ...current, [composerAttachmentScope]: prompt };
+    });
+  }, [composerAttachmentScope]);
+  const composerAttachmentDraftId = getOrCreateComposerAttachmentDraftId(
+    composerAttachmentDraftIdsRef.current,
+    composerAttachmentScope
+  );
+  const imageInputSupported = readImageInputSupported(connectionState, selectedThread);
+  const memoryProjectOptions = useMemo(
+    () => buildMemoryProjectOptions(visibleRuntimeThreads, projects),
+    [projects, visibleRuntimeThreads]
+  );
+  const memoryThreadOptions = useMemo(
+    () => visibleRuntimeThreads.map(thread => ({
+      key: thread.id,
+      label: thread.title?.trim() || thread.id
+    })),
+    [visibleRuntimeThreads]
+  );
+  const currentMemoryProjectKey = selectedThread === undefined
+    ? state.currentProjectId
+    : selectedThread.purpose === 'conversation'
+      ? selectedThread.projectId ?? undefined
+      : undefined;
+
+  function handleEditorContentChange(content: string) {
+    const path = selectedFilePathRef.current;
+    const nextDrafts = { ...draftContentByPathRef.current, [path]: content };
+    draftContentByPathRef.current = nextDrafts;
+    setDraftContentByPath(nextDrafts);
+    setSaveErrorByPath(previous => ({ ...previous, [path]: undefined }));
+  }
+
+  function setFileSaving(path: string, saving: boolean) {
+    const nextSavingPaths = new Set(savingFilePathsRef.current);
+    if (saving) {
+      nextSavingPaths.add(path);
+    } else {
+      nextSavingPaths.delete(path);
+    }
+
+    savingFilePathsRef.current = nextSavingPaths;
+    setSavingFilePaths(nextSavingPaths);
+  }
+
+  function bumpFileRevision(path: string) {
+    fileRevisionByPathRef.current[path] = (fileRevisionByPathRef.current[path] ?? 0) + 1;
+  }
+
+  function createTimelineId(prefix: string) {
+    timelineIdSequenceRef.current += 1;
+    return `${prefix}_${Date.now()}_${timelineIdSequenceRef.current}`;
+  }
+
+  function setTimelineItems(
+    update: TimelineItem[] | ((previous: TimelineItem[]) => TimelineItem[])
+  ) {
+    const nextItems = typeof update === 'function'
+      ? update(timelineItemsRef.current)
+      : update;
+    const threadId = timelineThreadIdRef.current;
+    timelineItemsRef.current = nextItems;
+    if (threadId !== undefined) {
+      timelineItemsByThreadIdRef.current[threadId] = nextItems;
+    }
+    setTimelineItemsState(nextItems);
+  }
+
+  function appendTimelineItemsForThread(threadId: string, items: TimelineItem[]) {
+    if (items.length === 0) return;
+    const previousItems = timelineItemsByThreadIdRef.current[threadId]
+      ?? (timelineThreadIdRef.current === threadId ? timelineItemsRef.current : []);
+    const nextItems = mergeTimelineItems(previousItems, items);
+    timelineItemsByThreadIdRef.current[threadId] = nextItems;
+    if (timelineThreadIdRef.current !== threadId) return;
+    timelineItemsRef.current = nextItems;
+    setTimelineItemsState(nextItems);
+  }
+
+  function replaceApproval(response: ApprovalDecisionResponse) {
+    const threadId = response.approval.threadId ?? undefined;
+    if (threadId === undefined) return;
+    updateTimelineItemsForThread(threadId, items => items.map(item => (
+      item.kind === 'approval' && item.approval.id === response.approval.id
+        ? { ...item, approval: response.approval }
+        : item
+    )));
+  }
+
+  async function resolveApproval(id: string, decision: 'approve' | 'reject') {
+    if (approvalService === null || resolvingApprovalIds.has(id)) return;
+    setResolvingApprovalIds(previous => new Set(previous).add(id));
+    setApprovalErrors(previous => ({ ...previous, [id]: undefined }));
+    try {
+      const response = decision === 'approve'
+        ? await approvalService.approve(id)
+        : await approvalService.reject(id);
+      replaceApproval(response);
+    } catch (error) {
+      setApprovalErrors(previous => ({
+        ...previous,
+        [id]: error instanceof Error ? error.message : '审批操作失败'
+      }));
+    } finally {
+      setResolvingApprovalIds(previous => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  function updateTimelineItemsForThread(
+    threadId: string,
+    update: (items: TimelineItem[]) => TimelineItem[]
+  ) {
+    const previousItems = timelineItemsByThreadIdRef.current[threadId]
+      ?? (timelineThreadIdRef.current === threadId ? timelineItemsRef.current : []);
+    const nextItems = update(previousItems);
+    timelineItemsByThreadIdRef.current[threadId] = nextItems;
+    if (timelineThreadIdRef.current !== threadId) return;
+    timelineItemsRef.current = nextItems;
+    setTimelineItemsState(nextItems);
+  }
+
+  function getTimelineEventBatcher(threadId: string): FrameBatcher<TimelineItem> {
+    const existing = timelineEventBatchersByThreadIdRef.current.get(threadId);
+    if (existing !== undefined) return existing;
+    const batcher = createFrameBatcher<TimelineItem>({
+      onFlush(items) {
+        if (!mountedRef.current) return;
+        appendTimelineItemsForThread(threadId, items);
+      }
+    });
+    timelineEventBatchersByThreadIdRef.current.set(threadId, batcher);
+    return batcher;
+  }
+
+  function showTimelineForThread(
+    threadId: string | undefined,
+    items: TimelineItem[],
+    cache: boolean
+  ) {
+    timelineThreadIdRef.current = threadId;
+    timelineItemsRef.current = items;
+    if (cache && threadId !== undefined) {
+      timelineItemsByThreadIdRef.current[threadId] = items;
+    }
+    setTimelineItemsState(items);
+  }
+
+  function adoptCurrentTimelineForThread(threadId: string) {
+    timelineThreadIdRef.current = threadId;
+    timelineItemsByThreadIdRef.current[threadId] = timelineItemsRef.current;
+  }
+
+  function hydrateTimelineAttachmentPreviews(
+    threadId: string,
+    items: TimelineItem[]
+  ): void {
+    if (attachmentService === null) return;
+
+    for (const item of items) {
+      if (item.kind !== 'user_message') continue;
+      for (const attachment of item.attachments ?? []) {
+        if (!attachment.mime.startsWith('image/')) continue;
+        if (item.attachmentPreviewUrls?.[attachment.id] !== undefined) continue;
+        const retainedUrl = retainedAttachmentPreviewUrlsRef.current.get(attachment.id);
+        if (retainedUrl !== undefined) {
+          applyTimelineAttachmentPreview(threadId, attachment.id, retainedUrl);
+          continue;
+        }
+
+        const loadKey = `${threadId}:${attachment.id}`;
+        if (attachmentPreviewLoadsRef.current.has(loadKey)) continue;
+        attachmentPreviewLoadsRef.current.add(loadKey);
+        void attachmentService.openContent({
+          id: attachment.id,
+          threadId
+        }).then(async response => {
+          if (!response.ok) return;
+          const previewUrl = URL.createObjectURL(await response.blob());
+          if (!mountedRef.current) {
+            URL.revokeObjectURL(previewUrl);
+            return;
+          }
+          const existingUrl = retainedAttachmentPreviewUrlsRef.current.get(attachment.id);
+          if (existingUrl !== undefined) {
+            URL.revokeObjectURL(previewUrl);
+            applyTimelineAttachmentPreview(threadId, attachment.id, existingUrl);
+            return;
+          }
+          retainedAttachmentPreviewUrlsRef.current.set(attachment.id, previewUrl);
+          applyTimelineAttachmentPreview(threadId, attachment.id, previewUrl);
+        }).catch(() => undefined).finally(() => {
+          attachmentPreviewLoadsRef.current.delete(loadKey);
+        });
+      }
+    }
+  }
+
+  function applyTimelineAttachmentPreview(
+    threadId: string,
+    attachmentId: string,
+    previewUrl: string
+  ): void {
+    updateTimelineItemsForThread(threadId, items => {
+      let changed = false;
+      const nextItems = items.map(item => {
+        if (
+          item.kind !== 'user_message'
+          || !item.attachments?.some(attachment => attachment.id === attachmentId)
+          || item.attachmentPreviewUrls?.[attachmentId] === previewUrl
+        ) {
+          return item;
+        }
+        changed = true;
+        return {
+          ...item,
+          attachmentPreviewUrls: {
+            ...item.attachmentPreviewUrls,
+            [attachmentId]: previewUrl
+          }
+        };
+      });
+      return changed ? nextItems : items;
+    });
+  }
+
+  function updatePendingRunStart(next: PendingRunStart) {
+    const updated = {
+      ...pendingRunStartsByIdRef.current,
+      [next.id]: next
+    };
+    pendingRunStartsByIdRef.current = updated;
+    if (mountedRef.current) setPendingRunStartsById(updated);
+  }
+
+  function removePendingRunStart(id: string) {
+    if (pendingRunStartsByIdRef.current[id] === undefined) return;
+    const updated = { ...pendingRunStartsByIdRef.current };
+    delete updated[id];
+    pendingRunStartsByIdRef.current = updated;
+    if (mountedRef.current) setPendingRunStartsById(updated);
+  }
+
+  function readHostRuntimeConfig(loadVersion: number, isCanceled: () => boolean) {
+    hostBridge
+      .readConnectionConfig()
+      .then(config => {
+        if (!isCanceled() && connectionConfigVersionRef.current === loadVersion) setConnectionConfig(config);
+      })
+      .catch(() => {
+        if (!isCanceled() && connectionConfigVersionRef.current === loadVersion) setConnectionConfig(null);
+      });
+  }
+
+  function retryRuntimeConnection() {
+    connectionConfigVersionRef.current += 1;
+    const loadVersion = connectionConfigVersionRef.current;
+    setConnectionConfig(null);
+    setConnectionState({ status: 'disconnected', message: '正在等待本地服务' });
+    readHostRuntimeConfig(loadVersion, () => false);
+  }
+
+  async function runEnterpriseSessionMutation(
+    action: (service: EnterpriseService) => Promise<EnterpriseSessionResponse>
+  ): Promise<EnterpriseSessionResponse> {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
+    ) {
+      throw new Error('本地 Runtime 未连接');
+    }
+    const generation = enterpriseRuntimeGenerationRef.current;
+
+    try {
+      const response = await action(activeEnterpriseService);
+      if (
+        enterpriseRuntimeGenerationRef.current === generation
+        && enterpriseServiceRef.current === activeEnterpriseService
+      ) {
+        setEnterpriseSession(response);
+        setEnterpriseCheckingTimedOut(false);
+        if (response.status === 'checking') {
+          setEnterpriseSessionProbeKey(current => current + 1);
+        }
+      }
+      return response;
+    } catch (error) {
+      try {
+        const snapshot = await activeEnterpriseService.getSession();
+        if (
+          enterpriseRuntimeGenerationRef.current === generation
+          && enterpriseServiceRef.current === activeEnterpriseService
+        ) {
+          setEnterpriseSession(snapshot);
+          setEnterpriseCheckingTimedOut(false);
+        }
+      } catch {
+        // The original operation error remains the user-facing failure.
+      }
+      throw error;
+    }
+  }
+
+  async function loginEnterprise(
+    input: EnterpriseLoginRequest
+  ): Promise<EnterpriseSessionResponse> {
+    const response = await runEnterpriseSessionMutation(service => service.login(input));
+    returnToEnterpriseViewAfterSignIn(response);
+    return response;
+  }
+
+  async function readEnterpriseGateway() {
+    const service = enterpriseServiceRef.current;
+    if (service === null) throw new Error('本地服务未连接');
+    return service.getGateway();
+  }
+
+  async function saveEnterpriseGateway(gateway: string) {
+    const service = enterpriseServiceRef.current;
+    if (service === null) throw new Error('本地服务未连接');
+    await service.setGateway(gateway);
+    setEnterpriseSession(await service.getSession());
+    setEnterpriseSessionProbeKey(current => current + 1);
+  }
+
+  async function registerEnterprise(
+    input: EnterpriseRegisterRequest
+  ): Promise<EnterpriseSessionResponse> {
+    const response = await runEnterpriseSessionMutation(service => service.register(input));
+    returnToEnterpriseViewAfterSignIn(response);
+    return response;
+  }
+
+  async function prepareEnterpriseDingTalkLogin(): Promise<EnterpriseDingTalkLoginPrepareResponse> {
+    const activeEnterpriseService = enterpriseService;
+    if (
+      activeEnterpriseService === null
+      || !runtimeSupportsEnterpriseSession(connectionState)
+    ) {
+      throw new Error('本地 Runtime 未连接');
+    }
+    return activeEnterpriseService.prepareDingTalkLogin();
+  }
+
+  async function checkEnterpriseSession(): Promise<EnterpriseSessionResponse> {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
+    ) {
+      throw new Error('本地 Runtime 未连接');
+    }
+    const generation = enterpriseRuntimeGenerationRef.current;
+    const response = await activeEnterpriseService.getSession();
+    if (
+      enterpriseRuntimeGenerationRef.current === generation
+      && enterpriseServiceRef.current === activeEnterpriseService
+    ) {
+      setEnterpriseSession(response);
+      setEnterpriseCheckingTimedOut(false);
+      returnToEnterpriseViewAfterSignIn(response);
+    }
+    return response;
+  }
+
+  function logoutEnterprise(): Promise<EnterpriseSessionResponse> {
+    return runEnterpriseSessionMutation(service => service.logout());
+  }
+
+  function refreshEnterpriseSession(): Promise<EnterpriseSessionResponse> {
+    return runEnterpriseSessionMutation(service => service.refreshSession());
+  }
+
+  function returnToEnterpriseViewAfterSignIn(response: EnterpriseSessionResponse) {
+    if (response.status !== 'signed_in') return;
+    const returnRoute = enterpriseReturnRouteRef.current;
+    if (returnRoute === undefined) return;
+    const activeView =
+      returnRoute.view === 'plugins' && returnRoute.source === 'enterprise'
+        ? 'plugins'
+        : returnRoute.view === 'knowledge'
+          ? 'knowledge'
+          : returnRoute.view === 'drive'
+            ? 'drive'
+            : returnRoute.view === 'connections'
+              ? 'connections'
+              : undefined;
+    if (activeView === undefined) return;
+    enterpriseReturnRouteRef.current = undefined;
+    dispatch({ type: 'set_active_view', activeView });
+    navigateToRoute(returnRoute);
+  }
+
+  function handleColorModeChange(mode: ColorMode) {
+    setColorMode(mode);
+    applyColorMode(mode);
+    writeColorModePreference(mode);
+  }
+
+  function handleAccentColorChange(color: AccentColor) {
+    setAccentColor(color);
+    applyAccentColor(color, customAccentColor);
+    writeAccentColorPreference(color);
+  }
+
+  function handleCustomAccentColorChange(color: string) {
+    const normalized = normalizeHexColor(color);
+    if (normalized === undefined) return;
+    setCustomAccentColor(normalized);
+    setAccentColor('custom');
+    applyAccentColor('custom', normalized);
+    writeCustomAccentColorPreference(normalized);
+    writeAccentColorPreference('custom');
+  }
+
+  function handleDefaultPermissionChange(permission: DefaultPermissionPreference) {
+    defaultPermissionSyncEnabledRef.current = true;
+    setDefaultPermission(permission);
+    setComposerRunConfig(null);
+    defaultPermissionSyncFailuresRef.current.clear();
+    setDefaultPermissionSyncError(undefined);
+    writeDefaultPermissionPreference(permission);
+  }
+
+  function openMobileSidebar() {
+    setSidebarCollapsed(false);
+    if (
+      isMobileNavigationViewport()
+      && !mobileSidebarHistoryEntryRef.current
+    ) {
+      window.history.pushState(
+        { ...window.history.state, claweeMobileNavigation: true },
+        ''
+      );
+      mobileSidebarHistoryEntryRef.current = true;
+    }
+    setMobileSidebarOpen(true);
+  }
+
+  function closeMobileSidebar() {
+    setMobileSidebarOpen(false);
+    if (window.history.state?.claweeMobileNavigation !== true) {
+      mobileSidebarHistoryEntryRef.current = false;
+    }
+  }
+
+  function dismissMobileSidebar() {
+    setMobileSidebarOpen(false);
+    if (
+      mobileSidebarHistoryEntryRef.current
+      && window.history.state?.claweeMobileNavigation === true
+    ) {
+      mobileSidebarHistoryEntryRef.current = false;
+      window.history.back();
+    }
+  }
+
+  async function submitPrompt(
+    prompt: string,
+    config?: ComposerRunConfig,
+    attachments: ComposerAttachment[] = [],
+    submissionMode?: RunSubmissionMode
+  ): Promise<boolean> {
+    if (
+      connectionState.status === 'connected'
+      && runService !== null
+      && threadService !== null
+      && connectionConfigRef.current !== null
+    ) {
+      const submitted = await submitRuntimePrompt(prompt, config, attachments, submissionMode);
+      if (submitted) {
+        nextComposerFocusRequestIdRef.current += 1;
+        setPendingComposerFocusRequestId(nextComposerFocusRequestIdRef.current);
+      }
+      if (submitted && shouldSuggestMemory(prompt)) {
+        setPendingMemorySuggestion({
+          id: Date.now(),
+          content: prompt.trim().slice(0, 2000)
+        });
+      }
+      return submitted;
+    }
+
+    setTimelineItems(previous => [
+      ...previous,
+      {
+        kind: 'diagnostic',
+        id: createTimelineId('runtime_not_connected'),
+        severity: 'error',
+        message: '本地运行内核尚未连接，无法发送任务。',
+        content: getConnectionStatusLabel(connectionState),
+        source: 'runtime'
+      }
+    ]);
+    return false;
+  }
+
+  function startNewConversation(options: {
+    updateRoute?: boolean;
+    projectId?: string;
+  } = {}) {
+    closeMobileSidebar();
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    showTimelineForThread(undefined, [], false);
+    setHistoryLoadingThreadId(undefined);
+    setHistoryLoadedThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+    setThreadConfigUpdateError(undefined);
+    setSearchHistoryTarget(undefined);
+    setTimelineRunTarget(undefined);
+    setTimelineApprovalTarget(undefined);
+    if (
+      options.projectId !== undefined
+      && options.projectId !== state.currentProjectId
+    ) {
+      dispatch({ type: 'select_project', projectId: options.projectId });
+    }
+    dispatch({ type: 'new_conversation' });
+    if (options.updateRoute !== false) navigateToRoute({ view: 'home' });
+  }
+
+  function selectProject(projectId: string, options: { updateRoute?: boolean } = {}) {
+    closeMobileSidebar();
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    setComposerRunConfig(null);
+    showTimelineForThread(undefined, [], false);
+    setHistoryLoadingThreadId(undefined);
+    setHistoryLoadedThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+    setThreadConfigUpdateError(undefined);
+    setSearchHistoryTarget(undefined);
+    setTimelineRunTarget(undefined);
+    setTimelineApprovalTarget(undefined);
+    dispatch({ type: 'select_project', projectId });
+    if (options.updateRoute !== false) navigateToRoute({ view: 'home' });
+  }
+
+  function selectProjectDirectory(
+    purpose: ProjectDirectorySelectionPurpose = 'add'
+  ): Promise<string | null> {
+    if (hostBridge.selectProjectDirectory !== undefined) {
+      return hostBridge.selectProjectDirectory(purpose);
+    }
+    return projectService?.selectProjectDirectory(purpose) ?? Promise.resolve(null);
+  }
+
+  async function selectCreateProjectSourceDirectory(): Promise<string | null> {
+    try {
+      setProjectLoadError(undefined);
+      return await selectProjectDirectory('create');
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(
+        error,
+        '无法打开系统文件夹选择窗口'
+      ));
+      return null;
+    }
+  }
+
+  async function addProjectDirectory() {
+    if (
+      projectService === null
+      || projectDirectorySelectionInFlightRef.current
+    ) return;
+    projectDirectorySelectionInFlightRef.current = true;
+    try {
+      const path = await selectProjectDirectory('add');
+      if (path === null) return;
+      await registerProjectDirectory(path);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '添加项目失败，请重试'));
+    } finally {
+      projectDirectorySelectionInFlightRef.current = false;
+    }
+  }
+
+  async function createBlankProject(
+    name: string,
+    sourceCwd?: string
+  ): Promise<boolean> {
+    if (
+      projectService === null
+      || projectDirectorySelectionInFlightRef.current
+    ) return false;
+    projectDirectorySelectionInFlightRef.current = true;
+    try {
+      const response = sourceCwd === undefined
+        ? await projectService.createManagedProject({ name })
+        : await projectService.createProject({ cwd: sourceCwd, name });
+      setProjects(current => upsertProject(current, response.project));
+      selectProject(response.project.id);
+      setProjectLoadError(undefined);
+      return true;
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '新建项目失败，请重试'));
+      return false;
+    } finally {
+      projectDirectorySelectionInFlightRef.current = false;
+    }
+  }
+
+  async function registerProjectDirectory(path: string) {
+    if (projectService === null) return;
+    try {
+      const response = await projectService.createProject({ cwd: path });
+      setProjects(current => upsertProject(current, response.project));
+      selectProject(response.project.id);
+      setProjectLoadError(undefined);
+    } catch (error) {
+      if (!(error instanceof ApiClientError) || error.code !== 'PROJECT_DIRECTORY_CONFLICT') {
+        throw error;
+      }
+      const refreshed = await projectService.listProjects('active');
+      setProjects(refreshed.projects);
+      const existing = refreshed.projects.find(project => (
+        normalizeWorkspacePath(project.cwd) === normalizeWorkspacePath(path)
+        || (
+          project.canonicalCwd !== null
+          && normalizeWorkspacePath(project.canonicalCwd) === normalizeWorkspacePath(path)
+        )
+      ));
+      if (existing !== undefined) {
+        selectProject(existing.id);
+        setProjectLoadError(undefined);
+        return;
+      }
+      throw new Error('项目已存在，但无法在项目列表中找到');
+    }
+  }
+
+  function handleProjectDragEnter(event: ReactDragEvent<HTMLDivElement>) {
+    if (!canImportDroppedProject(event.dataTransfer, hostBridge, projectService)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setProjectDropActive(true);
+  }
+
+  function handleProjectDragOver(event: ReactDragEvent<HTMLDivElement>) {
+    if (!canImportDroppedProject(event.dataTransfer, hostBridge, projectService)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    if (!projectDropActive) setProjectDropActive(true);
+  }
+
+  function handleProjectDragLeave(event: ReactDragEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+    setProjectDropActive(false);
+  }
+
+  async function handleProjectDrop(event: ReactDragEvent<HTMLDivElement>) {
+    const file = readDroppedDirectory(event.dataTransfer);
+    if (
+      file === undefined
+      || hostBridge.resolveDroppedFilePath === undefined
+      || projectService === null
+    ) {
+      setProjectDropActive(false);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setProjectDropActive(false);
+
+    const path = hostBridge.resolveDroppedFilePath(file);
+    if (path === null) {
+      setProjectLoadError('无法读取拖入的项目文件夹路径');
+      return;
+    }
+    try {
+      await registerProjectDirectory(path);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '拖入项目失败，请确认选择的是文件夹'));
+    }
+  }
+
+  async function archiveProject(projectId: string) {
+    if (projectService === null) return;
+    try {
+      const response = await projectService.archiveProject(projectId);
+      const remaining = projects.filter(project => project.id !== projectId);
+      setProjects(remaining);
+      setArchivedProjects(current => upsertProject(current, response.project));
+      if (state.currentProjectId === projectId) {
+        const nextProjectId = remaining[0]?.id;
+        if (nextProjectId === undefined) {
+          dispatch({ type: 'set_current_project', projectId: undefined });
+          startNewConversation();
+        } else {
+          selectProject(nextProjectId);
+        }
+      }
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '移除项目失败，请重试'));
+    }
+  }
+
+  async function reorderProjects(projectIds: string[]) {
+    if (projectService === null) return;
+    const previousProjects = projects;
+    const reorderedProjects = orderProjectsByIds(previousProjects, projectIds);
+    if (reorderedProjects === previousProjects) return;
+    setProjects(reorderedProjects);
+    try {
+      const response = await projectService.reorderProjects({ projectIds });
+      setProjects(response.projects);
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjects(previousProjects);
+      setProjectLoadError(getRuntimeErrorMessage(error, '保存项目顺序失败，请重试'));
+    }
+  }
+
+  async function openProjectManagement(projectId?: string) {
+    setProjectManagementProjectId(projectId);
+    setProjectManagementOpen(true);
+    if (projectService === null) return;
+    try {
+      const response = await projectService.listUnassignedThreads();
+      if (mountedRef.current) setUnassignedThreads(response.threads);
+    } catch (error) {
+      if (mountedRef.current) {
+        setProjectLoadError(getRuntimeErrorMessage(error, '无法加载待归属会话'));
+      }
+    }
+  }
+
+  async function refreshProjectsFromRuntime() {
+    if (projectService === null) return;
+    const [activeResponse, allResponse] = await Promise.all([
+      projectService.listProjects('active'),
+      projectService.listProjects('all')
+    ]);
+    setProjects(activeResponse.projects);
+    setArchivedProjects(
+      allResponse.projects.filter(project => project.status === 'archived')
+    );
+  }
+
+  async function updateManagedProject(
+    projectId: string,
+    input: Parameters<ProjectService['updateProject']>[1]
+  ) {
+    if (projectService === null) return;
+    setProjectMutationBusy(true);
+    try {
+      const response = await projectService.updateProject(projectId, input);
+      setProjects(current => upsertProject(current, response.project));
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '更新项目失败，请重试'));
+    } finally {
+      setProjectMutationBusy(false);
+    }
+  }
+
+  async function restoreManagedProject(projectId: string) {
+    if (projectService === null) return;
+    setProjectMutationBusy(true);
+    try {
+      await projectService.restoreProject(projectId);
+      await refreshProjectsFromRuntime();
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '恢复项目失败，请重试'));
+    } finally {
+      setProjectMutationBusy(false);
+    }
+  }
+
+  async function replaceManagedProjectDirectory(projectId: string) {
+    if (projectService === null) return;
+    setProjectMutationBusy(true);
+    try {
+      const cwd = await selectProjectDirectory('replace');
+      if (cwd === null) return;
+      const response = await projectService.replaceProjectDirectory(projectId, { cwd });
+      setProjects(current => upsertProject(current, response.project));
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '更换项目目录失败，请重试'));
+    } finally {
+      setProjectMutationBusy(false);
+    }
+  }
+
+  async function assignManagedThread(threadId: string, projectId: string) {
+    if (projectService === null) return;
+    setProjectMutationBusy(true);
+    try {
+      const response = await projectService.assignThreadProject(threadId, { projectId });
+      setRuntimeThreads(current => upsertThread(current, response.thread));
+      setUnassignedThreads(current => current.filter(thread => thread.id !== threadId));
+      setProjectLoadError(undefined);
+    } catch (error) {
+      setProjectLoadError(getRuntimeErrorMessage(error, '认领会话失败，请重试'));
+    } finally {
+      setProjectMutationBusy(false);
+    }
+  }
+
+  async function renameSidebarTask(task: SidebarTaskSummary, title: string) {
+    if (task.id.startsWith('draft:')) {
+      if (task.threadId === undefined) return;
+      await renameConversation(task.threadId, title);
+      return;
+    }
+    if (scheduleService === null) return;
+    const updated = await scheduleService.updateSchedule(task.id, { name: title });
+    handleScheduleChanged(updated);
+  }
+
+  async function archiveSidebarTask(task: SidebarTaskSummary) {
+    if (task.id.startsWith('draft:')) {
+      if (task.threadId === undefined) return;
+      await archiveConversation(task.threadId);
+      return;
+    }
+    if (scheduleService === null) return;
+    await scheduleService.deleteSchedule(task.id);
+    setRuntimeSchedules(current => current.filter(schedule => schedule.id !== task.id));
+    if (task.threadId !== undefined) {
+      setRuntimeThreads(current => current.filter(thread => thread.id !== task.threadId));
+      if (state.selectedThreadId === task.threadId) startNewConversation();
+    }
+  }
+
+  async function deleteSidebarTask(task: SidebarTaskSummary) {
+    if (task.id.startsWith('draft:')) {
+      if (task.threadId === undefined) return;
+      await deleteConversation(task.threadId);
+      return;
+    }
+    await archiveSidebarTask(task);
+  }
+
+  async function archiveConversation(threadId: string) {
+    if (threadService === null) return;
+    try {
+      await threadService.archiveThread(threadId);
+      setRuntimeThreads(current => current.filter(thread => thread.id !== threadId));
+      delete timelineItemsByThreadIdRef.current[threadId];
+      if (state.selectedThreadId === threadId) {
+        startNewConversation();
+      }
+      setThreadLoadError(undefined);
+    } catch (error) {
+      setThreadLoadError(
+        error instanceof ApiClientError && error.code === 'THREAD_HAS_ACTIVE_RUN'
+          ? '任务运行期间不能归档会话，请等待当前任务结束'
+          : getRuntimeErrorMessage(error, '归档会话失败，请重试')
+      );
+    }
+  }
+
+  async function toggleConversationPinned(threadId: string, pinned: boolean) {
+    if (threadService === null) return;
+    try {
+      const response = await threadService.updateThread(threadId, { pinned });
+      setRuntimeThreads(current => upsertThread(current, response.thread));
+      setThreadLoadError(undefined);
+    } catch (error) {
+      setThreadLoadError(
+        error instanceof ApiClientError && error.code === 'THREAD_HAS_ACTIVE_RUN'
+          ? '任务运行期间不能修改会话置顶状态，请等待当前任务结束'
+          : getRuntimeErrorMessage(error, pinned ? '置顶会话失败，请重试' : '取消置顶失败，请重试')
+      );
+    }
+  }
+
+  async function renameConversation(threadId: string, title: string) {
+    if (threadService === null) return;
+    try {
+      const response = await threadService.updateThread(threadId, { title });
+      setRuntimeThreads(current => upsertThread(current, response.thread));
+      setThreadLoadError(undefined);
+    } catch (error) {
+      setThreadLoadError(getRuntimeErrorMessage(error, '重命名会话失败，请重试'));
+      throw error;
+    }
+  }
+
+  async function deleteConversation(threadId: string) {
+    if (threadService === null) return;
+    try {
+      await threadService.deleteThread(threadId);
+      setRuntimeThreads(current => current.filter(thread => thread.id !== threadId));
+      delete timelineItemsByThreadIdRef.current[threadId];
+      if (state.selectedThreadId === threadId) {
+        startNewConversation();
+      }
+      setThreadLoadError(undefined);
+    } catch (error) {
+      setThreadLoadError(
+        error instanceof ApiClientError && error.code === 'THREAD_HAS_ACTIVE_RUN'
+          ? '任务运行期间不能删除会话，请等待当前任务结束'
+          : getRuntimeErrorMessage(error, '删除会话失败，请重试')
+      );
+      throw error;
+    }
+  }
+
+  function selectConversation(conversationId: string, options: { updateRoute?: boolean } = {}) {
+    closeMobileSidebar();
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    setThreadConfigUpdateError(undefined);
+    setSearchHistoryTarget(undefined);
+    setTimelineRunTarget(undefined);
+    setTimelineApprovalTarget(undefined);
+    const conversation = conversations.find(item => item.id === conversationId);
+    const alreadySelected = conversationId === state.selectedThreadId;
+    const followOpenFileWorkspace = !alreadySelected
+      && state.activeView === 'conversation'
+      && state.rightPanelMode === 'file';
+    if (conversation !== undefined && conversation.projectId !== state.currentProjectId) {
+      dispatch({ type: 'select_project', projectId: conversation.projectId });
+    }
+    if (alreadySelected) {
+      if (state.activeView !== 'conversation') {
+        dispatch({ type: 'select_thread', threadId: conversationId });
+      }
+      if (timelineItems.length === 0) {
+        setHistoryLoadingThreadId(conversationId);
+        setHistoryLoadedThreadId(undefined);
+        setThreadHistoryReloadKey(previous => previous + 1);
+      }
+      if (options.updateRoute !== false) {
+        navigateToRoute({ view: 'thread', threadId: conversationId });
+      }
+      return;
+    }
+
+    const cachedTimelineItems = timelineItemsByThreadIdRef.current[conversationId];
+    setHistoryLoadingThreadId(
+      cachedTimelineItems === undefined ? conversationId : undefined
+    );
+    setHistoryLoadedThreadId(
+      cachedTimelineItems === undefined ? undefined : conversationId
+    );
+    setRunsLoadedThreadId(
+      runsLoadedThreadIdsRef.current.has(conversationId)
+        ? conversationId
+        : undefined
+    );
+    showTimelineForThread(conversationId, cachedTimelineItems ?? [], false);
+    dispatch({ type: 'select_thread', threadId: conversationId });
+    if (followOpenFileWorkspace) {
+      dispatch({ type: 'open_files' });
+    }
+    if (options.updateRoute !== false) {
+      navigateToRoute({ view: 'thread', threadId: conversationId });
+    }
+  }
+
+  async function selectSidebarTask(threadId: string) {
+    const opened = await openScheduleTask(threadId);
+    if (opened) markThreadTasksRead(threadId);
+  }
+
+  function navigateToRoute(route: AppRoute, options?: { replace?: boolean }) {
+    const routeKey = formatRoute(route);
+    const replaceMobileSidebarEntry =
+      mobileSidebarHistoryEntryRef.current
+      && window.history.state?.claweeMobileNavigation === true;
+    if (replaceMobileSidebarEntry) {
+      mobileSidebarHistoryEntryRef.current = false;
+      setMobileSidebarOpen(false);
+    }
+    if (routeKey === formatRoute(props.route) && !replaceMobileSidebarEntry) return;
+    pendingRouteKeyRef.current = routeKey;
+    props.onNavigate(route, {
+      ...options,
+      replace: options?.replace === true || replaceMobileSidebarEntry
+    });
+  }
+
+  function applyRouteFromLocation(route: AppRoute) {
+    switch (route.view) {
+      case 'home':
+        startNewConversation({ updateRoute: false });
+        return;
+      case 'thread':
+        void openScheduleTask(route.threadId, route.runId, {
+          updateRoute: false,
+          approvalId: route.approvalId
+        });
+        return;
+      case 'search':
+      case 'schedules':
+      case 'tasks':
+      case 'dashboard':
+      case 'activity':
+      case 'activity-agent':
+      case 'activity-recharge-records':
+      case 'plugins':
+      case 'connections':
+      case 'knowledge':
+      case 'drive':
+      case 'account':
+      case 'settings':
+        closeMobileSidebar();
+        dispatch({
+          type: 'set_active_view',
+          activeView: route.view === 'activity-agent'
+            || route.view === 'activity-recharge-records'
+            ? 'activity'
+            : route.view
+        });
+        return;
+      case 'files':
+        closeMobileSidebar();
+        if (route.threadId !== undefined && route.threadId !== state.selectedThreadId) {
+          selectConversation(route.threadId, { updateRoute: false });
+        }
+        if (route.path === undefined) {
+          dispatch({ type: 'open_files' });
+        } else {
+          dispatch({ type: 'select_workspace_file', path: route.path });
+        }
+        return;
+      case 'capabilities':
+        return;
+    }
+  }
+
+  function openPrimaryView(activeView: ActiveView) {
+    closeMobileSidebar();
+    if (activeView === 'files') {
+      dispatch({ type: 'open_files' });
+      navigateToRoute({
+        view: 'files',
+        ...(state.selectedThreadId === undefined ? {} : { threadId: state.selectedThreadId })
+      });
+      return;
+    }
+
+    dispatch({ type: 'set_active_view', activeView });
+    navigateToRoute(routeForActiveView(activeView, state.selectedThreadId));
+  }
+
+  async function loadStarterSkill(skillName: string) {
+    if (starterSkillInFlightRef.current) return;
+
+    const activeCapabilityService = capabilityServiceRef.current;
+    const targetProjectId = currentProjectIdRef.current;
+    const targetThreadId = selectedThreadIdRef.current;
+    if (
+      activeCapabilityService === null
+      || connectionStatusRef.current !== 'connected'
+    ) {
+      setStarterSkillError('本地服务暂不可用，无法加载 Skill');
+      return;
+    }
+
+    const capabilityGeneration = skillMarketRuntimeGenerationRef.current;
+    starterSkillInFlightRef.current = true;
+    setStarterSkillBusyName(skillName);
+    setStarterSkillError(undefined);
+
+    const targetComposerIsCurrent = () => (
+      mountedRef.current
+      && activeViewRef.current === 'conversation'
+      && currentProjectIdRef.current === targetProjectId
+      && selectedThreadIdRef.current === targetThreadId
+    );
+    const selectSkill = (skillId: string) => {
+      if (!targetComposerIsCurrent()) return;
+      nextComposerSkillIdRef.current += 1;
+      setPendingComposerSkill({
+        projectId: targetProjectId,
+        threadId: targetThreadId,
+        request: {
+          id: nextComposerSkillIdRef.current,
+          skillId
+        }
+      });
+    };
+
+    try {
+      let localSkills = codexSkills;
+      let localSkillId = findValidCodexSkillId(localSkills, skillName);
+      if (localSkills === undefined) {
+        localSkills = await activeCapabilityService.listSkills();
+        if (!isCurrentCapabilityRuntime(capabilityGeneration, activeCapabilityService)) return;
+        setCodexSkills(localSkills);
+        localSkillId = findValidCodexSkillId(localSkills, skillName);
+      }
+      if (localSkillId !== undefined) {
+        selectSkill(localSkillId);
+        return;
+      }
+
+      const activeEnterpriseService = enterpriseServiceRef.current;
+      if (
+        activeEnterpriseService === null
+        || enterpriseSessionRef.current.status !== 'signed_in'
+      ) {
+        throw new Error('请先登录企业账号，再加载该 Skill');
+      }
+
+      const enterpriseGeneration = enterpriseHubGenerationRef.current;
+      const catalog = await activeEnterpriseService.listSkills();
+      if (!isCurrentEnterpriseHubRuntime(enterpriseGeneration, activeEnterpriseService)) return;
+      setEnterpriseSkills(catalog.skills);
+      setEnterpriseSkillsLoadError(undefined);
+      const enterpriseSkill = catalog.skills.find(skill => (
+        skill.name === skillName || skill.skillId === skillName
+      ));
+      if (enterpriseSkill === undefined) {
+        throw new Error('企业 Skill 目录中未找到该能力');
+      }
+
+      if (!enterpriseSkill.actions.includes('use')) {
+        if (!enterpriseSkill.actions.includes('install')) {
+          throw new Error('该企业 Skill 当前无法安装');
+        }
+        const mutation = await activeEnterpriseService.installSkill(
+          enterpriseSkill.skillId
+        );
+        if (!isCurrentEnterpriseHubRuntime(enterpriseGeneration, activeEnterpriseService)) return;
+        setEnterpriseSkills(current => upsertEnterpriseSkill(
+          current ?? catalog.skills,
+          mutation.skill
+        ));
+        try {
+          await refreshEnterpriseSkillListOnce(
+            enterpriseGeneration,
+            activeEnterpriseService
+          );
+        } catch {
+          // Installation succeeded. The local capability refresh below is authoritative here.
+        }
+      }
+
+      const refreshedLocalSkills = await activeCapabilityService.listSkills();
+      if (!isCurrentCapabilityRuntime(capabilityGeneration, activeCapabilityService)) return;
+      setCodexSkills(refreshedLocalSkills);
+      setCapabilitiesLoadError(undefined);
+      localSkillId = findValidCodexSkillId(refreshedLocalSkills, skillName);
+      if (localSkillId === undefined) {
+        throw new Error('Skill 已安装，但本机能力状态刷新失败');
+      }
+      selectSkill(localSkillId);
+    } catch (error) {
+      if (!targetComposerIsCurrent()) return;
+      if (isEnterpriseUnauthorized(error)) {
+        setEnterpriseSession({
+          status: 'signed_out',
+          reason: 'session_expired',
+          transportSecurity: enterpriseSessionRef.current.transportSecurity
+        });
+      }
+      setStarterSkillError(formatEnterpriseSkillError(
+        error,
+        'Skill 加载失败，请重试'
+      ));
+    } finally {
+      starterSkillInFlightRef.current = false;
+      if (mountedRef.current) setStarterSkillBusyName(undefined);
+    }
+  }
+
+  function closeFileWorkspace() {
+    dispatch({ type: 'close_file_workspace' });
+    navigateToRoute(routeForConversation(state.selectedThreadId));
+  }
+
+  function selectWorkspaceFile(path: string) {
+    dispatch({ type: 'select_workspace_file', path });
+    navigateToRoute({
+      view: 'files',
+      ...(state.selectedThreadId === undefined ? {} : { threadId: state.selectedThreadId }),
+      path
+    });
+  }
+
+  async function openSearchResult(result: ConversationSearchResult) {
+    closeMobileSidebar();
+    if (threadService === null) return;
+    let thread = runtimeThreads.find(item => item.id === result.threadId);
+    if (thread === undefined) {
+      try {
+        const response = await threadService.getThread(result.threadId);
+        if (!mountedRef.current) return;
+        thread = response.thread;
+        setRuntimeThreads(previous => upsertThread(previous, response.thread));
+      } catch {
+        if (mountedRef.current) setThreadLoadError('无法打开搜索结果对应的会话');
+        return;
+      }
+    }
+
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    setThreadLoadError(undefined);
+    setThreadConfigUpdateError(undefined);
+    setTimelineRunTarget(undefined);
+    setTimelineApprovalTarget(undefined);
+    setHistoryLoadingThreadId(thread.id);
+    setHistoryLoadedThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+    setSearchHistoryTarget(undefined);
+    showTimelineForThread(thread.id, [], false);
+
+    if (result.projectId !== state.currentProjectId) {
+      dispatch({ type: 'set_current_project', projectId: result.projectId });
+    }
+    dispatch({ type: 'select_thread', threadId: thread.id });
+    navigateToRoute({ view: 'thread', threadId: thread.id });
+    setThreadHistoryReloadKey(previous => previous + 1);
+  }
+
+  async function handleComposerPermissionChange(
+    permission: ComposerRunConfig['permission']
+  ): Promise<boolean> {
+    const baseConfig = composerRunConfig
+      ?? defaultComposerRunConfig(
+        currentProject,
+        defaultPermission,
+        recentComposerModelConfig
+      );
+
+    if (selectedThread === undefined) {
+      setComposerRunConfig({ ...baseConfig, permission });
+      setThreadConfigUpdateError(undefined);
+      return true;
+    }
+    if (currentRunBusy) {
+      setThreadConfigUpdateError('任务运行期间不能修改访问权限，请等待当前任务结束');
+      return false;
+    }
+
+    const sandbox = toRuntimeSandbox(permission);
+    if (sandbox === selectedThread.sandbox) {
+      setThreadConfigUpdateError(undefined);
+      return true;
+    }
+    if (threadService === null) {
+      setThreadConfigUpdateError('本地服务暂不可用，无法更新会话访问权限');
+      return false;
+    }
+
+    try {
+      const response = await threadService.updateThread(selectedThread.id, { sandbox });
+      if (!mountedRef.current) return false;
+      setRuntimeThreads(previous => upsertThread(previous, response.thread));
+      setThreadConfigUpdateError(undefined);
+      return true;
+    } catch (error) {
+      if (mountedRef.current) {
+        setThreadConfigUpdateError(
+          error instanceof ApiClientError && error.code === 'THREAD_HAS_ACTIVE_RUN'
+            ? '任务运行期间不能修改访问权限，请等待当前任务结束'
+            : '无法更新会话访问权限'
+        );
+      }
+      return false;
+    }
+  }
+
+  function handleComposerModelConfigChange(
+    config: Pick<ComposerRunConfig, 'model' | 'reasoning'>
+  ): boolean {
+    globalModelSelectionMigratedRef.current = true;
+    markGlobalModelSelectionMigrated();
+    setRecentComposerModelConfig(config);
+    writeRecentModelConfig(config);
+    setComposerRunConfig(current => ({
+      ...(current ?? defaultComposerRunConfig(
+        currentProject,
+        defaultPermission,
+        recentComposerModelConfig
+      )),
+      ...config
+    }));
+    setThreadConfigUpdateError(undefined);
+    return true;
+  }
+
+  function isCurrentSkillMarketRuntime(
+    generation: number,
+    activeCapabilityService: CapabilityService,
+    activeSkillMarketService: SkillMarketService
+  ) {
+    return mountedRef.current
+      && skillMarketRuntimeGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && capabilityServiceRef.current === activeCapabilityService
+      && skillMarketServiceRef.current === activeSkillMarketService;
+  }
+
+  function isCurrentCapabilityRuntime(
+    generation: number,
+    activeCapabilityService: CapabilityService
+  ) {
+    return mountedRef.current
+      && skillMarketRuntimeGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && capabilityServiceRef.current === activeCapabilityService;
+  }
+
+  function isCurrentThreadRuntime(generation: number, activeThreadService: ThreadService) {
+    return mountedRef.current
+      && skillMarketRuntimeGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && threadServiceRef.current === activeThreadService;
+  }
+
+  function isCurrentEnterpriseHubRuntime(
+    generation: number,
+    activeEnterpriseService: EnterpriseService
+  ) {
+    return mountedRef.current
+      && enterpriseHubGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && enterpriseSessionRef.current.status === 'signed_in'
+      && enterpriseServiceRef.current === activeEnterpriseService;
+  }
+
+  function isCurrentEnterpriseKnowledgeRuntime(
+    generation: number,
+    activeEnterpriseService: EnterpriseService
+  ) {
+    return mountedRef.current
+      && enterpriseKnowledgeGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && enterpriseSessionRef.current.status === 'signed_in'
+      && enterpriseServiceRef.current === activeEnterpriseService;
+  }
+
+  function isCurrentEnterpriseSharedDriveRuntime(
+    generation: number,
+    activeEnterpriseService: EnterpriseService
+  ) {
+    return mountedRef.current
+      && enterpriseSharedDriveGenerationRef.current === generation
+      && connectionStatusRef.current === 'connected'
+      && enterpriseSessionRef.current.status === 'signed_in'
+      && enterpriseServiceRef.current === activeEnterpriseService;
+  }
+
+  async function refreshEnterpriseSkillListOnce(
+    generation: number,
+    activeEnterpriseService: EnterpriseService
+  ): Promise<void> {
+    const response = await activeEnterpriseService.listSkills();
+    if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+    setEnterpriseSkills(response.skills);
+    setEnterpriseSkillsLoadError(undefined);
+  }
+
+  function refreshEnterpriseHub() {
+    if (enterpriseSessionRef.current.status === 'signed_in') {
+      setEnterpriseSkillsReloadKey(current => current + 1);
+      return;
+    }
+    void refreshEnterpriseSession();
+  }
+
+  function refreshEnterpriseKnowledge() {
+    setEnterpriseKnowledgeUploadNotice(undefined);
+    setEnterpriseKnowledgeUpload(undefined);
+    if (enterpriseSessionRef.current.status === 'signed_in') {
+      setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+      setEnterpriseKnowledgeDocumentsReloadKey(current => current + 1);
+      return;
+    }
+    void refreshEnterpriseSession();
+  }
+
+  function refreshEnterpriseSharedDrive() {
+    setEnterpriseSharedOperation(undefined);
+    setEnterpriseSharedNotice(undefined);
+    if (enterpriseSessionRef.current.status === 'signed_in') {
+      setEnterpriseSharedSpacesReloadKey(current => current + 1);
+      setEnterpriseSharedFilesReloadKey(current => current + 1);
+      return;
+    }
+    void refreshEnterpriseSession();
+  }
+
+  function selectEnterpriseSharedSpace(spaceId?: string) {
+    if (spaceId !== selectedEnterpriseSharedSpaceId) {
+      setSelectedEnterpriseSharedSpaceId(spaceId);
+      setEnterpriseSharedFiles(undefined);
+      setEnterpriseSharedFilesError(undefined);
+    }
+    setEnterpriseSharedOperation(undefined);
+    setEnterpriseSharedNotice(undefined);
+  }
+
+  function searchEnterpriseSharedFiles(query: string) {
+    setEnterpriseSharedQuery(query.trim());
+    setEnterpriseSharedOperation(undefined);
+    setEnterpriseSharedNotice(undefined);
+  }
+
+  async function loadMoreEnterpriseSharedSpaces() {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || enterpriseSharedSpacesLoadInFlightRef.current
+      || !enterpriseSharedSpacesMeta.hasNext
+      || enterpriseSharedSpacesMeta.nextCursor.length === 0
+    ) return;
+
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    enterpriseSharedSpacesLoadInFlightRef.current = true;
+    setEnterpriseSharedSpacesLoading(true);
+    setEnterpriseSharedSpacesError(undefined);
+    try {
+      const response = await activeEnterpriseService.listSharedSpaces({
+        limit: 100,
+        cursor: enterpriseSharedSpacesMeta.nextCursor
+      });
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      setEnterpriseSharedSpaces(previous => mergeSharedSpaces(
+        previous ?? [],
+        response.spaces
+      ));
+      setEnterpriseSharedSpacesMeta(response.meta);
+    } catch (error) {
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      if (isEnterpriseUnauthorized(error)) {
+        handleEnterpriseSessionExpired();
+      } else {
+        setEnterpriseSharedSpacesError(
+          formatEnterpriseSharedDriveError(error, '更多共享空间加载失败')
+        );
+      }
+    } finally {
+      if (isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) {
+        enterpriseSharedSpacesLoadInFlightRef.current = false;
+        setEnterpriseSharedSpacesLoading(false);
+      }
+    }
+  }
+
+  async function loadMoreEnterpriseSharedFiles() {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || enterpriseSharedFilesLoadInFlightRef.current
+      || !enterpriseSharedFilesMeta.hasNext
+      || enterpriseSharedFilesMeta.nextCursor.length === 0
+    ) return;
+
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    enterpriseSharedFilesLoadInFlightRef.current = true;
+    setEnterpriseSharedFilesLoading(true);
+    setEnterpriseSharedFilesError(undefined);
+    try {
+      const response = await activeEnterpriseService.listSharedFiles({
+        ...(selectedEnterpriseSharedSpaceId === undefined
+          ? {}
+          : { spaceId: selectedEnterpriseSharedSpaceId }),
+        ...(enterpriseSharedQuery.length === 0 ? {} : { query: enterpriseSharedQuery }),
+        limit: 100,
+        cursor: enterpriseSharedFilesMeta.nextCursor
+      });
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      setEnterpriseSharedFiles(previous => mergeSharedFiles(previous ?? [], response.files));
+      setEnterpriseSharedFilesMeta(response.meta);
+    } catch (error) {
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      if (isEnterpriseUnauthorized(error)) {
+        handleEnterpriseSessionExpired();
+      } else {
+        setEnterpriseSharedFilesError(
+          formatEnterpriseSharedDriveError(error, '更多共享文件加载失败')
+        );
+      }
+    } finally {
+      if (isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) {
+        enterpriseSharedFilesLoadInFlightRef.current = false;
+        setEnterpriseSharedFilesLoading(false);
+      }
+    }
+  }
+
+  async function uploadEnterpriseSharedFile(spaceId: string, file: File) {
+    const space = enterpriseSharedSpaces?.find(item => item.spaceId === spaceId);
+    if (space?.permissions.write !== true) return;
+    await mutateEnterpriseSharedFile({
+      kind: 'upload',
+      spaceId,
+      logicalPath: file.name,
+      file
+    });
+  }
+
+  async function replaceEnterpriseSharedFile(
+    target: EnterpriseSharedFileResponse,
+    file: File
+  ) {
+    const space = enterpriseSharedSpaces?.find(item => item.spaceId === target.spaceId);
+    if (space?.permissions.write !== true) return;
+    await mutateEnterpriseSharedFile({
+      kind: 'replace',
+      spaceId: target.spaceId,
+      logicalPath: target.logicalPath,
+      expectedRevision: target.revision,
+      file,
+      fileId: target.fileId
+    });
+  }
+
+  async function mutateEnterpriseSharedFile(request: {
+    kind: 'upload' | 'replace';
+    spaceId: string;
+    logicalPath: string;
+    expectedRevision?: number;
+    file: File;
+    fileId?: string;
+  }) {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || enterpriseSharedMutationInFlightRef.current
+    ) return;
+
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    enterpriseSharedMutationInFlightRef.current = true;
+    setEnterpriseSharedNotice(undefined);
+    setEnterpriseSharedOperation({
+      kind: request.kind,
+      ...(request.fileId === undefined ? {} : { fileId: request.fileId }),
+      fileName: request.logicalPath,
+      status: 'working'
+    });
+    try {
+      const response = await activeEnterpriseService.uploadSharedFile({
+        spaceId: request.spaceId,
+        logicalPath: request.logicalPath,
+        ...(request.expectedRevision === undefined
+          ? {}
+          : { expectedRevision: request.expectedRevision }),
+        file: request.file
+      });
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      setEnterpriseSharedOperation(undefined);
+      setEnterpriseSharedNotice(
+        response.reconciled
+          ? `${response.logicalPath} 已在服务端确认创建成功`
+          : request.kind === 'upload'
+            ? `${response.logicalPath} 已上传`
+            : `${response.logicalPath} 已替换为 revision ${response.revision}`
+      );
+      setEnterpriseSharedFilesReloadKey(current => current + 1);
+    } catch (error) {
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      if (isEnterpriseUnauthorized(error)) {
+        handleEnterpriseSessionExpired();
+        setEnterpriseSharedOperation(undefined);
+        return;
+      }
+      let message = formatEnterpriseSharedDriveError(
+        error,
+        request.kind === 'upload' ? '共享文件上传失败' : '共享文件替换失败'
+      );
+      if (error instanceof ApiClientError) {
+        if (error.code === 'ENTERPRISE_SHARED_FILE_REVISION_CONFLICT') {
+          const currentRevision = error.details?.currentRevision;
+          message = typeof currentRevision === 'number'
+            ? `远端文件已更新到 revision ${currentRevision}，请刷新后重新替换`
+            : '远端文件已被其他成员修改，请刷新后重新替换';
+          setEnterpriseSharedFilesReloadKey(current => current + 1);
+        } else if (
+          error.code === 'ENTERPRISE_SHARED_FILE_WRITE_FORBIDDEN'
+          || error.code === 'ENTERPRISE_FORBIDDEN'
+        ) {
+          message = '当前账户已没有该共享空间的写入权限';
+          setEnterpriseSharedSpacesReloadKey(current => current + 1);
+        } else if (error.code === 'ENTERPRISE_SHARED_FILE_ALREADY_EXISTS') {
+          message = '相同网盘路径已存在，请在文件列表中选择替换';
+          setEnterpriseSharedFilesReloadKey(current => current + 1);
+        } else if (
+          error.code === 'ENTERPRISE_SHARED_SPACE_NOT_FOUND'
+          || error.code === 'ENTERPRISE_SHARED_FILE_NOT_FOUND'
+        ) {
+          message = '共享空间或文件已不可访问，正在刷新列表';
+          setEnterpriseSharedSpacesReloadKey(current => current + 1);
+          setEnterpriseSharedFilesReloadKey(current => current + 1);
+        } else if (error.code === 'ENTERPRISE_SERVICE_UNAVAILABLE') {
+          message = request.kind === 'upload'
+            ? '上传结果未知，请刷新文件列表后再决定是否重试'
+            : '替换结果未知，请刷新并核对 revision 后再操作';
+          setEnterpriseSharedFilesReloadKey(current => current + 1);
+        }
+      }
+      setEnterpriseSharedOperation({
+        kind: request.kind,
+        ...(request.fileId === undefined ? {} : { fileId: request.fileId }),
+        fileName: request.logicalPath,
+        status: 'failed',
+        error: message
+      });
+    } finally {
+      enterpriseSharedMutationInFlightRef.current = false;
+    }
+  }
+
+  async function downloadEnterpriseSharedFile(
+    target: EnterpriseSharedFileResponse,
+    overwrite: boolean
+  ) {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || currentProject === undefined
+      || enterpriseSharedMutationInFlightRef.current
+    ) return;
+
+    const generation = enterpriseSharedDriveGenerationRef.current;
+    enterpriseSharedMutationInFlightRef.current = true;
+    setEnterpriseSharedNotice(undefined);
+    setEnterpriseSharedOperation({
+      kind: 'download',
+      fileId: target.fileId,
+      fileName: target.logicalPath,
+      status: 'working'
+    });
+    try {
+      const response = await activeEnterpriseService.downloadSharedFile({
+        fileId: target.fileId,
+        projectId: currentProject.id,
+        ...(overwrite ? { overwrite: true } : {})
+      });
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      setEnterpriseSharedOperation(undefined);
+      setEnterpriseSharedNotice(
+        `${response.relativePath} 已${response.overwritten ? '覆盖保存' : '保存'}到项目“${currentProject.name}”`
+      );
+    } catch (error) {
+      if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
+      if (isEnterpriseUnauthorized(error)) {
+        handleEnterpriseSessionExpired();
+        setEnterpriseSharedOperation(undefined);
+        return;
+      }
+      if (
+        error instanceof ApiClientError
+        && error.code === 'ENTERPRISE_SHARED_FILE_LOCAL_EXISTS'
+        && !overwrite
+      ) {
+        setEnterpriseSharedOperation({
+          kind: 'download',
+          fileId: target.fileId,
+          fileName: target.logicalPath,
+          status: 'requires_overwrite',
+          error: `项目中已存在 ${target.logicalPath}，再次点击覆盖按钮确认替换`
+        });
+        return;
+      }
+      if (
+        error instanceof ApiClientError
+        && error.code === 'ENTERPRISE_SHARED_FILE_NOT_FOUND'
+      ) {
+        setEnterpriseSharedFilesReloadKey(current => current + 1);
+      }
+      setEnterpriseSharedOperation({
+        kind: 'download',
+        fileId: target.fileId,
+        fileName: target.logicalPath,
+        status: 'failed',
+        error: formatEnterpriseSharedDriveError(error, '文件保存到项目失败')
+      });
+    } finally {
+      enterpriseSharedMutationInFlightRef.current = false;
+    }
+  }
+
+  function selectEnterpriseKnowledgeBase(knowledgeBaseId: string) {
+    if (knowledgeBaseId !== selectedEnterpriseKnowledgeBaseId) {
+      setSelectedEnterpriseKnowledgeBaseId(knowledgeBaseId);
+      setEnterpriseKnowledgeDocuments(undefined);
+      setEnterpriseKnowledgeDocumentsError(undefined);
+    }
+    setEnterpriseKnowledgeUpload(undefined);
+    setEnterpriseKnowledgeUploadNotice(undefined);
+  }
+
+  async function uploadEnterpriseKnowledgeDocument(file: File) {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    const knowledgeBase = enterpriseKnowledgeBases?.find(
+      item => item.knowledgeBaseId === selectedEnterpriseKnowledgeBaseId
+    );
+    if (
+      activeEnterpriseService === null
+      || connectionStatusRef.current !== 'connected'
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || knowledgeBase === undefined
+      || knowledgeBase.permissions.read !== true
+      || knowledgeBase.permissions.upload !== true
+      || enterpriseKnowledgeUploadInFlightRef.current
+    ) {
+      return;
+    }
+
+    const generation = enterpriseKnowledgeGenerationRef.current;
+    enterpriseKnowledgeUploadInFlightRef.current = true;
+    setEnterpriseKnowledgeUpload({
+      fileName: file.name,
+      status: 'uploading'
+    });
+    setEnterpriseKnowledgeUploadNotice(undefined);
+    try {
+      await activeEnterpriseService.uploadKnowledgeDocument({
+        knowledgeBaseId: knowledgeBase.knowledgeBaseId,
+        file
+      });
+      if (
+        !isCurrentEnterpriseKnowledgeRuntime(
+          generation,
+          activeEnterpriseService
+        )
+      ) {
+        return;
+      }
+      setEnterpriseKnowledgeUpload(undefined);
+      setEnterpriseKnowledgeUploadNotice(
+        `${file.name} 已提交处理，请关注文档状态`
+      );
+      setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+      setEnterpriseKnowledgeDocumentsReloadKey(current => current + 1);
+    } catch (error) {
+      if (
+        !isCurrentEnterpriseKnowledgeRuntime(
+          generation,
+          activeEnterpriseService
+        )
+      ) {
+        return;
+      }
+      if (isEnterpriseUnauthorized(error)) {
+        setEnterpriseSession({
+          status: 'signed_out',
+          reason: 'session_expired',
+          transportSecurity: enterpriseSessionRef.current.transportSecurity
+        });
+        setEnterpriseKnowledgeUpload(undefined);
+        return;
+      }
+
+      let message = formatEnterpriseKnowledgeError(
+        error,
+        '文档上传失败'
+      );
+      if (error instanceof ApiClientError) {
+        if (error.code === 'ENTERPRISE_DOCUMENT_UPLOAD_FORBIDDEN') {
+          message = '当前账户已没有该知识库的上传权限';
+          setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+        } else if (error.code === 'ENTERPRISE_KNOWLEDGE_BASE_NOT_FOUND') {
+          message = '该知识库已不可访问，正在刷新授权列表';
+          setSelectedEnterpriseKnowledgeBaseId(undefined);
+          setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+        } else if (error.code === 'ENTERPRISE_KNOWLEDGE_CONFLICT') {
+          message = '知识库状态已变化，请刷新后重新选择文件';
+          setEnterpriseKnowledgeBasesReloadKey(current => current + 1);
+          setEnterpriseKnowledgeDocumentsReloadKey(current => current + 1);
+        } else if (
+          error.code === 'ENTERPRISE_SERVICE_UNAVAILABLE'
+          || error.code === 'ENTERPRISE_KNOWLEDGE_PROVIDER_ERROR'
+        ) {
+          message = '上传结果未知，请先刷新文档列表，再决定是否重新上传';
+          setEnterpriseKnowledgeDocumentsReloadKey(current => current + 1);
+        }
+      }
+      setEnterpriseKnowledgeUpload({
+        fileName: file.name,
+        status: 'failed',
+        error: message
+      });
+    } finally {
+      enterpriseKnowledgeUploadInFlightRef.current = false;
+    }
+  }
+
+  async function loadEnterpriseSkillDetail(
+    skillId: string
+  ): Promise<EnterpriseSkillDetailResponse> {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || connectionStatusRef.current !== 'connected'
+      || enterpriseSessionRef.current.status !== 'signed_in'
+    ) {
+      throw new Error('企业Skills暂不可用');
+    }
+    const generation = enterpriseHubGenerationRef.current;
+    try {
+      const detail = await activeEnterpriseService.getSkillDetail(skillId);
+      if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+        throw new Error('企业 Skill 详情请求已过期');
+      }
+      return detail;
+    } catch (error) {
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+        if (isEnterpriseUnauthorized(error)) {
+          setEnterpriseSession({
+            status: 'signed_out',
+            reason: 'session_expired',
+            transportSecurity: enterpriseSessionRef.current.transportSecurity
+          });
+        } else if (
+          error instanceof ApiClientError
+          && error.status === 404
+        ) {
+          setEnterpriseSkillsReloadKey(current => current + 1);
+        }
+      }
+      throw new Error(formatEnterpriseSkillError(error, '企业 Skill 详情加载失败'));
+    }
+  }
+
+  async function mutateEnterpriseSkill(
+    skillId: string,
+    kind: 'install' | 'update'
+  ) {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (
+      activeEnterpriseService === null
+      || connectionStatusRef.current !== 'connected'
+      || enterpriseSessionRef.current.status !== 'signed_in'
+      || enterpriseSkillMutationInFlightRef.current
+    ) {
+      return;
+    }
+
+    const generation = enterpriseHubGenerationRef.current;
+    const capabilityGeneration = skillMarketRuntimeGenerationRef.current;
+    const activeCapabilityService = capabilityServiceRef.current;
+    enterpriseSkillMutationInFlightRef.current = true;
+    setEnterpriseSkillOperation({ skillId, kind });
+    try {
+      if (kind === 'install') {
+        await activeEnterpriseService.installSkill(skillId);
+      } else {
+        await activeEnterpriseService.updateSkill(skillId);
+      }
+      await refreshEnterpriseSkillListOnce(generation, activeEnterpriseService);
+      if (activeCapabilityService !== null) {
+        try {
+          const response = await activeCapabilityService.listSkills();
+          if (isCurrentCapabilityRuntime(
+            capabilityGeneration,
+            activeCapabilityService
+          )) {
+            setCodexSkills(response);
+            setCapabilitiesLoadError(undefined);
+          }
+        } catch {
+          // The enterprise mutation succeeded; capability refresh can retry later.
+        }
+      }
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+        setEnterpriseSkillOperation(undefined);
+      }
+    } catch (error) {
+      if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+      if (isEnterpriseUnauthorized(error)) {
+        setEnterpriseSession({
+          status: 'signed_out',
+          reason: 'session_expired',
+          transportSecurity: enterpriseSessionRef.current.transportSecurity
+        });
+        setEnterpriseSkillOperation(undefined);
+        return;
+      }
+      if (
+        error instanceof ApiClientError
+        && (error.status === 404 || error.status === 409)
+      ) {
+        try {
+          await refreshEnterpriseSkillListOnce(generation, activeEnterpriseService);
+        } catch {
+          // Preserve the mutation error; the user can refresh the directory manually.
+        }
+      }
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+        setEnterpriseSkillOperation({
+          skillId,
+          kind,
+          error: formatEnterpriseSkillError(
+            error,
+            kind === 'install' ? '企业 Skill 安装失败' : '企业 Skill 更新失败'
+          )
+        });
+      }
+    } finally {
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+        enterpriseSkillMutationInFlightRef.current = false;
+      }
+    }
+  }
+
+  function installEnterpriseSkill(skillId: string) {
+    return mutateEnterpriseSkill(skillId, 'install');
+  }
+
+  function updateEnterpriseSkill(skillId: string) {
+    return mutateEnterpriseSkill(skillId, 'update');
+  }
+
+  async function refreshSkillMarketState(
+    generation: number,
+    activeCapabilityService: CapabilityService,
+    activeSkillMarketService: SkillMarketService
+  ): Promise<void> {
+    const [skillsResult, recordsResult] = await Promise.allSettled([
+      Promise.resolve().then(() => activeCapabilityService.listSkills()),
+      Promise.resolve().then(() => activeSkillMarketService.listInstallRecords())
+    ]);
+    if (!isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) return;
+    const refreshErrors: string[] = [];
+    if (skillsResult.status === 'fulfilled') {
+      setCodexSkills(skillsResult.value);
+    } else {
+      setCodexSkills(undefined);
+      refreshErrors.push('Skill 状态刷新失败');
+    }
+    if (recordsResult.status === 'fulfilled') {
+      setSkillMarketInstallRecords(recordsResult.value.records);
+    } else {
+      setSkillMarketInstallRecords(undefined);
+      refreshErrors.push('安装记录刷新失败');
+    }
+    setSkillMarketLoadError(refreshErrors.length > 0 ? refreshErrors.join('；') : undefined);
+  }
+
+  async function installMarketSkill(skillId: string) {
+    const activeCapabilityService = capabilityService;
+    const activeSkillMarketService = skillMarketService;
+    if (activeCapabilityService === null || activeSkillMarketService === null || skillMarketMutationInFlightRef.current) return;
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+    skillMarketMutationInFlightRef.current = true;
+    setSkillMarketOperation({ skillId, kind: 'install' });
+    try {
+      await activeSkillMarketService.installSkill(skillId);
+      await refreshSkillMarketState(generation, activeCapabilityService, activeSkillMarketService);
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        setSkillMarketOperation(undefined);
+      }
+    } catch (error) {
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        setSkillMarketOperation({
+          skillId,
+          kind: 'install',
+          error: getRuntimeErrorMessage(error, '安装失败，请重试')
+        });
+      }
+    } finally {
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        skillMarketMutationInFlightRef.current = false;
+      }
+    }
+  }
+
+  async function updateMarketSkill(skillId: string) {
+    const activeCapabilityService = capabilityService;
+    const activeSkillMarketService = skillMarketService;
+    if (activeCapabilityService === null || activeSkillMarketService === null || skillMarketMutationInFlightRef.current) return;
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+    skillMarketMutationInFlightRef.current = true;
+    setSkillMarketOperation({ skillId, kind: 'update' });
+    try {
+      await activeSkillMarketService.updateSkill(skillId);
+      await refreshSkillMarketState(generation, activeCapabilityService, activeSkillMarketService);
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        setSkillMarketOperation(undefined);
+      }
+    } catch (error) {
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        setSkillMarketOperation({
+          skillId,
+          kind: 'update',
+          error: getRuntimeErrorMessage(error, '更新失败，请重试')
+        });
+      }
+    } finally {
+      if (isCurrentSkillMarketRuntime(generation, activeCapabilityService, activeSkillMarketService)) {
+        skillMarketMutationInFlightRef.current = false;
+      }
+    }
+  }
+
+  async function useMarketSkill(skillId: string, projectId: string) {
+    setSkillMarketUseError(undefined);
+    const isSkillCreator = skillId === 'skill-creator';
+    const entry = isSkillCreator ? undefined : getSkillMarketEntry(skillId);
+    if (!isSkillCreator && entry === undefined) {
+      setSkillMarketUseError({ skillId, error: '未找到这个 Skill' });
+      return;
+    }
+    await useSkillByName({
+      skillName: skillId,
+      title: isSkillCreator ? '创建技能' : getSkillMarketDisplayTitle(entry!),
+      projectId,
+      onError: error => setSkillMarketUseError(
+        error === undefined ? undefined : { skillId, error }
+      )
+    });
+  }
+
+  async function useEnterpriseSkill(
+    skill: EnterpriseSkillResponse,
+    projectId: string
+  ) {
+    setEnterpriseSkillUseError(undefined);
+    await useSkillByName({
+      skillName: skill.name,
+      title: skill.name,
+      projectId,
+      onError: error => setEnterpriseSkillUseError(
+        error === undefined
+          ? undefined
+          : { skillId: skill.skillId, error }
+      )
+    });
+  }
+
+  async function useSkillByName(input: {
+    skillName: string;
+    title: string;
+    projectId: string;
+    onError(error?: string): void;
+  }) {
+    if (skillMarketUseInFlightRef.current) return;
+    input.onError(undefined);
+    const activeThreadService = threadService;
+    if (activeThreadService === null) {
+      input.onError('本地服务暂不可用，无法创建对话');
+      return;
+    }
+    const project = findProjectById(projects, input.projectId);
+    if (project === undefined) {
+      input.onError('未找到所选项目');
+      return;
+    }
+    const config = defaultComposerRunConfig(
+      project,
+      defaultPermission,
+      recentComposerModelConfig
+    );
+    const generation = skillMarketRuntimeGenerationRef.current;
+    skillMarketUseInFlightRef.current = true;
+
+    try {
+      const request = buildThreadRequest(input.title, project, config);
+      const created = await activeThreadService.createThread(request);
+      if (!isCurrentThreadRuntime(generation, activeThreadService)) return;
+
+      setRuntimeThreads(previous => upsertThread(previous, created.thread));
+      showTimelineForThread(created.thread.id, [], true);
+      setThreadHistoryLoadError(undefined);
+      setHistoryLoadingThreadId(undefined);
+      setHistoryLoadedThreadId(created.thread.id);
+      setRunsLoadedThreadId(undefined);
+      setThreadConfigUpdateError(undefined);
+      skipNextHistoryLoadForThreadRef.current = created.thread.id;
+      allowInitialRuntimeProjectFocusRef.current = false;
+      if (project.id !== state.currentProjectId) {
+        dispatch({ type: 'select_project', projectId: project.id });
+      }
+      dispatch({ type: 'select_thread', threadId: created.thread.id });
+      navigateToRoute({ view: 'thread', threadId: created.thread.id });
+      nextComposerDraftIdRef.current += 1;
+      setPendingComposerDraft({
+        threadId: created.thread.id,
+        request: {
+          id: nextComposerDraftIdRef.current,
+          text: `$${input.skillName} `
+        }
+      });
+    } catch (error) {
+      if (isCurrentThreadRuntime(generation, activeThreadService)) {
+        input.onError(getRuntimeErrorMessage(error, '创建对话失败，请重试'));
+      }
+    } finally {
+      if (isCurrentThreadRuntime(generation, activeThreadService)) {
+        skillMarketUseInFlightRef.current = false;
+      }
+    }
+  }
+
+  async function uploadLocalSkill() {
+    const selectDirectory = hostBridge.selectProjectDirectory;
+    const activeRuntimeClient = runtimeClient;
+    const activeCapabilityService = capabilityService;
+    const activeSkillMarketService = skillMarketService;
+    if (selectDirectory === undefined) return;
+    if (activeRuntimeClient === null || activeCapabilityService === null || activeSkillMarketService === null) {
+      setSkillMarketLoadError('本地服务暂不可用，无法上传技能');
+      return;
+    }
+
+    try {
+      const sourcePath = await selectDirectory();
+      if (sourcePath === null) return;
+      setSkillMarketLoadError(undefined);
+      await activeRuntimeClient.post('/codex/skills/install', {
+        sourcePath,
+        confirmWriteToCodexHome: true
+      });
+      await refreshSkillMarketState(
+        skillMarketRuntimeGenerationRef.current,
+        activeCapabilityService,
+        activeSkillMarketService
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setSkillMarketLoadError(getRuntimeErrorMessage(error, '上传技能失败，请重试'));
+      }
+    }
+  }
+
+  async function submitRuntimePrompt(
+    prompt: string,
+    config?: ComposerRunConfig,
+    attachments: ComposerAttachment[] = [],
+    submissionMode?: RunSubmissionMode
+  ): Promise<boolean> {
+    if (runService === null || threadService === null || connectionConfigRef.current === null) {
+      return false;
+    }
+    if (
+      findPendingRunStart(
+        pendingRunStartsByIdRef.current,
+        state.selectedThreadId
+      ) !== undefined
+      || (
+        runsLoadingThreadId !== undefined
+        && runsLoadingThreadId === state.selectedThreadId
+      )
+    ) return false;
+
+    const effectiveConfig = config
+      ?? composerRunConfig
+      ?? defaultComposerRunConfig(
+        currentProject,
+        defaultPermission,
+        recentComposerModelConfig
+      );
+    setComposerRunConfig(effectiveConfig);
+    const pendingRunStartId = createTimelineId('pending_start');
+    updatePendingRunStart({
+      id: pendingRunStartId,
+      threadId: state.selectedThreadId,
+      cancelRequested: false
+    });
+    let runThreadId = state.selectedThreadId;
+    const userMessageId = createTimelineId('user');
+    const attachmentMetadata = attachments.map(item => item.attachment);
+    const attachmentPreviewUrls = Object.fromEntries(
+      attachments.map(item => [item.attachment.id, item.previewUrl])
+    );
+    for (const item of attachments) {
+      const previousUrl = retainedAttachmentPreviewUrlsRef.current.get(item.attachment.id);
+      if (previousUrl !== undefined && previousUrl !== item.previewUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      retainedAttachmentPreviewUrlsRef.current.set(item.attachment.id, item.previewUrl);
+    }
+    setTimelineItems(previous => [
+      ...previous,
+      {
+        kind: 'user_message',
+        id: userMessageId,
+        timestamp: new Date().toISOString(),
+        text: prompt,
+        attachments: attachmentMetadata,
+        attachmentPreviewUrls,
+        source: 'runtime'
+      }
+    ]);
+
+    try {
+      const pendingRunId = createTimelineId('pending_run');
+      setTimelineItems(previous => [
+        ...previous,
+        {
+          kind: 'run_status',
+          id: pendingRunId,
+          label: 'queued',
+          content: JSON.stringify({ status: 'queued' }),
+          source: 'runtime'
+        }
+      ]);
+      const resolvedThread = await resolveThreadIdForPrompt(prompt, effectiveConfig);
+      runThreadId = resolvedThread.threadId;
+      const pendingRunStart = pendingRunStartsByIdRef.current[pendingRunStartId];
+      updatePendingRunStart({
+        id: pendingRunStartId,
+        threadId: resolvedThread.threadId,
+        cancelRequested: pendingRunStart?.cancelRequested ?? false
+      });
+      const runInput: {
+        threadId: string;
+        prompt: string;
+        resumeMode: 'auto';
+        model?: string | null;
+        reasoning?: ComposerRunConfig['reasoning'];
+        draftId?: string;
+        attachmentIds?: string[];
+        submissionMode?: RunSubmissionMode;
+      } = {
+        threadId: resolvedThread.threadId,
+        prompt,
+        resumeMode: 'auto'
+      };
+      if (submissionMode !== undefined) runInput.submissionMode = submissionMode;
+      if (effectiveConfig.model !== null || !resolvedThread.created) {
+        runInput.model = effectiveConfig.model;
+      }
+      if (effectiveConfig.reasoning !== null || !resolvedThread.created) {
+        runInput.reasoning = effectiveConfig.reasoning;
+      }
+      if (attachments.length > 0) {
+        const draftId = attachments[0]!.attachment.draftId;
+        if (draftId === undefined) throw new Error('附件缺少草稿归属，无法发送');
+        runInput.draftId = draftId;
+        runInput.attachmentIds = attachments.map(item => item.attachment.id);
+      }
+      const run = await runService.startThreadRun(runInput);
+      setRunAttachmentsById(previous => ({
+        ...previous,
+        [run.id]: run.attachments ?? attachmentMetadata
+      }));
+      updateTimelineItemsForThread(resolvedThread.threadId, previous => previous.map(item =>
+        item.id === userMessageId && item.kind === 'user_message'
+          ? {
+              ...item,
+              attachments: run.attachments ?? attachmentMetadata,
+              runId: run.id,
+              runStatus: run.status,
+              submissionMode: run.submissionMode ?? submissionMode ?? 'enqueue',
+              queuePosition: run.queuePosition,
+              wasQueued: run.status === 'queued' || item.wasQueued === true
+            }
+          : item
+      ));
+      handleRunStarted(run);
+      void refreshThreadRunState(resolvedThread.threadId);
+      const cancelRequested = pendingRunStartsByIdRef.current[pendingRunStartId]?.cancelRequested === true;
+      removePendingRunStart(pendingRunStartId);
+      if (cancelRequested) {
+        dispatchRunRegistry({
+          type: 'set_cancel_state',
+          runId: run.id,
+          state: 'requested'
+        });
+        await requestRunCancellation(run.id);
+      }
+      subscribeToRunEvents(run.id, resolvedThread.threadId, connectionConfigRef.current);
+      composerAttachmentDraftIdsRef.current.delete(composerAttachmentScope);
+      return true;
+    } catch (error) {
+      if (mountedRef.current) {
+        const item: TimelineItem = {
+          kind: 'diagnostic',
+          id: createTimelineId('runtime_error'),
+          severity: 'error',
+          message: error instanceof Error ? error.message : 'Runtime run failed',
+          content: error instanceof Error ? error.message : String(error),
+          source: 'runtime'
+        };
+        if (runThreadId === undefined) setTimelineItems(previous => [...previous, item]);
+        else appendTimelineItemsForThread(runThreadId, [item]);
+      }
+      return true;
+    } finally {
+      removePendingRunStart(pendingRunStartId);
+    }
+  }
+
+  async function cancelActiveRun() {
+    const pendingStart = findPendingRunStart(
+      pendingRunStartsByIdRef.current,
+      state.selectedThreadId
+    );
+    if (pendingStart !== undefined) {
+      if (!pendingStart.cancelRequested) {
+        updatePendingRunStart({ ...pendingStart, cancelRequested: true });
+      }
+      return;
+    }
+
+    const activeRun = getThreadActiveRun(runRegistry, state.selectedThreadId);
+    if (activeRun === undefined) return;
+    if (getRunCancelState(runRegistry, activeRun.id) === 'requested') return;
+
+    dispatchRunRegistry({
+      type: 'set_cancel_state',
+      runId: activeRun.id,
+      state: 'requested'
+    });
+    await requestRunCancellation(activeRun.id);
+  }
+
+  async function requestRunCancellation(runId: string) {
+    let cancellationError: unknown;
+    try {
+      if (runService === null) throw new Error('本地运行内核已断开，无法停止任务');
+      await runService.cancelRun(runId);
+    } catch (error) {
+      cancellationError = error;
+    }
+    if (cancellationError === undefined) return;
+
+    if (!mountedRef.current) return;
+    const currentRun = runRegistryRef.current.runsById[runId];
+    if (currentRun !== undefined && isTerminalRunStatus(currentRun.status)) return;
+    if (runService !== null) {
+      try {
+        const latestRun = await runService.getRun(runId);
+        if (!mountedRef.current) return;
+        dispatchRunRegistry({ type: 'upsert_run', run: latestRun });
+        if (isTerminalRunStatus(latestRun.status)) return;
+      } catch {
+        // Preserve the original cancellation error when status reconciliation fails.
+      }
+    }
+
+    dispatchRunRegistry({
+      type: 'set_cancel_state',
+      runId,
+      state: 'failed'
+    });
+    const message = getRuntimeErrorMessage(cancellationError, '停止任务失败，请重试');
+    const item: TimelineItem = {
+      kind: 'diagnostic',
+      id: createTimelineId('cancel_error'),
+      runId,
+      severity: 'error',
+      message,
+      content: message,
+      source: 'runtime'
+    };
+    const threadId = runRegistryRef.current.runsById[runId]?.threadId;
+    if (threadId === undefined) setTimelineItems(previous => [...previous, item]);
+    else appendTimelineItemsForThread(threadId, [item]);
+  }
+
+  async function cancelQueuedRun(runId: string) {
+    if (getRunCancelState(runRegistryRef.current, runId) === 'requested') return;
+    dispatchRunRegistry({
+      type: 'set_cancel_state',
+      runId,
+      state: 'requested'
+    });
+    const threadId = runRegistryRef.current.runsById[runId]?.threadId;
+    await requestRunCancellation(runId);
+    if (threadId !== undefined) await refreshThreadRunState(threadId);
+  }
+
+  async function steerQueuedRun(runId: string) {
+    const threadId = runRegistryRef.current.runsById[runId]?.threadId;
+    try {
+      if (runService === null) throw new Error('本地运行内核已断开，无法调整等待任务');
+      await runService.steerRun(runId);
+      if (threadId !== undefined) await refreshThreadRunState(threadId);
+    } catch (error) {
+      const message = getRuntimeErrorMessage(error, '调整等待任务失败，请重试');
+      const item: TimelineItem = {
+        kind: 'diagnostic',
+        id: createTimelineId('steer_error'),
+        runId,
+        severity: 'error',
+        message,
+        content: message,
+        source: 'runtime'
+      };
+      if (threadId === undefined) setTimelineItems(previous => [...previous, item]);
+      else appendTimelineItemsForThread(threadId, [item]);
+    }
+  }
+
+  async function resolveThreadIdForPrompt(
+    prompt: string,
+    config: ComposerRunConfig
+  ): Promise<{ threadId: string; created: boolean }> {
+    if (state.selectedThreadId !== undefined) return { threadId: state.selectedThreadId, created: false };
+    if (threadService === null) throw new Error('Thread service is not available');
+
+    if (currentProject === undefined) {
+      throw new Error('请先添加项目');
+    }
+    const created = await threadService.createThread(
+      buildThreadRequest(prompt, currentProject, config)
+    );
+    setRuntimeThreads(previous => upsertThread(previous, created.thread));
+    skipNextHistoryLoadForThreadRef.current = created.thread.id;
+    navigationPersistenceReadyRef.current = true;
+    adoptCurrentTimelineForThread(created.thread.id);
+    dispatch({ type: 'select_thread', threadId: created.thread.id });
+    navigateToRoute({ view: 'thread', threadId: created.thread.id });
+    return { threadId: created.thread.id, created: true };
+  }
+
+  function handleRunStarted(run: RunResponse) {
+    dispatchRunRegistry({ type: 'upsert_run', run });
+    const item: TimelineItem = {
+      kind: 'run_status',
+      id: createTimelineId('run'),
+      runId: run.id,
+      label: run.status,
+      content: JSON.stringify(run),
+      source: 'runtime'
+    };
+    if (run.threadId === undefined) setTimelineItems(previous => [...previous, item]);
+    else appendTimelineItemsForThread(run.threadId, [item]);
+  }
+
+  async function refreshThreadRunState(threadId: string) {
+    if (threadService === null) return;
+    const knownRunIdsAtRequestStart = [
+      ...(runRegistryRef.current.runIdsByThreadId[threadId] ?? [])
+    ];
+    try {
+      const response = await threadService.listThreadRuns(threadId);
+      if (!mountedRef.current) return;
+      const runsById = new Map(response.runs.map(run => [run.id, run]));
+      dispatchRunRegistry({
+        type: 'merge_thread_runs',
+        threadId,
+        knownRunIdsAtRequestStart,
+        runs: response.runs
+      });
+      updateTimelineItemsForThread(threadId, items => items.map(item => {
+        if (item.kind !== 'user_message' || item.runId === undefined) return item;
+        const run = runsById.get(item.runId);
+        if (run === undefined) return item;
+        if (
+          item.runStatus !== undefined
+          && isTerminalRunStatus(item.runStatus)
+          && !isTerminalRunStatus(run.status)
+        ) {
+          return item;
+        }
+        return {
+          ...item,
+          runStatus: run.status,
+          submissionMode: run.submissionMode,
+          queuePosition: run.queuePosition
+        };
+      }));
+    } catch {
+      // SSE and the local registry remain the fallback when a refresh request fails.
+    }
+  }
+
+  async function refreshScheduleDraftBinding(threadId: string) {
+    const current = runtimeThreadsRef.current.find(thread => thread.id === threadId);
+    if (current?.purpose !== 'schedule_draft') return;
+
+    const activeThreadService = threadServiceRef.current;
+    const activeScheduleService = scheduleServiceRef.current;
+    if (activeThreadService === null || activeScheduleService === null) return;
+
+    try {
+      const [threadResponse, scheduleResponse] = await Promise.all([
+        activeThreadService.getThread(threadId),
+        activeScheduleService.listSchedules()
+      ]);
+      if (
+        !mountedRef.current
+        || threadServiceRef.current !== activeThreadService
+        || scheduleServiceRef.current !== activeScheduleService
+      ) {
+        return;
+      }
+      setRuntimeThreads(previous => upsertThread(previous, threadResponse.thread));
+      setRuntimeSchedules(scheduleResponse.schedules);
+    } catch {
+      // The draft stays usable when terminal-state reconciliation is unavailable.
+    }
+  }
+
+  function stopAllRunEventSubscriptions(markDisconnected = true) {
+    const activeControllers = [...runEventControllersRef.current.entries()];
+    runEventControllersRef.current.clear();
+    for (const [runId, subscription] of activeControllers) {
+      subscription.controller.stop();
+      if (!markDisconnected || !mountedRef.current) continue;
+      const run = runRegistryRef.current.runsById[runId];
+      if (run?.status !== 'running' && run?.status !== 'queued') continue;
+      dispatchRunRegistry({
+        type: 'set_subscription_state',
+        runId,
+        state: 'disconnected'
+      });
+    }
+  }
+
+  function subscribeToRunEvents(
+    runId: string,
+    threadId: string,
+    config: ConnectionConfig
+  ) {
+    if (runEventControllersRef.current.has(runId)) return;
+
+    const fromSeq = runRegistryRef.current.lastSeqByRunId[runId] ?? 0;
+    const replayUntilSeq = Math.max(
+      fromSeq,
+      runRegistryRef.current.runsById[runId]?.lastEventSeq ?? fromSeq
+    );
+    const cachedTimelineItems = timelineItemsByThreadIdRef.current[threadId]
+      ?? (timelineThreadIdRef.current === threadId ? timelineItemsRef.current : []);
+    const replayDeduper = replayUntilSeq > fromSeq
+      ? createRunReplayDeduper(cachedTimelineItems)
+      : undefined;
+    const controller = createRunEventController({
+      subscribe: subscribeRunEvents
+    });
+    runEventControllersRef.current.set(runId, { threadId, controller });
+    const isCurrentSubscription = () => (
+      mountedRef.current
+      && runEventControllersRef.current.get(runId)?.controller === controller
+    );
+
+    controller.start({
+      ...config,
+      runId,
+      fromSeq,
+      fetchImpl: runtimeFetch,
+      onStateChange(state) {
+        if (!isCurrentSubscription()) return;
+        dispatchRunRegistry({
+          type: 'set_subscription_state',
+          runId,
+          state: mapRunEventControllerState(state)
+        });
+      },
+      onEvent(event) {
+        if (!isCurrentSubscription()) return;
+        dispatchRunRegistry({ type: 'record_event', event });
+        if (event.type === 'status') {
+          updateTimelineItemsForThread(threadId, items => items.map(item =>
+            item.kind === 'user_message' && item.runId === event.runId
+              ? {
+                  ...item,
+                  runStatus: event.payload.label === 'queued' ? 'queued' : 'running',
+                  wasQueued: event.payload.label === 'queued' || item.wasQueued === true,
+                  ...(event.payload.label === 'queued' ? {} : { queuePosition: undefined })
+                }
+              : item
+          ));
+        } else if (event.type === 'done') {
+          updateTimelineItemsForThread(threadId, items => items.map(item =>
+            item.kind === 'user_message' && item.runId === event.runId
+              ? {
+                  ...item,
+                  runStatus: event.payload.status,
+                  queuePosition: undefined
+                }
+              : item
+          ));
+        }
+        const item = eventToTimelineItem(event);
+        if (
+          item !== null
+          && (
+            event.seq > replayUntilSeq
+            || replayDeduper === undefined
+            || replayDeduper.shouldAppend(item)
+          )
+        ) {
+          const timelineBatcher = getTimelineEventBatcher(threadId);
+          timelineBatcher.push(item);
+          if (event.type === 'approval') {
+            timelineBatcher.flush();
+          }
+        }
+        if (event.type === 'done') {
+          runEventControllersRef.current.delete(runId);
+          controller.stop();
+          getTimelineEventBatcher(threadId).flush();
+          void loadRunDiagnostics(event.runId);
+          void refreshThreadRunState(threadId);
+          void refreshScheduleDraftBinding(threadId);
+        }
+      },
+      onError(error) {
+        if (!isCurrentSubscription()) return;
+        dispatchRunRegistry({
+          type: 'set_subscription_state',
+          runId,
+          state: 'disconnected'
+        });
+        getTimelineEventBatcher(threadId).push({
+          kind: 'diagnostic',
+          id: createTimelineId('sse_error'),
+          runId,
+          severity: 'error',
+          message: error.message,
+          content: error.message,
+          source: 'runtime'
+        });
+        getTimelineEventBatcher(threadId).flush();
+      }
+    });
+  }
+
+  async function loadRunDiagnostics(runId: string) {
+    if (diagnosticsService === null) return;
+    try {
+      const diagnostics = await diagnosticsService.getRunDiagnostics(runId);
+      if (!mountedRef.current) return;
+      setRunDiagnosticsById(previous => ({ ...previous, [runId]: diagnostics }));
+    } catch {
+      return;
+    }
+  }
+
+  async function loadRunContext(runId: string) {
+    if (memoryService === null) return;
+    try {
+      const context = await memoryService.getRunContext(runId);
+      if (!mountedRef.current) return;
+      setRunContextById(previous => ({ ...previous, [runId]: context }));
+    } catch {
+      if (!mountedRef.current) return;
+      setRunContextById(previous => ({
+        ...previous,
+        [runId]: { runId, items: [] }
+      }));
+    }
+  }
+
+  function openRunDetail(runId: string) {
+    dispatch({ type: 'select_run_detail', runId });
+    void loadRunDiagnostics(runId);
+    void loadRunContext(runId);
+    void runService?.getRun(runId).then(run => {
+      if (!mountedRef.current) return;
+      setRunAttachmentsById(previous => ({
+        ...previous,
+        [runId]: run.attachments ?? []
+      }));
+    }).catch(() => undefined);
+  }
+
+  async function saveMemorySuggestion(input: CreateMemoryRequest) {
+    if (memoryService === null) throw new Error('记忆服务暂不可用');
+    await memoryService.createMemory(input);
+  }
+
+  async function openScheduleTask(
+    threadId: string,
+    runId?: string,
+    options: { updateRoute?: boolean; approvalId?: string } = {}
+  ): Promise<boolean> {
+    let thread = runtimeThreads.find(item => item.id === threadId);
+    if (thread === undefined && threadService !== null) {
+      try {
+        const response = await threadService.getThread(threadId);
+        if (!mountedRef.current) return false;
+        thread = response.thread;
+        setRuntimeThreads(previous => upsertThread(previous, response.thread));
+      } catch {
+        if (mountedRef.current) setThreadLoadError('无法打开任务对应的会话');
+        return false;
+      }
+    }
+    if (thread === undefined) return false;
+
+    closeMobileSidebar();
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    setThreadLoadError(undefined);
+    setThreadConfigUpdateError(undefined);
+    setSearchHistoryTarget(undefined);
+    setTimelineRunTarget(
+      runId === undefined ? undefined : { threadId: thread.id, runId }
+    );
+    setTimelineApprovalTarget(
+      options.approvalId === undefined
+        ? undefined
+        : { threadId: thread.id, approvalId: options.approvalId }
+    );
+    setHistoryLoadingThreadId(thread.id);
+    setHistoryLoadedThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+    showTimelineForThread(thread.id, [], false);
+    if (
+      thread.purpose === 'conversation'
+      && thread.projectId !== null
+      && thread.projectId !== state.currentProjectId
+    ) {
+      dispatch({ type: 'set_current_project', projectId: thread.projectId });
+    }
+    dispatch({ type: 'select_thread', threadId: thread.id });
+    if (options.updateRoute !== false) {
+      navigateToRoute({
+        view: 'thread',
+        threadId: thread.id,
+        ...(runId === undefined ? {} : { runId }),
+        ...(options.approvalId === undefined
+          ? {}
+          : { approvalId: options.approvalId })
+      });
+    }
+    setThreadHistoryReloadKey(previous => previous + 1);
+    return true;
+  }
+
+  function handleScheduleChanged(schedule: ScheduleResponse) {
+    setRuntimeSchedules(previous => upsertSchedule(previous, schedule));
+  }
+
+  function handleScheduleDeleted(schedule: ScheduleResponse) {
+    setRuntimeSchedules(previous => previous.filter(item => item.id !== schedule.id));
+    setRuntimeThreads(previous => previous.filter(item => item.id !== schedule.threadId));
+  }
+
+  async function runScheduleNow(schedule: ScheduleResponse) {
+    const alreadyOpen =
+      state.activeView === 'conversation'
+      && state.selectedThreadId === schedule.threadId;
+    const opened = alreadyOpen || await openScheduleTask(schedule.threadId);
+    if (!opened) throw new Error('无法打开任务对应的会话');
+    if (alreadyOpen) {
+      setTimelineRunTarget(undefined);
+      setTimelineApprovalTarget(undefined);
+      navigateToRoute({ view: 'thread', threadId: schedule.threadId });
+    }
+
+    try {
+      if (scheduleService === null) {
+        throw new Error('本地服务暂不可用，无法立即运行任务');
+      }
+      const response = await scheduleService.runNow(schedule.id);
+      handleScheduleChanged(response.schedule);
+      if (response.run !== null) {
+        const run: RunResponse = {
+          ...response.run,
+          threadId: response.run.threadId ?? schedule.threadId
+        };
+        handleRunStarted(run);
+        void refreshThreadRunState(schedule.threadId);
+        if (connectionConfigRef.current !== null) {
+          subscribeToRunEvents(run.id, schedule.threadId, connectionConfigRef.current);
+        }
+        return;
+      }
+
+      const message = response.queued
+        ? '本次运行已排队，会在当前任务结束后执行'
+        : response.skipped
+          ? '已有任务在运行，本次已跳过'
+          : undefined;
+      if (message !== undefined) {
+        appendTimelineItemsForThread(schedule.threadId, [
+          {
+            kind: 'assistant_message',
+            id: createTimelineId('schedule_run_status'),
+            text: message,
+            source: 'runtime'
+          }
+        ]);
+      }
+    } catch (error) {
+      const message = getRuntimeErrorMessage(error, '无法立即运行任务');
+      appendTimelineItemsForThread(schedule.threadId, [
+        {
+          kind: 'diagnostic',
+          id: createTimelineId('schedule_run_failed'),
+          severity: 'error',
+          message,
+          content: message,
+          source: 'runtime'
+        }
+      ]);
+      throw error;
+    }
+  }
+
+  async function openScheduleCreationConversation() {
+    const activeThreadService = threadService;
+    if (activeThreadService === null) {
+      throw new Error('本地服务暂不可用，无法创建对话');
+    }
+
+    const generation = skillMarketRuntimeGenerationRef.current;
+      const created = await activeThreadService.createThread(
+      {
+        title: SCHEDULE_DRAFT_TITLE,
+        workspaceMode: 'managed',
+        profile: 'default',
+        sandbox: 'workspace-write',
+        purpose: 'schedule_draft'
+      }
+    );
+    if (!isCurrentThreadRuntime(generation, activeThreadService)) return;
+
+    closeMobileSidebar();
+    setRuntimeThreads(previous => upsertThread(previous, created.thread));
+    showTimelineForThread(created.thread.id, [], true);
+    setThreadHistoryLoadError(undefined);
+    setHistoryLoadingThreadId(undefined);
+    setHistoryLoadedThreadId(created.thread.id);
+    setRunsLoadedThreadId(undefined);
+    setThreadConfigUpdateError(undefined);
+    skipNextHistoryLoadForThreadRef.current = created.thread.id;
+    allowInitialRuntimeProjectFocusRef.current = false;
+    dispatch({ type: 'select_thread', threadId: created.thread.id });
+    navigateToRoute({ view: 'thread', threadId: created.thread.id });
+    nextComposerDraftIdRef.current += 1;
+    setPendingComposerDraft({
+      threadId: created.thread.id,
+      request: {
+        id: nextComposerDraftIdRef.current,
+        text: SCHEDULE_CREATION_DRAFT
+      }
+    });
+  }
+
+  async function openTask(task: TaskItem) {
+    markTaskRead(task.id);
+    const threadId = task.threadId;
+    if (threadId === undefined) {
+      openRunDetail(task.runId);
+      return;
+    }
+    if (task.pendingApproval?.status === 'pending') {
+      await openScheduleTask(threadId, task.runId, {
+        approvalId: task.pendingApproval.id
+      });
+      return;
+    }
+
+    let thread = runtimeThreads.find(item => item.id === threadId);
+    if (thread === undefined && threadService !== null) {
+      try {
+        const response = await threadService.getThread(threadId);
+        if (!mountedRef.current) return;
+        thread = response.thread;
+        setRuntimeThreads(previous => upsertThread(previous, response.thread));
+      } catch {
+        setThreadLoadError('无法打开任务对应的会话');
+        return;
+      }
+    }
+    if (thread === undefined) return;
+
+    closeMobileSidebar();
+    allowInitialRuntimeProjectFocusRef.current = false;
+    navigationPersistenceReadyRef.current = true;
+    setThreadLoadError(undefined);
+    setThreadConfigUpdateError(undefined);
+    setSearchHistoryTarget(undefined);
+    setTimelineApprovalTarget(undefined);
+    setHistoryLoadingThreadId(thread.id);
+    setHistoryLoadedThreadId(undefined);
+    setRunsLoadedThreadId(undefined);
+    showTimelineForThread(thread.id, [], false);
+    if (
+      thread.purpose === 'conversation'
+      && thread.projectId !== null
+      && thread.projectId !== state.currentProjectId
+    ) {
+      dispatch({ type: 'set_current_project', projectId: thread.projectId });
+    }
+    dispatch({ type: 'select_thread', threadId: thread.id });
+    navigateToRoute({ view: 'thread', threadId: thread.id });
+    setThreadHistoryReloadKey(previous => previous + 1);
+    openRunDetail(task.runId);
+  }
+
+  function markTaskRead(taskId: string) {
+    setUnreadTaskIds(current => {
+      if (!current.has(taskId)) return current;
+      const next = new Set(current);
+      next.delete(taskId);
+      notificationService.setUnreadIds(next);
+      return next;
+    });
+  }
+
+  function markThreadTasksRead(threadId: string) {
+    const taskIds = new Set(
+      runtimeTasks
+        .filter(task => task.threadId === threadId)
+        .map(task => task.id)
+    );
+    if (taskIds.size === 0) return;
+    setUnreadTaskIds(current => {
+      const next = new Set(current);
+      let changed = false;
+      for (const taskId of taskIds) {
+        changed = next.delete(taskId) || changed;
+      }
+      if (!changed) return current;
+      notificationService.setUnreadIds(next);
+      return next;
+    });
+  }
+
+  function clearUnreadTasks() {
+    const next = new Set<string>();
+    notificationService.setUnreadIds(next);
+    setUnreadTaskIds(next);
+  }
+
+  async function enableTaskNotifications() {
+    setNotificationSettings(await notificationService.enable());
+  }
+
+  function disableTaskNotifications() {
+    setNotificationSettings(notificationService.disable());
+  }
+
+  function openTimelineFile(path: string) {
+    const workspacePath = toWorkspaceRelativePath(path, selectedThread);
+    dispatch({ type: 'select_workspace_file', path: workspacePath });
+    navigateToRoute({
+      view: 'files',
+      ...(state.selectedThreadId === undefined ? {} : { threadId: state.selectedThreadId }),
+      path: workspacePath
+    });
+  }
+
+  async function saveCurrentFile() {
+    if (currentFile === undefined) return;
+    if (savingFilePathsRef.current.has(currentFile.path)) return;
+
+    const saveSnapshot = { path: currentFile.path, content: selectedDraftContent };
+    bumpFileRevision(saveSnapshot.path);
+    setFileSaving(saveSnapshot.path, true);
+    setSaveErrorByPath(previous => ({ ...previous, [saveSnapshot.path]: undefined }));
+
+    try {
+      const savedFile = await fileService.saveFile(saveSnapshot.path, saveSnapshot.content);
+
+      if (!mountedRef.current) return;
+
+      bumpFileRevision(saveSnapshot.path);
+      const nextSavedFiles = { ...savedFileByPathRef.current, [saveSnapshot.path]: savedFile };
+      savedFileByPathRef.current = nextSavedFiles;
+      setSavedFileByPath(nextSavedFiles);
+      if (draftContentByPathRef.current[saveSnapshot.path] === saveSnapshot.content) {
+        const nextDrafts = { ...draftContentByPathRef.current, [saveSnapshot.path]: savedFile.content };
+        draftContentByPathRef.current = nextDrafts;
+        setDraftContentByPath(nextDrafts);
+      }
+    } catch {
+      if (mountedRef.current) {
+        setSaveErrorByPath(previous => ({ ...previous, [saveSnapshot.path]: '保存到本地草稿失败' }));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setFileSaving(saveSnapshot.path, false);
+      } else {
+        savingFilePathsRef.current.delete(saveSnapshot.path);
+      }
+    }
+  }
+
+  function updateConversationPaneWidth(clientX: number) {
+    const layout = conversationFileLayoutRef.current;
+    if (!layout) return;
+
+    const rect = layout.getBoundingClientRect();
+    setConversationPaneWidth(clampPaneWidth(
+      clientX - rect.left,
+      CONVERSATION_PANE_MIN_WIDTH,
+      Math.max(
+        CONVERSATION_PANE_MIN_WIDTH,
+        rect.width - FILE_WORKSPACE_MIN_WIDTH - CONVERSATION_FILE_RESIZE_HANDLE_WIDTH
+      )
+    ));
+  }
+
+  function adjustConversationPaneWidth(delta: number) {
+    const layout = conversationFileLayoutRef.current;
+    const rect = layout?.getBoundingClientRect();
+    const fallbackWidth = rect
+      ? Math.round(rect.width * 0.6) - CONVERSATION_FILE_RESIZE_HANDLE_WIDTH
+      : 760;
+    const maxWidth = rect
+      ? Math.max(
+          CONVERSATION_PANE_MIN_WIDTH,
+          rect.width - FILE_WORKSPACE_MIN_WIDTH - CONVERSATION_FILE_RESIZE_HANDLE_WIDTH
+        )
+      : 760;
+
+    setConversationPaneWidth((previous) => clampPaneWidth(
+      (previous ?? fallbackWidth) + delta,
+      CONVERSATION_PANE_MIN_WIDTH,
+      maxWidth
+    ));
+  }
+
+  function handleConversationResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    beginPaneResize(event, updateConversationPaneWidth);
+  }
+
+  function handleConversationResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      adjustConversationPaneWidth(-RESIZE_KEY_STEP);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      adjustConversationPaneWidth(RESIZE_KEY_STEP);
+    }
+  }
+
+  const detailPanel = createDetailPanel();
+  const selectedRunsLoading = runsLoadingThreadId !== undefined
+    && runsLoadingThreadId === state.selectedThreadId;
+  const conversationNeedsProject =
+    selectedThread === undefined || selectedThread.purpose === 'conversation';
+  const composerDisabled = (
+    conversationNeedsProject && currentProject === undefined
+  )
+    || selectedPendingRunStart !== undefined
+    || selectedRunsLoading
+    || connectionState.status !== 'connected';
+  const composerDisabledReason = connectionState.status !== 'connected'
+    ? '正在连接本地运行内核'
+    : projectLoadError !== undefined
+      ? projectLoadError
+      : conversationNeedsProject && currentProject === undefined
+        ? '请先添加项目'
+        : currentRunCanceling
+          ? '正在停止任务'
+          : selectedPendingRunStart !== undefined
+            ? '正在提交任务'
+            : '正在检查会话任务';
+  const fileWorkspaceOpen = state.activeView === 'conversation' && state.rightPanelMode === 'file';
+  const workspaceNeedsCompactSidebar = useMediaQuery(WORKSPACE_AUTO_COLLAPSE_MEDIA_QUERY);
+  const sidebarAutoCollapsed = fileWorkspaceOpen
+    && !sidebarCollapsed
+    && workspaceNeedsCompactSidebar;
+  const effectiveSidebarCollapsed = sidebarCollapsed || sidebarAutoCollapsed;
+  const effectiveComposerConfig = selectedThread === undefined
+    ? composerRunConfig ?? defaultComposerRunConfig(
+        currentProject,
+        defaultPermission,
+        recentComposerModelConfig
+      )
+    : {
+        permission: fromRuntimeSandbox(selectedThread.sandbox),
+        profile: selectedThread.profile,
+        model: recentComposerModelConfig === null
+          ? selectedThread.model ?? null
+          : recentComposerModelConfig.model,
+        reasoning: (recentComposerModelConfig === null
+          ? selectedThread.reasoning ?? null
+          : recentComposerModelConfig.reasoning) as ComposerRunConfig['reasoning']
+      };
+  const conversationFileLayoutStyle = conversationPaneWidth === undefined
+    ? undefined
+    : ({ '--conversation-pane-width': `${conversationPaneWidth}px` } as CSSProperties);
+  useEffect(() => {
+    if (
+      historyLoadingThreadId === undefined
+      || historyLoadingThreadId !== state.selectedThreadId
+      || timelineItems.length > 0
+    ) {
+      setHistoryLoadingOverlayThreadId(undefined);
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setHistoryLoadingOverlayThreadId(historyLoadingThreadId);
+    }, HISTORY_LOADING_DELAY_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [historyLoadingThreadId, state.selectedThreadId, timelineItems.length]);
+  const showHistoryLoadingOverlay =
+    historyLoadingOverlayThreadId !== undefined
+    && historyLoadingOverlayThreadId === state.selectedThreadId;
+  function handleComposerWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (canScrollVertically(event.target, event.currentTarget, event.deltaY)) return;
+    if (timelineRef.current?.scrollBy(event.deltaY) !== true) return;
+    event.preventDefault();
+  }
+  const conversationEmpty = timelineItems.length === 0;
+  const conversationHistoryPending =
+    state.selectedThreadId !== undefined
+    && historyLoadedThreadId !== state.selectedThreadId;
+  const conversationConfirmedEmpty = conversationEmpty && !conversationHistoryPending;
+  const conversationFilePaths = useMemo(() => (
+    collectConversationFilePaths(timelineItems)
+      .map(path => toWorkspaceRelativePath(path, selectedThread))
+      .filter(path => path.length > 0)
+  ), [selectedThread, timelineItems]);
+  const showConversationEmptyState = conversationConfirmedEmpty
+    && (
+      selectedThread === undefined
+      || selectedThread.purpose === 'conversation'
+      || selectedThread.purpose === 'knowledge_conversation'
+    );
+  const showConversationHeader = selectedThread !== undefined
+    || selectedScheduleTask !== undefined
+    || selectedConversation !== undefined;
+  const conversationTitle = selectedConversation?.title
+    ?? selectedScheduleTask?.name
+    ?? selectedThread?.title
+    ?? '新对话';
+  const conversationTaskToolbar =
+    selectedScheduleTask?.bindingStatus === 'ready'
+    && selectedSchedule !== undefined
+    && selectedSidebarTask !== undefined
+    && scheduleService !== null ? (
+      <Suspense fallback={<div className="schedule-thread-header" aria-hidden="true" />}>
+        <ScheduleThreadHeader
+          schedule={selectedSchedule}
+          status={selectedSidebarTask.status}
+          nextRunLabel={selectedSidebarTask.nextRunLabel}
+          service={scheduleService}
+          projects={projects}
+          profiles={codexProfiles?.profiles}
+          onRunNow={runScheduleNow}
+          onScheduleChanged={handleScheduleChanged}
+        />
+      </Suspense>
+    ) : undefined;
+  const useIntegratedConversationTitleBar =
+    integratedTitleBar?.integratedTitleBar === true
+    && state.activeView === 'conversation'
+    && showConversationHeader;
+  const conversationHeader = showConversationHeader ? (
+    <ConversationHeader
+      title={conversationTitle}
+      taskToolbar={
+        useIntegratedConversationTitleBar ? undefined : conversationTaskToolbar
+      }
+      fileWorkspaceOpen={fileWorkspaceOpen}
+      onOpenLocation={() => {
+        if (fileWorkspaceOpen) {
+          closeFileWorkspace();
+          return;
+        }
+        openPrimaryView('files');
+      }}
+    />
+  ) : undefined;
+  const pendingComposerApproval = [...timelineItems].reverse().find(item => (
+    item.kind === 'approval' && item.approval.status === 'pending'
+  ));
+  const conversationPage = (
+    <section
+      className={[
+        'conversation-page',
+        showConversationEmptyState ? 'is-empty' : undefined,
+        !useIntegratedConversationTitleBar && showConversationHeader
+          ? 'has-header'
+          : undefined,
+        useIntegratedConversationTitleBar ? 'has-integrated-header' : undefined,
+        useIntegratedConversationTitleBar && conversationTaskToolbar !== undefined
+          ? 'has-task-strip'
+          : undefined
+      ].filter(Boolean).join(' ')}
+    >
+      {useIntegratedConversationTitleBar ? null : conversationHeader}
+      {useIntegratedConversationTitleBar && conversationTaskToolbar !== undefined ? (
+        <div className="conversation-task-strip conversation-task-strip--standalone">
+          {conversationTaskToolbar}
+        </div>
+      ) : null}
+      <div className="conversation-body">
+        {treeLoadError ? <p className="inline-error">{treeLoadError}</p> : null}
+        {projectLoadError ? <p className="inline-error">{projectLoadError}</p> : null}
+        {threadLoadError ? <p className="inline-error">{threadLoadError}</p> : null}
+        {threadHistoryLoadError ? <p className="inline-error">{threadHistoryLoadError}</p> : null}
+        {threadConfigUpdateError ? (
+          <div className="conversation-toast" role="alert">
+            {threadConfigUpdateError}
+          </div>
+        ) : null}
+        {showConversationEmptyState ? (
+          <ConversationEmptyState
+            nickname={
+              enterpriseSession.status === 'signed_in'
+                ? enterpriseSession.account?.name
+                : undefined
+            }
+          />
+        ) : (
+          <Timeline
+            ref={timelineRef}
+            key={state.selectedThreadId ?? 'draft'}
+            items={timelineItems}
+            hasMore={threadHistory.hasMore}
+            loadingOlder={threadHistory.loadingOlder}
+            targetItemId={
+              searchHistoryTarget !== undefined
+              && searchHistoryTarget.threadId === state.selectedThreadId
+                ? searchHistoryTarget.itemId
+                : undefined
+            }
+            targetRunId={
+              timelineRunTarget !== undefined
+              && timelineRunTarget.threadId === state.selectedThreadId
+                ? timelineRunTarget.runId
+                : undefined
+            }
+            targetApprovalId={
+              timelineApprovalTarget !== undefined
+              && timelineApprovalTarget.threadId === state.selectedThreadId
+                ? timelineApprovalTarget.approvalId
+                : undefined
+            }
+            onLoadOlder={threadHistory.loadOlder}
+            onOpenFile={openTimelineFile}
+            onEditUserMessage={editUserMessage}
+            resolvingApprovalIds={resolvingApprovalIds}
+            approvalErrors={approvalErrors}
+            onApproveApproval={(id) => void resolveApproval(id, 'approve')}
+            onRejectApproval={(id) => void resolveApproval(id, 'reject')}
+          />
+        )}
+        {showHistoryLoadingOverlay ? (
+          <div className="conversation-history-loading" role="status" aria-label="正在加载会话历史">
+            <span>正在加载会话历史...</span>
+          </div>
+        ) : null}
+      </div>
+      <div className="composer-wrap" onWheel={handleComposerWheel}>
+        {pendingComposerApproval?.kind === 'approval' ? (
+          <div
+            className="composer-approval-overlay"
+            data-search-target={
+              timelineApprovalTarget?.approvalId === pendingComposerApproval.approval.id
+                ? 'true'
+                : undefined
+            }
+          >
+            <ApprovalPanel
+              approval={pendingComposerApproval.approval}
+              resolving={resolvingApprovalIds.has(pendingComposerApproval.approval.id)}
+              error={approvalErrors[pendingComposerApproval.approval.id]}
+              onApprove={id => void resolveApproval(id, 'approve')}
+              onReject={id => void resolveApproval(id, 'reject')}
+            />
+          </div>
+        ) : null}
+        {pendingMemorySuggestion !== undefined && memoryService !== null ? (
+          <MemorySuggestion
+            key={pendingMemorySuggestion.id}
+            content={pendingMemorySuggestion.content}
+            projectKey={currentMemoryProjectKey}
+            threadKey={state.selectedThreadId}
+            onSave={saveMemorySuggestion}
+            onDismiss={() => setPendingMemorySuggestion(undefined)}
+          />
+        ) : null}
+        <Composer
+          key={composerAttachmentScope}
+          projectId={currentProject?.id ?? ''}
+          projectName={currentProjectName}
+          projects={projects}
+          showProjectSelector={shouldShowComposerProjectSelector({
+            conversationEmpty: conversationConfirmedEmpty,
+            threadPurpose: selectedThread?.purpose
+          })}
+          permission={effectiveComposerConfig.permission}
+          profile={effectiveComposerConfig.profile}
+          model={effectiveComposerConfig.model}
+          reasoning={effectiveComposerConfig.reasoning}
+          models={codexModels?.models}
+          modelsLoading={codexModelsLoading}
+          modelsError={codexModelsLoadError}
+          modelsNotice={codexModelsNotice}
+          disabled={composerDisabled}
+          disabledReason={composerDisabledReason}
+          running={currentRunBusy}
+          canceling={currentRunCanceling}
+          permissionChangeDisabled={selectedThread !== undefined && currentRunBusy}
+          modelChangeDisabled={currentRunBusy}
+          slashCommands={slashCommands}
+          slashCommandsLoading={capabilitiesLoading}
+          slashCommandsError={capabilitiesLoadError}
+          connectors={composerConnectors}
+          connectorsLoading={capabilitiesLoading && codexMcp === undefined}
+          connectorsError={codexMcp === undefined ? capabilitiesLoadError : undefined}
+          onToggleConnector={mcpService === null ? undefined : toggleComposerConnector}
+          queuedItems={composerQueuedItems}
+          imageInputSupported={imageInputSupported}
+          imageInputUnsupportedReason={
+            imageInputSupported
+              ? undefined
+              : '当前 Codex 版本不支持图片输入，请更新 Codex'
+          }
+          draftRequest={
+            pendingComposerDraft !== undefined && pendingComposerDraft.threadId === state.selectedThreadId
+              ? pendingComposerDraft.request
+              : undefined
+          }
+          skillRequest={
+            pendingComposerSkill !== undefined
+            && pendingComposerSkill.projectId === state.currentProjectId
+            && pendingComposerSkill.threadId === state.selectedThreadId
+              ? pendingComposerSkill.request
+              : undefined
+          }
+          focusRequestId={pendingComposerFocusRequestId}
+          onSelectProject={selectProject}
+          onCreateBlankProject={
+            projectService === null
+              ? undefined
+              : createBlankProject
+          }
+          onSelectProjectSourceDirectory={
+            projectService === null
+              ? undefined
+              : selectCreateProjectSourceDirectory
+          }
+          onAddProjectDirectory={
+            projectService === null
+              ? undefined
+              : addProjectDirectory
+          }
+          onPermissionChange={handleComposerPermissionChange}
+          onModelConfigChange={handleComposerModelConfigChange}
+          initialPrompt={composerPromptByScope[composerAttachmentScope] ?? ''}
+          onPromptChange={handleComposerPromptChange}
+          onDraftApplied={handleComposerDraftApplied}
+          onSkillApplied={handleComposerSkillApplied}
+          onFocusRequestApplied={handleComposerFocusRequestApplied}
+          onManageSkills={() => navigateToRoute({ view: 'plugins' })}
+          onManageConnectors={() => openPrimaryView('connections')}
+          onCancel={() => void cancelActiveRun()}
+          onCancelQueuedRun={(runId) => void cancelQueuedRun(runId)}
+          onSteerQueuedRun={(runId) => void steerQueuedRun(runId)}
+          onUploadAttachment={async file => {
+            if (attachmentService === null) throw new Error('附件服务暂不可用');
+            const response = await attachmentService.upload({
+              file,
+              draftId: composerAttachmentDraftId
+            });
+            return response.attachment;
+          }}
+          onDeleteAttachment={async attachment => {
+            if (attachmentService === null || attachment.draftId === undefined) return;
+            await attachmentService.delete({
+              id: attachment.id,
+              draftId: attachment.draftId
+            });
+          }}
+          onSubmit={submitPrompt}
+        />
+        {conversationConfirmedEmpty ? (
+          <ConversationStarterTags
+            busySkillName={starterSkillBusyName}
+            error={starterSkillError}
+            onOpenDashboard={() => {
+              setStarterSkillError(undefined);
+              openPrimaryView('dashboard');
+            }}
+            onLoadSkill={(skillName) => void loadStarterSkill(skillName)}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+  const conversationWorkspace = fileWorkspaceOpen ? (
+    <section
+      className="conversation-file-layout"
+      aria-label="会话和文件工作区"
+      ref={conversationFileLayoutRef}
+      style={conversationFileLayoutStyle}
+    >
+      {conversationPage}
+      <div
+        className="pane-resize-handle conversation-file-resize-handle"
+        role="separator"
+        aria-label="调整会话和文件区域宽度"
+        aria-orientation="vertical"
+        aria-valuenow={conversationPaneWidth}
+        tabIndex={0}
+        onMouseDown={handleConversationResizeMouseDown}
+        onKeyDown={handleConversationResizeKeyDown}
+      />
+      <FilesPage
+        selectedThread={selectedThread}
+        selectedPath={state.workspaceTargetPath}
+        conversationPaths={conversationFilePaths}
+        workspaceFileService={workspaceFileService}
+        onClose={closeFileWorkspace}
+        onSelectPath={selectWorkspaceFile}
+        onOpenExternal={(url) => void hostBridge.openExternal(url)}
+      />
+    </section>
+  ) : conversationPage;
+  const main = props.capabilitiesView !== undefined ? (
+    <CapabilitiesPage {...props.capabilitiesView} />
+  ) : state.activeView === 'search' ? (
+    <SearchPage
+      connected={connectionState.status === 'connected'}
+      service={searchService}
+      projects={projects}
+      recentThreads={visibleRuntimeThreads.filter(thread => (
+        thread.purpose === 'conversation' && thread.projectId !== null
+      ))}
+      onOpenResult={result => void openSearchResult(result)}
+    />
+  ) : state.activeView === 'schedules' ? (
+    <SchedulesPage
+      connected={connectionState.status === 'connected'}
+      service={scheduleService}
+      projects={projects}
+      currentProjectId={state.currentProjectId ?? ''}
+      editScheduleId={
+        props.route.view === 'schedules' ? props.route.scheduleId : undefined
+      }
+      profiles={codexProfiles?.profiles}
+      defaultTimezone={resolveDefaultTimezone()}
+      onCreateWithClawee={openScheduleCreationConversation}
+      onOpenTask={(threadId, runId) => void openScheduleTask(threadId, runId)}
+      onRunNow={runScheduleNow}
+      onScheduleChanged={handleScheduleChanged}
+      onScheduleDeleted={handleScheduleDeleted}
+    />
+  ) : state.activeView === 'tasks' ? (
+    <TaskCenterPage
+      service={taskService}
+      approvalService={approvalService}
+      notificationSettings={notificationSettings}
+      unreadIds={unreadTaskIds}
+      onEnableNotifications={enableTaskNotifications}
+      onDisableNotifications={disableTaskNotifications}
+      onClearUnread={clearUnreadTasks}
+      onOpenTask={task => void openTask(task)}
+      onMarkRead={markTaskRead}
+      onEditSchedule={scheduleId => {
+        navigateToRoute({ view: 'schedules', scheduleId });
+      }}
+      onPauseSchedule={async scheduleId => {
+        if (scheduleService === null) throw new Error('本地运行内核未连接');
+        const updated = await scheduleService.updateSchedule(scheduleId, { enabled: false });
+        handleScheduleChanged(updated);
+      }}
+    />
+  ) : state.activeView === 'dashboard' ? (
+    <DashboardPage
+      connected={connectionState.status === 'connected'}
+      enterpriseSignedIn={enterpriseSession.status === 'signed_in'}
+      service={enterpriseService}
+      onSessionExpired={handleEnterpriseSessionExpired}
+    />
+  ) : state.activeView === 'activity' ? (
+    enterpriseActivity.capability === 'allowed' ? (
+      props.route.view === 'activity-recharge-records' ? (
+        <RechargeRecordsPage
+          range={props.route.range}
+          resolving={enterpriseBilling.resolving}
+          billingNotManaged={enterpriseBilling.billingNotManaged}
+          orders={enterpriseBilling.orders}
+          loading={enterpriseBilling.ordersLoading}
+          error={enterpriseBilling.ordersError}
+          page={enterpriseBilling.ordersPage}
+          onBack={() => navigateToRoute({
+            view: 'activity',
+            range: props.route.view === 'activity-recharge-records'
+              ? props.route.range
+              : '7d'
+          })}
+          onRefresh={enterpriseBilling.refreshOrders}
+          onRetry={enterpriseBilling.retryOrders}
+          onPreviousPage={enterpriseBilling.previousOrdersPage}
+          onNextPage={enterpriseBilling.nextOrdersPage}
+        />
+      ) : (
+        <ActivityPage
+          route={props.route.view === 'activity' || props.route.view === 'activity-agent'
+            ? props.route
+            : { view: 'activity', range: '7d' }}
+          statistics={enterpriseActivity.statistics}
+          statisticsLoading={enterpriseActivity.statisticsLoading}
+          statisticsError={enterpriseActivity.statisticsError}
+          detail={enterpriseActivity.detail}
+          detailLoading={enterpriseActivity.detailLoading}
+          detailError={enterpriseActivity.detailError}
+          billingEnabled={enterpriseBilling.enabled}
+          billingOverview={enterpriseBilling.overview}
+          billingLoading={enterpriseBilling.overviewLoading}
+          billingError={enterpriseBilling.overviewError}
+          rechargePending={enterpriseBilling.rechargePending}
+          rechargeError={enterpriseBilling.rechargeError}
+          onRetryBilling={enterpriseBilling.retryOverview}
+          onRecharge={() => void enterpriseBilling.recharge(
+            url => hostBridge.openExternal(url)
+          )}
+          onRetryStatistics={enterpriseActivity.retryStatistics}
+          onRetryDetail={enterpriseActivity.retryDetail}
+          onNavigate={navigateToRoute}
+        />
+      )
+    ) : <PageLoading />
+  ) : state.activeView === 'knowledge' ? (
+    <KnowledgePage
+      connected={connectionState.status === 'connected'}
+      session={enterpriseSession}
+      knowledgeBases={enterpriseKnowledgeBases}
+      knowledgeBasesLoading={enterpriseKnowledgeBasesLoading}
+      knowledgeBasesError={enterpriseKnowledgeBasesError}
+      selectedKnowledgeBaseId={selectedEnterpriseKnowledgeBaseId}
+      documents={enterpriseKnowledgeDocuments}
+      documentsLoading={enterpriseKnowledgeDocumentsLoading}
+      documentsError={enterpriseKnowledgeDocumentsError}
+      upload={enterpriseKnowledgeUpload}
+      uploadNotice={enterpriseKnowledgeUploadNotice}
+      onOpenAccount={() => {
+        enterpriseReturnRouteRef.current = { view: 'knowledge' };
+        dispatch({ type: 'set_active_view', activeView: 'account' });
+        navigateToRoute({ view: 'account' });
+      }}
+      onRefresh={refreshEnterpriseKnowledge}
+      onStartConversation={() => startNewConversation()}
+      onSelectKnowledgeBase={selectEnterpriseKnowledgeBase}
+      onUpload={file => void uploadEnterpriseKnowledgeDocument(file)}
+    />
+  ) : state.activeView === 'drive' ? (
+    <SharedDrivePage
+      connected={connectionState.status === 'connected'}
+      session={enterpriseSession}
+      spaces={enterpriseSharedSpaces}
+      spacesLoading={enterpriseSharedSpacesLoading}
+      spacesError={enterpriseSharedSpacesError}
+      spacesHasNext={enterpriseSharedSpacesMeta.hasNext}
+      selectedSpaceId={selectedEnterpriseSharedSpaceId}
+      files={enterpriseSharedFiles}
+      filesLoading={enterpriseSharedFilesLoading}
+      filesError={enterpriseSharedFilesError}
+      filesHasNext={enterpriseSharedFilesMeta.hasNext}
+      query={enterpriseSharedQuery}
+      maxFileSizeBytes={enterpriseSharedSpacesMeta.maxFileSizeBytes}
+      currentProjectId={currentProject?.id}
+      currentProjectName={currentProjectName}
+      operation={enterpriseSharedOperation}
+      notice={enterpriseSharedNotice}
+      onOpenAccount={() => {
+        enterpriseReturnRouteRef.current = { view: 'drive' };
+        dispatch({ type: 'set_active_view', activeView: 'account' });
+        navigateToRoute({ view: 'account' });
+      }}
+      onRefresh={refreshEnterpriseSharedDrive}
+      onLoadMoreSpaces={() => void loadMoreEnterpriseSharedSpaces()}
+      onSelectSpace={selectEnterpriseSharedSpace}
+      onSearch={searchEnterpriseSharedFiles}
+      onLoadMoreFiles={() => void loadMoreEnterpriseSharedFiles()}
+      onUpload={(spaceId, file) => void uploadEnterpriseSharedFile(spaceId, file)}
+      onReplace={(target, file) => void replaceEnterpriseSharedFile(target, file)}
+      onDownload={(target, overwrite) => {
+        void downloadEnterpriseSharedFile(target, overwrite);
+      }}
+    />
+  ) : state.activeView === 'connections' ? (
+    <ConnectionsPage
+      connected={connectionState.status === 'connected'}
+      session={enterpriseSession}
+      service={enterpriseService}
+      mcpService={mcpService}
+      mcpData={codexMcp}
+      mcpCatalog={enterpriseMcpCatalog}
+      mcpCapabilities={readMcpCapabilities(connectionState)}
+      onMcpDataChange={setCodexMcp}
+      onMcpCatalogChange={setEnterpriseMcpCatalog}
+      onOpenAccount={() => {
+        enterpriseReturnRouteRef.current = { view: 'connections' };
+        dispatch({ type: 'set_active_view', activeView: 'account' });
+        navigateToRoute({ view: 'account' });
+      }}
+      onRefreshSession={refreshEnterpriseSession}
+      onSessionExpired={handleEnterpriseSessionExpired}
+    />
+  ) : state.activeView === 'settings' ? (
+    <SettingsPage
+      runtimeStatus={runtimeStatus}
+      agentId={enterpriseSession.agentId}
+      defaultPermission={defaultPermission}
+      defaultPermissionError={defaultPermissionSyncError}
+      onDefaultPermissionChange={handleDefaultPermissionChange}
+      colorMode={colorMode}
+      onColorModeChange={handleColorModeChange}
+      accentColor={accentColor}
+      onAccentColorChange={handleAccentColorChange}
+      customAccentColor={customAccentColor}
+      onCustomAccentColorChange={handleCustomAccentColorChange}
+      desktopCloseBehavior={desktopCloseBehavior}
+      onDesktopCloseBehaviorChange={behavior => {
+        const update = hostBridge.updateDesktopPreferences;
+        if (update === undefined) return;
+        const previous = desktopCloseBehavior;
+        setDesktopCloseBehavior(behavior);
+        void update({ closeBehavior: behavior })
+          .then(preferences => setDesktopCloseBehavior(preferences.closeBehavior))
+          .catch(() => setDesktopCloseBehavior(previous));
+      }}
+      profileService={profileService}
+      profileData={codexProfiles}
+      onProfileDataChange={setCodexProfiles}
+      cleanupService={cleanupService}
+      memoryService={memoryService}
+      memoryProjects={memoryProjectOptions}
+      memoryThreads={memoryThreadOptions}
+      codexStatus={connectionState.status === 'connected' ? connectionState.codexStatus : undefined}
+      onBack={() => {
+        dispatch({ type: 'back_to_app' });
+        navigateToRoute(routeForConversation(state.selectedThreadId));
+      }}
+    />
+  ) : state.activeView === 'account' ? (
+    <EnterpriseAccountPage
+      connected={connectionState.status === 'connected'}
+      sessionInitialized={enterpriseSessionInitialized}
+      session={enterpriseSession}
+      checkingTimedOut={enterpriseCheckingTimedOut}
+      onLogin={loginEnterprise}
+      onReadGateway={readEnterpriseGateway}
+      onSaveGateway={saveEnterpriseGateway}
+      onRegister={registerEnterprise}
+      onPrepareDingTalkLogin={prepareEnterpriseDingTalkLogin}
+      onOpenDingTalkLogin={url => hostBridge.openExternal(url)}
+      onCheckSession={checkEnterpriseSession}
+      onLogout={logoutEnterprise}
+      onRefresh={refreshEnterpriseSession}
+    />
+  ) : state.activeView === 'plugins' ? (
+    <PluginsPage
+      connected={connectionState.status === 'connected'}
+      source={activePluginSource}
+      skills={codexSkills}
+      installRecords={skillMarketInstallRecords}
+      loading={skillMarketLoading}
+      loadError={skillMarketLoadError}
+      operation={skillMarketOperation}
+      useError={skillMarketUseError}
+      projects={projects}
+      currentProjectId={currentProject?.id ?? ''}
+      onInstall={skillId => void installMarketSkill(skillId)}
+      onUpdate={skillId => void updateMarketSkill(skillId)}
+      onUse={(skillId, projectId) => void useMarketSkill(skillId, projectId)}
+      onSourceChange={source => {
+        navigateToRoute(
+          source === 'public'
+            ? { view: 'plugins', source: 'public' }
+            : { view: 'plugins' }
+        );
+      }}
+      enterprise={{
+        connected: connectionState.status === 'connected',
+        session: enterpriseSession,
+        skills: enterpriseSkills,
+        loading: enterpriseSkillsLoading,
+        loadError: enterpriseSkillsLoadError,
+        operation: enterpriseSkillOperation,
+        useError: enterpriseSkillUseError,
+        projects,
+        currentProjectId: currentProject?.id ?? '',
+        onOpenAccount: () => {
+          enterpriseReturnRouteRef.current = {
+            view: 'plugins',
+            source: 'enterprise'
+          };
+          dispatch({ type: 'set_active_view', activeView: 'account' });
+          navigateToRoute({ view: 'account' });
+        },
+        onRefresh: refreshEnterpriseHub,
+        onLoadDetail: loadEnterpriseSkillDetail,
+        onInstall: skillId => void installEnterpriseSkill(skillId),
+        onUpdate: skillId => void updateEnterpriseSkill(skillId),
+        onUse: (skill, projectId) => void useEnterpriseSkill(skill, projectId),
+        onCreateSkill: () => void useMarketSkill('skill-creator', currentProject?.id ?? ''),
+        onUploadSkill: hostBridge.selectProjectDirectory === undefined
+          ? undefined
+          : () => void uploadLocalSkill()
+      }}
+    />
+  ) : state.activeView === 'conversation' ? (
+    conversationWorkspace
+  ) : (
+    <PlaceholderView label={getPlaceholderLabel(state.activeView)} />
+  );
+
+  if (
+    props.requireEnterpriseLogin !== false
+    && enterpriseSession.status !== 'signed_in'
+  ) {
+    return (
+      <div
+        className="app-drop-shell enterprise-access-gate"
+        data-integrated-title-bar={
+          integratedTitleBar?.integratedTitleBar === true ? 'true' : undefined
+        }
+        style={appShellStyle}
+      >
+        {integratedTitleBar?.integratedTitleBar === true ? (
+          <div className="desktop-titlebar-drag-region" aria-hidden="true" />
+        ) : null}
+        <span
+          className="app-visually-hidden"
+          role="status"
+          aria-label={getConnectionStatusLabel(connectionState)}
+        />
+        <Suspense fallback={<PageLoading />}>
+          <EnterpriseAccountPage
+            required
+            connected={runtimeSupportsEnterpriseSession(connectionState)}
+            sessionInitialized={enterpriseSessionInitialized}
+            session={enterpriseSession}
+            checkingTimedOut={enterpriseCheckingTimedOut}
+            onLogin={loginEnterprise}
+            onReadGateway={readEnterpriseGateway}
+            onSaveGateway={saveEnterpriseGateway}
+            onRegister={registerEnterprise}
+            onPrepareDingTalkLogin={prepareEnterpriseDingTalkLogin}
+            onOpenDingTalkLogin={url => hostBridge.openExternal(url)}
+            onCheckSession={checkEnterpriseSession}
+            onLogout={logoutEnterprise}
+            onRefresh={refreshEnterpriseSession}
+          />
+        </Suspense>
+      </div>
+    );
+  }
+
+  if (connectionState.status === 'configuration_required') {
+    const modelAccess = connectionState.configuration;
+    if (modelAccess.status === 'configuration_required') {
+      return (
+        <ModelServiceSetupPage
+          status={{
+            status: 'configuration_required',
+            configuration: null,
+            apiKeyConfigured: false
+          }}
+          integratedTitleBar={integratedTitleBar}
+          onConfigure={async input => {
+            if (
+              modelServiceConfigurationService === null
+              || connectionService === null
+            ) {
+              throw new Error('本地服务尚未连接');
+            }
+            await modelServiceConfigurationService.configure(input);
+            const nextState = await connectionService.check();
+            setConnectionState(nextState);
+            if (nextState.status !== 'connected') {
+              throw new Error('模型服务已保存，但 Codex Runtime 尚未就绪');
+            }
+          }}
+        />
+      );
+    }
+    if (modelAccess.status === 'resolving' || modelAccess.status === 'unavailable') {
+      return (
+        <ModelAccessStatusPage
+          status={modelAccess.status}
+          integratedTitleBar={integratedTitleBar}
+          onRetry={() => {
+            if (
+              modelServiceConfigurationService === null
+              || connectionService === null
+            ) {
+              return;
+            }
+            setConnectionState({
+              status: 'configuration_required',
+              configuration: { status: 'resolving' }
+            });
+            void modelServiceConfigurationService.retry()
+              .then(() => connectionService.check())
+              .then(setConnectionState)
+              .catch(() => undefined);
+          }}
+          onLogout={() => void logoutEnterprise()}
+        />
+      );
+    }
+  }
+
+  return (
+    <div
+      className="app-drop-shell"
+      data-integrated-title-bar={
+        integratedTitleBar?.integratedTitleBar === true ? 'true' : undefined
+      }
+      data-project-drop-root="true"
+      style={appShellStyle}
+      onDragEnter={handleProjectDragEnter}
+      onDragOver={handleProjectDragOver}
+      onDragLeave={handleProjectDragLeave}
+      onDrop={(event) => void handleProjectDrop(event)}
+    >
+      {integratedTitleBar?.integratedTitleBar === true ? (
+        <div className="desktop-titlebar-drag-region" aria-hidden="true" />
+      ) : null}
+      <span
+        className="app-visually-hidden"
+        role="status"
+        aria-label={
+          connectionState.status === 'connected' && runtimeWorkspaceReady
+            ? getConnectionStatusLabel(connectionState)
+            : '正在加载本地运行内核'
+        }
+        aria-live="polite"
+      />
+      <WorkbenchLayout
+      sidebar={
+        <ClaweeSidebar
+          projects={projects}
+          conversations={conversations}
+          tasks={sidebarTasks}
+          runningConversationIds={runningConversationIds}
+          currentProjectId={state.currentProjectId}
+          selectedConversationId={state.selectedThreadId}
+          activeView={state.activeView}
+          collapsed={effectiveSidebarCollapsed}
+          autoCollapsed={sidebarAutoCollapsed}
+          colorMode={colorMode}
+          enterpriseSession={enterpriseSession}
+          activityAllowed={enterpriseActivity.capability === 'allowed'}
+          onNewConversation={projectId => startNewConversation({ projectId })}
+          onSelectProject={selectProject}
+          onSelectConversation={selectConversation}
+          onSelectTask={selectSidebarTask}
+          onOpenView={openPrimaryView}
+          onOpenAccount={() => {
+            enterpriseReturnRouteRef.current = undefined;
+            closeMobileSidebar();
+            dispatch({ type: 'set_active_view', activeView: 'account' });
+            navigateToRoute({ view: 'account' });
+          }}
+          onAddProject={
+            projectService === null
+              ? undefined
+              : () => {
+                  setProjectLoadError(undefined);
+                  setCreateProjectOpen(true);
+                }
+          }
+          onAddProjectDirectory={
+            projectService === null
+              ? undefined
+              : () => addProjectDirectory()
+          }
+          onManageProjects={() => void openProjectManagement()}
+          onEditProject={projectId => void openProjectManagement(projectId)}
+          onReplaceProjectDirectory={
+            projectService === null
+              ? undefined
+              : projectId => void replaceManagedProjectDirectory(projectId)
+          }
+          onReorderProjects={
+            projectService === null
+              ? undefined
+              : projectIds => reorderProjects(projectIds)
+          }
+          onArchiveProject={projectId => void archiveProject(projectId)}
+          onTogglePinnedConversation={
+            (threadId, pinned) => toggleConversationPinned(threadId, pinned)
+          }
+          onArchiveConversation={threadId => archiveConversation(threadId)}
+          onRenameConversation={(threadId, title) => renameConversation(threadId, title)}
+          onDeleteConversation={threadId => deleteConversation(threadId)}
+          onArchiveTask={task => archiveSidebarTask(task)}
+          onRenameTask={(task, title) => renameSidebarTask(task, title)}
+          onDeleteTask={task => deleteSidebarTask(task)}
+          onOpenSettings={() => {
+            closeMobileSidebar();
+            dispatch({ type: 'open_settings' });
+            navigateToRoute({ view: 'settings' });
+          }}
+          onToggleCollapsed={() => setSidebarCollapsed((currentValue) => !currentValue)}
+        />
+      }
+      mainHeader={
+        useIntegratedConversationTitleBar ? conversationHeader : undefined
+      }
+      main={(
+        <Suspense fallback={<PageLoading />}>
+          {main}
+        </Suspense>
+      )}
+      detail={detailPanel}
+      detailOpen={detailPanel !== null && state.activeView === 'conversation'}
+      sidebarCollapsed={effectiveSidebarCollapsed}
+      mobileSidebarOpen={mobileSidebarOpen}
+      onOpenMobileSidebar={openMobileSidebar}
+      onCloseMobileSidebar={dismissMobileSidebar}
+      />
+      {projectDropActive ? (
+        <div className="project-drop-overlay" role="status" aria-live="polite">
+          <FolderInput aria-hidden="true" size={30} />
+          <strong>松开以添加项目文件夹</strong>
+        </div>
+      ) : null}
+      <CreateProjectDialog
+        open={createProjectOpen}
+        error={createProjectOpen ? projectLoadError : undefined}
+        onClose={() => setCreateProjectOpen(false)}
+        onSelectSourceDirectory={
+          projectService === null
+            ? undefined
+            : selectCreateProjectSourceDirectory
+        }
+        onCreate={createBlankProject}
+      />
+      <ProjectManagementDialog
+        open={projectManagementOpen}
+        projects={projects}
+        archivedProjects={archivedProjects}
+        unassignedThreads={unassignedThreads}
+        initialProjectId={projectManagementProjectId}
+        busy={projectMutationBusy}
+        error={projectManagementOpen ? projectLoadError : undefined}
+        onClose={() => {
+          setProjectManagementOpen(false);
+          setProjectManagementProjectId(undefined);
+        }}
+        onUpdate={updateManagedProject}
+        onArchive={archiveProject}
+        onRestore={restoreManagedProject}
+        onReplaceDirectory={
+          projectService === null
+            ? undefined
+            : replaceManagedProjectDirectory
+        }
+        onAssignThread={assignManagedThread}
+        onAddProject={
+          projectService === null
+            ? undefined
+            : () => {
+                setProjectManagementOpen(false);
+                setProjectLoadError(undefined);
+                setCreateProjectOpen(true);
+              }
+        }
+        onAddProjectDirectory={
+          projectService === null
+            ? undefined
+            : async () => {
+                await addProjectDirectory();
+                setProjectManagementOpen(true);
+              }
+        }
+      />
+      <ConfirmDialog
+        open={codexHomeConfirmationOpen}
+        title="确认修改全局配置"
+        description="此操作会修改全局 CODEX_HOME，是否继续？"
+        confirmLabel="继续"
+        onCancel={() => settleCodexHomeConfirmation(false)}
+        onConfirm={() => settleCodexHomeConfirmation(true)}
+      />
+    </div>
+  );
+
+  function createDetailPanel() {
+    if (state.rightPanelMode === 'closed') return null;
+    if (state.rightPanelMode === 'file') return null;
+
+    if (state.rightPanelMode === 'run_detail') {
+      return (
+        <DetailPanel
+          mode="run"
+          title="运行详情"
+          subtitle={state.selectedRunId}
+          content={
+            <RunDetailPanel
+              runId={state.selectedRunId}
+              diagnostics={runDiagnostics}
+              attachments={selectedRunAttachments}
+              context={selectedRunContext}
+            />
+          }
+          onClose={() => dispatch({ type: 'close_detail' })}
+        />
+      );
+    }
+
+    if (state.rightPanelMode === 'change') {
+      return (
+        <DetailPanel
+          mode="change"
+          title="已编辑 docs/atoms.md"
+          subtitle="+903 -0"
+          content="docs/atoms.md"
+          onClose={() => dispatch({ type: 'close_detail' })}
+          onApprove={() => dispatch({ type: 'close_detail' })}
+          onRevert={() => dispatch({ type: 'close_detail' })}
+        />
+      );
+    }
+
+    const fileTitle = selectedFilePath.split('/').at(-1) ?? selectedFilePath;
+    const fileContent = loadingSelectedFile
+      ? '正在加载文件...'
+      : loadError ?? saveError ?? (selectedDraftContent.length > 0 ? selectedDraftContent : '暂无预览内容');
+
+    return (
+      <DetailPanel
+        mode="file"
+        title={fileTitle}
+        subtitle={selectedFilePath}
+        content={fileContent}
+        onClose={() => dispatch({ type: 'close_detail' })}
+      />
+    );
+  }
+}
+
+function mergeTimelineItems(
+  previousItems: TimelineItem[],
+  incomingItems: TimelineItem[]
+): TimelineItem[] {
+  let nextItems = previousItems;
+  for (const incoming of incomingItems) {
+    if (incoming.kind !== 'approval') {
+      nextItems = [...nextItems, incoming];
+      continue;
+    }
+    const index = nextItems.findIndex(item => (
+      item.kind === 'approval' && item.approval.id === incoming.approval.id
+    ));
+    if (index < 0) {
+      nextItems = [...nextItems, incoming];
+      continue;
+    }
+    nextItems = nextItems.map((item, itemIndex) => (
+      itemIndex === index ? incoming : item
+    ));
+  }
+  return nextItems;
+}
+
+function createInitialState(
+  route: AppRoute,
+  persistedNavigation: PersistedNavigation | null
+): AppState {
+  const persistedState: AppState = {
+    ...initialAppState,
+    currentProjectId: persistedNavigation?.currentProjectId ?? initialAppState.currentProjectId,
+    selectedThreadId: persistedNavigation?.selectedThreadId
+  };
+
+  switch (route.view) {
+    case 'home':
+      return persistedState;
+    case 'thread':
+      return {
+        ...persistedState,
+        activeView: 'conversation',
+        selectedThreadId: route.threadId
+      };
+    case 'search':
+    case 'schedules':
+    case 'tasks':
+    case 'dashboard':
+    case 'activity':
+    case 'activity-agent':
+    case 'activity-recharge-records':
+    case 'plugins':
+    case 'connections':
+    case 'knowledge':
+    case 'drive':
+    case 'account':
+    case 'settings':
+      return {
+        ...persistedState,
+        activeView: route.view === 'activity-agent'
+          || route.view === 'activity-recharge-records'
+          ? 'activity'
+          : route.view,
+        rightPanelMode: 'closed'
+      };
+    case 'files':
+      return {
+        ...persistedState,
+        activeView: 'conversation',
+        selectedThreadId: route.threadId ?? persistedState.selectedThreadId,
+        selectedFilePath: route.path ?? persistedState.selectedFilePath,
+        workspaceTargetPath: route.path,
+        rightPanelMode: 'file'
+      };
+    case 'capabilities':
+      return persistedState;
+  }
+}
+
+function routeForActiveView(activeView: ActiveView, selectedThreadId?: string): AppRoute {
+  switch (activeView) {
+    case 'conversation':
+      return routeForConversation(selectedThreadId);
+    case 'search':
+      return { view: 'search' };
+    case 'schedules':
+      return { view: 'schedules' };
+    case 'tasks':
+      return { view: 'tasks' };
+    case 'dashboard':
+      return { view: 'dashboard' };
+    case 'activity':
+      return { view: 'activity', range: '7d' };
+    case 'plugins':
+      return { view: 'plugins' };
+    case 'connections':
+      return { view: 'connections' };
+    case 'knowledge':
+      return { view: 'knowledge' };
+    case 'drive':
+      return { view: 'drive' };
+    case 'account':
+      return { view: 'account' };
+    case 'settings':
+      return { view: 'settings' };
+    case 'files':
+      return {
+        view: 'files',
+        ...(selectedThreadId === undefined ? {} : { threadId: selectedThreadId })
+      };
+  }
+}
+
+function routeForConversation(selectedThreadId?: string): AppRoute {
+  return selectedThreadId === undefined
+    ? { view: 'home' }
+    : { view: 'thread', threadId: selectedThreadId };
+}
+
+function PageLoading() {
+  return (
+    <section className="page-loading" role="status" aria-label="正在加载页面">
+      <span>正在加载页面...</span>
+    </section>
+  );
+}
+
+export async function pollEnterpriseSessionUntilSettled(input: {
+  readSession(): Promise<EnterpriseSessionResponse>;
+  onSession(response: EnterpriseSessionResponse): void;
+  onTimeout(): void;
+  onError(error: unknown): void;
+  signal?: AbortSignal;
+  now?: () => number;
+  wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  timeoutMs?: number;
+  intervalMs?: number;
+}): Promise<void> {
+  const now = input.now ?? Date.now;
+  const wait = input.wait ?? waitForEnterprisePoll;
+  const timeoutMs = input.timeoutMs ?? 15_000;
+  const intervalMs = input.intervalMs ?? 250;
+  const startedAt = now();
+  const isAborted = () => input.signal?.aborted === true;
+
+  while (!isAborted()) {
+    let response: EnterpriseSessionResponse;
+    try {
+      response = await input.readSession();
+    } catch (error) {
+      if (!isAborted()) input.onError(error);
+      return;
+    }
+    if (isAborted()) return;
+
+    input.onSession(response);
+    if (response.status !== 'checking') {
+      return;
+    }
+
+    const elapsed = now() - startedAt;
+    if (elapsed >= timeoutMs) {
+      input.onTimeout();
+      return;
+    }
+    await wait(Math.min(intervalMs, timeoutMs - elapsed), input.signal);
+  }
+}
+
+function waitForEnterprisePoll(
+  delayMs: number,
+  signal?: AbortSignal
+): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      window.clearTimeout(timerId);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timerId = window.setTimeout(finish, delayMs);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
+function getConnectionStatusLabel(connectionState: ConnectionState) {
+  if (connectionState.status === 'connected') return '本地运行内核正常';
+  if (connectionState.status === 'configuration_required') {
+    return '等待配置 Codex 模型服务';
+  }
+  return connectionState.message;
+}
+
+function runtimeSupportsEnterpriseSession(
+  connectionState: ConnectionState
+): boolean {
+  return runtimeStatusSupportsEnterpriseSession(connectionState.status);
+}
+
+function runtimeStatusSupportsEnterpriseSession(
+  status: ConnectionState['status']
+): boolean {
+  return status === 'connected' || status === 'configuration_required';
+}
+
+function readPersistedNavigation(): PersistedNavigation | null {
+  const value = readJsonFromStorage<unknown>(NAVIGATION_STORAGE_KEY);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.currentProjectId !== undefined
+    && (
+      typeof record.currentProjectId !== 'string'
+      || record.currentProjectId.length === 0
+    )
+  ) {
+    return null;
+  }
+  if (record.selectedThreadId !== undefined && typeof record.selectedThreadId !== 'string') return null;
+
+  return {
+    currentProjectId: record.currentProjectId as string | undefined,
+    selectedThreadId: record.selectedThreadId
+  };
+}
+
+function writePersistedNavigation(value: PersistedNavigation): void {
+  try {
+    writeJsonToStorage(NAVIGATION_STORAGE_KEY, value);
+  } catch {
+    return;
+  }
+}
+
+function readDefaultPermissionPreference(): DefaultPermissionPreference {
+  try {
+    const value = window.localStorage.getItem(DEFAULT_PERMISSION_STORAGE_KEY);
+    if (value === 'follow-global') return 'workspace-write';
+    return isDefaultPermissionPreference(value) ? value : DEFAULT_PERMISSION_PREFERENCE;
+  } catch {
+    return DEFAULT_PERMISSION_PREFERENCE;
+  }
+}
+
+function hasPersistedDefaultPermissionPreference(): boolean {
+  try {
+    const value = window.localStorage.getItem(DEFAULT_PERMISSION_STORAGE_KEY);
+    return value === 'follow-global' || isDefaultPermissionPreference(value);
+  } catch {
+    return false;
+  }
+}
+
+function resolveDefaultTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function writeDefaultPermissionPreference(permission: DefaultPermissionPreference): void {
+  try {
+    window.localStorage.setItem(DEFAULT_PERMISSION_STORAGE_KEY, permission);
+  } catch {
+    return;
+  }
+}
+
+function canImportDroppedProject(
+  dataTransfer: DataTransfer,
+  hostBridge: HostBridge,
+  projectService: ProjectService | null
+): boolean {
+  return projectService !== null
+    && hostBridge.resolveDroppedFilePath !== undefined
+    && readDroppedDirectory(dataTransfer) !== undefined;
+}
+
+function readDroppedDirectory(dataTransfer: DataTransfer): File | undefined {
+  const fileItems = Array.from(dataTransfer.items).filter(item => item.kind === 'file');
+  if (fileItems.length > 1) return undefined;
+
+  for (const item of fileItems) {
+    const entry = item.webkitGetAsEntry();
+    if (entry?.isFile === true) return undefined;
+    if (entry !== null && entry.isDirectory !== true) return undefined;
+    const file = item.getAsFile();
+    if (file !== null) return file;
+  }
+
+  const files = Array.from(dataTransfer.files);
+  return files.length === 1 ? files[0] : undefined;
+}
+
+function PlaceholderView(props: { label: string }) {
+  return (
+    <section className="placeholder-page" aria-labelledby="placeholder-title">
+      <h1 id="placeholder-title">Clawee：{props.label}</h1>
+    </section>
+  );
+}
+
+function getPlaceholderLabel(activeView: 'schedules' | 'plugins' | 'files') {
+  switch (activeView) {
+    case 'schedules':
+      return '已安排';
+    case 'plugins':
+      return '插件';
+    case 'files':
+      return '文件';
+  }
+}
+
+function isMobileNavigationViewport(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia(`(max-width: ${MOBILE_NAVIGATION_MAX_WIDTH}px)`).matches;
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => (
+    typeof window.matchMedia === 'function' && window.matchMedia(query).matches
+  ));
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia(query);
+    const updateMatches = () => setMatches(mediaQuery.matches);
+
+    updateMatches();
+    mediaQuery.addEventListener('change', updateMatches);
+    return () => mediaQuery.removeEventListener('change', updateMatches);
+  }, [query]);
+
+  return matches;
+}
+
+function getSkillMarketEntry(skillId: string): (typeof skillMarketCatalog)[number] | undefined {
+  return skillMarketCatalog.find(entry => entry.id === skillId);
+}
+
+function shouldShowThreadInSidebar(thread: ThreadResponse): boolean {
+  if (thread.purpose === 'schedule_draft') return true;
+  if (thread.workspaceMode === 'managed') return false;
+  if (isRuntimeWorkspacePath(thread.cwd)) return false;
+  if (isRuntimeWorkspacePath(thread.canonicalCwd)) return false;
+  return true;
+}
+
+function isRuntimeWorkspacePath(path: string): boolean {
+  const normalized = normalizePathForCompare(path).replace(/\\/g, '/').replace(/^\.\//, '');
+  return normalized === '.runtime/workspaces'
+    || normalized.startsWith('.runtime/workspaces/')
+    || normalized.includes('/.runtime/workspaces/');
+}
+
+function mapThreadToConversation(
+  thread: ThreadResponse
+): ClaweeConversation | undefined {
+  if (thread.projectId === null) return undefined;
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title ?? thread.codexThreadId ?? thread.id,
+    updatedLabel: formatRelativeTime(thread.updatedAt),
+    updatedAt: thread.updatedAt,
+    pinnedAt: thread.pinnedAt
+  };
+}
+
+function buildMemoryProjectOptions(
+  threads: ThreadResponse[],
+  projects: ClaweeProject[]
+): Array<{ key: string; label: string }> {
+  const options = new Map<string, string>();
+  for (const thread of threads) {
+    if (thread.purpose !== 'conversation' || thread.projectId === null) continue;
+    const label = findProjectById(projects, thread.projectId)?.name ?? '未知项目';
+    options.set(thread.projectId, label);
+  }
+  return Array.from(options, ([key, label]) => ({ key, label }));
+}
+
+function shouldSuggestMemory(prompt: string): boolean {
+  return /(记住|以后|偏好|始终|每次|默认)/.test(prompt);
+}
+
+function toWorkspaceRelativePath(path: string, thread: ThreadResponse | undefined): string {
+  const trimmedPath = path.trim();
+  if (trimmedPath.length === 0 || thread === undefined) return trimmedPath;
+
+  return stripWorkspaceRoot(trimmedPath, thread.canonicalCwd)
+    ?? stripWorkspaceRoot(trimmedPath, thread.cwd)
+    ?? stripWorkspaceRootByName(trimmedPath, thread.canonicalCwd)
+    ?? stripWorkspaceRootByName(trimmedPath, thread.cwd)
+    ?? normalizeWorkspacePath(trimmedPath).replace(/^\.\//, '');
+}
+
+function stripWorkspaceRoot(path: string, root: string): string | undefined {
+  const normalizedPath = normalizeWorkspacePath(path);
+  const normalizedRoot = normalizeWorkspacePath(root).replace(/\/+$/, '');
+  if (normalizedRoot.length === 0) return undefined;
+  if (normalizedPath === normalizedRoot) return '';
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : undefined;
+}
+
+function stripWorkspaceRootByName(path: string, root: string): string | undefined {
+  const normalizedPath = normalizeWorkspacePath(path);
+  if (!normalizedPath.startsWith('/')) return undefined;
+
+  const normalizedRoot = normalizeWorkspacePath(root).replace(/\/+$/, '');
+  const rootName = normalizedRoot.split('/').at(-1);
+  if (rootName === undefined || rootName.length === 0) return undefined;
+
+  const marker = `/${rootName}/`;
+  const markerIndex = normalizedPath.lastIndexOf(marker);
+  return markerIndex < 0
+    ? undefined
+    : normalizedPath.slice(markerIndex + marker.length);
+}
+
+function normalizeWorkspacePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function normalizePathForCompare(path: string): string {
+  return path.replace(/^~(?=\/)/, '').replace(/\/+$/, '');
+}
+
+export function formatRelativeTime(iso: string): string {
+  const sqliteUtc = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d{1,3})?$/.exec(
+    iso
+  );
+  const timestamp = Date.parse(
+    sqliteUtc === null
+      ? iso
+      : `${sqliteUtc[1]}T${sqliteUtc[2]}${sqliteUtc[3] ?? ''}Z`
+  );
+  if (!Number.isFinite(timestamp)) return '';
+
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return '刚刚';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}分钟`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}小时`;
+  if (diffMs < 7 * day) return `${Math.floor(diffMs / day)}天`;
+  return `${Math.floor(diffMs / (7 * day))}周`;
+}
+
+function getRuntimeErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return fallback;
+}
+
+function isEnterpriseUnauthorized(error: unknown): boolean {
+  return error instanceof ApiClientError
+    && (
+      error.status === 401
+      || error.code === 'ENTERPRISE_UNAUTHORIZED'
+      || error.code === 'ENTERPRISE_SESSION_EXPIRED'
+    );
+}
+
+function formatEnterpriseSkillError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiClientError)) return getRuntimeErrorMessage(error, fallback);
+  switch (error.code) {
+    case 'ENTERPRISE_FORBIDDEN':
+      return '当前账户没有企业Skills访问权限';
+    case 'ENTERPRISE_SKILL_NOT_FOUND':
+      return '该企业 Skill 已下架或不存在';
+    case 'ENTERPRISE_SKILL_VERSION_CHANGED':
+      return '企业 Skill 版本已变化，请刷新后重试';
+    case 'ENTERPRISE_SKILL_SOURCE_CONFLICT':
+      return '本地同名 Skill 已由其他来源占用';
+    case 'ENTERPRISE_SKILL_LOCAL_CHANGED':
+      return '本地 Skill 已被修改，无法自动覆盖';
+    case 'ENTERPRISE_SKILL_PACKAGE_INVALID':
+    case 'ENTERPRISE_SKILL_PACKAGE_HASH_MISMATCH':
+      return '企业 Skill 包校验失败';
+    case 'ENTERPRISE_SKILL_PACKAGE_TOO_LARGE':
+      return '企业 Skill 包超过允许大小';
+    case 'ENTERPRISE_RATE_LIMITED':
+      return '企业服务请求过于频繁，请稍后重试';
+    case 'ENTERPRISE_SERVICE_UNAVAILABLE':
+      return '企业Skills暂时不可用';
+    default:
+      return error.message.trim().length > 0 ? error.message : fallback;
+  }
+}
+
+function formatEnterpriseKnowledgeError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiClientError)) return getRuntimeErrorMessage(error, fallback);
+  switch (error.code) {
+    case 'ENTERPRISE_FORBIDDEN':
+      return '当前账户没有企业知识库访问权限';
+    case 'ENTERPRISE_AGENT_FORBIDDEN':
+      return '当前设备的企业 Agent 无法访问知识库';
+    case 'ENTERPRISE_KNOWLEDGE_BASE_NOT_FOUND':
+      return '该知识库不存在或当前账户已无权访问';
+    case 'ENTERPRISE_DOCUMENT_UPLOAD_FORBIDDEN':
+      return '当前账户没有该知识库的上传权限';
+    case 'ENTERPRISE_DOCUMENT_TOO_LARGE':
+      return '单个文档不能超过 50 MiB';
+    case 'ENTERPRISE_DOCUMENT_TYPE_UNSUPPORTED':
+      return '仅支持 PDF、DOCX、Markdown、TXT、XLSX 和 CSV 文件';
+    case 'ENTERPRISE_KNOWLEDGE_CONFLICT':
+      return '知识库状态已变化，请刷新后重试';
+    case 'ENTERPRISE_RATE_LIMITED':
+      return '企业知识服务请求过于频繁，请稍后重试';
+    case 'ENTERPRISE_KNOWLEDGE_PROVIDER_ERROR':
+    case 'ENTERPRISE_SERVICE_UNAVAILABLE':
+      return '企业知识服务暂时不可用';
+    case 'ENTERPRISE_PROTOCOL_ERROR':
+      return '企业知识服务返回了无法识别的数据';
+    default:
+      return error.message.trim().length > 0 ? error.message : fallback;
+  }
+}
+
+function formatEnterpriseSharedDriveError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiClientError)) return getRuntimeErrorMessage(error, fallback);
+  switch (error.code) {
+    case 'ENTERPRISE_FORBIDDEN':
+      return '当前账户没有共享网盘访问权限';
+    case 'ENTERPRISE_AGENT_FORBIDDEN':
+      return '当前设备的企业 Agent 无法访问共享网盘';
+    case 'ENTERPRISE_SHARED_SPACE_NOT_FOUND':
+      return '该共享空间不存在或当前账户已无权访问';
+    case 'ENTERPRISE_SHARED_FILE_NOT_FOUND':
+      return '该共享文件不存在或当前账户已无权访问';
+    case 'ENTERPRISE_SHARED_FILE_WRITE_FORBIDDEN':
+      return '当前账户没有该共享空间的写入权限';
+    case 'ENTERPRISE_SHARED_FILE_ALREADY_EXISTS':
+      return '相同网盘路径已存在';
+    case 'ENTERPRISE_SHARED_FILE_REVISION_CONFLICT':
+      return '远端文件已被其他成员修改';
+    case 'ENTERPRISE_SHARED_FILE_TOO_LARGE':
+      return '共享文件超过服务端允许大小';
+    case 'ENTERPRISE_SHARED_FILE_LENGTH_MISMATCH':
+    case 'ENTERPRISE_SHARED_FILE_DIGEST_MISMATCH':
+      return '共享文件完整性校验失败';
+    case 'ENTERPRISE_SHARED_FILE_STORAGE_UNAVAILABLE':
+    case 'ENTERPRISE_SERVICE_UNAVAILABLE':
+      return '企业文件服务暂时不可用';
+    case 'ENTERPRISE_SHARED_FILE_LOCAL_EXISTS':
+      return '当前项目中已存在同路径文件';
+    case 'ENTERPRISE_SHARED_FILE_LOCAL_WRITE_FAILED':
+      return '文件无法写入当前项目';
+    case 'PROJECT_NOT_FOUND':
+      return '当前项目不存在';
+    case 'PROJECT_ARCHIVED':
+      return '当前项目已归档，无法写入文件';
+    case 'PROJECT_DIRECTORY_UNAVAILABLE':
+      return '当前项目目录不可用';
+    case 'PATH_ESCAPE':
+    case 'PATH_IGNORED':
+      return '远端文件路径不能写入当前项目';
+    case 'ENTERPRISE_RATE_LIMITED':
+      return '企业文件服务请求过于频繁，请稍后重试';
+    case 'ENTERPRISE_PROTOCOL_ERROR':
+      return '企业文件服务返回了无法识别的数据';
+    default:
+      return error.message.trim().length > 0 ? error.message : fallback;
+  }
+}
+
+function mergeSharedSpaces(
+  current: EnterpriseSharedSpaceResponse[],
+  incoming: EnterpriseSharedSpaceResponse[]
+): EnterpriseSharedSpaceResponse[] {
+  const merged = new Map(current.map(space => [space.spaceId, space]));
+  for (const space of incoming) merged.set(space.spaceId, space);
+  return Array.from(merged.values());
+}
+
+function mergeSharedFiles(
+  current: EnterpriseSharedFileResponse[],
+  incoming: EnterpriseSharedFileResponse[]
+): EnterpriseSharedFileResponse[] {
+  const merged = new Map(current.map(file => [file.fileId, file]));
+  for (const file of incoming) merged.set(file.fileId, file);
+  return Array.from(merged.values());
+}
+
+function buildThreadRequest(
+  prompt: string,
+  project: ClaweeProject,
+  config: ComposerRunConfig
+): Extract<CreateThreadRequest, { projectId: string }> {
+  const request: Extract<CreateThreadRequest, { projectId: string }> = {
+    projectId: project.id,
+    title: prompt.trim() || '新对话',
+    profile: config.profile,
+    sandbox: toRuntimeSandbox(config.permission)
+  };
+  if (config.model !== null) request.model = config.model;
+  if (config.reasoning !== null) {
+    request.reasoning = config.reasoning;
+  }
+  return request;
+}
+
+function defaultComposerRunConfig(
+  project: ClaweeProject | undefined,
+  defaultPermission: DefaultPermissionPreference,
+  recentModelConfig: RecentModelConfig | null
+): ComposerRunConfig {
+  const projectHasModelConfig = project !== undefined
+    && (project.model !== null || project.reasoning !== null);
+  const modelConfig = recentModelConfig ?? (
+    projectHasModelConfig
+      ? {
+        model: project.model,
+        reasoning: project.reasoning
+      }
+      : null
+  );
+  return {
+    permission: resolveDefaultPermission(project, defaultPermission),
+    profile: project?.profile ?? 'default',
+    model: modelConfig?.model ?? null,
+    reasoning: modelConfig?.reasoning ?? null
+  };
+}
+
+function readGlobalModelSelectionMigrated(): boolean {
+  try {
+    return window.localStorage.getItem(GLOBAL_MODEL_SELECTION_MIGRATION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markGlobalModelSelectionMigrated(): void {
+  try {
+    window.localStorage.setItem(GLOBAL_MODEL_SELECTION_MIGRATION_KEY, '1');
+  } catch {
+    return;
+  }
+}
+
+function resolveDefaultPermission(
+  project: ClaweeProject | undefined,
+  preference: DefaultPermissionPreference
+): ProjectPermission {
+  if (preference !== 'follow-project') return preference;
+  if (
+    project?.sandbox === 'workspace-write'
+    || project?.sandbox === 'danger-full-access'
+  ) {
+    return project.sandbox;
+  }
+  return 'workspace-write';
+}
+
+function isDefaultPermissionPreference(value: string | null): value is DefaultPermissionPreference {
+  return value === 'follow-project'
+    || value === 'follow-global'
+    || value === 'workspace-write'
+    || value === 'danger-full-access';
+}
+
+function getOrCreateComposerAttachmentDraftId(
+  draftIds: Map<string, string>,
+  scope: string
+): string {
+  const existing = draftIds.get(scope);
+  if (existing !== undefined) return existing;
+  const created = `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  draftIds.set(scope, created);
+  return created;
+}
+
+function readImageInputSupported(
+  connectionState: ConnectionState,
+  thread?: ThreadResponse
+): boolean {
+  if (connectionState.status !== 'connected') return false;
+  const capabilities = connectionState.codexStatus.capabilities;
+  if (typeof capabilities !== 'object' || capabilities === null || Array.isArray(capabilities)) {
+    return false;
+  }
+  const record = capabilities as Record<string, unknown>;
+  const resumesExistingThread =
+    thread?.codexThreadId !== undefined && thread.codexThreadId !== null;
+  return resumesExistingThread
+    ? record.resumeImages === true
+    : record.execImages === true;
+}
+
+function readMcpCapabilities(connectionState: ConnectionState): McpCapabilities | undefined {
+  if (connectionState.status !== 'connected') return undefined;
+  const capabilities = connectionState.codexStatus.capabilities;
+  if (typeof capabilities !== 'object' || capabilities === null || Array.isArray(capabilities)) {
+    return undefined;
+  }
+  const record = capabilities as Record<string, unknown>;
+  return {
+    mcpAdd: record.mcpAdd === true,
+    mcpRemove: record.mcpRemove === true,
+    mcpLogin: record.mcpLogin === true,
+    mcpLogout: record.mcpLogout === true,
+    mcpAddEnv: record.mcpAddEnv === true,
+    mcpAddUrl: record.mcpAddUrl === true,
+    mcpAddBearerTokenEnvVar: record.mcpAddBearerTokenEnvVar === true,
+    mcpAddOAuth: record.mcpAddOAuth === true
+  };
+}
+
+export function buildComposerSlashCommands(
+  skills: CodexSkillListResponse | undefined,
+  mcp: CodexMcpListResponse | undefined,
+  enterpriseCatalog?: EnterpriseMcpCatalogResponse
+): ComposerSlashCommand[] {
+  const skillCommands = (skills?.skills ?? [])
+    .filter(skill => skill.status === 'valid')
+    .map(skill => ({
+      id: `skill:${skill.id}`,
+      category: 'skill' as const,
+      label: skill.name ?? skill.id,
+      description: skill.description ?? skill.id,
+      insertText: `$${skill.id} `
+    }));
+  const mcpCommands = (mcp?.servers ?? [])
+    .filter(server => server.status === 'configured' && server.enabled)
+    .map(server => {
+      const upstream = findEnterpriseMcpUpstream(server, enterpriseCatalog);
+      return {
+        id: `mcp:${server.name}`,
+        category: 'mcp' as const,
+        label: upstream?.name ?? server.name,
+        description: upstream === undefined
+          ? `${server.transport} · 已开启`
+          : `${server.name} · ${server.transport} · 已开启`,
+        insertText: connectorInsertText(server.name, upstream?.name)
+      };
+    });
+  return [...skillCommands, ...mcpCommands];
+}
+
+export function buildComposerMcpConnectors(
+  mcp: CodexMcpListResponse | undefined,
+  enterpriseCatalog?: EnterpriseMcpCatalogResponse
+): ComposerConnector[] {
+  return (mcp?.servers ?? [])
+    .filter(server => server.status === 'configured')
+    .map(server => {
+      const upstream = findEnterpriseMcpUpstream(server, enterpriseCatalog);
+      return {
+        id: `mcp:${server.name}`,
+        label: upstream?.name ?? server.name,
+        description: [
+          ...(upstream === undefined ? [] : [server.name]),
+          server.transport,
+          server.enabled ? '已开启' : '已安装'
+        ].join(' · '),
+        status: server.enabled ? 'enabled' as const : 'installed' as const,
+        ...(server.enabled
+          ? { insertText: connectorInsertText(server.name, upstream?.name) }
+          : {})
+      };
+    });
+}
+
+function findEnterpriseMcpUpstream(
+  server: CodexMcpListResponse['servers'][number],
+  catalog?: EnterpriseMcpCatalogResponse
+): EnterpriseMcpCatalogResponse['upstreams'][number] | undefined {
+  return catalog?.upstreams.find(upstream => (
+    upstream.installedServerName === server.name
+    || upstream.codexServerName === server.name
+    || upstream.endpoint === server.url
+  ));
+}
+
+function connectorInsertText(serverName: string, displayName?: string): string {
+  return displayName === undefined
+    ? `使用 MCP：${serverName} `
+    : `使用连接器「${displayName}」（MCP：${serverName}） `;
+}
+
+function toRuntimeSandbox(permission: ClaweeProject['sandbox'] | undefined): SandboxMode {
+  if (permission === 'danger-full-access' || permission === 'workspace-write') return permission;
+  return 'workspace-write';
+}
+
+function fromRuntimeSandbox(sandbox: SandboxMode): ProjectPermission {
+  if (sandbox === 'danger-full-access' || sandbox === 'workspace-write') return sandbox;
+  return 'follow-global';
+}
+
+function upsertThread(threads: ThreadResponse[], thread: ThreadResponse): ThreadResponse[] {
+  const withoutThread = threads.filter(item => item.id !== thread.id);
+  return [thread, ...withoutThread];
+}
+
+function upsertProject(
+  projects: ClaweeProject[],
+  project: ClaweeProject
+): ClaweeProject[] {
+  const existingIndex = projects.findIndex(item => item.id === project.id);
+  if (existingIndex < 0) return [project, ...projects];
+  return projects.map((item, index) => index === existingIndex ? project : item);
+}
+
+function orderProjectsByIds(
+  projects: ClaweeProject[],
+  projectIds: string[]
+): ClaweeProject[] {
+  if (projects.length !== projectIds.length) return projects;
+  const projectsById = new Map(projects.map(project => [project.id, project]));
+  const reordered = projectIds.map(projectId => projectsById.get(projectId));
+  if (reordered.some(project => project === undefined)) return projects;
+  if (reordered.every((project, index) => project === projects[index])) return projects;
+  return reordered as ClaweeProject[];
+}
+
+function upsertSchedule(
+  schedules: ScheduleResponse[],
+  schedule: ScheduleResponse
+): ScheduleResponse[] {
+  const withoutSchedule = schedules.filter(item => item.id !== schedule.id);
+  return [schedule, ...withoutSchedule];
+}
+
+function upsertEnterpriseSkill(
+  skills: EnterpriseSkillResponse[],
+  skill: EnterpriseSkillResponse
+): EnterpriseSkillResponse[] {
+  return [skill, ...skills.filter(item => item.skillId !== skill.skillId)];
+}
+
+function findValidCodexSkillId(
+  skills: CodexSkillListResponse | undefined,
+  skillName: string
+): string | undefined {
+  return skills?.skills.find(skill => (
+    skill.status === 'valid'
+    && (skill.id === skillName || skill.name === skillName)
+  ))?.id;
+}
+
+function findPendingRunStart(
+  pendingRunStartsById: PendingRunStartsById,
+  threadId: string | undefined
+): PendingRunStart | undefined {
+  return Object.values(pendingRunStartsById).find(pending => pending?.threadId === threadId);
+}
+
+function mapRunEventControllerState(
+  state: RunEventControllerState
+): RunSubscriptionState {
+  switch (state) {
+    case 'idle':
+      return 'idle';
+    case 'connecting':
+    case 'reconnecting':
+      return 'connecting';
+    case 'connected':
+      return 'connected';
+    case 'disconnected':
+      return 'disconnected';
+  }
+}
+
+function isTerminalRunStatus(status: RunResponse['status']): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+}
+
+function mapHistoryItemsToTimelineItems(items: ThreadHistoryItem[]): TimelineItem[] {
+  let currentRunId: string | undefined;
+  let currentRunHasDone = false;
+  let currentRunHasPersistedId = false;
+  const timelineItems: TimelineItem[] = [];
+
+  function closeCurrentRun() {
+    if (currentRunId === undefined || currentRunHasDone) return;
+    timelineItems.push({
+      id: `${currentRunId}_done`,
+      runId: currentRunId,
+      kind: 'done',
+      status: 'succeeded',
+      content: JSON.stringify({ type: 'done', status: 'succeeded' }),
+      source: 'runtime'
+    });
+    currentRunHasDone = true;
+  }
+
+  for (const item of items) {
+    if (item.type === 'user_message' || item.type === 'schedule_trigger') {
+      closeCurrentRun();
+      currentRunId = item.runId !== undefined
+        ? item.runId
+        : item.turnId === undefined
+          ? `history_item_${item.id}`
+          : `history_${item.turnId}`;
+      currentRunHasDone = false;
+      currentRunHasPersistedId = item.runId !== undefined;
+      timelineItems.push(mapHistoryItemToTimelineItem(item, currentRunId));
+      continue;
+    }
+
+    if (item.type === 'done') {
+      timelineItems.push(mapHistoryItemToTimelineItem(item, currentRunId));
+      currentRunHasDone = true;
+      currentRunId = undefined;
+      currentRunHasPersistedId = false;
+      continue;
+    }
+
+    timelineItems.push(mapHistoryItemToTimelineItem(
+      item,
+      item.turnId === undefined || currentRunHasPersistedId ? currentRunId : undefined
+    ));
+  }
+
+  closeCurrentRun();
+  return timelineItems;
+}
+
+function mapHistoryItemToTimelineItem(item: ThreadHistoryItem, fallbackRunId?: string): TimelineItem {
+  const runId = (
+    item.type === 'user_message'
+    || item.type === 'schedule_trigger'
+  ) && item.runId !== undefined
+    ? item.runId
+    : fallbackRunId
+      ?? (item.turnId === undefined ? undefined : `history_${item.turnId}`);
+  const base = {
+    id: item.id,
+    timestamp: item.createdAt,
+    ...(runId === undefined ? {} : { runId })
+  };
+
+  switch (item.type) {
+    case 'user_message':
+      return {
+        ...base,
+        kind: 'user_message',
+        text: item.text,
+        ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
+        source: 'runtime'
+      };
+    case 'schedule_trigger':
+      return {
+        ...base,
+        kind: 'schedule_trigger',
+        runId: item.runId ?? runId ?? `history_item_${item.id}`,
+        prompt: item.prompt,
+        triggeredAt: item.triggeredAt,
+        source: 'runtime'
+      };
+    case 'assistant_message':
+      return {
+        ...base,
+        kind: 'assistant_message',
+        text: item.text,
+        content: JSON.stringify(item),
+        source: 'runtime'
+      };
+    case 'reasoning_summary':
+      return {
+        ...base,
+        kind: 'reasoning_summary',
+        text: item.text,
+        content: JSON.stringify(item),
+        source: 'runtime'
+      };
+    case 'tool_use':
+      return {
+        ...base,
+        kind: 'tool_step',
+        name: item.name,
+        content: JSON.stringify({ type: 'tool_use', name: item.name, input: item.input }),
+        source: 'runtime'
+      };
+    case 'tool_result':
+      return {
+        ...base,
+        kind: 'tool_step',
+        name: item.name,
+        content: JSON.stringify({ type: 'tool_result', name: item.name, output: item.output, isError: item.isError }),
+        source: 'runtime'
+      };
+    case 'file_change':
+      return {
+        ...base,
+        kind: 'change_card',
+        title: formatHistoryFileChangeTitle(item.changes),
+        path: item.changes.find(change => change.path.length > 0)?.path ?? '文件变更',
+        delta: `${item.changes.length} 项变更`,
+        source: 'runtime'
+      };
+    case 'done':
+      return {
+        ...base,
+        kind: 'done',
+        status: item.status,
+        content: JSON.stringify(item),
+        source: 'runtime'
+      };
+    default: {
+      const _exhaustive: never = item;
+      return _exhaustive;
+    }
+  }
+}
+
+function formatHistoryFileChangeTitle(
+  changes: Array<{ kind: 'add' | 'modify' | 'delete' | 'unknown' }>
+): string {
+  if (changes.length === 0) return '文件变更';
+
+  const counts = new Map<'add' | 'modify' | 'delete' | 'unknown', number>();
+  for (const change of changes) counts.set(change.kind, (counts.get(change.kind) ?? 0) + 1);
+
+  return (['add', 'modify', 'delete', 'unknown'] as const)
+    .map(kind => {
+      const count = counts.get(kind) ?? 0;
+      if (count === 0) return undefined;
+      if (kind === 'add') return `新增 ${count} 个文件`;
+      if (kind === 'modify') return `修改 ${count} 个文件`;
+      if (kind === 'delete') return `删除 ${count} 个文件`;
+      return `变更 ${count} 个文件`;
+    })
+    .filter((part): part is string => part !== undefined)
+    .join('，');
+}
+
+function clampPaneWidth(value: number, min: number, max: number): number {
+  return Math.round(Math.min(Math.max(value, min), max));
+}
+
+function mapRuntimeStatus(connectionState: ConnectionState): RuntimeStatus {
+  if (connectionState.status !== 'connected') {
+    return {
+      connected: false,
+      runtimeVersion: '0.1.0',
+      lastCheckedAt: '2026-07-07 10:00'
+    };
+  }
+
+  return {
+    connected: true,
+    runtimeVersion: '0.1.0',
+    codexVersion: connectionState.codexStatus.codexVersion,
+    codexPath: connectionState.codexStatus.codexBin,
+    codexHome: connectionState.codexStatus.codexHome,
+    lastCheckedAt: '2026-07-07 10:00'
+  };
+}
+
+function hasOwnPath<T>(record: Record<string, T>, path: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, path);
+}

@@ -1,0 +1,49 @@
+{
+  "name": "@clawee/daemon",
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build && node --import tsx scripts/prepare-enterprise-development-config-2026-08-09.ts",
+    "dev": "node --import tsx src/main.ts --clawee-enterprise-config=.runtime/config.toml",
+    "preserver:start": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build && node scripts/prepare-server-runtime.mjs && node --import tsx scripts/prepare-enterprise-development-config-2026-08-09.ts",
+    "server:start": "node --import tsx scripts/start-server.mjs",
+    "predev:e2e": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
+    "dev:e2e": "node --import tsx src/main.ts",
+    "prebuild": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "pretest": "pnpm --filter @clawee/protocol build && pnpm --filter @clawee/skill-market build",
+    "test": "vitest run --passWithNoTests",
+    "verify:schedule-upgrade": "node --import tsx scripts/verify-scheduled-task-upgrade.ts"
+  },
+  "dependencies": {
+    "@clawee/protocol": "workspace:*",
+    "@clawee/skill-market": "workspace:*",
+    "@fastify/cors": "^11.0.1",
+    "@fastify/static": "10.1.2",
+    "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "better-sqlite3": "^12.11.1",
+    "cron-parser": "^5.6.1",
+    "cross-spawn": "^7.0.6",
+    "fastify": "^5.12.1",
+    "nanoid": "^5.0.9",
+    "toml": "4.2.0",
+    "unpdf": "1.8.1",
+    "yaml": "^2.8.1",
+    "yauzl": "3.4.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/yauzl": "3.4.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krillinai/Clawee.git",
+    "directory": "client/apps/daemon"
+  }
+}

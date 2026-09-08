@@ -1,0 +1,93 @@
+server:
+  addr: "127.0.0.1:1904"
+  enable_pprof: false
+
+database:
+  url: "postgres://claw_mcp@localhost:15932/claw_mcp?sslmode=disable"
+
+admin:
+  token: ""
+
+security:
+  session_cookie_name: "claw_front_token"
+  admin_session_cookie_name: "claw_admin_token"
+  session_cookie_secure: false
+  session_duration: "168h"
+  user_jwt_signing_key: ""
+  agent_token_encryption_key: ""
+
+logging:
+  level: "info"
+  format: "console"
+  output: "stdout"
+  access_enabled: true
+  error_response_body: false
+
+static:
+  enabled: true
+  dir: ""
+
+office:
+  install:
+    public_base_url: ""
+    collector_binary_root: "public/collectors"
+
+mcp:
+  public_base_url: "http://localhost:1904"
+  auth:
+    enabled: true
+    resource: "http://localhost:1904/mcp"
+    resource_metadata_url: "http://localhost:1904/.well-known/oauth-protected-resource/mcp"
+    authorization_servers: []
+    required_scopes:
+      - "mcp:call"
+
+knowledge:
+  enabled: false
+  provider_type: "bailian"
+  bailian:
+    endpoint: "https://bailian.cn-beijing.aliyuncs.com"
+    workspace_id: ""
+    access_key_id: ""
+    access_key_secret: ""
+
+skillhub:
+  enabled: false
+  package_root: "data/skillhub/packages"
+  github_sync_enabled: false
+  repository_root: "data/skillhub/repositories"
+
+shared_files:
+  storage_root: "data/shared-files"
+
+claw_admin:
+  base_url: ""
+  deployment_credential: ""
+  timeout: "10s"
+
+model_access:
+  mode: "enterprise_managed"
+
+agent_activity:
+  reporting_enabled: false
+
+sub2api:
+  base_url: ""
+  admin_api_key: ""
+  organization_user_id: 0
+
+dingtalk:
+  enabled: false
+  client_id: ""
+  client_secret: ""
+  redirect_url: ""
+  provider_key: "default"
+  auto_provision: false
+  state_ttl: "10m"
+  request_timeout: "10s"
+
+bilibili:
+  enabled: false
+  client_id: ""
+  client_secret: ""
+  redirect_url: ""

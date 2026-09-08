@@ -1,0 +1,20 @@
+{
+  "name": "@clawee/harness",
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@clawee/protocol": "workspace:*"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krillinai/Clawee.git",
+    "directory": "client/apps/harness"
+  }
+}

@@ -1,0 +1,50 @@
+name: Server CI
+on:
+  push:
+    tags-ignore:
+      - '**'
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: claw_mcp_test
+          POSTGRES_USER: claw_mcp
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U claw_mcp -d claw_mcp_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: server/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: server/web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web test
+      - run: pnpm --dir web build
+      - run: go test -p 1 ./...
+        env:
+          CLAW_MCP_TEST_DATABASE_URL: postgres://claw_mcp@127.0.0.1:5432/claw_mcp_test?sslmode=disable
+      - run: go vet ./...
+      - run: pnpm --dir web audit --audit-level high
+      - run: ./scripts/build-collector.sh

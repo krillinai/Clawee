@@ -1,0 +1,184 @@
+name: Desktop Preflight
+
+run-name: Desktop Preflight · ${{ inputs.ref || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要验证的分支、Tag 或 Commit SHA
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: desktop-preflight-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      target-sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - id: target
+        name: 解析候选提交
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: 标记 Preflight 运行中
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        shell: bash
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
+            -f state=pending \
+            -f context=desktop-preflight \
+            -f description='Clawee Desktop 三平台预发布验证运行中' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm codex:runtime:verify
+      - run: pnpm audit --audit-level high
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm build
+    defaults:
+      run:
+        working-directory: client
+
+  package:
+    needs: verify
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-x64
+            os: macos-15-intel
+            platform: mac
+            arch: x64
+          - name: macos-arm64
+            os: macos-14
+            platform: mac
+            arch: arm64
+          - name: windows-x64
+            os: windows-latest
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
+      CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
+      CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
+      CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.target-sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: |
+            client/apps/desktop/.cache/electron
+            client/apps/desktop/.cache/electron-builder
+            client/apps/desktop/.cache/node-gyp
+            client/apps/desktop/.cache/npm
+            client/apps/desktop/.cache/codex-runtime
+          key: desktop-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('client/pnpm-lock.yaml', 'client/apps/desktop/package.json', 'client/config/codex-runtime.json') }}
+          restore-keys: |
+            desktop-build-${{ runner.os }}-${{ matrix.arch }}-
+      - name: 生成内部测试安装包
+        run: pnpm desktop:dist
+      - name: 上传内部测试安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawee-desktop-preflight-${{ matrix.name }}
+          path: |
+            client/apps/desktop/release/*.dmg
+            client/apps/desktop/release/*.exe
+            client/apps/desktop/release/clawee-desktop-build-manifest-*.json
+            client/apps/desktop/release/*.zip
+            client/apps/desktop/release/*.blockmap
+            client/apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+      - name: 验证包内 Codex Runtime E2E
+        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
+      - name: 验证包内 Codex 真实会话
+        env:
+          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
+        run: pnpm --filter @clawee/desktop e2e:real-codex
+      - name: 上传 Runtime E2E 证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawee-desktop-preflight-e2e-${{ matrix.name }}
+          path: |
+            client/test-results/clawee-desktop-embedded-runtime-e2e.json
+            client/test-results/clawee-desktop-runtime-tool-loop-e2e.json
+            client/test-results/clawee-desktop-real-codex-smoke.json
+            client/test-results/desktop-embedded-runtime-playwright
+            client/test-results/desktop-embedded-runtime-playwright-report
+            client/test-results/desktop-real-codex-playwright
+          if-no-files-found: warn
+          retention-days: 14
+    defaults:
+      run:
+        working-directory: client
+  record:
+    if: always() && needs.verify.outputs.target-sha != ''
+    needs:
+      - verify
+      - package
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: 记录 Preflight 结果
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.verify.outputs.target-sha }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        shell: bash
+        run: |
+          state=failure
+          description='Clawee Desktop 三平台预发布验证失败'
+          if [[ "$VERIFY_RESULT" == 'success' && "$PACKAGE_RESULT" == 'success' ]]; then
+            state=success
+            description='Clawee Desktop 三平台预发布验证通过'
+          fi
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
+            -f state="$state" \
+            -f context=desktop-preflight \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script data-theme-init>
+      (() => {
+        const storageKey = "clawee-theme";
+        const validThemes = ["light", "dark", "system"];
+        let theme = "system";
+
+        try {
+          const storedTheme = localStorage.getItem(storageKey);
+          if (storedTheme && validThemes.includes(storedTheme)) theme = storedTheme;
+        } catch {
+          theme = "system";
+        }
+
+        const systemPrefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const resolvedTheme = theme === "system" ? (systemPrefersDark ? "dark" : "light") : theme;
+        const root = document.documentElement;
+        root.classList.toggle("dark", resolvedTheme === "dark");
+        root.style.colorScheme = resolvedTheme;
+      })();
+    </script>
+    <title>Clawee Admin</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

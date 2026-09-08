@@ -1,0 +1,8359 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "@acemir/cssom",
+      "version": "0.9.31",
+      "purl": "pkg:npm/%40acemir/cssom@0.9.31",
+      "bom-ref": "pkg:npm/%40acemir/cssom@0.9.31",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@adobe/css-tools",
+      "version": "4.5.0",
+      "purl": "pkg:npm/%40adobe/css-tools@4.5.0",
+      "bom-ref": "pkg:npm/%40adobe/css-tools@4.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@alloc/quick-lru",
+      "version": "5.2.0",
+      "purl": "pkg:npm/%40alloc/quick-lru@5.2.0",
+      "bom-ref": "pkg:npm/%40alloc/quick-lru@5.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@asamuzakjp/css-color",
+      "version": "4.1.2",
+      "purl": "pkg:npm/%40asamuzakjp/css-color@4.1.2",
+      "bom-ref": "pkg:npm/%40asamuzakjp/css-color@4.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@asamuzakjp/dom-selector",
+      "version": "6.8.1",
+      "purl": "pkg:npm/%40asamuzakjp/dom-selector@6.8.1",
+      "bom-ref": "pkg:npm/%40asamuzakjp/dom-selector@6.8.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@asamuzakjp/nwsapi",
+      "version": "2.3.9",
+      "purl": "pkg:npm/%40asamuzakjp/nwsapi@2.3.9",
+      "bom-ref": "pkg:npm/%40asamuzakjp/nwsapi@2.3.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/code-frame",
+      "version": "7.29.0",
+      "purl": "pkg:npm/%40babel/code-frame@7.29.0",
+      "bom-ref": "pkg:npm/%40babel/code-frame@7.29.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/compat-data",
+      "version": "7.29.3",
+      "purl": "pkg:npm/%40babel/compat-data@7.29.3",
+      "bom-ref": "pkg:npm/%40babel/compat-data@7.29.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/core",
+      "version": "7.29.0",
+      "purl": "pkg:npm/%40babel/core@7.29.0",
+      "bom-ref": "pkg:npm/%40babel/core@7.29.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/generator",
+      "version": "7.29.1",
+      "purl": "pkg:npm/%40babel/generator@7.29.1",
+      "bom-ref": "pkg:npm/%40babel/generator@7.29.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-compilation-targets",
+      "version": "7.28.6",
+      "purl": "pkg:npm/%40babel/helper-compilation-targets@7.28.6",
+      "bom-ref": "pkg:npm/%40babel/helper-compilation-targets@7.28.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-globals",
+      "version": "7.28.0",
+      "purl": "pkg:npm/%40babel/helper-globals@7.28.0",
+      "bom-ref": "pkg:npm/%40babel/helper-globals@7.28.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-module-imports",
+      "version": "7.28.6",
+      "purl": "pkg:npm/%40babel/helper-module-imports@7.28.6",
+      "bom-ref": "pkg:npm/%40babel/helper-module-imports@7.28.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-module-transforms",
+      "version": "7.28.6",
+      "purl": "pkg:npm/%40babel/helper-module-transforms@7.28.6",
+      "bom-ref": "pkg:npm/%40babel/helper-module-transforms@7.28.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-plugin-utils",
+      "version": "7.28.6",
+      "purl": "pkg:npm/%40babel/helper-plugin-utils@7.28.6",
+      "bom-ref": "pkg:npm/%40babel/helper-plugin-utils@7.28.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-string-parser",
+      "version": "7.27.1",
+      "purl": "pkg:npm/%40babel/helper-string-parser@7.27.1",
+      "bom-ref": "pkg:npm/%40babel/helper-string-parser@7.27.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-validator-identifier",
+      "version": "7.28.5",
+      "purl": "pkg:npm/%40babel/helper-validator-identifier@7.28.5",
+      "bom-ref": "pkg:npm/%40babel/helper-validator-identifier@7.28.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helper-validator-option",
+      "version": "7.27.1",
+      "purl": "pkg:npm/%40babel/helper-validator-option@7.27.1",
+      "bom-ref": "pkg:npm/%40babel/helper-validator-option@7.27.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/helpers",
+      "version": "7.29.2",
+      "purl": "pkg:npm/%40babel/helpers@7.29.2",
+      "bom-ref": "pkg:npm/%40babel/helpers@7.29.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/parser",
+      "version": "7.29.3",
+      "purl": "pkg:npm/%40babel/parser@7.29.3",
+      "bom-ref": "pkg:npm/%40babel/parser@7.29.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/plugin-transform-react-jsx-self",
+      "version": "7.27.1",
+      "purl": "pkg:npm/%40babel/plugin-transform-react-jsx-self@7.27.1",
+      "bom-ref": "pkg:npm/%40babel/plugin-transform-react-jsx-self@7.27.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/plugin-transform-react-jsx-source",
+      "version": "7.27.1",
+      "purl": "pkg:npm/%40babel/plugin-transform-react-jsx-source@7.27.1",
+      "bom-ref": "pkg:npm/%40babel/plugin-transform-react-jsx-source@7.27.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/runtime",
+      "version": "7.29.2",
+      "purl": "pkg:npm/%40babel/runtime@7.29.2",
+      "bom-ref": "pkg:npm/%40babel/runtime@7.29.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/template",
+      "version": "7.28.6",
+      "purl": "pkg:npm/%40babel/template@7.28.6",
+      "bom-ref": "pkg:npm/%40babel/template@7.28.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/traverse",
+      "version": "7.29.0",
+      "purl": "pkg:npm/%40babel/traverse@7.29.0",
+      "bom-ref": "pkg:npm/%40babel/traverse@7.29.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@babel/types",
+      "version": "7.29.0",
+      "purl": "pkg:npm/%40babel/types@7.29.0",
+      "bom-ref": "pkg:npm/%40babel/types@7.29.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/color-helpers",
+      "version": "6.0.2",
+      "purl": "pkg:npm/%40csstools/color-helpers@6.0.2",
+      "bom-ref": "pkg:npm/%40csstools/color-helpers@6.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT-0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/css-calc",
+      "version": "3.2.1",
+      "purl": "pkg:npm/%40csstools/css-calc@3.2.1",
+      "bom-ref": "pkg:npm/%40csstools/css-calc@3.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/css-color-parser",
+      "version": "4.1.1",
+      "purl": "pkg:npm/%40csstools/css-color-parser@4.1.1",
+      "bom-ref": "pkg:npm/%40csstools/css-color-parser@4.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/css-parser-algorithms",
+      "version": "4.0.0",
+      "purl": "pkg:npm/%40csstools/css-parser-algorithms@4.0.0",
+      "bom-ref": "pkg:npm/%40csstools/css-parser-algorithms@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/css-syntax-patches-for-csstree",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40csstools/css-syntax-patches-for-csstree@1.1.4",
+      "bom-ref": "pkg:npm/%40csstools/css-syntax-patches-for-csstree@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT-0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@csstools/css-tokenizer",
+      "version": "4.0.0",
+      "purl": "pkg:npm/%40csstools/css-tokenizer@4.0.0",
+      "bom-ref": "pkg:npm/%40csstools/css-tokenizer@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@date-fns/tz",
+      "version": "1.5.0",
+      "purl": "pkg:npm/%40date-fns/tz@1.5.0",
+      "bom-ref": "pkg:npm/%40date-fns/tz@1.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@esbuild/darwin-arm64",
+      "version": "0.27.7",
+      "purl": "pkg:npm/%40esbuild/darwin-arm64@0.27.7",
+      "bom-ref": "pkg:npm/%40esbuild/darwin-arm64@0.27.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@exodus/bytes",
+      "version": "1.15.1",
+      "purl": "pkg:npm/%40exodus/bytes@1.15.1",
+      "bom-ref": "pkg:npm/%40exodus/bytes@1.15.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@floating-ui/core",
+      "version": "1.7.5",
+      "purl": "pkg:npm/%40floating-ui/core@1.7.5",
+      "bom-ref": "pkg:npm/%40floating-ui/core@1.7.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@floating-ui/dom",
+      "version": "1.7.6",
+      "purl": "pkg:npm/%40floating-ui/dom@1.7.6",
+      "bom-ref": "pkg:npm/%40floating-ui/dom@1.7.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@floating-ui/react-dom",
+      "version": "2.1.8",
+      "purl": "pkg:npm/%40floating-ui/react-dom@2.1.8",
+      "bom-ref": "pkg:npm/%40floating-ui/react-dom@2.1.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@floating-ui/utils",
+      "version": "0.2.11",
+      "purl": "pkg:npm/%40floating-ui/utils@0.2.11",
+      "bom-ref": "pkg:npm/%40floating-ui/utils@0.2.11",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@fontsource-variable/geist",
+      "version": "5.3.0",
+      "purl": "pkg:npm/%40fontsource-variable/geist@5.3.0",
+      "bom-ref": "pkg:npm/%40fontsource-variable/geist@5.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "OFL-1.1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@jridgewell/gen-mapping",
+      "version": "0.3.13",
+      "purl": "pkg:npm/%40jridgewell/gen-mapping@0.3.13",
+      "bom-ref": "pkg:npm/%40jridgewell/gen-mapping@0.3.13",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@jridgewell/remapping",
+      "version": "2.3.5",
+      "purl": "pkg:npm/%40jridgewell/remapping@2.3.5",
+      "bom-ref": "pkg:npm/%40jridgewell/remapping@2.3.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@jridgewell/resolve-uri",
+      "version": "3.1.2",
+      "purl": "pkg:npm/%40jridgewell/resolve-uri@3.1.2",
+      "bom-ref": "pkg:npm/%40jridgewell/resolve-uri@3.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.5.5",
+      "purl": "pkg:npm/%40jridgewell/sourcemap-codec@1.5.5",
+      "bom-ref": "pkg:npm/%40jridgewell/sourcemap-codec@1.5.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@jridgewell/trace-mapping",
+      "version": "0.3.31",
+      "purl": "pkg:npm/%40jridgewell/trace-mapping@0.3.31",
+      "bom-ref": "pkg:npm/%40jridgewell/trace-mapping@0.3.31",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@nodelib/fs.scandir",
+      "version": "2.1.5",
+      "purl": "pkg:npm/%40nodelib/fs.scandir@2.1.5",
+      "bom-ref": "pkg:npm/%40nodelib/fs.scandir@2.1.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@nodelib/fs.stat",
+      "version": "2.0.5",
+      "purl": "pkg:npm/%40nodelib/fs.stat@2.0.5",
+      "bom-ref": "pkg:npm/%40nodelib/fs.stat@2.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@nodelib/fs.walk",
+      "version": "1.2.8",
+      "purl": "pkg:npm/%40nodelib/fs.walk@1.2.8",
+      "bom-ref": "pkg:npm/%40nodelib/fs.walk@1.2.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@playwright/test",
+      "version": "1.60.0",
+      "purl": "pkg:npm/%40playwright/test@1.60.0",
+      "bom-ref": "pkg:npm/%40playwright/test@1.60.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE,NOTICE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/number",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/number@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/number@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/primitive",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40radix-ui/primitive@1.1.4",
+      "bom-ref": "pkg:npm/%40radix-ui/primitive@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/primitive",
+      "version": "1.1.5",
+      "purl": "pkg:npm/%40radix-ui/primitive@1.1.5",
+      "bom-ref": "pkg:npm/%40radix-ui/primitive@1.1.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/primitive",
+      "version": "1.1.7",
+      "purl": "pkg:npm/%40radix-ui/primitive@1.1.7",
+      "bom-ref": "pkg:npm/%40radix-ui/primitive@1.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-arrow",
+      "version": "1.1.9",
+      "purl": "pkg:npm/%40radix-ui/react-arrow@1.1.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-arrow@1.1.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-checkbox",
+      "version": "1.3.4",
+      "purl": "pkg:npm/%40radix-ui/react-checkbox@1.3.4",
+      "bom-ref": "pkg:npm/%40radix-ui/react-checkbox@1.3.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-collapsible",
+      "version": "1.1.20",
+      "purl": "pkg:npm/%40radix-ui/react-collapsible@1.1.20",
+      "bom-ref": "pkg:npm/%40radix-ui/react-collapsible@1.1.20",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-collection",
+      "version": "1.1.12",
+      "purl": "pkg:npm/%40radix-ui/react-collection@1.1.12",
+      "bom-ref": "pkg:npm/%40radix-ui/react-collection@1.1.12",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-collection",
+      "version": "1.1.9",
+      "purl": "pkg:npm/%40radix-ui/react-collection@1.1.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-collection@1.1.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-compose-refs",
+      "version": "1.1.3",
+      "purl": "pkg:npm/%40radix-ui/react-compose-refs@1.1.3",
+      "bom-ref": "pkg:npm/%40radix-ui/react-compose-refs@1.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-compose-refs",
+      "version": "1.1.5",
+      "purl": "pkg:npm/%40radix-ui/react-compose-refs@1.1.5",
+      "bom-ref": "pkg:npm/%40radix-ui/react-compose-refs@1.1.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-context",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40radix-ui/react-context@1.1.4",
+      "bom-ref": "pkg:npm/%40radix-ui/react-context@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-context",
+      "version": "1.2.0",
+      "purl": "pkg:npm/%40radix-ui/react-context@1.2.0",
+      "bom-ref": "pkg:npm/%40radix-ui/react-context@1.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-context",
+      "version": "1.2.2",
+      "purl": "pkg:npm/%40radix-ui/react-context@1.2.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-context@1.2.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-dialog",
+      "version": "1.1.16",
+      "purl": "pkg:npm/%40radix-ui/react-dialog@1.1.16",
+      "bom-ref": "pkg:npm/%40radix-ui/react-dialog@1.1.16",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-direction",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-direction@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-direction@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-dismissable-layer",
+      "version": "1.1.12",
+      "purl": "pkg:npm/%40radix-ui/react-dismissable-layer@1.1.12",
+      "bom-ref": "pkg:npm/%40radix-ui/react-dismissable-layer@1.1.12",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-focus-guards",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40radix-ui/react-focus-guards@1.1.4",
+      "bom-ref": "pkg:npm/%40radix-ui/react-focus-guards@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-focus-scope",
+      "version": "1.1.9",
+      "purl": "pkg:npm/%40radix-ui/react-focus-scope@1.1.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-focus-scope@1.1.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-id",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-id@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-id@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-id",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40radix-ui/react-id@1.1.4",
+      "bom-ref": "pkg:npm/%40radix-ui/react-id@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-label",
+      "version": "2.1.9",
+      "purl": "pkg:npm/%40radix-ui/react-label@2.1.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-label@2.1.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-popover",
+      "version": "1.1.16",
+      "purl": "pkg:npm/%40radix-ui/react-popover@1.1.16",
+      "bom-ref": "pkg:npm/%40radix-ui/react-popover@1.1.16",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-popper",
+      "version": "1.3.0",
+      "purl": "pkg:npm/%40radix-ui/react-popper@1.3.0",
+      "bom-ref": "pkg:npm/%40radix-ui/react-popper@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-portal",
+      "version": "1.1.11",
+      "purl": "pkg:npm/%40radix-ui/react-portal@1.1.11",
+      "bom-ref": "pkg:npm/%40radix-ui/react-portal@1.1.11",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-presence",
+      "version": "1.1.10",
+      "purl": "pkg:npm/%40radix-ui/react-presence@1.1.10",
+      "bom-ref": "pkg:npm/%40radix-ui/react-presence@1.1.10",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-presence",
+      "version": "1.1.6",
+      "purl": "pkg:npm/%40radix-ui/react-presence@1.1.6",
+      "bom-ref": "pkg:npm/%40radix-ui/react-presence@1.1.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-primitive",
+      "version": "2.1.10",
+      "purl": "pkg:npm/%40radix-ui/react-primitive@2.1.10",
+      "bom-ref": "pkg:npm/%40radix-ui/react-primitive@2.1.10",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-primitive",
+      "version": "2.1.5",
+      "purl": "pkg:npm/%40radix-ui/react-primitive@2.1.5",
+      "bom-ref": "pkg:npm/%40radix-ui/react-primitive@2.1.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-primitive",
+      "version": "2.1.7",
+      "purl": "pkg:npm/%40radix-ui/react-primitive@2.1.7",
+      "bom-ref": "pkg:npm/%40radix-ui/react-primitive@2.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-roving-focus",
+      "version": "1.1.12",
+      "purl": "pkg:npm/%40radix-ui/react-roving-focus@1.1.12",
+      "bom-ref": "pkg:npm/%40radix-ui/react-roving-focus@1.1.12",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-roving-focus",
+      "version": "1.1.15",
+      "purl": "pkg:npm/%40radix-ui/react-roving-focus@1.1.15",
+      "bom-ref": "pkg:npm/%40radix-ui/react-roving-focus@1.1.15",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-select",
+      "version": "2.3.0",
+      "purl": "pkg:npm/%40radix-ui/react-select@2.3.0",
+      "bom-ref": "pkg:npm/%40radix-ui/react-select@2.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-separator",
+      "version": "1.1.9",
+      "purl": "pkg:npm/%40radix-ui/react-separator@1.1.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-separator@1.1.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-slot",
+      "version": "1.2.5",
+      "purl": "pkg:npm/%40radix-ui/react-slot@1.2.5",
+      "bom-ref": "pkg:npm/%40radix-ui/react-slot@1.2.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-slot",
+      "version": "1.3.0",
+      "purl": "pkg:npm/%40radix-ui/react-slot@1.3.0",
+      "bom-ref": "pkg:npm/%40radix-ui/react-slot@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-slot",
+      "version": "1.3.3",
+      "purl": "pkg:npm/%40radix-ui/react-slot@1.3.3",
+      "bom-ref": "pkg:npm/%40radix-ui/react-slot@1.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-tabs",
+      "version": "1.1.14",
+      "purl": "pkg:npm/%40radix-ui/react-tabs@1.1.14",
+      "bom-ref": "pkg:npm/%40radix-ui/react-tabs@1.1.14",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-toggle",
+      "version": "1.1.14",
+      "purl": "pkg:npm/%40radix-ui/react-toggle@1.1.14",
+      "bom-ref": "pkg:npm/%40radix-ui/react-toggle@1.1.14",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-toggle-group",
+      "version": "1.1.15",
+      "purl": "pkg:npm/%40radix-ui/react-toggle-group@1.1.15",
+      "bom-ref": "pkg:npm/%40radix-ui/react-toggle-group@1.1.15",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-tooltip",
+      "version": "1.2.9",
+      "purl": "pkg:npm/%40radix-ui/react-tooltip@1.2.9",
+      "bom-ref": "pkg:npm/%40radix-ui/react-tooltip@1.2.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-callback-ref",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-callback-ref@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-callback-ref@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-controllable-state",
+      "version": "1.2.3",
+      "purl": "pkg:npm/%40radix-ui/react-use-controllable-state@1.2.3",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-controllable-state@1.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-controllable-state",
+      "version": "1.2.6",
+      "purl": "pkg:npm/%40radix-ui/react-use-controllable-state@1.2.6",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-controllable-state@1.2.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-effect-event",
+      "version": "0.0.3",
+      "purl": "pkg:npm/%40radix-ui/react-use-effect-event@0.0.3",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-effect-event@0.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-effect-event",
+      "version": "0.0.5",
+      "purl": "pkg:npm/%40radix-ui/react-use-effect-event@0.0.5",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-effect-event@0.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-escape-keydown",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-escape-keydown@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-escape-keydown@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-is-hydrated",
+      "version": "0.1.1",
+      "purl": "pkg:npm/%40radix-ui/react-use-is-hydrated@0.1.1",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-is-hydrated@0.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-layout-effect",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-layout-effect@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-layout-effect@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-layout-effect",
+      "version": "1.1.4",
+      "purl": "pkg:npm/%40radix-ui/react-use-layout-effect@1.1.4",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-layout-effect@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-previous",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-previous@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-previous@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-rect",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-rect@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-rect@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-use-size",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/react-use-size@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/react-use-size@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/react-visually-hidden",
+      "version": "1.2.5",
+      "purl": "pkg:npm/%40radix-ui/react-visually-hidden@1.2.5",
+      "bom-ref": "pkg:npm/%40radix-ui/react-visually-hidden@1.2.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@radix-ui/rect",
+      "version": "1.1.2",
+      "purl": "pkg:npm/%40radix-ui/rect@1.1.2",
+      "bom-ref": "pkg:npm/%40radix-ui/rect@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@rolldown/pluginutils",
+      "version": "1.0.0-rc.3",
+      "purl": "pkg:npm/%40rolldown/pluginutils@1.0.0-rc.3",
+      "bom-ref": "pkg:npm/%40rolldown/pluginutils@1.0.0-rc.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@rollup/rollup-darwin-arm64",
+      "version": "4.60.4",
+      "purl": "pkg:npm/%40rollup/rollup-darwin-arm64@4.60.4",
+      "bom-ref": "pkg:npm/%40rollup/rollup-darwin-arm64@4.60.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@standard-schema/spec",
+      "version": "1.1.0",
+      "purl": "pkg:npm/%40standard-schema/spec@1.1.0",
+      "bom-ref": "pkg:npm/%40standard-schema/spec@1.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@tanstack/query-core",
+      "version": "5.100.13",
+      "purl": "pkg:npm/%40tanstack/query-core@5.100.13",
+      "bom-ref": "pkg:npm/%40tanstack/query-core@5.100.13",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@tanstack/react-query",
+      "version": "5.100.13",
+      "purl": "pkg:npm/%40tanstack/react-query@5.100.13",
+      "bom-ref": "pkg:npm/%40tanstack/react-query@5.100.13",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@testing-library/dom",
+      "version": "10.4.1",
+      "purl": "pkg:npm/%40testing-library/dom@10.4.1",
+      "bom-ref": "pkg:npm/%40testing-library/dom@10.4.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@testing-library/jest-dom",
+      "version": "6.9.1",
+      "purl": "pkg:npm/%40testing-library/jest-dom@6.9.1",
+      "bom-ref": "pkg:npm/%40testing-library/jest-dom@6.9.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@testing-library/react",
+      "version": "16.3.2",
+      "purl": "pkg:npm/%40testing-library/react@16.3.2",
+      "bom-ref": "pkg:npm/%40testing-library/react@16.3.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/aria-query",
+      "version": "5.0.4",
+      "purl": "pkg:npm/%40types/aria-query@5.0.4",
+      "bom-ref": "pkg:npm/%40types/aria-query@5.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/babel__core",
+      "version": "7.20.5",
+      "purl": "pkg:npm/%40types/babel__core@7.20.5",
+      "bom-ref": "pkg:npm/%40types/babel__core@7.20.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/babel__generator",
+      "version": "7.27.0",
+      "purl": "pkg:npm/%40types/babel__generator@7.27.0",
+      "bom-ref": "pkg:npm/%40types/babel__generator@7.27.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/babel__template",
+      "version": "7.4.4",
+      "purl": "pkg:npm/%40types/babel__template@7.4.4",
+      "bom-ref": "pkg:npm/%40types/babel__template@7.4.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/babel__traverse",
+      "version": "7.28.0",
+      "purl": "pkg:npm/%40types/babel__traverse@7.28.0",
+      "bom-ref": "pkg:npm/%40types/babel__traverse@7.28.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/chai",
+      "version": "5.2.3",
+      "purl": "pkg:npm/%40types/chai@5.2.3",
+      "bom-ref": "pkg:npm/%40types/chai@5.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-array",
+      "version": "3.2.2",
+      "purl": "pkg:npm/%40types/d3-array@3.2.2",
+      "bom-ref": "pkg:npm/%40types/d3-array@3.2.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-color",
+      "version": "3.1.3",
+      "purl": "pkg:npm/%40types/d3-color@3.1.3",
+      "bom-ref": "pkg:npm/%40types/d3-color@3.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-ease",
+      "version": "3.0.2",
+      "purl": "pkg:npm/%40types/d3-ease@3.0.2",
+      "bom-ref": "pkg:npm/%40types/d3-ease@3.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-interpolate",
+      "version": "3.0.4",
+      "purl": "pkg:npm/%40types/d3-interpolate@3.0.4",
+      "bom-ref": "pkg:npm/%40types/d3-interpolate@3.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-path",
+      "version": "3.1.1",
+      "purl": "pkg:npm/%40types/d3-path@3.1.1",
+      "bom-ref": "pkg:npm/%40types/d3-path@3.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-scale",
+      "version": "4.0.9",
+      "purl": "pkg:npm/%40types/d3-scale@4.0.9",
+      "bom-ref": "pkg:npm/%40types/d3-scale@4.0.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-shape",
+      "version": "3.1.8",
+      "purl": "pkg:npm/%40types/d3-shape@3.1.8",
+      "bom-ref": "pkg:npm/%40types/d3-shape@3.1.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-time",
+      "version": "3.0.4",
+      "purl": "pkg:npm/%40types/d3-time@3.0.4",
+      "bom-ref": "pkg:npm/%40types/d3-time@3.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/d3-timer",
+      "version": "3.0.2",
+      "purl": "pkg:npm/%40types/d3-timer@3.0.2",
+      "bom-ref": "pkg:npm/%40types/d3-timer@3.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/debug",
+      "version": "4.1.13",
+      "purl": "pkg:npm/%40types/debug@4.1.13",
+      "bom-ref": "pkg:npm/%40types/debug@4.1.13",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/deep-eql",
+      "version": "4.0.2",
+      "purl": "pkg:npm/%40types/deep-eql@4.0.2",
+      "bom-ref": "pkg:npm/%40types/deep-eql@4.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/estree",
+      "version": "1.0.8",
+      "purl": "pkg:npm/%40types/estree@1.0.8",
+      "bom-ref": "pkg:npm/%40types/estree@1.0.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "purl": "pkg:npm/%40types/estree@1.0.9",
+      "bom-ref": "pkg:npm/%40types/estree@1.0.9",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/estree-jsx",
+      "version": "1.0.5",
+      "purl": "pkg:npm/%40types/estree-jsx@1.0.5",
+      "bom-ref": "pkg:npm/%40types/estree-jsx@1.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/hast",
+      "version": "3.0.5",
+      "purl": "pkg:npm/%40types/hast@3.0.5",
+      "bom-ref": "pkg:npm/%40types/hast@3.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/mdast",
+      "version": "4.0.4",
+      "purl": "pkg:npm/%40types/mdast@4.0.4",
+      "bom-ref": "pkg:npm/%40types/mdast@4.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/ms",
+      "version": "2.1.0",
+      "purl": "pkg:npm/%40types/ms@2.1.0",
+      "bom-ref": "pkg:npm/%40types/ms@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/node",
+      "version": "24.12.4",
+      "purl": "pkg:npm/%40types/node@24.12.4",
+      "bom-ref": "pkg:npm/%40types/node@24.12.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/react",
+      "version": "19.2.15",
+      "purl": "pkg:npm/%40types/react@19.2.15",
+      "bom-ref": "pkg:npm/%40types/react@19.2.15",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/react-dom",
+      "version": "19.2.3",
+      "purl": "pkg:npm/%40types/react-dom@19.2.3",
+      "bom-ref": "pkg:npm/%40types/react-dom@19.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/unist",
+      "version": "2.0.11",
+      "purl": "pkg:npm/%40types/unist@2.0.11",
+      "bom-ref": "pkg:npm/%40types/unist@2.0.11",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@types/unist",
+      "version": "3.0.3",
+      "purl": "pkg:npm/%40types/unist@3.0.3",
+      "bom-ref": "pkg:npm/%40types/unist@3.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@ungap/structured-clone",
+      "version": "1.3.3",
+      "purl": "pkg:npm/%40ungap/structured-clone@1.3.3",
+      "bom-ref": "pkg:npm/%40ungap/structured-clone@1.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitejs/plugin-react",
+      "version": "5.2.0",
+      "purl": "pkg:npm/%40vitejs/plugin-react@5.2.0",
+      "bom-ref": "pkg:npm/%40vitejs/plugin-react@5.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/expect",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/expect@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/expect@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/mocker",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/mocker@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/mocker@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/pretty-format",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/pretty-format@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/pretty-format@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/runner",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/runner@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/runner@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/snapshot",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/snapshot@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/snapshot@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/spy",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/spy@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/spy@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@vitest/utils",
+      "version": "4.1.7",
+      "purl": "pkg:npm/%40vitest/utils@4.1.7",
+      "bom-ref": "pkg:npm/%40vitest/utils@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "agent-base",
+      "version": "7.1.4",
+      "purl": "pkg:npm/agent-base@7.1.4",
+      "bom-ref": "pkg:npm/agent-base@7.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ansi-regex",
+      "version": "5.0.1",
+      "purl": "pkg:npm/ansi-regex@5.0.1",
+      "bom-ref": "pkg:npm/ansi-regex@5.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ansi-styles",
+      "version": "4.3.0",
+      "purl": "pkg:npm/ansi-styles@4.3.0",
+      "bom-ref": "pkg:npm/ansi-styles@4.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ansi-styles",
+      "version": "5.2.0",
+      "purl": "pkg:npm/ansi-styles@5.2.0",
+      "bom-ref": "pkg:npm/ansi-styles@5.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "any-promise",
+      "version": "1.3.0",
+      "purl": "pkg:npm/any-promise@1.3.0",
+      "bom-ref": "pkg:npm/any-promise@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "anymatch",
+      "version": "3.1.3",
+      "purl": "pkg:npm/anymatch@3.1.3",
+      "bom-ref": "pkg:npm/anymatch@3.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "arg",
+      "version": "5.0.2",
+      "purl": "pkg:npm/arg@5.0.2",
+      "bom-ref": "pkg:npm/arg@5.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "aria-hidden",
+      "version": "1.2.6",
+      "purl": "pkg:npm/aria-hidden@1.2.6",
+      "bom-ref": "pkg:npm/aria-hidden@1.2.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "aria-query",
+      "version": "5.3.0",
+      "purl": "pkg:npm/aria-query@5.3.0",
+      "bom-ref": "pkg:npm/aria-query@5.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "aria-query",
+      "version": "5.3.2",
+      "purl": "pkg:npm/aria-query@5.3.2",
+      "bom-ref": "pkg:npm/aria-query@5.3.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "assertion-error",
+      "version": "2.0.1",
+      "purl": "pkg:npm/assertion-error@2.0.1",
+      "bom-ref": "pkg:npm/assertion-error@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "autoprefixer",
+      "version": "10.5.0",
+      "purl": "pkg:npm/autoprefixer@10.5.0",
+      "bom-ref": "pkg:npm/autoprefixer@10.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "bail",
+      "version": "2.0.2",
+      "purl": "pkg:npm/bail@2.0.2",
+      "bom-ref": "pkg:npm/bail@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "baseline-browser-mapping",
+      "version": "2.11.21",
+      "purl": "pkg:npm/baseline-browser-mapping@2.11.21",
+      "bom-ref": "pkg:npm/baseline-browser-mapping@2.11.21",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "bidi-js",
+      "version": "1.0.3",
+      "purl": "pkg:npm/bidi-js@1.0.3",
+      "bom-ref": "pkg:npm/bidi-js@1.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "binary-extensions",
+      "version": "2.3.0",
+      "purl": "pkg:npm/binary-extensions@2.3.0",
+      "bom-ref": "pkg:npm/binary-extensions@2.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "braces",
+      "version": "3.0.3",
+      "purl": "pkg:npm/braces@3.0.3",
+      "bom-ref": "pkg:npm/braces@3.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "browserslist",
+      "version": "4.28.7",
+      "purl": "pkg:npm/browserslist@4.28.7",
+      "bom-ref": "pkg:npm/browserslist@4.28.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "camelcase-css",
+      "version": "2.0.1",
+      "purl": "pkg:npm/camelcase-css@2.0.1",
+      "bom-ref": "pkg:npm/camelcase-css@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "caniuse-lite",
+      "version": "1.0.30001793",
+      "purl": "pkg:npm/caniuse-lite@1.0.30001793",
+      "bom-ref": "pkg:npm/caniuse-lite@1.0.30001793",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "CC-BY-4.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "caniuse-lite",
+      "version": "1.0.30001810",
+      "purl": "pkg:npm/caniuse-lite@1.0.30001810",
+      "bom-ref": "pkg:npm/caniuse-lite@1.0.30001810",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "CC-BY-4.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ccount",
+      "version": "2.0.1",
+      "purl": "pkg:npm/ccount@2.0.1",
+      "bom-ref": "pkg:npm/ccount@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "chai",
+      "version": "6.2.2",
+      "purl": "pkg:npm/chai@6.2.2",
+      "bom-ref": "pkg:npm/chai@6.2.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "character-entities",
+      "version": "2.0.2",
+      "purl": "pkg:npm/character-entities@2.0.2",
+      "bom-ref": "pkg:npm/character-entities@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "character-entities-html4",
+      "version": "2.1.0",
+      "purl": "pkg:npm/character-entities-html4@2.1.0",
+      "bom-ref": "pkg:npm/character-entities-html4@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "character-entities-legacy",
+      "version": "3.0.0",
+      "purl": "pkg:npm/character-entities-legacy@3.0.0",
+      "bom-ref": "pkg:npm/character-entities-legacy@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "character-reference-invalid",
+      "version": "2.0.1",
+      "purl": "pkg:npm/character-reference-invalid@2.0.1",
+      "bom-ref": "pkg:npm/character-reference-invalid@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "chokidar",
+      "version": "3.6.0",
+      "purl": "pkg:npm/chokidar@3.6.0",
+      "bom-ref": "pkg:npm/chokidar@3.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "class-variance-authority",
+      "version": "0.7.1",
+      "purl": "pkg:npm/class-variance-authority@0.7.1",
+      "bom-ref": "pkg:npm/class-variance-authority@0.7.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cliui",
+      "version": "8.0.1",
+      "purl": "pkg:npm/cliui@8.0.1",
+      "bom-ref": "pkg:npm/cliui@8.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "clsx",
+      "version": "2.1.1",
+      "purl": "pkg:npm/clsx@2.1.1",
+      "bom-ref": "pkg:npm/clsx@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cmdk",
+      "version": "1.1.1",
+      "purl": "pkg:npm/cmdk@1.1.1",
+      "bom-ref": "pkg:npm/cmdk@1.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "color-convert",
+      "version": "2.0.1",
+      "purl": "pkg:npm/color-convert@2.0.1",
+      "bom-ref": "pkg:npm/color-convert@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "color-name",
+      "version": "1.1.4",
+      "purl": "pkg:npm/color-name@1.1.4",
+      "bom-ref": "pkg:npm/color-name@1.1.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "comma-separated-tokens",
+      "version": "2.0.3",
+      "purl": "pkg:npm/comma-separated-tokens@2.0.3",
+      "bom-ref": "pkg:npm/comma-separated-tokens@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "commander",
+      "version": "4.1.1",
+      "purl": "pkg:npm/commander@4.1.1",
+      "bom-ref": "pkg:npm/commander@4.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "convert-source-map",
+      "version": "2.0.0",
+      "purl": "pkg:npm/convert-source-map@2.0.0",
+      "bom-ref": "pkg:npm/convert-source-map@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cookie",
+      "version": "1.1.1",
+      "purl": "pkg:npm/cookie@1.1.1",
+      "bom-ref": "pkg:npm/cookie@1.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "css-tree",
+      "version": "3.2.1",
+      "purl": "pkg:npm/css-tree@3.2.1",
+      "bom-ref": "pkg:npm/css-tree@3.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "css.escape",
+      "version": "1.5.1",
+      "purl": "pkg:npm/css.escape@1.5.1",
+      "bom-ref": "pkg:npm/css.escape@1.5.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cssesc",
+      "version": "3.0.0",
+      "purl": "pkg:npm/cssesc@3.0.0",
+      "bom-ref": "pkg:npm/cssesc@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cssstyle",
+      "version": "5.3.7",
+      "purl": "pkg:npm/cssstyle@5.3.7",
+      "bom-ref": "pkg:npm/cssstyle@5.3.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "csstype",
+      "version": "3.2.3",
+      "purl": "pkg:npm/csstype@3.2.3",
+      "bom-ref": "pkg:npm/csstype@3.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-array",
+      "version": "3.2.4",
+      "purl": "pkg:npm/d3-array@3.2.4",
+      "bom-ref": "pkg:npm/d3-array@3.2.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-color",
+      "version": "3.1.0",
+      "purl": "pkg:npm/d3-color@3.1.0",
+      "bom-ref": "pkg:npm/d3-color@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-ease",
+      "version": "3.0.1",
+      "purl": "pkg:npm/d3-ease@3.0.1",
+      "bom-ref": "pkg:npm/d3-ease@3.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-format",
+      "version": "3.1.2",
+      "purl": "pkg:npm/d3-format@3.1.2",
+      "bom-ref": "pkg:npm/d3-format@3.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-interpolate",
+      "version": "3.0.1",
+      "purl": "pkg:npm/d3-interpolate@3.0.1",
+      "bom-ref": "pkg:npm/d3-interpolate@3.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-path",
+      "version": "3.1.0",
+      "purl": "pkg:npm/d3-path@3.1.0",
+      "bom-ref": "pkg:npm/d3-path@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-scale",
+      "version": "4.0.2",
+      "purl": "pkg:npm/d3-scale@4.0.2",
+      "bom-ref": "pkg:npm/d3-scale@4.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-shape",
+      "version": "3.2.0",
+      "purl": "pkg:npm/d3-shape@3.2.0",
+      "bom-ref": "pkg:npm/d3-shape@3.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-time",
+      "version": "3.1.0",
+      "purl": "pkg:npm/d3-time@3.1.0",
+      "bom-ref": "pkg:npm/d3-time@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-time-format",
+      "version": "4.1.0",
+      "purl": "pkg:npm/d3-time-format@4.1.0",
+      "bom-ref": "pkg:npm/d3-time-format@4.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "d3-timer",
+      "version": "3.0.1",
+      "purl": "pkg:npm/d3-timer@3.0.1",
+      "bom-ref": "pkg:npm/d3-timer@3.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "data-urls",
+      "version": "6.0.1",
+      "purl": "pkg:npm/data-urls@6.0.1",
+      "bom-ref": "pkg:npm/data-urls@6.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "date-fns",
+      "version": "4.4.0",
+      "purl": "pkg:npm/date-fns@4.4.0",
+      "bom-ref": "pkg:npm/date-fns@4.4.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "debug",
+      "version": "4.4.3",
+      "purl": "pkg:npm/debug@4.4.3",
+      "bom-ref": "pkg:npm/debug@4.4.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "decimal.js",
+      "version": "10.6.0",
+      "purl": "pkg:npm/decimal.js@10.6.0",
+      "bom-ref": "pkg:npm/decimal.js@10.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENCE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "decimal.js-light",
+      "version": "2.5.1",
+      "purl": "pkg:npm/decimal.js-light@2.5.1",
+      "bom-ref": "pkg:npm/decimal.js-light@2.5.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENCE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "decode-named-character-reference",
+      "version": "1.3.0",
+      "purl": "pkg:npm/decode-named-character-reference@1.3.0",
+      "bom-ref": "pkg:npm/decode-named-character-reference@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "define-lazy-prop",
+      "version": "2.0.0",
+      "purl": "pkg:npm/define-lazy-prop@2.0.0",
+      "bom-ref": "pkg:npm/define-lazy-prop@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dequal",
+      "version": "2.0.3",
+      "purl": "pkg:npm/dequal@2.0.3",
+      "bom-ref": "pkg:npm/dequal@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "detect-node-es",
+      "version": "1.1.0",
+      "purl": "pkg:npm/detect-node-es@1.1.0",
+      "bom-ref": "pkg:npm/detect-node-es@1.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "devlop",
+      "version": "1.1.0",
+      "purl": "pkg:npm/devlop@1.1.0",
+      "bom-ref": "pkg:npm/devlop@1.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "didyoumean",
+      "version": "1.2.2",
+      "purl": "pkg:npm/didyoumean@1.2.2",
+      "bom-ref": "pkg:npm/didyoumean@1.2.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dlv",
+      "version": "1.1.3",
+      "purl": "pkg:npm/dlv@1.1.3",
+      "bom-ref": "pkg:npm/dlv@1.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": ""
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dom-accessibility-api",
+      "version": "0.5.16",
+      "purl": "pkg:npm/dom-accessibility-api@0.5.16",
+      "bom-ref": "pkg:npm/dom-accessibility-api@0.5.16",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dom-accessibility-api",
+      "version": "0.6.3",
+      "purl": "pkg:npm/dom-accessibility-api@0.6.3",
+      "bom-ref": "pkg:npm/dom-accessibility-api@0.6.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dom-helpers",
+      "version": "5.2.1",
+      "purl": "pkg:npm/dom-helpers@5.2.1",
+      "bom-ref": "pkg:npm/dom-helpers@5.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "electron-to-chromium",
+      "version": "1.5.422",
+      "purl": "pkg:npm/electron-to-chromium@1.5.422",
+      "bom-ref": "pkg:npm/electron-to-chromium@1.5.422",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "emoji-regex",
+      "version": "8.0.0",
+      "purl": "pkg:npm/emoji-regex@8.0.0",
+      "bom-ref": "pkg:npm/emoji-regex@8.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "entities",
+      "version": "8.0.0",
+      "purl": "pkg:npm/entities@8.0.0",
+      "bom-ref": "pkg:npm/entities@8.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "es-errors",
+      "version": "1.3.0",
+      "purl": "pkg:npm/es-errors@1.3.0",
+      "bom-ref": "pkg:npm/es-errors@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "es-module-lexer",
+      "version": "2.1.0",
+      "purl": "pkg:npm/es-module-lexer@2.1.0",
+      "bom-ref": "pkg:npm/es-module-lexer@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "esbuild",
+      "version": "0.27.7",
+      "purl": "pkg:npm/esbuild@0.27.7",
+      "bom-ref": "pkg:npm/esbuild@0.27.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "escalade",
+      "version": "3.2.0",
+      "purl": "pkg:npm/escalade@3.2.0",
+      "bom-ref": "pkg:npm/escalade@3.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "escape-string-regexp",
+      "version": "5.0.0",
+      "purl": "pkg:npm/escape-string-regexp@5.0.0",
+      "bom-ref": "pkg:npm/escape-string-regexp@5.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "estree-util-is-identifier-name",
+      "version": "3.0.0",
+      "purl": "pkg:npm/estree-util-is-identifier-name@3.0.0",
+      "bom-ref": "pkg:npm/estree-util-is-identifier-name@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "estree-walker",
+      "version": "3.0.3",
+      "purl": "pkg:npm/estree-walker@3.0.3",
+      "bom-ref": "pkg:npm/estree-walker@3.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "eventemitter3",
+      "version": "4.0.7",
+      "purl": "pkg:npm/eventemitter3@4.0.7",
+      "bom-ref": "pkg:npm/eventemitter3@4.0.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "expect-type",
+      "version": "1.3.0",
+      "purl": "pkg:npm/expect-type@1.3.0",
+      "bom-ref": "pkg:npm/expect-type@1.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "extend",
+      "version": "3.0.2",
+      "purl": "pkg:npm/extend@3.0.2",
+      "bom-ref": "pkg:npm/extend@3.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fast-equals",
+      "version": "5.4.1",
+      "purl": "pkg:npm/fast-equals@5.4.1",
+      "bom-ref": "pkg:npm/fast-equals@5.4.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fast-glob",
+      "version": "3.3.3",
+      "purl": "pkg:npm/fast-glob@3.3.3",
+      "bom-ref": "pkg:npm/fast-glob@3.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fastq",
+      "version": "1.20.1",
+      "purl": "pkg:npm/fastq@1.20.1",
+      "bom-ref": "pkg:npm/fastq@1.20.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fdir",
+      "version": "6.5.0",
+      "purl": "pkg:npm/fdir@6.5.0",
+      "bom-ref": "pkg:npm/fdir@6.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fill-range",
+      "version": "7.1.1",
+      "purl": "pkg:npm/fill-range@7.1.1",
+      "bom-ref": "pkg:npm/fill-range@7.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fraction.js",
+      "version": "5.3.4",
+      "purl": "pkg:npm/fraction.js@5.3.4",
+      "bom-ref": "pkg:npm/fraction.js@5.3.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fsevents",
+      "version": "2.3.2",
+      "purl": "pkg:npm/fsevents@2.3.2",
+      "bom-ref": "pkg:npm/fsevents@2.3.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fsevents",
+      "version": "2.3.3",
+      "purl": "pkg:npm/fsevents@2.3.3",
+      "bom-ref": "pkg:npm/fsevents@2.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "function-bind",
+      "version": "1.1.2",
+      "purl": "pkg:npm/function-bind@1.1.2",
+      "bom-ref": "pkg:npm/function-bind@1.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "gensync",
+      "version": "1.0.0-beta.2",
+      "purl": "pkg:npm/gensync@1.0.0-beta.2",
+      "bom-ref": "pkg:npm/gensync@1.0.0-beta.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "get-caller-file",
+      "version": "2.0.5",
+      "purl": "pkg:npm/get-caller-file@2.0.5",
+      "bom-ref": "pkg:npm/get-caller-file@2.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "get-nonce",
+      "version": "1.0.1",
+      "purl": "pkg:npm/get-nonce@1.0.1",
+      "bom-ref": "pkg:npm/get-nonce@1.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "glob-parent",
+      "version": "5.1.2",
+      "purl": "pkg:npm/glob-parent@5.1.2",
+      "bom-ref": "pkg:npm/glob-parent@5.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "glob-parent",
+      "version": "6.0.2",
+      "purl": "pkg:npm/glob-parent@6.0.2",
+      "bom-ref": "pkg:npm/glob-parent@6.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "hasown",
+      "version": "2.0.3",
+      "purl": "pkg:npm/hasown@2.0.3",
+      "bom-ref": "pkg:npm/hasown@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "hast-util-to-jsx-runtime",
+      "version": "2.3.6",
+      "purl": "pkg:npm/hast-util-to-jsx-runtime@2.3.6",
+      "bom-ref": "pkg:npm/hast-util-to-jsx-runtime@2.3.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "hast-util-whitespace",
+      "version": "3.0.0",
+      "purl": "pkg:npm/hast-util-whitespace@3.0.0",
+      "bom-ref": "pkg:npm/hast-util-whitespace@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "html-encoding-sniffer",
+      "version": "6.0.0",
+      "purl": "pkg:npm/html-encoding-sniffer@6.0.0",
+      "bom-ref": "pkg:npm/html-encoding-sniffer@6.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "html-url-attributes",
+      "version": "3.0.1",
+      "purl": "pkg:npm/html-url-attributes@3.0.1",
+      "bom-ref": "pkg:npm/html-url-attributes@3.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "http-proxy-agent",
+      "version": "7.0.2",
+      "purl": "pkg:npm/http-proxy-agent@7.0.2",
+      "bom-ref": "pkg:npm/http-proxy-agent@7.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "https-proxy-agent",
+      "version": "7.0.6",
+      "purl": "pkg:npm/https-proxy-agent@7.0.6",
+      "bom-ref": "pkg:npm/https-proxy-agent@7.0.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "indent-string",
+      "version": "4.0.0",
+      "purl": "pkg:npm/indent-string@4.0.0",
+      "bom-ref": "pkg:npm/indent-string@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "inline-style-parser",
+      "version": "0.2.7",
+      "purl": "pkg:npm/inline-style-parser@0.2.7",
+      "bom-ref": "pkg:npm/inline-style-parser@0.2.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "internmap",
+      "version": "2.0.3",
+      "purl": "pkg:npm/internmap@2.0.3",
+      "bom-ref": "pkg:npm/internmap@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-alphabetical",
+      "version": "2.0.1",
+      "purl": "pkg:npm/is-alphabetical@2.0.1",
+      "bom-ref": "pkg:npm/is-alphabetical@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-alphanumerical",
+      "version": "2.0.1",
+      "purl": "pkg:npm/is-alphanumerical@2.0.1",
+      "bom-ref": "pkg:npm/is-alphanumerical@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-binary-path",
+      "version": "2.1.0",
+      "purl": "pkg:npm/is-binary-path@2.1.0",
+      "bom-ref": "pkg:npm/is-binary-path@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-core-module",
+      "version": "2.16.2",
+      "purl": "pkg:npm/is-core-module@2.16.2",
+      "bom-ref": "pkg:npm/is-core-module@2.16.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-decimal",
+      "version": "2.0.1",
+      "purl": "pkg:npm/is-decimal@2.0.1",
+      "bom-ref": "pkg:npm/is-decimal@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-docker",
+      "version": "2.2.1",
+      "purl": "pkg:npm/is-docker@2.2.1",
+      "bom-ref": "pkg:npm/is-docker@2.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-extglob",
+      "version": "2.1.1",
+      "purl": "pkg:npm/is-extglob@2.1.1",
+      "bom-ref": "pkg:npm/is-extglob@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-fullwidth-code-point",
+      "version": "3.0.0",
+      "purl": "pkg:npm/is-fullwidth-code-point@3.0.0",
+      "bom-ref": "pkg:npm/is-fullwidth-code-point@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-glob",
+      "version": "4.0.3",
+      "purl": "pkg:npm/is-glob@4.0.3",
+      "bom-ref": "pkg:npm/is-glob@4.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-hexadecimal",
+      "version": "2.0.1",
+      "purl": "pkg:npm/is-hexadecimal@2.0.1",
+      "bom-ref": "pkg:npm/is-hexadecimal@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-number",
+      "version": "7.0.0",
+      "purl": "pkg:npm/is-number@7.0.0",
+      "bom-ref": "pkg:npm/is-number@7.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-plain-obj",
+      "version": "4.1.0",
+      "purl": "pkg:npm/is-plain-obj@4.1.0",
+      "bom-ref": "pkg:npm/is-plain-obj@4.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-potential-custom-element-name",
+      "version": "1.0.1",
+      "purl": "pkg:npm/is-potential-custom-element-name@1.0.1",
+      "bom-ref": "pkg:npm/is-potential-custom-element-name@1.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "is-wsl",
+      "version": "2.2.0",
+      "purl": "pkg:npm/is-wsl@2.2.0",
+      "bom-ref": "pkg:npm/is-wsl@2.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jiti",
+      "version": "1.21.7",
+      "purl": "pkg:npm/jiti@1.21.7",
+      "bom-ref": "pkg:npm/jiti@1.21.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "purl": "pkg:npm/js-tokens@4.0.0",
+      "bom-ref": "pkg:npm/js-tokens@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jsdom",
+      "version": "27.4.0",
+      "purl": "pkg:npm/jsdom@27.4.0",
+      "bom-ref": "pkg:npm/jsdom@27.4.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jsesc",
+      "version": "3.1.0",
+      "purl": "pkg:npm/jsesc@3.1.0",
+      "bom-ref": "pkg:npm/jsesc@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "json5",
+      "version": "2.2.3",
+      "purl": "pkg:npm/json5@2.2.3",
+      "bom-ref": "pkg:npm/json5@2.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lilconfig",
+      "version": "3.1.3",
+      "purl": "pkg:npm/lilconfig@3.1.3",
+      "bom-ref": "pkg:npm/lilconfig@3.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lines-and-columns",
+      "version": "1.2.4",
+      "purl": "pkg:npm/lines-and-columns@1.2.4",
+      "bom-ref": "pkg:npm/lines-and-columns@1.2.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lodash",
+      "version": "4.18.1",
+      "purl": "pkg:npm/lodash@4.18.1",
+      "bom-ref": "pkg:npm/lodash@4.18.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "longest-streak",
+      "version": "3.1.0",
+      "purl": "pkg:npm/longest-streak@3.1.0",
+      "bom-ref": "pkg:npm/longest-streak@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "purl": "pkg:npm/loose-envify@1.4.0",
+      "bom-ref": "pkg:npm/loose-envify@1.4.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lru-cache",
+      "version": "11.5.0",
+      "purl": "pkg:npm/lru-cache@11.5.0",
+      "bom-ref": "pkg:npm/lru-cache@11.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BlueOak-1.0.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lru-cache",
+      "version": "5.1.1",
+      "purl": "pkg:npm/lru-cache@5.1.1",
+      "bom-ref": "pkg:npm/lru-cache@5.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lucide-react",
+      "version": "0.555.0",
+      "purl": "pkg:npm/lucide-react@0.555.0",
+      "bom-ref": "pkg:npm/lucide-react@0.555.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lz-string",
+      "version": "1.5.0",
+      "purl": "pkg:npm/lz-string@1.5.0",
+      "bom-ref": "pkg:npm/lz-string@1.5.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "magic-string",
+      "version": "0.30.21",
+      "purl": "pkg:npm/magic-string@0.30.21",
+      "bom-ref": "pkg:npm/magic-string@0.30.21",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "markdown-table",
+      "version": "3.0.4",
+      "purl": "pkg:npm/markdown-table@3.0.4",
+      "bom-ref": "pkg:npm/markdown-table@3.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-find-and-replace",
+      "version": "3.0.2",
+      "purl": "pkg:npm/mdast-util-find-and-replace@3.0.2",
+      "bom-ref": "pkg:npm/mdast-util-find-and-replace@3.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-from-markdown",
+      "version": "2.0.3",
+      "purl": "pkg:npm/mdast-util-from-markdown@2.0.3",
+      "bom-ref": "pkg:npm/mdast-util-from-markdown@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm",
+      "version": "3.1.0",
+      "purl": "pkg:npm/mdast-util-gfm@3.1.0",
+      "bom-ref": "pkg:npm/mdast-util-gfm@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm-autolink-literal",
+      "version": "2.0.1",
+      "purl": "pkg:npm/mdast-util-gfm-autolink-literal@2.0.1",
+      "bom-ref": "pkg:npm/mdast-util-gfm-autolink-literal@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm-footnote",
+      "version": "2.1.0",
+      "purl": "pkg:npm/mdast-util-gfm-footnote@2.1.0",
+      "bom-ref": "pkg:npm/mdast-util-gfm-footnote@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm-strikethrough",
+      "version": "2.0.0",
+      "purl": "pkg:npm/mdast-util-gfm-strikethrough@2.0.0",
+      "bom-ref": "pkg:npm/mdast-util-gfm-strikethrough@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm-table",
+      "version": "2.0.0",
+      "purl": "pkg:npm/mdast-util-gfm-table@2.0.0",
+      "bom-ref": "pkg:npm/mdast-util-gfm-table@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-gfm-task-list-item",
+      "version": "2.0.0",
+      "purl": "pkg:npm/mdast-util-gfm-task-list-item@2.0.0",
+      "bom-ref": "pkg:npm/mdast-util-gfm-task-list-item@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-mdx-expression",
+      "version": "2.0.1",
+      "purl": "pkg:npm/mdast-util-mdx-expression@2.0.1",
+      "bom-ref": "pkg:npm/mdast-util-mdx-expression@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-mdx-jsx",
+      "version": "3.2.0",
+      "purl": "pkg:npm/mdast-util-mdx-jsx@3.2.0",
+      "bom-ref": "pkg:npm/mdast-util-mdx-jsx@3.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-mdxjs-esm",
+      "version": "2.0.1",
+      "purl": "pkg:npm/mdast-util-mdxjs-esm@2.0.1",
+      "bom-ref": "pkg:npm/mdast-util-mdxjs-esm@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-phrasing",
+      "version": "4.1.0",
+      "purl": "pkg:npm/mdast-util-phrasing@4.1.0",
+      "bom-ref": "pkg:npm/mdast-util-phrasing@4.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-to-hast",
+      "version": "13.2.1",
+      "purl": "pkg:npm/mdast-util-to-hast@13.2.1",
+      "bom-ref": "pkg:npm/mdast-util-to-hast@13.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-to-markdown",
+      "version": "2.1.2",
+      "purl": "pkg:npm/mdast-util-to-markdown@2.1.2",
+      "bom-ref": "pkg:npm/mdast-util-to-markdown@2.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdast-util-to-string",
+      "version": "4.0.0",
+      "purl": "pkg:npm/mdast-util-to-string@4.0.0",
+      "bom-ref": "pkg:npm/mdast-util-to-string@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mdn-data",
+      "version": "2.27.1",
+      "purl": "pkg:npm/mdn-data@2.27.1",
+      "bom-ref": "pkg:npm/mdn-data@2.27.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "CC0-1.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "merge2",
+      "version": "1.4.1",
+      "purl": "pkg:npm/merge2@1.4.1",
+      "bom-ref": "pkg:npm/merge2@1.4.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark",
+      "version": "4.0.2",
+      "purl": "pkg:npm/micromark@4.0.2",
+      "bom-ref": "pkg:npm/micromark@4.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-core-commonmark",
+      "version": "2.0.3",
+      "purl": "pkg:npm/micromark-core-commonmark@2.0.3",
+      "bom-ref": "pkg:npm/micromark-core-commonmark@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm",
+      "version": "3.0.0",
+      "purl": "pkg:npm/micromark-extension-gfm@3.0.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-autolink-literal",
+      "version": "2.1.0",
+      "purl": "pkg:npm/micromark-extension-gfm-autolink-literal@2.1.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-autolink-literal@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-footnote",
+      "version": "2.1.0",
+      "purl": "pkg:npm/micromark-extension-gfm-footnote@2.1.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-footnote@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-strikethrough",
+      "version": "2.1.0",
+      "purl": "pkg:npm/micromark-extension-gfm-strikethrough@2.1.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-strikethrough@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-table",
+      "version": "2.1.1",
+      "purl": "pkg:npm/micromark-extension-gfm-table@2.1.1",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-table@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-tagfilter",
+      "version": "2.0.0",
+      "purl": "pkg:npm/micromark-extension-gfm-tagfilter@2.0.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-tagfilter@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-extension-gfm-task-list-item",
+      "version": "2.1.0",
+      "purl": "pkg:npm/micromark-extension-gfm-task-list-item@2.1.0",
+      "bom-ref": "pkg:npm/micromark-extension-gfm-task-list-item@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-factory-destination",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-factory-destination@2.0.1",
+      "bom-ref": "pkg:npm/micromark-factory-destination@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-factory-label",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-factory-label@2.0.1",
+      "bom-ref": "pkg:npm/micromark-factory-label@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-factory-space",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-factory-space@2.0.1",
+      "bom-ref": "pkg:npm/micromark-factory-space@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-factory-title",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-factory-title@2.0.1",
+      "bom-ref": "pkg:npm/micromark-factory-title@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-factory-whitespace",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-factory-whitespace@2.0.1",
+      "bom-ref": "pkg:npm/micromark-factory-whitespace@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-character",
+      "version": "2.1.1",
+      "purl": "pkg:npm/micromark-util-character@2.1.1",
+      "bom-ref": "pkg:npm/micromark-util-character@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-chunked",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-chunked@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-chunked@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-classify-character",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-classify-character@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-classify-character@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-combine-extensions",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-combine-extensions@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-combine-extensions@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-decode-numeric-character-reference",
+      "version": "2.0.2",
+      "purl": "pkg:npm/micromark-util-decode-numeric-character-reference@2.0.2",
+      "bom-ref": "pkg:npm/micromark-util-decode-numeric-character-reference@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-decode-string",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-decode-string@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-decode-string@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-encode",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-encode@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-encode@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-html-tag-name",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-html-tag-name@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-html-tag-name@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-normalize-identifier",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-normalize-identifier@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-normalize-identifier@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-resolve-all",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-resolve-all@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-resolve-all@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-sanitize-uri",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-sanitize-uri@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-sanitize-uri@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-subtokenize",
+      "version": "2.1.0",
+      "purl": "pkg:npm/micromark-util-subtokenize@2.1.0",
+      "bom-ref": "pkg:npm/micromark-util-subtokenize@2.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-symbol",
+      "version": "2.0.1",
+      "purl": "pkg:npm/micromark-util-symbol@2.0.1",
+      "bom-ref": "pkg:npm/micromark-util-symbol@2.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromark-util-types",
+      "version": "2.0.2",
+      "purl": "pkg:npm/micromark-util-types@2.0.2",
+      "bom-ref": "pkg:npm/micromark-util-types@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "micromatch",
+      "version": "4.0.8",
+      "purl": "pkg:npm/micromatch@4.0.8",
+      "bom-ref": "pkg:npm/micromatch@4.0.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "min-indent",
+      "version": "1.0.1",
+      "purl": "pkg:npm/min-indent@1.0.1",
+      "bom-ref": "pkg:npm/min-indent@1.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ms",
+      "version": "2.1.3",
+      "purl": "pkg:npm/ms@2.1.3",
+      "bom-ref": "pkg:npm/ms@2.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mz",
+      "version": "2.7.0",
+      "purl": "pkg:npm/mz@2.7.0",
+      "bom-ref": "pkg:npm/mz@2.7.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "nanoid",
+      "version": "3.3.18",
+      "purl": "pkg:npm/nanoid@3.3.18",
+      "bom-ref": "pkg:npm/nanoid@3.3.18",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "node-releases",
+      "version": "2.0.54",
+      "purl": "pkg:npm/node-releases@2.0.54",
+      "bom-ref": "pkg:npm/node-releases@2.0.54",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "normalize-path",
+      "version": "3.0.0",
+      "purl": "pkg:npm/normalize-path@3.0.0",
+      "bom-ref": "pkg:npm/normalize-path@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "object-assign",
+      "version": "4.1.1",
+      "purl": "pkg:npm/object-assign@4.1.1",
+      "bom-ref": "pkg:npm/object-assign@4.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "object-hash",
+      "version": "3.0.0",
+      "purl": "pkg:npm/object-hash@3.0.0",
+      "bom-ref": "pkg:npm/object-hash@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "obug",
+      "version": "2.1.1",
+      "purl": "pkg:npm/obug@2.1.1",
+      "bom-ref": "pkg:npm/obug@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "open",
+      "version": "8.4.2",
+      "purl": "pkg:npm/open@8.4.2",
+      "bom-ref": "pkg:npm/open@8.4.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "parse-entities",
+      "version": "4.0.2",
+      "purl": "pkg:npm/parse-entities@4.0.2",
+      "bom-ref": "pkg:npm/parse-entities@4.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "parse5",
+      "version": "8.0.1",
+      "purl": "pkg:npm/parse5@8.0.1",
+      "bom-ref": "pkg:npm/parse5@8.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "path-parse",
+      "version": "1.0.7",
+      "purl": "pkg:npm/path-parse@1.0.7",
+      "bom-ref": "pkg:npm/path-parse@1.0.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pathe",
+      "version": "2.0.3",
+      "purl": "pkg:npm/pathe@2.0.3",
+      "bom-ref": "pkg:npm/pathe@2.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "picocolors",
+      "version": "1.1.1",
+      "purl": "pkg:npm/picocolors@1.1.1",
+      "bom-ref": "pkg:npm/picocolors@1.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "picomatch",
+      "version": "2.3.2",
+      "purl": "pkg:npm/picomatch@2.3.2",
+      "bom-ref": "pkg:npm/picomatch@2.3.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "picomatch",
+      "version": "4.0.4",
+      "purl": "pkg:npm/picomatch@4.0.4",
+      "bom-ref": "pkg:npm/picomatch@4.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pify",
+      "version": "2.3.0",
+      "purl": "pkg:npm/pify@2.3.0",
+      "bom-ref": "pkg:npm/pify@2.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pirates",
+      "version": "4.0.7",
+      "purl": "pkg:npm/pirates@4.0.7",
+      "bom-ref": "pkg:npm/pirates@4.0.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "playwright",
+      "version": "1.60.0",
+      "purl": "pkg:npm/playwright@1.60.0",
+      "bom-ref": "pkg:npm/playwright@1.60.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE,NOTICE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "playwright-core",
+      "version": "1.60.0",
+      "purl": "pkg:npm/playwright-core@1.60.0",
+      "bom-ref": "pkg:npm/playwright-core@1.60.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE,NOTICE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss",
+      "version": "8.5.23",
+      "purl": "pkg:npm/postcss@8.5.23",
+      "bom-ref": "pkg:npm/postcss@8.5.23",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-import",
+      "version": "15.1.0",
+      "purl": "pkg:npm/postcss-import@15.1.0",
+      "bom-ref": "pkg:npm/postcss-import@15.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-js",
+      "version": "4.1.0",
+      "purl": "pkg:npm/postcss-js@4.1.0",
+      "bom-ref": "pkg:npm/postcss-js@4.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-load-config",
+      "version": "6.0.1",
+      "purl": "pkg:npm/postcss-load-config@6.0.1",
+      "bom-ref": "pkg:npm/postcss-load-config@6.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-nested",
+      "version": "6.2.0",
+      "purl": "pkg:npm/postcss-nested@6.2.0",
+      "bom-ref": "pkg:npm/postcss-nested@6.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-selector-parser",
+      "version": "6.1.2",
+      "purl": "pkg:npm/postcss-selector-parser@6.1.2",
+      "bom-ref": "pkg:npm/postcss-selector-parser@6.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "postcss-value-parser",
+      "version": "4.2.0",
+      "purl": "pkg:npm/postcss-value-parser@4.2.0",
+      "bom-ref": "pkg:npm/postcss-value-parser@4.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pretty-format",
+      "version": "27.5.1",
+      "purl": "pkg:npm/pretty-format@27.5.1",
+      "bom-ref": "pkg:npm/pretty-format@27.5.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "prop-types",
+      "version": "15.8.1",
+      "purl": "pkg:npm/prop-types@15.8.1",
+      "bom-ref": "pkg:npm/prop-types@15.8.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "property-information",
+      "version": "7.2.0",
+      "purl": "pkg:npm/property-information@7.2.0",
+      "bom-ref": "pkg:npm/property-information@7.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "punycode",
+      "version": "2.3.1",
+      "purl": "pkg:npm/punycode@2.3.1",
+      "bom-ref": "pkg:npm/punycode@2.3.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE-MIT.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "queue-microtask",
+      "version": "1.2.3",
+      "purl": "pkg:npm/queue-microtask@1.2.3",
+      "bom-ref": "pkg:npm/queue-microtask@1.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react",
+      "version": "19.2.6",
+      "purl": "pkg:npm/react@19.2.6",
+      "bom-ref": "pkg:npm/react@19.2.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-day-picker",
+      "version": "10.0.1",
+      "purl": "pkg:npm/react-day-picker@10.0.1",
+      "bom-ref": "pkg:npm/react-day-picker@10.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-dom",
+      "version": "19.2.6",
+      "purl": "pkg:npm/react-dom@19.2.6",
+      "bom-ref": "pkg:npm/react-dom@19.2.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-is",
+      "version": "16.13.1",
+      "purl": "pkg:npm/react-is@16.13.1",
+      "bom-ref": "pkg:npm/react-is@16.13.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-is",
+      "version": "17.0.2",
+      "purl": "pkg:npm/react-is@17.0.2",
+      "bom-ref": "pkg:npm/react-is@17.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-is",
+      "version": "18.3.1",
+      "purl": "pkg:npm/react-is@18.3.1",
+      "bom-ref": "pkg:npm/react-is@18.3.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-markdown",
+      "version": "10.1.0",
+      "purl": "pkg:npm/react-markdown@10.1.0",
+      "bom-ref": "pkg:npm/react-markdown@10.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-refresh",
+      "version": "0.18.0",
+      "purl": "pkg:npm/react-refresh@0.18.0",
+      "bom-ref": "pkg:npm/react-refresh@0.18.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-remove-scroll",
+      "version": "2.7.2",
+      "purl": "pkg:npm/react-remove-scroll@2.7.2",
+      "bom-ref": "pkg:npm/react-remove-scroll@2.7.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-remove-scroll-bar",
+      "version": "2.3.8",
+      "purl": "pkg:npm/react-remove-scroll-bar@2.3.8",
+      "bom-ref": "pkg:npm/react-remove-scroll-bar@2.3.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-router",
+      "version": "7.18.3",
+      "purl": "pkg:npm/react-router@7.18.3",
+      "bom-ref": "pkg:npm/react-router@7.18.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-router-dom",
+      "version": "7.18.3",
+      "purl": "pkg:npm/react-router-dom@7.18.3",
+      "bom-ref": "pkg:npm/react-router-dom@7.18.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-smooth",
+      "version": "4.0.4",
+      "purl": "pkg:npm/react-smooth@4.0.4",
+      "bom-ref": "pkg:npm/react-smooth@4.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-style-singleton",
+      "version": "2.2.3",
+      "purl": "pkg:npm/react-style-singleton@2.2.3",
+      "bom-ref": "pkg:npm/react-style-singleton@2.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "react-transition-group",
+      "version": "4.4.5",
+      "purl": "pkg:npm/react-transition-group@4.4.5",
+      "bom-ref": "pkg:npm/react-transition-group@4.4.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "read-cache",
+      "version": "1.0.0",
+      "purl": "pkg:npm/read-cache@1.0.0",
+      "bom-ref": "pkg:npm/read-cache@1.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "readdirp",
+      "version": "3.6.0",
+      "purl": "pkg:npm/readdirp@3.6.0",
+      "bom-ref": "pkg:npm/readdirp@3.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "recharts",
+      "version": "2.15.4",
+      "purl": "pkg:npm/recharts@2.15.4",
+      "bom-ref": "pkg:npm/recharts@2.15.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "recharts-scale",
+      "version": "0.4.5",
+      "purl": "pkg:npm/recharts-scale@0.4.5",
+      "bom-ref": "pkg:npm/recharts-scale@0.4.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "redent",
+      "version": "3.0.0",
+      "purl": "pkg:npm/redent@3.0.0",
+      "bom-ref": "pkg:npm/redent@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "remark-gfm",
+      "version": "4.0.1",
+      "purl": "pkg:npm/remark-gfm@4.0.1",
+      "bom-ref": "pkg:npm/remark-gfm@4.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "remark-parse",
+      "version": "11.0.0",
+      "purl": "pkg:npm/remark-parse@11.0.0",
+      "bom-ref": "pkg:npm/remark-parse@11.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "remark-rehype",
+      "version": "11.1.2",
+      "purl": "pkg:npm/remark-rehype@11.1.2",
+      "bom-ref": "pkg:npm/remark-rehype@11.1.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "remark-stringify",
+      "version": "11.0.0",
+      "purl": "pkg:npm/remark-stringify@11.0.0",
+      "bom-ref": "pkg:npm/remark-stringify@11.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "require-directory",
+      "version": "2.1.1",
+      "purl": "pkg:npm/require-directory@2.1.1",
+      "bom-ref": "pkg:npm/require-directory@2.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "require-from-string",
+      "version": "2.0.2",
+      "purl": "pkg:npm/require-from-string@2.0.2",
+      "bom-ref": "pkg:npm/require-from-string@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "resolve",
+      "version": "1.22.12",
+      "purl": "pkg:npm/resolve@1.22.12",
+      "bom-ref": "pkg:npm/resolve@1.22.12",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "reusify",
+      "version": "1.1.0",
+      "purl": "pkg:npm/reusify@1.1.0",
+      "bom-ref": "pkg:npm/reusify@1.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "rollup",
+      "version": "4.60.4",
+      "purl": "pkg:npm/rollup@4.60.4",
+      "bom-ref": "pkg:npm/rollup@4.60.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "rollup-plugin-visualizer",
+      "version": "6.0.11",
+      "purl": "pkg:npm/rollup-plugin-visualizer@6.0.11",
+      "bom-ref": "pkg:npm/rollup-plugin-visualizer@6.0.11",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "run-parallel",
+      "version": "1.2.0",
+      "purl": "pkg:npm/run-parallel@1.2.0",
+      "bom-ref": "pkg:npm/run-parallel@1.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "saxes",
+      "version": "6.0.0",
+      "purl": "pkg:npm/saxes@6.0.0",
+      "bom-ref": "pkg:npm/saxes@6.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "scheduler",
+      "version": "0.27.0",
+      "purl": "pkg:npm/scheduler@0.27.0",
+      "bom-ref": "pkg:npm/scheduler@0.27.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "semver",
+      "version": "6.3.1",
+      "purl": "pkg:npm/semver@6.3.1",
+      "bom-ref": "pkg:npm/semver@6.3.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "set-cookie-parser",
+      "version": "2.7.2",
+      "purl": "pkg:npm/set-cookie-parser@2.7.2",
+      "bom-ref": "pkg:npm/set-cookie-parser@2.7.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "siginfo",
+      "version": "2.0.0",
+      "purl": "pkg:npm/siginfo@2.0.0",
+      "bom-ref": "pkg:npm/siginfo@2.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "source-map",
+      "version": "0.7.6",
+      "purl": "pkg:npm/source-map@0.7.6",
+      "bom-ref": "pkg:npm/source-map@0.7.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "source-map-js",
+      "version": "1.2.1",
+      "purl": "pkg:npm/source-map-js@1.2.1",
+      "bom-ref": "pkg:npm/source-map-js@1.2.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "space-separated-tokens",
+      "version": "2.0.2",
+      "purl": "pkg:npm/space-separated-tokens@2.0.2",
+      "bom-ref": "pkg:npm/space-separated-tokens@2.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "stackback",
+      "version": "0.0.2",
+      "purl": "pkg:npm/stackback@0.0.2",
+      "bom-ref": "pkg:npm/stackback@0.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": ""
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "std-env",
+      "version": "4.1.0",
+      "purl": "pkg:npm/std-env@4.1.0",
+      "bom-ref": "pkg:npm/std-env@4.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENCE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "string-width",
+      "version": "4.2.3",
+      "purl": "pkg:npm/string-width@4.2.3",
+      "bom-ref": "pkg:npm/string-width@4.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "stringify-entities",
+      "version": "4.0.4",
+      "purl": "pkg:npm/stringify-entities@4.0.4",
+      "bom-ref": "pkg:npm/stringify-entities@4.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "strip-ansi",
+      "version": "6.0.1",
+      "purl": "pkg:npm/strip-ansi@6.0.1",
+      "bom-ref": "pkg:npm/strip-ansi@6.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "strip-indent",
+      "version": "3.0.0",
+      "purl": "pkg:npm/strip-indent@3.0.0",
+      "bom-ref": "pkg:npm/strip-indent@3.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "style-to-js",
+      "version": "1.1.21",
+      "purl": "pkg:npm/style-to-js@1.1.21",
+      "bom-ref": "pkg:npm/style-to-js@1.1.21",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "style-to-object",
+      "version": "1.0.14",
+      "purl": "pkg:npm/style-to-object@1.0.14",
+      "bom-ref": "pkg:npm/style-to-object@1.0.14",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "sucrase",
+      "version": "3.35.1",
+      "purl": "pkg:npm/sucrase@3.35.1",
+      "bom-ref": "pkg:npm/sucrase@3.35.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "supports-preserve-symlinks-flag",
+      "version": "1.0.0",
+      "purl": "pkg:npm/supports-preserve-symlinks-flag@1.0.0",
+      "bom-ref": "pkg:npm/supports-preserve-symlinks-flag@1.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "symbol-tree",
+      "version": "3.2.4",
+      "purl": "pkg:npm/symbol-tree@3.2.4",
+      "bom-ref": "pkg:npm/symbol-tree@3.2.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tailwind-merge",
+      "version": "3.6.0",
+      "purl": "pkg:npm/tailwind-merge@3.6.0",
+      "bom-ref": "pkg:npm/tailwind-merge@3.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tailwindcss",
+      "version": "3.4.19",
+      "purl": "pkg:npm/tailwindcss@3.4.19",
+      "bom-ref": "pkg:npm/tailwindcss@3.4.19",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "thenify",
+      "version": "3.3.1",
+      "purl": "pkg:npm/thenify@3.3.1",
+      "bom-ref": "pkg:npm/thenify@3.3.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "thenify-all",
+      "version": "1.6.0",
+      "purl": "pkg:npm/thenify-all@1.6.0",
+      "bom-ref": "pkg:npm/thenify-all@1.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tiny-invariant",
+      "version": "1.3.3",
+      "purl": "pkg:npm/tiny-invariant@1.3.3",
+      "bom-ref": "pkg:npm/tiny-invariant@1.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tinybench",
+      "version": "2.9.0",
+      "purl": "pkg:npm/tinybench@2.9.0",
+      "bom-ref": "pkg:npm/tinybench@2.9.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tinyexec",
+      "version": "1.2.2",
+      "purl": "pkg:npm/tinyexec@1.2.2",
+      "bom-ref": "pkg:npm/tinyexec@1.2.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tinyglobby",
+      "version": "0.2.16",
+      "purl": "pkg:npm/tinyglobby@0.2.16",
+      "bom-ref": "pkg:npm/tinyglobby@0.2.16",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tinyrainbow",
+      "version": "3.1.0",
+      "purl": "pkg:npm/tinyrainbow@3.1.0",
+      "bom-ref": "pkg:npm/tinyrainbow@3.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENCE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tldts",
+      "version": "7.0.32",
+      "purl": "pkg:npm/tldts@7.0.32",
+      "bom-ref": "pkg:npm/tldts@7.0.32",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tldts-core",
+      "version": "7.0.32",
+      "purl": "pkg:npm/tldts-core@7.0.32",
+      "bom-ref": "pkg:npm/tldts-core@7.0.32",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "to-regex-range",
+      "version": "5.0.1",
+      "purl": "pkg:npm/to-regex-range@5.0.1",
+      "bom-ref": "pkg:npm/to-regex-range@5.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tough-cookie",
+      "version": "6.0.1",
+      "purl": "pkg:npm/tough-cookie@6.0.1",
+      "bom-ref": "pkg:npm/tough-cookie@6.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tr46",
+      "version": "6.0.0",
+      "purl": "pkg:npm/tr46@6.0.0",
+      "bom-ref": "pkg:npm/tr46@6.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "trim-lines",
+      "version": "3.0.1",
+      "purl": "pkg:npm/trim-lines@3.0.1",
+      "bom-ref": "pkg:npm/trim-lines@3.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "trough",
+      "version": "2.2.0",
+      "purl": "pkg:npm/trough@2.2.0",
+      "bom-ref": "pkg:npm/trough@2.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ts-interface-checker",
+      "version": "0.1.13",
+      "purl": "pkg:npm/ts-interface-checker@0.1.13",
+      "bom-ref": "pkg:npm/ts-interface-checker@0.1.13",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tslib",
+      "version": "2.8.1",
+      "purl": "pkg:npm/tslib@2.8.1",
+      "bom-ref": "pkg:npm/tslib@2.8.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "CopyrightNotice.txt,LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "0BSD"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "typescript",
+      "version": "5.9.3",
+      "purl": "pkg:npm/typescript@5.9.3",
+      "bom-ref": "pkg:npm/typescript@5.9.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "undici-types",
+      "version": "7.16.0",
+      "purl": "pkg:npm/undici-types@7.16.0",
+      "bom-ref": "pkg:npm/undici-types@7.16.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unified",
+      "version": "11.0.5",
+      "purl": "pkg:npm/unified@11.0.5",
+      "bom-ref": "pkg:npm/unified@11.0.5",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unist-util-is",
+      "version": "6.0.1",
+      "purl": "pkg:npm/unist-util-is@6.0.1",
+      "bom-ref": "pkg:npm/unist-util-is@6.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unist-util-position",
+      "version": "5.0.0",
+      "purl": "pkg:npm/unist-util-position@5.0.0",
+      "bom-ref": "pkg:npm/unist-util-position@5.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unist-util-stringify-position",
+      "version": "4.0.0",
+      "purl": "pkg:npm/unist-util-stringify-position@4.0.0",
+      "bom-ref": "pkg:npm/unist-util-stringify-position@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unist-util-visit",
+      "version": "5.1.0",
+      "purl": "pkg:npm/unist-util-visit@5.1.0",
+      "bom-ref": "pkg:npm/unist-util-visit@5.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unist-util-visit-parents",
+      "version": "6.0.2",
+      "purl": "pkg:npm/unist-util-visit-parents@6.0.2",
+      "bom-ref": "pkg:npm/unist-util-visit-parents@6.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "update-browserslist-db",
+      "version": "1.2.3",
+      "purl": "pkg:npm/update-browserslist-db@1.2.3",
+      "bom-ref": "pkg:npm/update-browserslist-db@1.2.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "use-callback-ref",
+      "version": "1.3.3",
+      "purl": "pkg:npm/use-callback-ref@1.3.3",
+      "bom-ref": "pkg:npm/use-callback-ref@1.3.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "use-sidecar",
+      "version": "1.1.3",
+      "purl": "pkg:npm/use-sidecar@1.1.3",
+      "bom-ref": "pkg:npm/use-sidecar@1.1.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "util-deprecate",
+      "version": "1.0.2",
+      "purl": "pkg:npm/util-deprecate@1.0.2",
+      "bom-ref": "pkg:npm/util-deprecate@1.0.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "vfile",
+      "version": "6.0.3",
+      "purl": "pkg:npm/vfile@6.0.3",
+      "bom-ref": "pkg:npm/vfile@6.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "vfile-message",
+      "version": "4.0.3",
+      "purl": "pkg:npm/vfile-message@4.0.3",
+      "bom-ref": "pkg:npm/vfile-message@4.0.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "victory-vendor",
+      "version": "36.9.2",
+      "purl": "pkg:npm/victory-vendor@36.9.2",
+      "bom-ref": "pkg:npm/victory-vendor@36.9.2",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT AND ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "vite",
+      "version": "7.3.6",
+      "purl": "pkg:npm/vite@7.3.6",
+      "bom-ref": "pkg:npm/vite@7.3.6",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "vitest",
+      "version": "4.1.7",
+      "purl": "pkg:npm/vitest@4.1.7",
+      "bom-ref": "pkg:npm/vitest@4.1.7",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "w3c-xmlserializer",
+      "version": "5.0.0",
+      "purl": "pkg:npm/w3c-xmlserializer@5.0.0",
+      "bom-ref": "pkg:npm/w3c-xmlserializer@5.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "webidl-conversions",
+      "version": "8.0.1",
+      "purl": "pkg:npm/webidl-conversions@8.0.1",
+      "bom-ref": "pkg:npm/webidl-conversions@8.0.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.md"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "whatwg-mimetype",
+      "version": "4.0.0",
+      "purl": "pkg:npm/whatwg-mimetype@4.0.0",
+      "bom-ref": "pkg:npm/whatwg-mimetype@4.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "whatwg-mimetype",
+      "version": "5.0.0",
+      "purl": "pkg:npm/whatwg-mimetype@5.0.0",
+      "bom-ref": "pkg:npm/whatwg-mimetype@5.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "whatwg-url",
+      "version": "15.1.0",
+      "purl": "pkg:npm/whatwg-url@15.1.0",
+      "bom-ref": "pkg:npm/whatwg-url@15.1.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "why-is-node-running",
+      "version": "2.3.0",
+      "purl": "pkg:npm/why-is-node-running@2.3.0",
+      "bom-ref": "pkg:npm/why-is-node-running@2.3.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "wrap-ansi",
+      "version": "7.0.0",
+      "purl": "pkg:npm/wrap-ansi@7.0.0",
+      "bom-ref": "pkg:npm/wrap-ansi@7.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ws",
+      "version": "8.21.0",
+      "purl": "pkg:npm/ws@8.21.0",
+      "bom-ref": "pkg:npm/ws@8.21.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "xml-name-validator",
+      "version": "5.0.0",
+      "purl": "pkg:npm/xml-name-validator@5.0.0",
+      "bom-ref": "pkg:npm/xml-name-validator@5.0.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "xmlchars",
+      "version": "2.2.0",
+      "purl": "pkg:npm/xmlchars@2.2.0",
+      "bom-ref": "pkg:npm/xmlchars@2.2.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "y18n",
+      "version": "5.0.8",
+      "purl": "pkg:npm/y18n@5.0.8",
+      "bom-ref": "pkg:npm/y18n@5.0.8",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "yallist",
+      "version": "3.1.1",
+      "purl": "pkg:npm/yallist@3.1.1",
+      "bom-ref": "pkg:npm/yallist@3.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "yargs",
+      "version": "17.7.3",
+      "purl": "pkg:npm/yargs@17.7.3",
+      "bom-ref": "pkg:npm/yargs@17.7.3",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "yargs-parser",
+      "version": "21.1.1",
+      "purl": "pkg:npm/yargs-parser@21.1.1",
+      "bom-ref": "pkg:npm/yargs-parser@21.1.1",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE.txt"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "zwitch",
+      "version": "2.0.4",
+      "purl": "pkg:npm/zwitch@2.0.4",
+      "bom-ref": "pkg:npm/zwitch@2.0.4",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "license"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    }
+  ]
+}
