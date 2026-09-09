@@ -27,6 +27,10 @@ describe('Desktop package release script', () => {
 
     expect(deploymentStage).toContain("'deploy'");
     expect(deploymentStage).toContain("'--legacy'");
+    expect(deploymentStage).toContain(
+      "offline ? ['--offline'] : ['--prefer-offline']"
+    );
+    expect(prepareDaemonScript).not.toContain('deployOffline');
   });
 
   it('allows pnpm to fill missing optional dependency metadata during deploy', () => {

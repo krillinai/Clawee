@@ -25,7 +25,6 @@ const cacheDir = resolve(
     ?? resolve(desktopDir, '.cache')
 );
 const offline = process.env.CLAWEE_DESKTOP_OFFLINE === '1';
-const deployOffline = process.env.CLAWEE_DESKTOP_OFFLINE !== '0';
 const nativeBuildEnv = { ...process.env };
 delete nativeBuildEnv.npm_config_recursive;
 mkdirSync(cacheDir, { recursive: true });
@@ -51,7 +50,7 @@ await runStage('构建 Web', 'pnpm', ['--filter', '@clawee/web', 'build'], {
 rmSync(targetDir, { recursive: true, force: true });
 await runStage('部署 Daemon 生产依赖', 'pnpm', [
   '--frozen-lockfile',
-  ...(deployOffline ? ['--offline'] : []),
+  ...(offline ? ['--offline'] : ['--prefer-offline']),
   '--config.ignore-scripts=true',
   '--config.public-hoist-pattern=*',
   '--filter',
