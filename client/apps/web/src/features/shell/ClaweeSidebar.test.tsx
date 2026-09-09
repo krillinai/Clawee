@@ -66,6 +66,35 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ClaweeSidebar>> 
 }
 
 describe('ClaweeSidebar', () => {
+  it('uses custom expanded and compact logos without changing their image frames', () => {
+    const { rerender } = renderSidebar({ sidebarLogoUrl: 'blob:expanded' });
+    const expandedLogo = screen.getByRole('img', { name: 'KrillinAI' });
+    expect(expandedLogo).toHaveAttribute('src', 'blob:expanded');
+    expect(expandedLogo.parentElement).toHaveClass('sidebar-brand-lockup-logo');
+
+    rerender(
+      <ClaweeSidebar
+        projects={projects}
+        conversations={conversations}
+        tasks={[]}
+        activeView="conversation"
+        collapsed
+        sidebarCompactLogoUrl="blob:compact"
+        onNewConversation={vi.fn()}
+        onSelectProject={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onSelectTask={vi.fn()}
+        onOpenView={vi.fn()}
+        onOpenAccount={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
+    const compactLogo = screen.getByRole('img', { name: 'KrillinAI' });
+    expect(compactLogo).toHaveAttribute('src', 'blob:compact');
+    expect(compactLogo.parentElement).toHaveClass('sidebar-logo-mark');
+  });
+
   it('renders global actions, projects, recent conversations, and the settings footer action', () => {
     renderSidebar();
 

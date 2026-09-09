@@ -198,6 +198,7 @@ import {
 import {
   registerEnterpriseBusinessDashboardRoutes
 } from './routes.enterprise-business-dashboard-2026-08-30.js';
+import { registerEnterprisePlatformBrandingRoutes } from './routes.enterprise-platform-branding.js';
 
 export type BuildServerInput = {
   token: string;
@@ -897,6 +898,10 @@ export async function buildServer(input: BuildServerInput) {
     server,
     enterpriseBusinessDashboardManager
   );
+  await registerEnterprisePlatformBrandingRoutes(server, {
+    sessionManager: enterpriseSessionManager,
+    httpClient: enterpriseHttpClient
+  });
   await registerProfileRoutes(server, {
     codexHome: resolvedCodexHome,
     profileManager,
@@ -1089,6 +1094,9 @@ function isModelAccessRequest(
     || route === '/enterprise/qr-login'
     || route === '/enterprise/qr-login/:requestId'
     || route === '/enterprise/dingtalk/login/prepare'
+    || route === '/enterprise/platform-branding'
+    || route === '/enterprise/platform-branding/sidebar-logo'
+    || route === '/enterprise/platform-branding/sidebar-compact-logo'
     || route === '/enterprise/logout';
 }
 

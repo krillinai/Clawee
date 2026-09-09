@@ -84,6 +84,12 @@ const modelConfigurationSchema = z.object({
     })
   ])
 });
+const platformBrandingSchema = z.object({
+  data: z.object({
+    sidebar_logo_configured: z.boolean(),
+    sidebar_compact_logo_configured: z.boolean()
+  }).strict()
+}).strict();
 const authMethodsResponseSchema = z.object({
   data: z.object({
     password: z.boolean(),
@@ -691,6 +697,16 @@ export type EnterpriseModelConfiguration =
     }
   | { mode: 'enterprise_managed' };
 
+export type EnterprisePlatformBranding = {
+  sidebarLogoConfigured: boolean;
+  sidebarCompactLogoConfigured: boolean;
+};
+
+export type EnterprisePlatformBrandingImage = {
+  content: Uint8Array;
+  contentType: 'image/png' | 'image/jpeg';
+};
+
 export type EnterpriseDingTalkAuthorizationInput = {
   agentId: string;
   redirectUri: string;
@@ -785,6 +801,13 @@ export type EnterpriseHttpClient = {
   getModelConfiguration?(
     accessToken: string
   ): Promise<EnterpriseModelConfiguration>;
+  getPlatformBranding?(
+    accessToken: string
+  ): Promise<EnterprisePlatformBranding>;
+  getPlatformBrandingImage?(
+    accessToken: string,
+    kind: 'sidebar-logo' | 'sidebar-compact-logo'
+  ): Promise<EnterprisePlatformBrandingImage>;
   revealAccountMcpToken(accessToken: string): Promise<EnterpriseAccountMcpToken>;
   getMcpCatalog(accessToken: string): Promise<EnterpriseRemoteMcpCatalog>;
   listKnowledgeBases(accessToken: string): Promise<{
@@ -1005,6 +1028,39 @@ export function createEnterpriseHttpClient(input: {
     }
   }
 
+  async function requestPlatformBrandingImage(
+    accessToken: string,
+    kind: 'sidebar-logo' | 'sidebar-compact-logo'
+  ): Promise<EnterprisePlatformBrandingImage> {
+    let response: Response;
+    try {
+      response = await fetchImpl(
+        new URL(`/api/v1/app/platform-branding/${kind}`, origin),
+        {
+          headers: jsonHeaders(accessToken, false),
+          method: 'GET',
+          signal: AbortSignal.timeout(jsonTimeoutMs)
+        }
+      );
+    } catch {
+      throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
+    }
+    if (!response.ok) throw await createResponseError(response);
+    const contentType = response.headers.get('content-type')?.split(';', 1)[0];
+    if (contentType !== 'image/png' && contentType !== 'image/jpeg') {
+      throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
+    }
+    const declaredSize = parseContentLength(response.headers.get('content-length'));
+    if (declaredSize !== undefined && (declaredSize === 0 || declaredSize > 1024 * 1024)) {
+      throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
+    }
+    const content = new Uint8Array(await response.arrayBuffer());
+    if (content.byteLength === 0 || content.byteLength > 1024 * 1024) {
+      throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
+    }
+    return { content, contentType };
+  }
+
   return {
     async register(request, agentId) {
       await requestWithoutResult({
@@ -1202,6 +1258,23 @@ export function createEnterpriseHttpClient(input: {
         apiKey: response.data.api_key,
         credentialVersion: response.data.credential_version
       };
+    },
+
+    async getPlatformBranding(accessToken) {
+      const response = await requestJson({
+        accessToken,
+        method: 'GET',
+        path: '/api/v1/app/platform-branding',
+        schema: platformBrandingSchema
+      });
+      return {
+        sidebarLogoConfigured: response.data.sidebar_logo_configured,
+        sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured
+      };
+    },
+
+    getPlatformBrandingImage(accessToken, kind) {
+      return requestPlatformBrandingImage(accessToken, kind);
     },
 
     async revealAccountMcpToken(accessToken) {

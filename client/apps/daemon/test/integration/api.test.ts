@@ -303,6 +303,18 @@ describe('runtime api', () => {
             frontendAllowed: true
           };
         },
+        async getPlatformBranding() {
+          return {
+            sidebarLogoConfigured: true,
+            sidebarCompactLogoConfigured: true
+          };
+        },
+        async getPlatformBrandingImage() {
+          return {
+            content: new Uint8Array([1, 2, 3]),
+            contentType: 'image/png' as const
+          };
+        },
         async logout() {}
       } as unknown as EnterpriseHttpClient
     });
@@ -318,6 +330,9 @@ describe('runtime api', () => {
       status: 'configuration_required',
       mode: 'enterprise_managed'
     });
+    expect((await authGet('/enterprise/platform-branding')).statusCode).toBe(200);
+    expect((await authGet('/enterprise/platform-branding/sidebar-logo')).statusCode).toBe(200);
+    expect((await authGet('/enterprise/platform-branding/sidebar-compact-logo')).statusCode).toBe(200);
     const blocked = await authGet('/projects');
     expect(blocked.statusCode).toBe(428);
     expect(blocked.json()).toEqual({

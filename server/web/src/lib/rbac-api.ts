@@ -28,7 +28,8 @@ export const permissions = {
   sharedFilesRead: "console:shared_files:read",
   sharedFilesManage: "console:shared_files:manage",
   dataResourceGrantRead: "console:data_resource_grant:read",
-  dataResourceGrantManage: "console:data_resource_grant:manage"
+  dataResourceGrantManage: "console:data_resource_grant:manage",
+  platformBrandingManage: "console:platform_branding:manage"
 } as const;
 
 export type Permission = {

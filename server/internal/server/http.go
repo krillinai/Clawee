@@ -26,6 +26,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
 	"github.com/krillinai/Clawee/server/internal/office/httpapi"
 	"github.com/krillinai/Clawee/server/internal/office/management"
+	"github.com/krillinai/Clawee/server/internal/platformbranding"
 	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
@@ -73,6 +74,7 @@ type Options struct {
 	SkillHubService          *skillhub.Service
 	SkillSourceService       *skillhub.GitHubSourceService
 	SharedFilesService       *sharedfiles.Service
+	PlatformBrandingService  *platformbranding.Service
 	DingTalkAuth             DingTalkAuthOptions
 	BilibiliIntegration      BilibiliIntegration
 	BilibiliSyncRequester    BilibiliSyncRequester
@@ -225,6 +227,7 @@ func NewRouter(opts Options) http.Handler {
 	mountBillingRoutes(appAPI, opts)
 	mountModelConfigurationRoutes(appAPI, opts)
 	mountBusinessDataRoutes(appAPI, opts)
+	mountPlatformBrandingRoutes(appAPI, adminAPI, opts)
 
 	mountAgentRoutes(appAPI, opts)
 	mountKnowledgeAppRoutes(appAPI, opts)

@@ -38,6 +38,7 @@ import (
 	officeRealtime "github.com/krillinai/Clawee/server/internal/office/realtime"
 	officeState "github.com/krillinai/Clawee/server/internal/office/state"
 	officeStore "github.com/krillinai/Clawee/server/internal/office/store"
+	"github.com/krillinai/Clawee/server/internal/platformbranding"
 	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/server"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
@@ -227,6 +228,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 	}
+	platformBrandingStore := platformbranding.Store(platformbranding.NewMemoryStore())
+	if pool != nil {
+		platformBrandingStore = platformbranding.NewPostgresStore(pool)
+	}
+	platformBrandingSvc := platformbranding.NewService(platformBrandingStore)
 	var dingtalkClient *dingtalk.Client
 	if cfg.DingTalk.Enabled {
 		dingtalkClient = dingtalk.NewClient(cfg.DingTalk.ClientID, cfg.DingTalk.ClientSecret, dingtalkTimeout)
@@ -366,6 +372,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			SkillHubService:            skillHubRuntime.Service,
 			SkillSourceService:         skillHubRuntime.Sources,
 			SharedFilesService:         sharedFilesSvc,
+			PlatformBrandingService:    platformBrandingSvc,
 			DingTalkAuth: server.DingTalkAuthOptions{
 				Enabled: cfg.DingTalk.Enabled, ProviderKey: cfg.DingTalk.ProviderKey,
 				RedirectURL: cfg.DingTalk.RedirectURL, AutoProvision: cfg.DingTalk.AutoProvision,

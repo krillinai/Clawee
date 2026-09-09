@@ -34,6 +34,7 @@ const (
 	PermissionSharedFilesManage       = "console:shared_files:manage"
 	PermissionDataResourceGrantRead   = "console:data_resource_grant:read"
 	PermissionDataResourceGrantManage = "console:data_resource_grant:manage"
+	PermissionPlatformBrandingManage  = "console:platform_branding:manage"
 )
 
 type Permission struct {
@@ -73,6 +74,7 @@ var permissionCatalog = []Permission{
 	{PermissionSharedFilesManage, "shared_files", "manage", "网盘管理", "管理共享空间、成员及文件上传下载"},
 	{PermissionDataResourceGrantRead, "data_resource_grant", "read", "数据权限查看", "查看数据资源 Action 和被授权用户"},
 	{PermissionDataResourceGrantManage, "data_resource_grant", "manage", "数据权限管理", "查看并管理账户数据资源授权"},
+	{PermissionPlatformBrandingManage, "platform_branding", "manage", "平台外观管理", "查看并管理客户端平台外观"},
 }
 
 func PermissionCatalog() []Permission {

@@ -30,7 +30,13 @@ import type {
 } from '@clawee/protocol';
 import type { RuntimeClient } from '../runtime/client.js';
 
-type ClientLike = Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'>;
+type ClientLike = Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'>
+  & Partial<Pick<RuntimeClient, 'rawGet'>>;
+
+export type EnterprisePlatformBrandingResponse = {
+  sidebarLogoConfigured: boolean;
+  sidebarCompactLogoConfigured: boolean;
+};
 
 const KNOWLEDGE_DOCUMENT_CONTENT_TYPE =
   'application/vnd.clawee.knowledge-document';
@@ -47,6 +53,15 @@ export function createEnterpriseService(client: ClientLike) {
     },
     getSession(): Promise<EnterpriseSessionResponse> {
       return client.get('/enterprise/session');
+    },
+    getPlatformBranding(): Promise<EnterprisePlatformBrandingResponse> {
+      return client.get('/enterprise/platform-branding');
+    },
+    getPlatformBrandingImage(kind: 'sidebar-logo' | 'sidebar-compact-logo'): Promise<Response> {
+      if (client.rawGet === undefined) {
+        return Promise.reject(new Error('Runtime raw response access is unavailable'));
+      }
+      return client.rawGet(`/enterprise/platform-branding/${kind}`);
     },
     refreshSession(): Promise<EnterpriseSessionResponse> {
       return client.post('/enterprise/session/refresh');

@@ -93,6 +93,7 @@ const UsersPage = lazy(() => import("./pages/users").then((module) => ({ default
 const RBACRolesPage = lazy(() => import("./pages/rbac-roles").then((module) => ({ default: module.RBACRolesPage })));
 const RBACPermissionsPage = lazy(() => import("./pages/rbac-permissions").then((module) => ({ default: module.RBACPermissionsPage })));
 const DataResourceGrantsPage = lazy(() => import("./pages/data-resource-grants").then((module) => ({ default: module.DataResourceGrantsPage })));
+const PlatformBrandingPage = lazy(() => import("./pages/platform-branding").then((module) => ({ default: module.PlatformBrandingPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}>{element}</AuthGate>;
@@ -167,6 +168,7 @@ export function App() {
               <Route path="/admin/rbac/roles" element={adminPage(permissions.rbacRead, <RBACRolesPage />)} />
               <Route path="/admin/rbac/permissions" element={adminPage(permissions.rbacRead, <RBACPermissionsPage />)} />
               <Route path="/admin/data-permissions" element={adminPage(permissions.dataResourceGrantRead, <DataResourceGrantsPage />)} />
+              <Route path="/admin/platform-branding" element={adminPage(permissions.platformBrandingManage, <PlatformBrandingPage />)} />
               <Route path="/admin/mcp/upstream-servers" element={adminPage(permissions.mcpUpstreamRead, <MCPUpstreamServersPage />)} />
               <Route path="/admin/mcp/upstream-servers/detail" element={adminPage(permissions.mcpUpstreamRead, <MCPUpstreamServersPage />)} />
               <Route path="/admin/mcp/capabilities" element={adminPage(permissions.mcpCapabilityRead, <MCPCapabilitiesPage />)} />

@@ -3,6 +3,19 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createEnterpriseService } from './enterprise-service-2026-07-30.js';
 
 describe('enterprise service', () => {
+  it('uses exact platform branding routes including raw images', async () => {
+    const get = vi.fn(async (_path: string) => ({}));
+    const response = new Response(new Blob(['logo'], { type: 'image/png' }));
+    const rawGet = vi.fn(async (_path: string) => response);
+    const service = createEnterpriseService(createClient({ get, rawGet }));
+
+    await service.getPlatformBranding();
+    await expect(service.getPlatformBrandingImage('sidebar-logo')).resolves.toBe(response);
+
+    expect(get).toHaveBeenCalledWith('/enterprise/platform-branding');
+    expect(rawGet).toHaveBeenCalledWith('/enterprise/platform-branding/sidebar-logo');
+  });
+
   it('posts only account fields to exact enterprise runtime routes', async () => {
     const get = vi.fn(async (_path: string) => ({}));
     const post = vi.fn(async (_path: string, _body?: unknown) => ({}));
@@ -233,8 +246,9 @@ function createClient(
       contentType?: string
     ) => Promise<unknown>;
     patch?: (path: string, body: unknown) => Promise<unknown>;
+    rawGet?: (path: string) => Promise<Response>;
   }
-): Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'> {
+): Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'> & Partial<Pick<RuntimeClient, 'rawGet'>> {
   return {
     get<T>(path: string): Promise<T> {
       if (overrides.get) return overrides.get(path) as Promise<T>;
@@ -263,6 +277,7 @@ function createClient(
         return overrides.patch(path, body) as Promise<T>;
       }
       throw new Error(`Unexpected patch: ${path}`);
-    }
+    },
+    ...(overrides.rawGet === undefined ? {} : { rawGet: overrides.rawGet })
   };
 }

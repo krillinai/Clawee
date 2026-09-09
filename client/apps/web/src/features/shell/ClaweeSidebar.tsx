@@ -64,6 +64,8 @@ export function ClaweeSidebar(props: {
   autoCollapsed?: boolean;
   colorMode?: ColorMode;
   enterpriseSession?: EnterpriseSessionResponse;
+  sidebarLogoUrl?: string;
+  sidebarCompactLogoUrl?: string;
   activityAllowed?: boolean;
   onNewConversation(projectId?: string): void;
   onSelectProject(projectId: string): void;
@@ -360,7 +362,7 @@ export function ClaweeSidebar(props: {
             <span className="sidebar-logo-mark">
               <img
                 className="sidebar-logo-image"
-                src={`/krillinai-mark-${logoColor}.png`}
+                src={props.sidebarCompactLogoUrl ?? `/krillinai-mark-${logoColor}.png`}
                 alt="KrillinAI"
               />
             </span>
@@ -372,7 +374,7 @@ export function ClaweeSidebar(props: {
               <span className="sidebar-brand-lockup-logo">
                 <img
                   className="sidebar-logo-image"
-                  src={`/krillinai-wordmark-${logoColor}.png`}
+                  src={props.sidebarLogoUrl ?? `/krillinai-wordmark-${logoColor}.png`}
                   alt="KrillinAI"
                 />
               </span>

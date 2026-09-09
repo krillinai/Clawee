@@ -7,6 +7,7 @@ type APIClient = {
   post<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
   patch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
   put<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  putForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T>;
   delete(path: string, init?: RequestInit): Promise<void>;
 };
 
@@ -38,8 +39,23 @@ function createAPIClient(basePath: string): APIClient {
     post: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "POST", body, init),
     patch: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "PATCH", body, init),
     put: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "PUT", body, init),
+    putForm: <T>(path: string, body: FormData, init?: RequestInit) => apiFetchForm<T>(scopedURL(basePath, path), "PUT", body, init),
     delete: (path: string, init?: RequestInit) => apiFetch<void>(scopedURL(basePath, path), "DELETE", undefined, init)
   };
+}
+
+async function apiFetchForm<T>(url: string, method: string, body: FormData, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    method,
+    credentials: "include",
+    headers: { Accept: "application/json", ...init?.headers },
+    body
+  });
+  if (!response.ok) {
+    throw await responseAPIError(response, `${method} ${url} failed with ${response.status}`);
+  }
+  return unwrapAPIResponse<T>(await response.json());
 }
 
 async function apiFetch<T>(url: string, method: string, body?: unknown, init?: RequestInit): Promise<T> {

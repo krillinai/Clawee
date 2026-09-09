@@ -208,6 +208,10 @@ type AppFileService = {
 type CapabilityService = ReturnType<typeof createCapabilityService>;
 type SkillMarketService = ReturnType<typeof createSkillMarketService>;
 type EnterpriseService = ReturnType<typeof createEnterpriseService>;
+type PlatformBrandingUrls = {
+  sidebarLogoUrl?: string;
+  sidebarCompactLogoUrl?: string;
+};
 type ThreadService = ReturnType<typeof createThreadService>;
 type ScheduleService = ReturnType<typeof createScheduleService>;
 type SearchService = ReturnType<typeof createSearchService>;
@@ -396,6 +400,7 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseCheckingTimedOut, setEnterpriseCheckingTimedOut] = useState(false);
   const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
   const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
+  const [platformBrandingUrls, setPlatformBrandingUrls] = useState<PlatformBrandingUrls>({});
   const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
   const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
   const [enterpriseSkillsLoadError, setEnterpriseSkillsLoadError] = useState<string>();
@@ -603,6 +608,7 @@ export function AppController(props: AppControllerProps) {
   const capabilityServiceRef = useRef<CapabilityService | null>(null);
   const skillMarketServiceRef = useRef<SkillMarketService | null>(null);
   const enterpriseServiceRef = useRef<EnterpriseService | null>(null);
+  const platformBrandingObjectUrlsRef = useRef<string[]>([]);
   const enterpriseSessionRef = useRef(enterpriseSession);
   const enterpriseReturnRouteRef = useRef<AppRoute>();
   const threadServiceRef = useRef<ThreadService | null>(null);
@@ -947,6 +953,59 @@ export function AppController(props: AppControllerProps) {
       attachmentPreviewLoadsRef.current.clear();
     };
   }, []);
+
+  useEffect(() => {
+    for (const url of platformBrandingObjectUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    platformBrandingObjectUrlsRef.current = [];
+    setPlatformBrandingUrls({});
+
+    if (enterpriseService === null || enterpriseSession.status !== 'signed_in') {
+      return;
+    }
+
+    let canceled = false;
+    const createdUrls: string[] = [];
+    const loadImage = async (
+      configured: boolean,
+      kind: 'sidebar-logo' | 'sidebar-compact-logo'
+    ) => {
+      if (!configured) return undefined;
+      try {
+        const response = await enterpriseService.getPlatformBrandingImage(kind);
+        if (!response.ok) return undefined;
+        const objectUrl = URL.createObjectURL(await response.blob());
+        createdUrls.push(objectUrl);
+        return objectUrl;
+      } catch {
+        return undefined;
+      }
+    };
+
+    void enterpriseService.getPlatformBranding()
+      .then(async branding => {
+        const [sidebarLogoUrl, sidebarCompactLogoUrl] = await Promise.all([
+          loadImage(branding.sidebarLogoConfigured, 'sidebar-logo'),
+          loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo')
+        ]);
+        if (canceled) {
+          for (const url of createdUrls) URL.revokeObjectURL(url);
+          return;
+        }
+        platformBrandingObjectUrlsRef.current = createdUrls;
+        setPlatformBrandingUrls({ sidebarLogoUrl, sidebarCompactLogoUrl });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      canceled = true;
+      for (const url of platformBrandingObjectUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      platformBrandingObjectUrlsRef.current = [];
+    };
+  }, [enterpriseService, enterpriseSession.account?.subjectId, enterpriseSession.status]);
 
   useEffect(() => {
     function handleBrowserBack() {
@@ -6536,6 +6595,8 @@ export function AppController(props: AppControllerProps) {
           autoCollapsed={sidebarAutoCollapsed}
           colorMode={colorMode}
           enterpriseSession={enterpriseSession}
+          sidebarLogoUrl={platformBrandingUrls.sidebarLogoUrl}
+          sidebarCompactLogoUrl={platformBrandingUrls.sidebarCompactLogoUrl}
           activityAllowed={enterpriseActivity.capability === 'allowed'}
           onNewConversation={projectId => startNewConversation({ projectId })}
           onSelectProject={selectProject}
