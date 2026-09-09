@@ -43,6 +43,12 @@ describe('Desktop package release script', () => {
     expect(deploymentStage).not.toContain("'--offline'");
   });
 
+  it('uses a GitHub-safe Windows installer name referenced by update metadata', () => {
+    expect(builderConfig).toContain(
+      'artifactName: ${productName}-Setup-${version}.${ext}'
+    );
+  });
+
   it('prepares and records the embedded Codex Runtime before packaging', () => {
     const desktopBuild = packageScript.indexOf("'构建 Desktop'");
     const runtimePreparation = packageScript.indexOf("'准备 Codex Runtime'");
