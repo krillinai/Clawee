@@ -1,11 +1,8 @@
 import react from '@vitejs/plugin-react';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 import { claweeAppVersion } from './build-metadata.js';
@@ -18,6 +15,9 @@ import {
 import {
   resolveDevDaemonLaunch
 } from './src/runtime/dev-daemon-launch.js';
+import {
+  withDevelopmentRuntime
+} from './src/runtime/development-runtime-env.js';
 
 type RuntimeConfig = DevDaemonConfig;
 
@@ -46,6 +46,26 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: 4173
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replaceAll('\\', '/');
+          if (
+            normalized.includes('/node_modules/react/')
+            || normalized.includes('/node_modules/react-dom/')
+            || normalized.includes('/node_modules/react-router/')
+            || normalized.includes('/node_modules/react-router-dom/')
+            || normalized.includes('/node_modules/@remix-run/router/')
+            || normalized.includes('/node_modules/react-virtuoso/')
+            || normalized.includes('/node_modules/scheduler/')
+          ) {
+            return 'react-vendor';
+          }
+        }
+      }
+    }
   }
 });
 
@@ -106,7 +126,9 @@ function getRuntimeConfig(): Promise<RuntimeConfig> {
 function startRuntimeProcess(): RuntimeProcess {
   const pnpmScript = process.env.npm_execpath;
   const launch = resolveDevDaemonLaunch(process.env);
-  const runtimeEnv = withDevelopmentRuntime(launch.env);
+  const runtimeEnv = withDevelopmentRuntime(launch.env, {
+    useProvidedDescriptor: launch.script === 'dev:e2e'
+  });
   const scriptArgs = [
     '--filter',
     '@clawee/daemon',
@@ -192,75 +214,6 @@ function startRuntimeProcess(): RuntimeProcess {
   });
 
   return { child, config };
-}
-
-function withDevelopmentRuntime(
-  sourceEnv: NodeJS.ProcessEnv
-): NodeJS.ProcessEnv {
-  const repoRoot = resolve(
-    fileURLToPath(new URL('../../', import.meta.url))
-  );
-  const runtimeDirectory = resolve(
-    repoRoot,
-    'apps/desktop/.pack/codex-runtime'
-  );
-  const runtimeManifest = readJsonFile<{
-    runtimeId: string;
-    codexVersion: string;
-    releaseTag: string;
-    layoutVersion: number;
-    minimumClaweeVersion: string;
-  }>(resolve(repoRoot, 'config/codex-runtime.json'));
-  const runtimePackage = readJsonFile<{
-    target: string;
-    entrypoint: string;
-  }>(join(runtimeDirectory, 'codex-package.json'));
-  const entryPath = join(runtimeDirectory, runtimePackage.entrypoint);
-  const dataDir = resolve(
-    sourceEnv.CLAWEE_DATA_DIR ?? join(repoRoot, '.runtime')
-  );
-  const homePath = join(dataDir, 'codex-home');
-  const env = { ...sourceEnv };
-  for (const key of [
-    'CODEX_BIN',
-    'CLAWEE_CODEX_BIN',
-    'CODEX_HOME',
-    'CLAWEE_CODEX_HOME',
-    'CLAWEE_CODEX_RUNTIME_DESCRIPTOR',
-    'CLAWEE_CODEX_DEV_BIN',
-    'CLAWEE_CODEX_DEV_HOME'
-  ]) {
-    delete env[key];
-  }
-  return {
-    ...env,
-    CLAWEE_DATA_DIR: dataDir,
-    CLAWEE_DEFAULT_CWD: repoRoot,
-    CLAWEE_DEFAULT_PROJECT_ROOT: repoRoot,
-    CLAWEE_CODEX_RUNTIME_DESCRIPTOR: JSON.stringify({
-      candidate: {
-        runtimeId: runtimeManifest.runtimeId,
-        source: 'external-development',
-        codexVersion: runtimeManifest.codexVersion,
-        releaseTag: runtimeManifest.releaseTag,
-        target: runtimePackage.target,
-        layoutVersion: runtimeManifest.layoutVersion,
-        entryPath,
-        homePath,
-        contentSha256: createHash('sha256')
-          .update(readFileSync(entryPath))
-          .digest('hex'),
-        minimumClaweeVersion: runtimeManifest.minimumClaweeVersion,
-        migrationSourceHome: null
-      },
-      previous: null,
-      claweeVersion: claweeAppVersion
-    })
-  };
-}
-
-function readJsonFile<T>(path: string): T {
-  return JSON.parse(readFileSync(path, 'utf8')) as T;
 }
 
 function runtimeStartupDiagnostics(stdout: string, stderr: string): string {

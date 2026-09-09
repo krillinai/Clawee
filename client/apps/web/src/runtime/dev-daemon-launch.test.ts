@@ -5,6 +5,9 @@ import {
   WEB_E2E_ENTERPRISE_CONFIG_ENV,
   WEB_E2E_RUN_ID_ENV
 } from './dev-daemon-launch.js';
+import {
+  withDevelopmentRuntime
+} from './development-runtime-env.js';
 
 describe('Vite Runtime daemon launch', () => {
   it('uses the normal development daemon outside Web E2E', () => {
@@ -38,6 +41,38 @@ describe('Vite Runtime daemon launch', () => {
         CLAWEE_DATA_DIR: '/tmp/clawee-data'
       }
     });
+  });
+
+  it('keeps the isolated Runtime descriptor during Web E2E', () => {
+    const descriptor = JSON.stringify({
+      candidate: {
+        runtimeId: 'codex-web-e2e-layout-1',
+        entryPath: '/tmp/clawee-web-e2e/fake-codex'
+      }
+    });
+    const env = withDevelopmentRuntime({
+      CLAWEE_DATA_DIR: '/tmp/clawee-data',
+      CLAWEE_CODEX_RUNTIME_DESCRIPTOR: ` ${descriptor} `,
+      CODEX_BIN: '/tmp/untrusted-codex',
+      CODEX_HOME: '/tmp/untrusted-home'
+    }, {
+      repoRoot: '/tmp/clawee-repo',
+      useProvidedDescriptor: true
+    });
+
+    expect(env.CLAWEE_CODEX_RUNTIME_DESCRIPTOR).toBe(descriptor);
+    expect(env.CLAWEE_DATA_DIR).toBe('/tmp/clawee-data');
+    expect(env.CLAWEE_DEFAULT_CWD).toBe('/tmp/clawee-repo');
+    expect(env.CLAWEE_DEFAULT_PROJECT_ROOT).toBe('/tmp/clawee-repo');
+    expect(env.CODEX_BIN).toBeUndefined();
+    expect(env.CODEX_HOME).toBeUndefined();
+  });
+
+  it('requires an isolated Runtime descriptor during Web E2E', () => {
+    expect(() => withDevelopmentRuntime({}, {
+      repoRoot: '/tmp/clawee-repo',
+      useProvidedDescriptor: true
+    })).toThrow('WEB_E2E_RUNTIME_DESCRIPTOR_REQUIRED');
   });
 
   it('rejects partial, malformed, or relative Web E2E configuration', () => {

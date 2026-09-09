@@ -180,6 +180,24 @@ export class FakeEnterpriseAuthServer {
     }
 
     if (
+      request.method === 'POST'
+      && path === '/api/v1/app/mcp/token/reveal'
+    ) {
+      sendJson(response, 404, { error: { code: 'not_found' } });
+      return;
+    }
+
+    if (
+      request.method === 'GET'
+      && path === '/api/v1/app/mcp/catalog'
+    ) {
+      sendJson(response, 200, {
+        data: { upstreams: [] }
+      });
+      return;
+    }
+
+    if (
       request.method === 'GET'
       && path === '/api/v1/app/business-data-sources/bilibili'
     ) {

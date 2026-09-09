@@ -70,6 +70,10 @@ describe('Desktop deep links', () => {
   it('does not start the Browser development Daemon for Desktop-hosted Web', () => {
     const developmentScript = readFileSync('scripts/dev.mjs', 'utf8');
     const webViteConfig = readFileSync('../web/vite.config.ts', 'utf8');
+    const webRuntimeEnvironment = readFileSync(
+      '../web/src/runtime/development-runtime-env.ts',
+      'utf8'
+    );
 
     expect(developmentScript).toContain(
       "CLAWEE_WEB_DESKTOP_HOSTED: '1'"
@@ -80,11 +84,14 @@ describe('Desktop deep links', () => {
     expect(webViteConfig).toContain(
       '...(DESKTOP_HOSTED ? [] : [claweeRuntimeDevPlugin()])'
     );
-    expect(webViteConfig).not.toContain(
-      'if (sourceEnv.CLAWEE_CODEX_RUNTIME_DESCRIPTOR'
-    );
     expect(webViteConfig).toContain(
+      "useProvidedDescriptor: launch.script === 'dev:e2e'"
+    );
+    expect(webRuntimeEnvironment).toContain(
       "'CLAWEE_CODEX_RUNTIME_DESCRIPTOR'"
+    );
+    expect(webRuntimeEnvironment).toContain(
+      'if (options.useProvidedDescriptor === true)'
     );
   });
 });
