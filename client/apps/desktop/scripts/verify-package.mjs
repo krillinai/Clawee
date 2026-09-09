@@ -24,7 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   readEnterpriseGatewayPackageConfig
-} from './enterprise-package-contract-2026-07-30.mjs';
+} from './enterprise-package-contract.mjs';
 import {
   assertCodexRuntimePackage
 } from './codex-runtime-package-contract.mjs';

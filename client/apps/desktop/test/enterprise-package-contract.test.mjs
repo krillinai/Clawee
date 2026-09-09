@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertEnterpriseReleaseTransport,
   readEnterpriseGatewayPackageConfig
-} from '../scripts/enterprise-package-contract-2026-07-30.mjs';
+} from '../scripts/enterprise-package-contract.mjs';
 
 const tempRoots = [];
 

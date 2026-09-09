@@ -92,7 +92,7 @@ Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企�
 ## 5. 验证与发布约束
 
 - 修改客户端可执行代码、依赖、构建或发布配置后，提交前运行客户端 `desktop:preflight:local`，验证测试、类型检查、实际打包 App 和内嵌 Web 哈希。未通过不得宣称可发布。
-- 正式发布在干净提交上运行 `desktop:preflight:release`，验证签名及公证凭据；随后对该已推送 SHA 运行一次远端 preflight，最后运行 `desktop:tag:check`。不得将远端打包用于反复试错，不移动或重建正式 Tag。
-- 运行远端桌面发布前，报告本地结果、目标 SHA 和 workflow 次数。公开 PR 不使用维护者签名或生产凭据。
+- 正式发布在干净提交上运行 `desktop:preflight:release`，验证签名及公证凭据；随后对该已推送 SHA 运行一次远端 Release Preflight，最后运行 `desktop:tag:check`。不得将远端打包用于反复试错，不移动或重建正式 Tag。
+- 运行远端发布前，报告本地结果、目标 SHA 和 workflow 次数。公开 PR 不使用维护者签名或生产凭据。
 - 服务端集成测试使用隔离测试数据库。配置通过仓库外的 `CLAWEE_OPS_DIR` 或环境变量提供；不得操作旧生产实例或用户数据。
 - 公开前扫描源码和产物，第三方许可按实际再分发内容保留。扫描报告留在仓库外，输出必须脱敏。

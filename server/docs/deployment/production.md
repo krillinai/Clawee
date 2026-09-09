@@ -56,7 +56,7 @@ docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml up
 
 Gateway 映射宿主机 `0.0.0.0:1904`，数据库不映射宿主机端口。镜像内服务也监听 `0.0.0.0:1904`。使用 HTTPS Origin 初始化时会开启 Secure Cookie；通过防火墙限制 Gateway 端口，并将 HTTPS 代理限制到部署者可访问的网络，完成首个管理员注册后再扩大访问范围。客户端填写实际域名，不填写 `0.0.0.0`。
 
-发行后可使用 `ghcr.io/krillinai/clawee-server:1.1.0`，并根据实际发行摘要锁定镜像。尚未发布的版本应先本地构建，不能假定镜像已存在。
+发行后可使用 `ghcr.io/krillinai/clawee-server:0.1.0`，并根据实际发行摘要锁定镜像。尚未发布的版本应先本地构建，不能假定镜像已存在。
 
 数据库与文件分别位于 Compose 命名卷，`docker compose down` 不会删除它们；不要在备份前执行 `down -v`。数据备份可使用 `pg_dump`；文件卷在暂停写入后归档，连同对应配置密钥一起加密保管。恢复时先停止 Gateway，将数据库与文件恢复到同一备份点，再验证就绪、登录和文件下载。
 

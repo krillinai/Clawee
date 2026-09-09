@@ -1,6 +1,6 @@
 {
   "name": "@clawee/desktop",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Clawee 本地 Codex 桌面工作台",
   "author": "Clawee",
@@ -18,8 +18,8 @@
     "build": "pnpm build:main && pnpm build:preload && pnpm build:bootstrap",
     "prepare:daemon": "node scripts/prepare-daemon.mjs",
     "prepare:codex-runtime": "node scripts/prepare-codex-runtime.mjs",
-    "notary:setup": "node scripts/setup-macos-notarization-2026-08-18.mjs",
-    "release:doctor": "node scripts/check-macos-release-credentials-2026-08-18.mjs",
+    "notary:setup": "node scripts/setup-macos-notarization.mjs",
+    "release:doctor": "node scripts/check-macos-release-credentials.mjs",
     "package": "node scripts/package-release.mjs --dir",
     "dist": "node scripts/package-release.mjs --dist",
     "release": "node scripts/package-release.mjs --release",

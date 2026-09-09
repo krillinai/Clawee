@@ -47,7 +47,7 @@ describe('Desktop local release preflight', () => {
       'Desktop tag check requires a clean Git worktree'
     );
     expect(tagCheck).toContain("gitOutput(['rev-parse', '@{upstream}'])");
-    expect(tagCheck).toContain('desktop-preflight');
+    expect(tagCheck).toContain('release-preflight');
     expect(tagCheck).toContain('releaseReady !== true');
     expect(tagCheck).toContain('release tags are immutable');
     expect(tagCheck).toContain("commandOutput('pnpm', ['desktop:release:doctor']");
@@ -60,7 +60,7 @@ describe('Desktop local release preflight', () => {
     expect(agentRules).toContain('desktop:preflight:release');
     expect(agentRules).toContain('desktop:tag:check');
     expect(agentRules).toContain('不得将远端打包用于反复试错');
-    expect(agentRules).toContain('运行远端桌面发布前，报告本地结果、目标 SHA 和 workflow 次数');
+    expect(agentRules).toContain('运行远端发布前，报告本地结果、目标 SHA 和 workflow 次数');
   });
 
   it('provides side-effect-free help for both commands', () => {

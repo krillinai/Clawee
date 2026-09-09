@@ -18,9 +18,9 @@
 | 公开仓库 | `https://github.com/krillinai/Clawee`，与当前 origin 一致 |
 | 工作位置 | 当前仓库、当前 `clawee` 分支；不创建新分支或 git worktree |
 | 历史方式 | 从筛选后源码快照开始新历史，两个旧仓库及其历史保留私有 |
-| 首个整合开源版本 | `v1.1.0`；客户端和服务端作为同一兼容组合发布，保留上游 Runtime 自身版本 |
+| 首个整合开源版本 | `v0.1.0`；客户端和服务端作为同一兼容组合发布，保留上游 Runtime 自身版本 |
 | 桌面更新 | `krillinai/Clawee` 的 GitHub Releases，正式版使用 stable 渠道 |
-| 服务端发行 | 同一 Release 提供 Linux amd64/arm64 包；容器使用 `ghcr.io/krillinai/clawee-server:1.1.0` 及提交摘要标识 |
+| 服务端发行 | 同一 Release 提供 Linux amd64/arm64 包；容器使用 `ghcr.io/krillinai/clawee-server:0.1.0` 及提交摘要标识 |
 | Go module | `github.com/krillinai/Clawee/server`，同步内部 import |
 | 旧版本处理 | 直接升级，不实现旧网关、旧配置、旧更新渠道或旧用户数据的兼容迁移逻辑；不自动操作旧生产实例 |
 | 服务端配置外置化 | 已提交并纳入基线，不再作为待完成工作 |
@@ -156,7 +156,7 @@ Clawee/
 - 发布下载地址、更新源、README 链接及命令工作目录。检查客户端 server-mode 打包脚本中的默认网关。
 - Go module 从 `krillinai/claw-mcp` 一次性改为 `github.com/krillinai/Clawee/server` 并同步内部 import；它是公开项目路径规范化，不代表原路径本身需要下载私有依赖。
 
-沿用 Clawee 品牌及现有 `com.clawee.desktop` appId，版本提升至 1.1.0；首发以全新配置和空数据库验证。保留现有数据库迁移文件用于新部署建表，但不增加旧版本探测、配置转换、数据搬迁、双更新源或新旧协议兼容层。此决定不授权清理旧用户目录或操作旧生产数据库。
+沿用 Clawee 品牌及现有 `com.clawee.desktop` appId，首个整合版本定为 0.1.0；首发以全新配置和空数据库验证。保留现有数据库迁移文件用于新部署建表，但不增加旧版本探测、配置转换、数据搬迁、双更新源或新旧协议兼容层。此决定不授权清理旧用户目录或操作旧生产数据库。
 
 ## 5. 公开用户的最小可运行路径
 
@@ -189,7 +189,7 @@ PR 检查不依赖生产 Secret；发布工作流使用独立受保护的 releas
 
 发布流程遵守源项目现有约束：修改后的本地预检先通过；正式提交保持干净并生成关联证据，再运行该 SHA 的远端 preflight，最后通过 Tag 检查。普通 PR 与社区本地构建不应要求正式 Apple 签名凭据。此次方案阶段不运行 workflow、不创建 Tag。
 
-首版正式 Tag 固定为 `v1.1.0`，统一发布客户端和服务端组合，并记录组件版本、API 范围和数据库初始化要求。预发布需要时使用 `v1.1.0-rc.N` 并标为 prerelease，不能进入 stable 更新源；普通开发提交不创建版本 Tag。服务端和客户端都从同一提交构建，避免独立打 Tag 意外触发桌面正式发布。
+首版正式 Tag 固定为 `v0.1.0`，统一发布客户端和服务端组合，并记录组件版本、API 范围和数据库初始化要求。预发布需要时使用 `v0.1.0-rc.N` 并标为 prerelease，不能进入 stable 更新源；普通开发提交不创建版本 Tag。服务端和客户端都从同一提交构建，避免独立打 Tag 意外触发正式发布。
 
 桌面使用 electron-updater 的 GitHub provider，owner 为 `krillinai`、repo 为 `Clawee`。除了安装包，发布流程必须提供平台更新元数据及对应文件和校验信息；macOS 自动更新需要 ZIP，不能只上传 DMG。验证更新元数据解析、下载和校验，fork 的开发构建默认不访问或发布上游正式更新源。现有正式平台范围保持 macOS arm64/x64、Windows x64；Linux 首发交付服务端，不新增 Linux 桌面支持承诺。
 

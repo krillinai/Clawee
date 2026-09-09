@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXPECTED_VERSION="$(
+  node -e \
+    'const fs = require("node:fs"); console.log(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version)' \
+    "$ROOT_DIR/../package.json"
+)"
 PACKAGE_SCRIPT="$ROOT_DIR/scripts/package-release.sh"
 DEPLOY_SCRIPT="$ROOT_DIR/scripts/deploy-release.sh"
 ROLLBACK_SCRIPT="$ROOT_DIR/scripts/rollback-release.sh"
@@ -70,6 +75,10 @@ if ! grep -Fxq './configs/config.example.yaml' "$PACKAGE_LIST"; then
   printf 'release package is missing configs/config.example.yaml\n' >&2
   exit 1
 fi
+if ! grep -Fxq './release-manifest.json' "$PACKAGE_LIST"; then
+  printf 'release package is missing release-manifest.json\n' >&2
+  exit 1
+fi
 if grep -Eq '(^|/)config\.yaml$|(^|/)\.env$' "$PACKAGE_LIST"; then
   printf 'release package contains a private config or .env\n' >&2
   exit 1
@@ -86,6 +95,21 @@ if grep -R -I -Eq "(gateway|admin)\\.${PRIVATE_DOMAIN_SUFFIX}|${PERSONAL_HOME_PR
   printf 'release package contains a fixed private marker\n' >&2
   exit 1
 fi
+node --input-type=module - "$EXTRACT_DIR/release-manifest.json" "$EXPECTED_VERSION" <<'NODE'
+import { readFileSync } from 'node:fs';
+
+const manifest = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const expectedVersion = process.argv[3];
+if (
+  manifest.schemaVersion !== 1
+  || manifest.product !== 'clawee-server'
+  || manifest.version !== expectedVersion
+  || manifest.platform !== 'linux'
+  || manifest.arch !== 'amd64'
+) {
+  throw new Error(`invalid release manifest: ${JSON.stringify(manifest)}`);
+}
+NODE
 
 bash "$ROOT_DIR/scripts/test-deploy-release-service-unit.sh"
 printf 'package release tests passed\n'

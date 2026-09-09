@@ -38,6 +38,36 @@ cp "$ROOT_DIR/deploy/stop.sh" "$BUILD_DIR/deploy/stop.sh"
 cp "$ROOT_DIR/deploy/restart.sh" "$BUILD_DIR/deploy/restart.sh"
 cp "$ROOT_DIR/deploy/healthcheck.sh" "$BUILD_DIR/deploy/healthcheck.sh"
 cp -R "$ROOT_DIR/db/migrations" "$BUILD_DIR/db/"
+RELEASE_VERSION="${CLAW_MCP_VERSION:-$(node -p "require('../package.json').version")}"
+RELEASE_COMMIT="${CLAW_MCP_COMMIT:-$(git rev-parse HEAD 2>/dev/null || printf unknown)}"
+RELEASE_BUILD_TIME="${CLAW_MCP_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+node --input-type=module - \
+  "$BUILD_DIR/release-manifest.json" \
+  "$RELEASE_VERSION" \
+  "$RELEASE_COMMIT" \
+  "$RELEASE_BUILD_TIME" \
+  "$TARGET_GOOS" \
+  "$TARGET_GOARCH" <<'NODE'
+import { writeFileSync } from 'node:fs';
+
+const [
+  outputPath,
+  version,
+  commit,
+  buildTime,
+  goos,
+  goarch
+] = process.argv.slice(2);
+writeFileSync(outputPath, `${JSON.stringify({
+  schemaVersion: 1,
+  product: 'clawee-server',
+  version,
+  commit,
+  buildTime,
+  platform: goos,
+  arch: goarch
+}, null, 2)}\n`);
+NODE
 find "$BUILD_DIR" -type f -name '.DS_Store' -delete
 
 COPYFILE_DISABLE=1 tar --no-xattrs -czf "$PACKAGE_PATH" -C "$BUILD_DIR" .

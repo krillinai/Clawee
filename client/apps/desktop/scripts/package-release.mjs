@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readEnterpriseGatewayPackageConfig,
   serializeEnterpriseGatewayPackageConfig
-} from './enterprise-package-contract-2026-07-30.mjs';
+} from './enterprise-package-contract.mjs';
 import {
   inspectDirectory
 } from './directory-integrity.mjs';
@@ -29,6 +29,7 @@ import {
   assertFormalReleasePlatform,
   assertWindowsSigningConfigured,
   desktopReleaseTag,
+  isStableReleaseVersion,
   installerExtension,
   normalizeDesktopPlatform,
   resolveDesktopBuildManifestPath,
@@ -149,9 +150,13 @@ writeFileSync(
   enterpriseGatewayConfigStage,
   serializeEnterpriseGatewayPackageConfig(enterpriseRelease.gateway)
 );
-const officialRelease = process.env.CLAWEE_OFFICIAL_RELEASE === '1'
+const desktopVersion = JSON.parse(
+  readFileSync(join(desktopDir, 'package.json'), 'utf8')
+).version;
+const officialRelease = isStableReleaseVersion(desktopVersion)
+  && process.env.CLAWEE_OFFICIAL_RELEASE === '1'
   && process.env.GITHUB_REPOSITORY === 'krillinai/Clawee'
-  && process.env.GITHUB_REF_NAME === `v${JSON.parse(readFileSync(join(desktopDir, 'package.json'), 'utf8')).version}`;
+  && process.env.GITHUB_REF_NAME === `v${desktopVersion}`;
 if (officialRelease) {
   writeFileSync(join(dirname(enterpriseGatewayConfigStage), 'official-release.json'), '{"channel":"stable"}\n');
 }
@@ -287,6 +292,11 @@ const manifest = {
   platform,
   arch,
   mode,
+  releaseVersion: desktopVersion,
+  releaseChannel: isStableReleaseVersion(desktopVersion)
+    ? 'stable'
+    : 'prerelease',
+  officialRelease,
   enterpriseOrigin: enterpriseRelease.gateway,
   enterpriseTransportSecurity: enterpriseRelease.transportSecurity,
   enterpriseGatewayConfigHash: createHash('sha256')

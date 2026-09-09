@@ -20,7 +20,7 @@ if (args.includes('--help')) {
   console.log([
     'Usage: pnpm desktop:tag:check -- [v<version>]',
     '',
-    'Checks local release evidence, pushed HEAD, GitHub Desktop Preflight status,',
+    'Checks local release evidence, pushed HEAD, GitHub Release Preflight status,',
     'tag immutability, and macOS signing credentials. It never creates a tag.'
   ].join('\n'));
   process.exit(0);
@@ -103,11 +103,11 @@ const preflightState = commandOutput('gh', [
   'api',
   `repos/{owner}/{repo}/commits/${head}/status`,
   '--jq',
-  '[.statuses[] | select(.context == "desktop-preflight")][0].state // "missing"'
+  '[.statuses[] | select(.context == "release-preflight")][0].state // "missing"'
 ]);
 if (preflightState !== 'success') {
   throw new Error(
-    `Commit ${head} Desktop Preflight status is ${preflightState}; `
+    `Commit ${head} Release Preflight status is ${preflightState}; `
     + 'do not create or push the release tag.'
   );
 }

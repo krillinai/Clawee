@@ -1,6 +1,6 @@
 # 功能验证与操作指南
 
-更新日期：2026-09-08。本阶段在当前仓库验证启动、业务功能和部署，保持当前依赖、锁文件与 Runtime 不变。普通 CI、默认分支和分支保护均后置，见[正式发布前待处理事项](pre-release-checklist.md)。
+更新日期：2026-09-09。本阶段在当前仓库验证启动、业务功能和部署，保持当前依赖、锁文件与 Runtime 不变。远端 CI、Release Preflight 和分支保护安排见[正式发布前待处理事项](pre-release-checklist.md)。
 
 本文是可执行的验收清单，不表示各项已经重新验证通过。整合阶段已有的本机测试证据见[开源整合方案](open-source-migration-plan.md#8-验证边界与本轮交付)；本次验收应记录实际 SHA、环境与结果。
 
@@ -248,7 +248,7 @@ curl --fail http://127.0.0.1:1904/readyz
 docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml ps
 ```
 
-Gateway 启动后需要等待就绪；首次 `curl` 若早于服务启动完成，稍后重试。该 Compose 使用本次本地构建的镜像，不要求 GHCR 已经发行 `1.1.0`。
+Gateway 启动后需要等待就绪；首次 `curl` 若早于服务启动完成，稍后重试。该 Compose 使用本次本地构建的镜像，不要求 GHCR 已经发行 `0.1.0`。
 
 - [ ] `1904` 的内嵌管理台可访问，首个管理员注册成功；桌面连接后完成真实任务及 MCP 授权调用。
 - [ ] 日志无反复崩溃、配置读取或数据库连接错误；版本接口与本次构建对应。

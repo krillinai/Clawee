@@ -53,6 +53,10 @@ export function desktopReleaseTag(version) {
   return `v${version}`;
 }
 
+export function isStableReleaseVersion(version) {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version);
+}
+
 export function resolveDesktopBuildManifestPath(
   rootDir,
   releaseDir,

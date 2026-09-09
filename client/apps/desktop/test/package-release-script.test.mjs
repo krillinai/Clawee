@@ -69,6 +69,9 @@ describe('Desktop package release script', () => {
     );
     expect(packageScript).toContain('`--runtime-dir=${codexRuntimeStage}`');
     expect(packageScript).toContain('version: 2');
+    expect(packageScript).toContain('releaseChannel');
+    expect(packageScript).toContain('officialRelease');
+    expect(packageScript).toContain('isStableReleaseVersion');
     for (const field of [
       'codexRuntimeId',
       'codexRuntimeVersion',

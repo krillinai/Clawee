@@ -1,4 +1,4 @@
-name: Desktop Release
+name: Release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   statuses: read
 
 concurrency:
-  group: desktop-build-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: release
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
     env:
       MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -26,24 +29,18 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
-      - name: 验证版本标签
-        shell: bash
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          const desktopPackage = JSON.parse(
-            readFileSync('apps/desktop/package.json', 'utf8')
-          );
-          const expectedTag = `v${desktopPackage.version}`;
-          if (process.env.GITHUB_REF_NAME !== expectedTag) {
-            throw new Error(
-              `Desktop release tag ${process.env.GITHUB_REF_NAME} does not `
-              + `match package version ${desktopPackage.version}; `
-              + `expected ${expectedTag}`
-            );
-          }
-          NODE
-      - name: 验证同提交 Desktop Preflight
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: release
+        name: 验证统一版本和标签
+        run: >-
+          node scripts/release-version.mjs check
+          --tag "$GITHUB_REF_NAME"
+          --github-output "$GITHUB_OUTPUT"
+      - name: 验证同提交 Release Preflight
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -51,10 +48,10 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           state="$(
             gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/status" \
-              --jq '[.statuses[] | select(.context == "desktop-preflight")][0].state // "missing"'
+              --jq '[.statuses[] | select(.context == "release-preflight")][0].state // "missing"'
           )"
           if [[ "$state" != 'success' ]]; then
-            echo "::error::Commit ${target_sha} 的 Desktop Preflight 状态为 ${state}，禁止正式发布。"
+            echo "::error::Commit ${target_sha} 的 Release Preflight 状态为 ${state}，禁止正式发布。"
             exit 1
           fi
       - name: 验证 macOS 正式签名凭据
@@ -76,11 +73,8 @@ jobs:
             echo "::error::release Environment 缺少 macOS 签名 Secret：${missing[*]}"
             exit 1
           fi
-    defaults:
-      run:
-        working-directory: client
 
-  package:
+  desktop:
     needs: gate
     timeout-minutes: 90
     permissions:
@@ -97,7 +91,7 @@ jobs:
             os: macos-14
             platform: mac
             arch: arm64
-          - name: windows-x64
+          - name: windows-x64-unsigned
             os: windows-latest
             platform: win
             arch: x64
@@ -114,9 +108,11 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
       APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
       CLAWEE_APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-      CLAWEE_OFFICIAL_RELEASE: "1"
+      CLAWEE_OFFICIAL_RELEASE: ${{ needs.gate.outputs.prerelease == 'false' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: client/package.json
@@ -180,30 +176,125 @@ jobs:
         working-directory: client
 
   server:
-    needs: package
+    needs: gate
     uses: ./.github/workflows/server-release.yml
     permissions:
       contents: read
+
+  image:
+    needs: [gate, desktop, server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          build-args: |
+            CLAW_MCP_VERSION=${{ needs.gate.outputs.version }}
+            CLAW_MCP_COMMIT=${{ github.sha }}
+          tags: ghcr.io/krillinai/clawee-server:sha-${{ github.sha }}
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [package, server]
+    needs: [gate, desktop, server, image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/krillinai/clawee-server
+      IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      PRERELEASE: ${{ needs.gate.outputs.prerelease }}
+      TAG: ${{ github.ref_name }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           pattern: clawee-*-release-*
           merge-multiple: true
-      - name: 发布 GitHub Release
+      - name: 生成统一发布清单
+        run: |
+          node scripts/build-release-manifest.mjs \
+            --artifacts artifacts \
+            --output artifacts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$GITHUB_SHA" \
+            --image "$IMAGE" \
+            --image-digest "$IMAGE_DIGEST"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 创建草稿 Release 并上传产物
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+        shell: bash
         run: |
-          gh release create "$TAG" --generate-notes --draft --verify-tag
-          find artifacts -type f -print0 | xargs -0 gh release upload "$TAG"
-          gh release edit "$TAG" --draft=false --latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" != 'true' ]]; then
+              echo "::error::Release ${TAG} 已公开，禁止覆盖。"
+              exit 1
+            fi
+          else
+            args=(--generate-notes --draft --verify-tag)
+            if [[ "$PRERELEASE" == 'true' ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "$TAG" "${args[@]}"
+          fi
+          while IFS= read -r -d '' file; do
+            gh release upload "$TAG" "$file" --clobber
+          done < <(find artifacts -type f -print0)
+      - name: 发布版本镜像标签
+        shell: bash
+        run: |
+          tags=(--tag "${IMAGE}:${VERSION}")
+          if [[ "$PRERELEASE" == 'false' ]]; then
+            tags+=(--tag "${IMAGE}:latest")
+          fi
+          docker buildx imagetools create \
+            "${tags[@]}" \
+            "${IMAGE}@${IMAGE_DIGEST}"
+      - name: 公开 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            gh release edit "$TAG" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi

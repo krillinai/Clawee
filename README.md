@@ -4,7 +4,7 @@ Clawee 是可自托管的 Agent 工作台，包含桌面客户端、本地执行
 
 项目采用 Apache-2.0。通用能力全部开放；模型托管、计费、钉钉、百炼等外部服务按需配置。默认使用自带模型服务，不依赖维护者运营的网关。
 
-当前优先开放客户端与服务端源码，整合版本目标为 **1.1.0**。保留现有依赖，第三方再分发许可补齐或替换另作专项处理，进度见 [第三方组件说明](third_party/README.md)。正式安装包与镜像尚在准备中，以 [GitHub Releases](https://github.com/krillinai/Clawee/releases) 实际发布内容为准。
+当前优先开放客户端与服务端源码，首个整合版本目标为 **0.1.0**。保留现有依赖，第三方再分发许可补齐或替换另作专项处理，进度见 [第三方组件说明](third_party/README.md)。正式安装包与镜像尚在准备中，以 [GitHub Releases](https://github.com/krillinai/Clawee/releases) 实际发布内容为准。
 
 ## 本地启动
 

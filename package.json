@@ -1,6 +1,6 @@
 {
   "name": "clawee",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -20,6 +20,8 @@
     "test": "node --test scripts/*.test.mjs",
     "client:build": "node scripts/clawee.mjs client build",
     "server:build": "node scripts/clawee.mjs server build",
+    "release:check": "node scripts/release-version.mjs check",
+    "release:version": "node scripts/release-version.mjs set",
     "desktop:preflight:local": "node scripts/clawee.mjs client desktop:preflight:local",
     "desktop:preflight:release": "node scripts/clawee.mjs client desktop:preflight:release",
     "desktop:tag:check": "node scripts/clawee.mjs client desktop:tag:check"

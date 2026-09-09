@@ -6,7 +6,7 @@
   "sourceCommit": "78c290807ce710180111df227df3b7a4fe845452",
   "variant": "codex",
   "layoutVersion": 1,
-  "minimumClaweeVersion": "1.0.0",
+  "minimumClaweeVersion": "0.1.0",
   "previousSupportedReleaseTag": "rust-v0.146.0",
   "schemas": {
     "stable": {

@@ -1,6 +1,6 @@
-name: Desktop Preflight
+name: Release Preflight
 
-run-name: Desktop Preflight · ${{ inputs.ref || github.ref_name }}
+run-name: Release Preflight · ${{ inputs.ref || github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -15,11 +15,11 @@ permissions:
   statuses: write
 
 concurrency:
-  group: desktop-preflight-${{ inputs.ref || github.ref }}
+  group: release-preflight-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify:
+  client:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     outputs:
@@ -42,8 +42,8 @@ jobs:
           gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
             -f state=pending \
-            -f context=desktop-preflight \
-            -f description='Clawee Desktop 三平台预发布验证运行中' \
+            -f context=release-preflight \
+            -f description='Clawee 客户端与服务端预发布验证运行中' \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
       - uses: pnpm/action-setup@v4
         with:
@@ -53,6 +53,8 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
+      - run: node scripts/release-version.mjs check
+        working-directory: ${{ github.workspace }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm codex:runtime:verify
       - run: pnpm audit --audit-level high
@@ -63,8 +65,52 @@ jobs:
       run:
         working-directory: client
 
-  package:
-    needs: verify
+  server:
+    needs: client
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: claw_mcp_test
+          POSTGRES_USER: claw_mcp
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U claw_mcp -d claw_mcp_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.client.outputs.target-sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: server/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: server/web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web test
+      - run: pnpm --dir web build
+      - run: go test -p 1 ./...
+        env:
+          CLAW_MCP_TEST_DATABASE_URL: postgres://claw_mcp@127.0.0.1:5432/claw_mcp_test?sslmode=disable
+      - run: go vet ./...
+      - run: pnpm --dir web audit --audit-level high
+      - run: ./scripts/build-collector.sh
+    defaults:
+      run:
+        working-directory: server
+
+  desktop:
+    needs: [client, server]
     timeout-minutes: 90
     permissions:
       contents: read
@@ -80,7 +126,7 @@ jobs:
             os: macos-14
             platform: mac
             arch: arm64
-          - name: windows-x64
+          - name: windows-x64-unsigned
             os: windows-latest
             platform: win
             arch: x64
@@ -93,7 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.target-sha }}
+          ref: ${{ needs.client.outputs.target-sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
@@ -117,6 +163,12 @@ jobs:
             desktop-build-${{ runner.os }}-${{ matrix.arch }}-
       - name: 生成内部测试安装包
         run: pnpm desktop:dist
+      - name: 验证包内 Codex Runtime E2E
+        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
+      - name: 验证包内 Codex 真实会话
+        env:
+          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
+        run: pnpm --filter @clawee/desktop e2e:real-codex
       - name: 上传内部测试安装包
         uses: actions/upload-artifact@v4
         with:
@@ -130,12 +182,6 @@ jobs:
             client/apps/desktop/release/latest*.yml
           if-no-files-found: error
           retention-days: 14
-      - name: 验证包内 Codex Runtime E2E
-        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
-      - name: 验证包内 Codex 真实会话
-        env:
-          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
-        run: pnpm --filter @clawee/desktop e2e:real-codex
       - name: 上传 Runtime E2E 证据
         if: always()
         uses: actions/upload-artifact@v4
@@ -153,11 +199,76 @@ jobs:
     defaults:
       run:
         working-directory: client
+
+  server-package:
+    needs: [client, server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.client.outputs.target-sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: server/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: server/web/pnpm-lock.yaml
+      - run: pnpm --dir server/web install --frozen-lockfile
+      - name: 构建服务端预检包
+        working-directory: server
+        env:
+          TARGET_GOARCH: ${{ matrix.arch }}
+          CLAW_MCP_COMMIT: ${{ needs.client.outputs.target-sha }}
+          PACKAGE_NAME: clawee-server-preflight-linux-${{ matrix.arch }}.tar.gz
+        run: ./scripts/package-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clawee-server-preflight-linux-${{ matrix.arch }}
+          path: server/release/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  container:
+    needs: [client, server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.client.outputs.target-sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm --dir client install --frozen-lockfile
+      - run: docker build -f server/Dockerfile -t clawee-server:preflight .
+      - run: CLAWEE_TEST_IMAGE=clawee-server:preflight node scripts/container-smoke.mjs
+
   record:
-    if: always() && needs.verify.outputs.target-sha != ''
+    if: always() && needs.client.outputs.target-sha != ''
     needs:
-      - verify
-      - package
+      - client
+      - server
+      - desktop
+      - server-package
+      - container
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -165,20 +276,27 @@ jobs:
       - name: 记录 Preflight 结果
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ needs.verify.outputs.target-sha }}
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          PACKAGE_RESULT: ${{ needs.package.result }}
+          TARGET_SHA: ${{ needs.client.outputs.target-sha }}
+          CLIENT_RESULT: ${{ needs.client.result }}
+          SERVER_RESULT: ${{ needs.server.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+          SERVER_PACKAGE_RESULT: ${{ needs.server-package.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
         shell: bash
         run: |
           state=failure
-          description='Clawee Desktop 三平台预发布验证失败'
-          if [[ "$VERIFY_RESULT" == 'success' && "$PACKAGE_RESULT" == 'success' ]]; then
+          description='Clawee 客户端与服务端预发布验证失败'
+          if [[ "$CLIENT_RESULT" == 'success' \
+            && "$SERVER_RESULT" == 'success' \
+            && "$DESKTOP_RESULT" == 'success' \
+            && "$SERVER_PACKAGE_RESULT" == 'success' \
+            && "$CONTAINER_RESULT" == 'success' ]]; then
             state=success
-            description='Clawee Desktop 三平台预发布验证通过'
+            description='Clawee 客户端与服务端预发布验证通过'
           fi
           gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
             -f state="$state" \
-            -f context=desktop-preflight \
+            -f context=release-preflight \
             -f description="$description" \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

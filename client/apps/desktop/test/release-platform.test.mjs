@@ -6,6 +6,7 @@ import {
   codexRuntimeTargetTriple,
   desktopReleaseTag,
   installerExtension,
+  isStableReleaseVersion,
   normalizeDesktopPlatform,
   resolveDesktopBuildManifestPath,
   windowsPowerShellEnvironment,
@@ -55,6 +56,12 @@ describe('Desktop release platform', () => {
 
   it('uses semantic version tags without a product-specific prefix', () => {
     expect(desktopReleaseTag('1.0.0')).toBe('v1.0.0');
+  });
+
+  it('only treats three-part versions as stable releases', () => {
+    expect(isStableReleaseVersion('0.1.0')).toBe(true);
+    expect(isStableReleaseVersion('0.2.0-rc.1')).toBe(false);
+    expect(isStableReleaseVersion('0.2')).toBe(false);
   });
 
   it('resolves configured build manifests from the repository root', () => {
