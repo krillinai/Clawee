@@ -27,6 +27,10 @@ describe('Desktop package release script', () => {
 
     expect(deploymentStage).toContain("'deploy'");
     expect(deploymentStage).toContain("'--legacy'");
+    expect(deploymentStage).toContain(
+      "offline ? ['--offline'] : ['--prefer-offline']"
+    );
+    expect(prepareDaemonScript).not.toContain('deployOffline');
   });
 
   it('allows pnpm to fill missing optional dependency metadata during deploy', () => {
@@ -37,6 +41,12 @@ describe('Desktop package release script', () => {
     expect(deploymentStage).toContain("'--prefer-offline'");
     expect(deploymentStage).toContain("'--legacy'");
     expect(deploymentStage).not.toContain("'--offline'");
+  });
+
+  it('uses a GitHub-safe Windows installer name referenced by update metadata', () => {
+    expect(builderConfig).toContain(
+      'artifactName: ${productName}-Setup-${version}.${ext}'
+    );
   });
 
   it('prepares and records the embedded Codex Runtime before packaging', () => {
