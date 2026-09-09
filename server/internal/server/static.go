@@ -73,7 +73,10 @@ func isStaticAppRoute(urlPath string) bool {
 
 func isPublicRootAsset(name string) bool {
 	switch name {
-	case "favicon.ico", "favicon.svg", "logo-v2-black-logo.svg", "logo-v2-white-logo.svg":
+	case "favicon.ico", "favicon.svg",
+		"logo-v2-black-logo.svg", "logo-v2-white-logo.svg",
+		"krillinai-mark-black.png", "krillinai-mark-white.png",
+		"krillinai-wordmark-black.png", "krillinai-wordmark-white.png":
 		return true
 	default:
 		return false

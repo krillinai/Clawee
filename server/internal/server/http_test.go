@@ -2011,6 +2011,36 @@ func TestEmbeddedPublicRootSVGAssets(t *testing.T) {
 	}
 }
 
+func TestEmbeddedPublicRootPNGAssets(t *testing.T) {
+	router := newTestRouter(t, server.Options{})
+
+	for _, requestPath := range []string{
+		"/krillinai-mark-black.png",
+		"/krillinai-mark-white.png",
+		"/krillinai-wordmark-black.png",
+		"/krillinai-wordmark-white.png",
+	} {
+		t.Run(requestPath, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want %d", requestPath, rec.Code, http.StatusOK)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "image/png" {
+				t.Fatalf("%s Content-Type = %q, want image/png", requestPath, got)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "public, max-age=86400" {
+				t.Fatalf("%s Cache-Control = %q, want one-day public cache", requestPath, got)
+			}
+			if !bytes.HasPrefix(rec.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
+				t.Fatalf("%s body is not a PNG", requestPath)
+			}
+		})
+	}
+}
+
 func TestEmbeddedStaticAssetUsesPrecompressedGzip(t *testing.T) {
 	router := newTestRouter(t, server.Options{})
 
