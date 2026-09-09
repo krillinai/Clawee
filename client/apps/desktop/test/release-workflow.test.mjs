@@ -18,11 +18,18 @@ const ciWorkflow = readFileSync(
   resolve(process.cwd(), '../../../.github/workflows/ci.yml'),
   'utf8'
 );
+const serverCiWorkflow = readFileSync(
+  resolve(process.cwd(), '../../../.github/workflows/server-ci.yml'),
+  'utf8'
+);
 
 describe('Release workflows', () => {
-  it('keeps ordinary CI off version tag pushes', () => {
-    expect(ciWorkflow).toContain('tags-ignore:');
-    expect(ciWorkflow).toContain("- '**'");
+  it('runs ordinary CI for branch pushes while keeping it off version tags', () => {
+    for (const workflow of [ciWorkflow, serverCiWorkflow]) {
+      expect(workflow).toContain('branches:');
+      expect(workflow).toContain("- '**'");
+      expect(workflow).not.toContain('tags-ignore:');
+    }
   });
 
   it('runs client, server, package, container and unsigned Desktop preflight for an explicit ref', () => {
