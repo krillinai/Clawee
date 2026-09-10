@@ -91,7 +91,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 	defer application.Close()
 	defer application.Logger.Sync()
 
-	application.Logger.Info("claw-mcp server listening",
+	application.Logger.Info("Clawee Gateway listening",
 		zap.String("addr", cfg.Server.Addr),
 		zap.String("mcp_endpoint", "/mcp"),
 		zap.String("version", buildinfo.FullVersion()),

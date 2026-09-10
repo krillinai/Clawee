@@ -101,7 +101,7 @@ trap 'rm -rf "$unit_dir"' EXIT
 
 cat >"$expected_unit" <<EOF
 [Unit]
-Description=Claw MCP Gateway
+Description=Clawee Gateway
 After=network-online.target
 Wants=network-online.target
 

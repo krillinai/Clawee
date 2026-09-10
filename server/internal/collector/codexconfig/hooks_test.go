@@ -179,7 +179,7 @@ func TestEnsureHooksCreatesFileWhenParentExists(t *testing.T) {
 		`matcher = "startup|resume|clear|compact"`,
 		"[[hooks.Stop.hooks]]",
 		`command = "\"/opt/clawee/clawee-collector\" hook codex"`,
-		`statusMessage = "向 Claw MCP 上报会话启动事件"`,
+		`statusMessage = "向 Clawee Gateway 上报会话启动事件"`,
 		blockEnd,
 	} {
 		if !strings.Contains(body, want) {

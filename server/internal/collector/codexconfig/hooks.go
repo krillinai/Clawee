@@ -43,14 +43,14 @@ func DefaultCodexConfigPath() (string, error) {
 
 func DefaultHookEvents() []HookEvent {
 	return []HookEvent{
-		{Name: "SessionStart", Matcher: "startup|resume|clear|compact", StatusMessage: "向 Claw MCP 上报会话启动事件"},
-		{Name: "UserPromptSubmit", StatusMessage: "向 Claw MCP 上报用户输入事件"},
-		{Name: "PreToolUse", StatusMessage: "向 Claw MCP 上报工具开始事件"},
-		{Name: "PostToolUse", StatusMessage: "向 Claw MCP 上报工具完成事件"},
-		{Name: "PermissionRequest", StatusMessage: "向 Claw MCP 上报权限请求事件"},
-		{Name: "SubagentStart", StatusMessage: "向 Claw MCP 上报子代理启动事件"},
-		{Name: "SubagentStop", StatusMessage: "向 Claw MCP 上报子代理停止事件"},
-		{Name: "Stop", StatusMessage: "向 Claw MCP 上报当前轮次结束事件"},
+		{Name: "SessionStart", Matcher: "startup|resume|clear|compact", StatusMessage: "向 Clawee Gateway 上报会话启动事件"},
+		{Name: "UserPromptSubmit", StatusMessage: "向 Clawee Gateway 上报用户输入事件"},
+		{Name: "PreToolUse", StatusMessage: "向 Clawee Gateway 上报工具开始事件"},
+		{Name: "PostToolUse", StatusMessage: "向 Clawee Gateway 上报工具完成事件"},
+		{Name: "PermissionRequest", StatusMessage: "向 Clawee Gateway 上报权限请求事件"},
+		{Name: "SubagentStart", StatusMessage: "向 Clawee Gateway 上报子代理启动事件"},
+		{Name: "SubagentStop", StatusMessage: "向 Clawee Gateway 上报子代理停止事件"},
+		{Name: "Stop", StatusMessage: "向 Clawee Gateway 上报当前轮次结束事件"},
 	}
 }
 

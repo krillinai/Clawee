@@ -122,7 +122,7 @@ func TestInstallPageIncludesCodexCLIHookTrustGuide(t *testing.T) {
 
 func TestInstallScriptsPrintCodexCLIHookTrustNextStep(t *testing.T) {
 	api := NewInstallAPI(t.TempDir())
-	want := "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Claw MCP Hook。"
+	want := "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Clawee Collector Hook。"
 
 	for _, path := range []string{
 		"https://office.local/office/collectors/install.sh?code=reg_123",
@@ -467,7 +467,7 @@ func TestInstallPowerShellScriptDerivesOfficeURLAndCodeFromInviteLink(t *testing
 		`Assert-NativeCommandSucceeded $LASTEXITCODE "windows current-user collector diagnose"`,
 		`Move-Item -LiteralPath $CleanupInstallRoot -Destination $LegacyBackupPath`,
 		`安装结果:`,
-		`下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Claw MCP Hook。`,
+		`下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Clawee Collector Hook。`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("PowerShell script missing %q:\n%s", want, body)

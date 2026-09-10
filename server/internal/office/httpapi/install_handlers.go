@@ -50,9 +50,9 @@ func (api *InstallAPI) handleInstallPage(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>安装 Claw MCP 采集器</title></head>
+<head><meta charset="utf-8"><title>安装 Clawee Collector</title></head>
 <body>
-  <h1>安装 Claw MCP 采集器</h1>
+  <h1>安装 Clawee Collector</h1>
   <p>注册码：<code>%s</code></p>
   <section>
     <h2>一键安装</h2>
@@ -73,7 +73,7 @@ func (api *InstallAPI) handleInstallPage(w http.ResponseWriter, r *http.Request)
     <pre><code>codex</code></pre>
     <p>进入 Codex CLI 交互界面后输入：</p>
     <pre><code>/hooks</code></pre>
-    <p>在 Hook 列表中审核并信任 Claw MCP Hook。<code>/hooks</code> 是 Codex CLI 交互命令，不是 PowerShell 或 Shell 子命令，请不要执行 <code>codex /hooks</code>。未授权前，Codex 会跳过未信任的 command hook。</p>
+    <p>在 Hook 列表中审核并信任 Clawee Collector Hook。<code>/hooks</code> 是 Codex CLI 交互命令，不是 PowerShell 或 Shell 子命令，请不要执行 <code>codex /hooks</code>。未授权前，Codex 会跳过未信任的 command hook。</p>
     <p>授权完成后，退出 CLI 并重新打开 Codex 桌面版或开始新会话；采集器会通过 <code>clawee-collector hook codex</code> 上报状态摘要。</p>
   </section>
   <p>隐私边界：采集器只上传 Agent 状态摘要，不上传 prompt、回复、工具输出、文件内容或 token。</p>
@@ -297,7 +297,7 @@ fi
 
 echo "clawee-collector installed"
 echo "状态: running=true health_ok=true heartbeat_ok=true 时表示安装验证通过"
-echo "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Claw MCP Hook。"
+echo "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Clawee Collector Hook。"
 `
 
 const installPowerShellTemplate = `$ErrorActionPreference = "Stop"
@@ -604,5 +604,5 @@ if ($MigratingLegacyLayout -and (Test-Path -LiteralPath $CleanupInstallRoot)) {
 }
 
 Write-Host "clawee-collector installed for current Windows user"
-Write-Host "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Claw MCP Hook。 ".TrimEnd()
+Write-Host "下一步：在终端运行 codex，进入 Codex CLI 交互界面后输入 /hooks 并审核 Clawee Collector Hook。 ".TrimEnd()
 `
