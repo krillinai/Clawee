@@ -1,5 +1,9 @@
 name: Source Security
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
