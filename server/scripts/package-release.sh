@@ -26,11 +26,9 @@ cp "$ROOT_DIR/../LICENSE" "$ROOT_DIR/../NOTICE" "$BUILD_DIR/licenses/clawee/"
 cp -R "$ROOT_DIR/../third_party" "$BUILD_DIR/licenses/third_party"
 
 "$ROOT_DIR/scripts/build-web.sh" >&2
-make collector-downloads-all >&2
 
 CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$BUILD_DIR/claw-mcp" ./cmd/claw-mcp
 
-cp -R "$ROOT_DIR/public/collectors" "$BUILD_DIR/public/"
 cp "$EXAMPLE_CONFIG" "$BUILD_DIR/configs/config.example.yaml"
 cp "$ROOT_DIR/deploy/docker-compose.yaml" "$BUILD_DIR/deploy/docker-compose.yaml"
 cp "$ROOT_DIR/deploy/start.sh" "$BUILD_DIR/deploy/start.sh"

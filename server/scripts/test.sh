@@ -34,7 +34,6 @@ fi
 
 CLAW_MCP_TEST_DATABASE_URL="$TEST_DATABASE_URL" go test ./internal/sharedfiles -run TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace -count=1
 CLAW_MCP_TEST_DATABASE_URL="$TEST_DATABASE_URL" go test ./internal/accounts -run TestPostgresStoreBindsExternalIdentity -count=1
-./scripts/build-collector.sh
 
 if [[ -d web ]]; then
   (cd web && pnpm test)

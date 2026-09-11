@@ -14,9 +14,6 @@ const AgentAccessPage = lazy(() =>
 const AppMCPCapabilitiesPage = lazy(() =>
   import("./pages/app-mcp-capabilities").then((module) => ({ default: module.AppMCPCapabilitiesPage }))
 );
-const AppCollectorsPage = lazy(() =>
-  import("./pages/app-collectors").then((module) => ({ default: module.AppCollectorsPage }))
-);
 const AppSkillsPage = lazy(() =>
   import("./pages/app-skills").then((module) => ({ default: module.AppSkillsPage }))
 );
@@ -83,9 +80,6 @@ const OfficeAgentActivityPage = lazy(() =>
 const OfficeAgentDetailPage = lazy(() =>
   import("./pages/office-agent-detail").then((module) => ({ default: module.OfficeAgentDetailPage }))
 );
-const OfficeCollectorsPage = lazy(() =>
-  import("./pages/office-collectors").then((module) => ({ default: module.OfficeCollectorsPage }))
-);
 const RegisterPage = lazy(() =>
   import("./pages/register").then((module) => ({ default: module.RegisterPage }))
 );
@@ -135,8 +129,6 @@ export function App() {
               <Route path="/app/agents" element={<AgentAccessPage />} />
               <Route path="/app/agents/detail" element={<AgentAccessPage />} />
               <Route path="/app/mcp-capabilities" element={<AppMCPCapabilitiesPage />} />
-              <Route path="/app/collectors" element={<AppCollectorsPage />} />
-              <Route path="/app/collectors/detail" element={<AppCollectorsPage />} />
               <Route path="/app/activity" element={<AppActivityPage />} />
               <Route path="/app/activity/detail" element={<AppActivityPage detail />} />
               <Route path="/app/activity/recharge-records" element={<AppRechargeRecordsPage />} />
@@ -187,8 +179,6 @@ export function App() {
                 path="/admin/knowledge-bases/documents"
                 element={adminPage(permissions.knowledgeRead, <KnowledgeBaseDocumentsPage />)}
               />
-              <Route path="/admin/collectors" element={adminPage(permissions.collectorRead, <OfficeCollectorsPage />)} />
-              <Route path="/admin/collectors/detail" element={adminPage(permissions.collectorRead, <OfficeCollectorsPage />)} />
               <Route path="/admin/activity" element={adminPage(permissions.activityRead, <OfficeAgentActivityPage />)} />
               <Route
                 path="/admin/activity/detail"

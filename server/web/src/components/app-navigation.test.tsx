@@ -31,6 +31,7 @@ describe("AppNavigation", () => {
       "src",
       "/assets/app-icons/mcp-f654f2a2.png"
     );
+    expect(screen.queryByRole("link", { name: "Collector" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "动态" })).not.toBeInTheDocument();
   });
 

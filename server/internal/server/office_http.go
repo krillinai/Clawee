@@ -21,13 +21,6 @@ func mountOfficePublicRoutes(router *gin.Engine, opts Options) {
 			router.Any(path, wrapOfficeHandler(opts.OfficeCollectorAPI))
 		}
 	}
-
-	if opts.OfficeInstallAPI != nil {
-		router.GET("/office/collectors/install", wrapOfficeHandler(opts.OfficeInstallAPI))
-		router.GET("/office/collectors/install.sh", wrapOfficeHandler(opts.OfficeInstallAPI))
-		router.GET("/office/collectors/install.ps1", wrapOfficeHandler(opts.OfficeInstallAPI))
-		router.GET("/office/collectors/downloads/clawee-collector/*path", wrapOfficeHandler(opts.OfficeInstallAPI))
-	}
 }
 
 func mountOfficeAdminRoutes(admin *gin.RouterGroup, opts Options) {

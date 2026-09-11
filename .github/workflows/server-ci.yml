@@ -44,4 +44,3 @@ jobs:
           CLAW_MCP_TEST_DATABASE_URL: postgres://claw_mcp@127.0.0.1:5432/claw_mcp_test?sslmode=disable
       - run: go vet ./...
       - run: pnpm --dir web audit --audit-level high
-      - run: ./scripts/build-collector.sh

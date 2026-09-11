@@ -67,7 +67,6 @@ type Options struct {
 	OfficeManagementAPI      *httpapi.ManagementAPI
 	AgentCollectorLookup     AgentCollectorLookup
 	OfficeUserCollectorsAPI  http.Handler
-	OfficeInstallAPI         http.Handler
 	ClaweeActivityReporter   ClaweeActivityReporter
 	ActivityReportingEnabled bool
 	KnowledgeService         *knowledge.Service

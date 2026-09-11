@@ -79,6 +79,10 @@ if ! grep -Fxq './release-manifest.json' "$PACKAGE_LIST"; then
   printf 'release package is missing release-manifest.json\n' >&2
   exit 1
 fi
+if grep -Eq '(^|/)public/collectors(/|$)' "$PACKAGE_LIST"; then
+  printf 'release package must not contain Collector binaries\n' >&2
+  exit 1
+fi
 if grep -Eq '(^|/)config\.yaml$|(^|/)\.env$' "$PACKAGE_LIST"; then
   printf 'release package contains a private config or .env\n' >&2
   exit 1

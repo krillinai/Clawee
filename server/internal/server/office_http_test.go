@@ -409,26 +409,23 @@ func TestLegacyOfficeDynamicRoutesNotFound(t *testing.T) {
 	})
 }
 
-func TestOfficeInstallRoutesUseCollectorsPrefix(t *testing.T) {
+func TestOfficeInstallRoutesAreNotMounted(t *testing.T) {
 	router := newTestRouter(t, server.Options{
-		ProxyGateway:     testProxyGateway(mcpgateway.NewMemoryStore()),
-		OfficeInstallAPI: httpapi.NewInstallAPI(t.TempDir()).Handler(),
+		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()),
 	})
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/office/collectors/install?code=reg_123", nil)
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("prefixed install status = %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/install?code=reg_123", nil)
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("legacy install status = %d, want %d", rec.Code, http.StatusNotFound)
+	for _, path := range []string{
+		"/office/collectors/install?code=reg_123",
+		"/office/collectors/install.sh?code=reg_123",
+		"/office/collectors/install.ps1?code=reg_123",
+		"/office/collectors/downloads/clawee-collector/linux/amd64/clawee-collector",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("install route %s status = %d, want %d", path, rec.Code, http.StatusNotFound)
+		}
 	}
 }
 

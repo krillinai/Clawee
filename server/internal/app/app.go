@@ -258,7 +258,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	var officeUserDashboardAPI http.Handler
 	var officeManagementAPI *httpapi.ManagementAPI
 	var officeUserCollectorsAPI http.Handler
-	var officeInstallAPI http.Handler
 	var officeSQLDB *sql.DB
 	var collectorSQLDB *sql.DB
 	if pool != nil {
@@ -273,7 +272,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	officeUserDashboardAPI = officeAPIs.userDashboard
 	officeManagementAPI = officeAPIs.management
 	officeUserCollectorsAPI = officeAPIs.userCollectors
-	officeInstallAPI = officeAPIs.install
 	activitySvc, err := activity.NewService(snapshotClient, officeAPIs.activityStore, mcpUsageStore, "Asia/Shanghai")
 	if err != nil {
 		return nil, err
@@ -365,7 +363,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			OfficeManagementAPI:        officeManagementAPI,
 			AgentCollectorLookup:       officeAPIs.agentCollectorLookup,
 			OfficeUserCollectorsAPI:    officeUserCollectorsAPI,
-			OfficeInstallAPI:           officeInstallAPI,
 			ClaweeActivityReporter:     officeAPIs.activityReporter,
 			ActivityReportingEnabled:   cfg.Activity.ReportingEnabled,
 			KnowledgeService:           knowledgeSvc,
@@ -620,7 +617,6 @@ type officeAPIs struct {
 	management           *httpapi.ManagementAPI
 	agentCollectorLookup server.AgentCollectorLookup
 	userCollectors       http.Handler
-	install              http.Handler
 	activityStore        activity.ActivityStore
 	agentSummaryReader   activity.AgentSummaryReader
 	activityReporter     server.ClaweeActivityReporter
@@ -659,9 +655,6 @@ func buildOfficeAPIs(adminDB *sql.DB, collectorDB *sql.DB, installConfig config.
 		apis.management = managementAPI
 		apis.agentCollectorLookup = adminStore
 		apis.userCollectors = managementAPI.UserCollectorsHandler()
-	}
-	if adminDB != nil || collectorDB != nil {
-		apis.install = httpapi.NewInstallAPI(installConfig.CollectorBinaryRoot).Handler()
 	}
 	return apis
 }

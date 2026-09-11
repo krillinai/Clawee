@@ -56,7 +56,7 @@ describe("AdminLayout", () => {
     expect(screen.getByRole("link", { name: "智能体管理" })).toHaveAttribute("href", "/admin/mcp/agents");
     expect(screen.getByRole("link", { name: "智能体管理" })).toHaveClass("h-9", "text-[13px]", "font-normal");
     expect(screen.getByRole("link", { name: "智能体活动" })).toHaveAttribute("href", "/admin/activity");
-    expect(screen.getByRole("link", { name: "采集器管理" })).toHaveAttribute("href", "/admin/collectors");
+    expect(screen.queryByRole("link", { name: "采集器管理" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "MCP 网关" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("link", { name: "上游服务" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "MCP 网关" }));

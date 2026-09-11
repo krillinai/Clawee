@@ -21,7 +21,7 @@
 | 客户端测试 | `client/`：`pnpm test` | `pnpm run client:test` |
 | 服务端测试 | `server/`：`make test` | `pnpm run server:test` |
 | 客户端全量构建 | `client/`：`pnpm build` | `pnpm run client:build` |
-| 服务端及 Collector 构建 | `server/`：`make build` | `pnpm run server:build` |
+| 服务端构建 | `server/`：`make build` | `pnpm run server:build` |
 | 本机桌面完整预检 | `client/`：`pnpm desktop:preflight:local` | `pnpm run desktop:preflight:local` |
 | Linux 服务端包 | `server/`：`make release-linux-amd64` / `make release-linux-arm64` | `node scripts/clawee.mjs server release-linux-amd64` 等 |
 | SSH 服务端部署 | `server/`：`./scripts/deploy-release.sh staging` | 进入 `server/` 后执行 |

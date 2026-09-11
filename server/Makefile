@@ -25,7 +25,7 @@ dev-collector:
 build-web:
 	./scripts/build-web.sh
 
-build-backend: build-web build-collector
+build-backend: build-web
 	./scripts/build-backend.sh
 
 build-collector: collector-downloads
@@ -51,7 +51,6 @@ release-linux-arm64:
 	TARGET_GOOS=linux TARGET_GOARCH=arm64 ./scripts/package-release.sh
 
 build:
-	$(MAKE) collector-downloads-all
 	$(MAKE) build-backend
 
 db-migrate-up:

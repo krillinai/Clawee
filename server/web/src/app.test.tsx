@@ -12,8 +12,8 @@ import {
   listMCPGrants,
   listMCPUpstreamServers
 } from "@/lib/mcp-admin-api";
-import { fetchCollectorOverview, getAgentActivityList, getAgentDetail, getOfficeSnapshot } from "@/lib/office-api";
-import { fixtureAgentDetail, fixtureCollectorsOverview, fixtureOffice } from "@/test/office-fixtures";
+import { getAgentActivityList, getAgentDetail, getOfficeSnapshot } from "@/lib/office-api";
+import { fixtureAgentDetail, fixtureOffice } from "@/test/office-fixtures";
 import { ThemeProvider } from "@/components/theme-provider";
 import { permissions } from "@/lib/rbac-api";
 import { getSharedSpace, listSharedFiles } from "@/lib/shared-files-api";
@@ -58,7 +58,6 @@ vi.mock("@/lib/office-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/office-api")>("@/lib/office-api");
   return {
     ...actual,
-    fetchCollectorOverview: vi.fn(),
     getAgentActivityList: vi.fn(),
     getOfficeSnapshot: vi.fn(),
     getAgentDetail: vi.fn()
@@ -80,7 +79,6 @@ const listMCPGrantsMock = vi.mocked(listMCPGrants);
 const listMCPUpstreamServersMock = vi.mocked(listMCPUpstreamServers);
 const listKnowledgeBasesMock = vi.mocked(listKnowledgeBases);
 const listKnowledgeDocumentsMock = vi.mocked(listKnowledgeDocuments);
-const fetchCollectorOverviewMock = vi.mocked(fetchCollectorOverview);
 const getAgentActivityListMock = vi.mocked(getAgentActivityList);
 const getOfficeSnapshotMock = vi.mocked(getOfficeSnapshot);
 const getAgentDetailMock = vi.mocked(getAgentDetail);
@@ -121,7 +119,6 @@ describe("App", () => {
     listMCPUpstreamServersMock.mockResolvedValue([]);
     listKnowledgeBasesMock.mockResolvedValue([]);
     listKnowledgeDocumentsMock.mockResolvedValue([]);
-    fetchCollectorOverviewMock.mockResolvedValue(fixtureCollectorsOverview);
     getAgentActivityListMock.mockResolvedValue(fixtureOffice);
     getOfficeSnapshotMock.mockResolvedValue(fixtureOffice);
     getAgentDetailMock.mockResolvedValue(fixtureAgentDetail);
@@ -234,10 +231,11 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "活动" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("link", { name: "Collector" }));
+    expect(screen.queryByRole("link", { name: "Collector" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "MCP" }));
 
-    expect(await screen.findByRole("heading", { name: "我的 Collector" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Collector" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "MCP 能力目录" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "MCP" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("admin@example.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "进入管理后台" })).toHaveAttribute("href", "/admin");
 
@@ -370,14 +368,12 @@ describe("App", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/admin"));
   });
 
-  it("renders the office collectors route for admins", async () => {
-    window.history.pushState({}, "", "/admin/collectors");
+  it.each(["/app/collectors", "/admin/collectors"])("does not expose the retired Collector route %s", async (path) => {
+    window.history.pushState({}, "", path);
 
     renderApp();
 
-    expect(await screen.findByRole("heading", { name: "采集器管理" })).toBeInTheDocument();
-    expect(screen.getByText("采集器列表")).toBeInTheDocument();
-    expect(screen.getByText("采集器注册码")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "页面不存在" })).toBeInTheDocument();
   });
 
   it("renders the unified Agent management route", async () => {

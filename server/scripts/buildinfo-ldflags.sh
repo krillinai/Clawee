@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-claw_mcp_version="${CLAW_MCP_VERSION:-0.1.4}"
+claw_mcp_version="${CLAW_MCP_VERSION:-0.1.5}"
 claw_mcp_build_time="${CLAW_MCP_BUILD_TIME:-$(TZ=Asia/Shanghai date +%Y%m%dT%H%M%S)BJT}"
 claw_mcp_commit="${CLAW_MCP_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 

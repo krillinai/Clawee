@@ -5,7 +5,6 @@ import {
   BookOpenText,
   CheckSquare,
   ChevronRight,
-  Cpu,
   Database,
   FileSearch,
   FolderOpen,
@@ -66,8 +65,7 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
     label: "智能体活动",
     items: [
       { label: "智能体管理", href: "/admin/mcp/agents", icon: KeyRound, permissions: [permissions.agentRead, permissions.mcpGrantRead] },
-      { label: "智能体活动", href: "/admin/activity", icon: Radio, permission: permissions.activityRead },
-      { label: "采集器管理", href: "/admin/collectors", icon: Cpu, permission: permissions.collectorRead }
+      { label: "智能体活动", href: "/admin/activity", icon: Radio, permission: permissions.activityRead }
     ]
   },
   {

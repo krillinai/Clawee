@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Bot, Boxes, ChartNoAxesCombined, PackageOpen, RadioTower, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Boxes, ChartNoAxesCombined, PackageOpen, type LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { appIconPaths } from "@/lib/app-icons";
@@ -16,7 +16,6 @@ type AppNavItem = {
 const baseItems: AppNavItem[] = [
   { href: "/app/agents", label: "Agent", icon: Bot },
   { href: "/app/mcp-capabilities", label: "MCP", icon: Boxes, iconSrc: appIconPaths.mcp },
-  { href: "/app/collectors", label: "Collector", icon: RadioTower },
   { href: "/app/skills", label: "技能", icon: PackageOpen }
 ];
 
@@ -27,12 +26,12 @@ export function AppNavigation() {
   });
   const views = dataViewsQuery.data ?? [];
   const items: AppNavItem[] = [
-    ...baseItems.slice(0, 3),
+    ...baseItems.slice(0, 2),
     ...(canReadAgentActivity(views) ? [{ href: "/app/activity", label: "动态", icon: Activity }] : []),
     ...(canReadBusinessData(views)
       ? [{ href: "/app/business-data", label: "数据看板", icon: ChartNoAxesCombined }]
       : []),
-    ...baseItems.slice(3),
+    ...baseItems.slice(2),
   ];
 
   return (
