@@ -157,6 +157,16 @@ export class FakeEnterpriseAuthServer {
       return;
     }
 
+    if (request.method === 'GET' && path === '/api/v1/app/platform-branding') {
+      sendJson(response, 200, {
+        data: {
+          sidebar_logo_configured: false,
+          sidebar_compact_logo_configured: false
+        }
+      });
+      return;
+    }
+
     if (
       request.method === 'POST'
       && path === '/api/v1/app/model-configuration'
