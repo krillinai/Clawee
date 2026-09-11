@@ -10,7 +10,7 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { name: '数据看板' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '业务洞察' })).toBeInTheDocument();
     for (const name of ['竞品洞察', '客户管理', '小红书运营', '抖音投放']) {
-      expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: /^编辑/ })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '哔哩哔哩运营' })).toBeInTheDocument();
@@ -18,26 +18,6 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('总 Token')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Agent 运行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '知识资产' })).not.toBeInTheDocument();
-  });
-
-  it('opens the Xiaohongshu detail dashboard and returns to the overview', async () => {
-    const user = userEvent.setup();
-    render(<DashboardPage />);
-    await user.click(screen.getByRole('button', { name: '打开小红书运营详情看板' }));
-    expect(screen.getByRole('heading', { name: '小红书运营' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '热门笔记表现' })).toBeInTheDocument();
-    expect(screen.getByText('286.4 万')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '返回数据看板' }));
-    expect(screen.getByRole('heading', { name: '业务洞察' })).toBeInTheDocument();
-  });
-
-  it('opens the Douyin campaign detail dashboard', async () => {
-    const user = userEvent.setup();
-    render(<DashboardPage />);
-    await user.click(screen.getByRole('button', { name: '打开抖音投放详情看板' }));
-    expect(screen.getByRole('heading', { name: '抖音投放' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '投放计划表现' })).toBeInTheDocument();
-    expect(screen.getByText('¥386,400')).toBeInTheDocument();
   });
 
   it('creates a personal dashboard in the employee view', async () => {
