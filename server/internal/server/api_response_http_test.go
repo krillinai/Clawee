@@ -49,7 +49,7 @@ func TestUnifiedAPIResponsePreservesOpaqueJSONAndPrefersExplicitSnakeCase(t *tes
 		"InputSchema": map[string]any{
 			"properties": map[string]any{"customerId": map[string]any{"type": "string"}},
 		},
-		"mcp_config":          map[string]any{"mcpServers": map[string]any{"claw-mcp": map[string]any{"url": "/mcp"}}},
+		"mcp_config":          map[string]any{"mcpServers": map[string]any{"clawee-gateway": map[string]any{"url": "/mcp"}}},
 		"input":               map[string]any{"customerId": "customer_1"},
 		"response":            map[string]any{"orderId": "order_1"},
 		"resolved_data_scope": map[string]any{"customerId": "customer_1"},

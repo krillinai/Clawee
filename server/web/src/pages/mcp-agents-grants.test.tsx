@@ -565,7 +565,7 @@ describe("MCPAgentsGrantsPage", () => {
     fireEvent.click(within(configPane).getByRole("button", { name: "复制" }));
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        JSON.stringify({ mcpServers: { "claw-mcp": { url: "http://localhost:3000/mcp", headers: { Authorization: `Bearer ${copiedToken}`, "X-Claw-Agent-ID": "agent_sales" } } } }, null, 2)
+        JSON.stringify({ mcpServers: { "clawee-gateway": { url: "http://localhost:3000/mcp", headers: { Authorization: `Bearer ${copiedToken}`, "X-Claw-Agent-ID": "agent_sales" } } } }, null, 2)
       );
     });
     expect(await within(configPane).findByRole("button", { name: "已复制" })).toBeInTheDocument();

@@ -1572,7 +1572,7 @@ func TestSystemVersionRouteReturnsBuildInfo(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body["name"] != "claw-mcp" {
+	if body["name"] != "clawee-gateway" {
 		t.Fatalf("name = %q", body["name"])
 	}
 	if body["version"] != "0.1.1" {

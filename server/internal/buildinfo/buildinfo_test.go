@@ -67,8 +67,8 @@ func TestInfo(t *testing.T) {
 	Commit = "abc1234"
 
 	got := Info()
-	if got.Name != "claw-mcp" {
-		t.Fatalf("Name = %q, want claw-mcp", got.Name)
+	if got.Name != "clawee-gateway" {
+		t.Fatalf("Name = %q, want clawee-gateway", got.Name)
 	}
 	if got.Version != "0.1.1" {
 		t.Fatalf("Version = %q, want 0.1.1", got.Version)

@@ -55,7 +55,8 @@ func TestAdminStatusReportsSkillSourceAvailability(t *testing.T) {
 	}
 	var response struct {
 		Data struct {
-			SkillSourceEnabled bool `json:"skill_source_enabled"`
+			Service            string `json:"service"`
+			SkillSourceEnabled bool   `json:"skill_source_enabled"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
@@ -63,6 +64,9 @@ func TestAdminStatusReportsSkillSourceAvailability(t *testing.T) {
 	}
 	if !response.Data.SkillSourceEnabled {
 		t.Fatalf("skill_source_enabled = false, body=%s", recorder.Body.String())
+	}
+	if response.Data.Service != "clawee-gateway" {
+		t.Fatalf("service = %q, want clawee-gateway", response.Data.Service)
 	}
 }
 

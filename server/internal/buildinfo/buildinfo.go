@@ -27,7 +27,7 @@ func FullVersion() string {
 
 func Info() InfoResponse {
 	return InfoResponse{
-		Name:        "claw-mcp",
+		Name:        "clawee-gateway",
 		Version:     Version,
 		BuildTime:   BuildTime,
 		Commit:      Commit,

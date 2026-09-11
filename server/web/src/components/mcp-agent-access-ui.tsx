@@ -302,7 +302,7 @@ export function MCPAgentTokenDrawer({
 function accountMCPConfig(token: string, agentId: string) {
   return {
     mcpServers: {
-      "claw-mcp": {
+      "clawee-gateway": {
         url: `${window.location.origin}/mcp`,
         headers: {
           Authorization: `Bearer ${token}`,

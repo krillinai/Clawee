@@ -213,7 +213,7 @@ func NewRouter(opts Options) http.Handler {
 	mountSkillHubRoutes(appAPI, adminAPI, opts)
 	status := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"service":              "claw-mcp",
+			"service":              "clawee-gateway",
 			"status":               "ok",
 			"skill_source_enabled": opts.SkillSourceService != nil,
 		})

@@ -109,7 +109,7 @@ describe("App", () => {
       }
     );
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ service: "claw-mcp", status: "ok" }),
+      JSON.stringify({ service: "clawee-gateway", status: "ok" }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     )));
     listAccountsMock.mockResolvedValue([]);
