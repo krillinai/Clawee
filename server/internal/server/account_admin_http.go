@@ -113,6 +113,9 @@ func handleUpdateAccount(accountSvc *accounts.Service, rbacSvc *rbac.Service, pr
 			return
 		}
 		if req.Name != nil {
+			if !authorizePermission(c, rbacSvc, rbac.PermissionAccountUpdateName) {
+				return
+			}
 			account, err := accountSvc.UpdateAccountName(c.Request.Context(), userID, *req.Name)
 			if err != nil {
 				accountError(c, err)
@@ -125,6 +128,9 @@ func handleUpdateAccount(accountSvc *accounts.Service, rbacSvc *rbac.Service, pr
 				return
 			}
 			c.JSON(http.StatusOK, resp)
+			return
+		}
+		if !authorizePermission(c, rbacSvc, rbac.PermissionAccountUpdateStatus) {
 			return
 		}
 		if *req.Status != accounts.StatusActive && *req.Status != accounts.StatusDisabled {
@@ -272,7 +278,7 @@ func mountAccountAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	}
 	admin.GET("/accounts", requirePermission(opts.RBACService, rbac.PermissionAccountRead), handleListAccounts(opts.AccountService, opts.ProxyGateway))
 	admin.GET("/accounts/detail", requirePermission(opts.RBACService, rbac.PermissionAccountRead), handleAccountDetail(opts.AccountService, opts.ProxyGateway))
-	admin.POST("/accounts", requirePermission(opts.RBACService, rbac.PermissionAccountManage), handleCreateAccount(opts.AccountService, opts.ProxyGateway))
-	admin.PATCH("/accounts", requirePermission(opts.RBACService, rbac.PermissionAccountManage), handleUpdateAccount(opts.AccountService, opts.RBACService, opts.ProxyGateway, opts.ModelCredentialLifecycle, opts.Logger))
-	admin.POST("/accounts/password/reset", requirePermission(opts.RBACService, rbac.PermissionAccountManage), handleResetAccountPassword(opts.AccountService, opts.ProxyGateway, opts.Logger))
+	admin.POST("/accounts", requirePermission(opts.RBACService, rbac.PermissionAccountCreate), handleCreateAccount(opts.AccountService, opts.ProxyGateway))
+	admin.PATCH("/accounts", handleUpdateAccount(opts.AccountService, opts.RBACService, opts.ProxyGateway, opts.ModelCredentialLifecycle, opts.Logger))
+	admin.POST("/accounts/password/reset", requirePermission(opts.RBACService, rbac.PermissionAccountResetPassword), handleResetAccountPassword(opts.AccountService, opts.ProxyGateway, opts.Logger))
 }

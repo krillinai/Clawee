@@ -269,22 +269,21 @@ func mountKnowledgeAdminRoutes(admin *gin.RouterGroup, opts Options) {
 		c.Status(http.StatusNoContent)
 	}
 	read := requirePermission(opts.RBACService, rbac.PermissionKnowledgeRead)
-	manage := requirePermission(opts.RBACService, rbac.PermissionKnowledgeManage)
 	admin.GET("/knowledge-bases", read, list)
 	admin.GET("/knowledge-bases/detail", read, detail)
-	admin.POST("/knowledge-bases", manage, create)
-	admin.PATCH("/knowledge-bases", manage, update)
-	admin.POST("/knowledge-bases/remove", manage, remove)
+	admin.POST("/knowledge-bases", requirePermission(opts.RBACService, rbac.PermissionKnowledgeCreate), create)
+	admin.PATCH("/knowledge-bases", requirePermission(opts.RBACService, rbac.PermissionKnowledgeUpdate), update)
+	admin.POST("/knowledge-bases/remove", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDelete), remove)
 	admin.GET("/knowledge-bases/documents", read, listDocuments)
-	admin.POST("/knowledge-bases/documents", manage, func(c *gin.Context) { handleKnowledgeDocumentUpload(c, service, nil) })
-	admin.POST("/knowledge-bases/documents/sync", manage, syncDocuments)
-	admin.POST("/knowledge-bases/documents/remove", manage, removeDocument)
+	admin.POST("/knowledge-bases/documents", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDocumentUpload), func(c *gin.Context) { handleKnowledgeDocumentUpload(c, service, nil) })
+	admin.POST("/knowledge-bases/documents/sync", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDocumentSync), syncDocuments)
+	admin.POST("/knowledge-bases/documents/remove", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDocumentDelete), removeDocument)
 	if opts.DataAccessService != nil && opts.AccountService != nil {
-		mountKnowledgeDataGrantRoutes(admin, opts, read, manage)
+		mountKnowledgeDataGrantRoutes(admin, opts, read, requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberUpdate))
 	}
 }
 
-func mountKnowledgeDataGrantRoutes(admin *gin.RouterGroup, opts Options, read, manage gin.HandlerFunc) {
+func mountKnowledgeDataGrantRoutes(admin *gin.RouterGroup, opts Options, read, memberUpdate gin.HandlerFunc) {
 	list := func(c *gin.Context) {
 		id := knowledgeBaseID(c)
 		if id == "" {
@@ -399,11 +398,11 @@ func mountKnowledgeDataGrantRoutes(admin *gin.RouterGroup, opts Options, read, m
 		c.JSON(http.StatusOK, itemsResponse(items))
 	}
 	admin.GET("/knowledge-bases/account-grants", read, list)
-	admin.POST("/knowledge-bases/account-grants", manage, createOrReplace(false))
-	admin.PATCH("/knowledge-bases/account-grants", manage, createOrReplace(true))
-	admin.POST("/knowledge-bases/account-grants/remove", manage, remove)
+	admin.POST("/knowledge-bases/account-grants", memberUpdate, createOrReplace(false))
+	admin.PATCH("/knowledge-bases/account-grants", memberUpdate, createOrReplace(true))
+	admin.POST("/knowledge-bases/account-grants/remove", memberUpdate, remove)
 	admin.GET("/knowledge-bases/members", read, listMembers)
-	admin.GET("/knowledge-bases/member-candidates", manage, listCandidates)
+	admin.GET("/knowledge-bases/member-candidates", memberUpdate, listCandidates)
 }
 
 func knowledgeMembers(c *gin.Context, opts Options) ([]knowledgeMemberResponse, error) {

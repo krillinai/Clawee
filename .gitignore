@@ -37,4 +37,5 @@ server/deploy/servers.yaml
 .mcp.json
 .superpowers/
 .worktrees/
-
+output/
+tmp/

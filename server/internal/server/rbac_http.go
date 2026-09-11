@@ -37,7 +37,10 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 	}
 	service := opts.RBACService
 	read := requirePermission(service, rbac.PermissionRBACRead)
-	manage := requirePermission(service, rbac.PermissionRBACManage)
+	roleCreate := requirePermission(service, rbac.PermissionRBACRoleCreate)
+	roleUpdate := requirePermission(service, rbac.PermissionRBACRoleUpdate)
+	roleDelete := requirePermission(service, rbac.PermissionRBACRoleDelete)
+	accountRoleUpdate := requirePermission(service, rbac.PermissionRBACAccountRoleUpdate)
 
 	group.GET("/permissions", read, func(c *gin.Context) {
 		catalog := rbac.PermissionCatalog()
@@ -67,7 +70,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusOK, gin.H{"data": roleResponse(role)})
 	})
-	group.POST("/roles", manage, func(c *gin.Context) {
+	group.POST("/roles", roleCreate, func(c *gin.Context) {
 		var request createRoleRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)
@@ -82,7 +85,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusCreated, gin.H{"data": roleResponse(role)})
 	})
-	group.PATCH("/roles", manage, func(c *gin.Context) {
+	group.PATCH("/roles", roleUpdate, func(c *gin.Context) {
 		var request updateRoleRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)
@@ -97,7 +100,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusOK, gin.H{"data": roleResponse(role)})
 	})
-	group.POST("/roles/remove", manage, func(c *gin.Context) {
+	group.POST("/roles/remove", roleDelete, func(c *gin.Context) {
 		var request roleIDRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)
@@ -121,7 +124,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusOK, gin.H{"data": items, "meta": gin.H{"next_cursor": "", "has_next": false}})
 	})
-	group.POST("/account-roles", manage, func(c *gin.Context) {
+	group.POST("/account-roles", accountRoleUpdate, func(c *gin.Context) {
 		var request accountRoleRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)
@@ -133,7 +136,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusCreated, gin.H{"data": gin.H{"user_id": request.UserID, "role_id": request.RoleID}})
 	})
-	group.POST("/account-roles/remove", manage, func(c *gin.Context) {
+	group.POST("/account-roles/remove", accountRoleUpdate, func(c *gin.Context) {
 		var request accountRoleRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)

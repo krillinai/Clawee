@@ -44,16 +44,16 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 		return
 	}
 	read := skillRequirePermission(opts.RBACService, rbac.PermissionSkillRead)
-	manage := skillRequirePermission(opts.RBACService, rbac.PermissionSkillManage)
 	admin.GET("/skill-spaces", read, handleAdminSkillSpaces(opts.SkillHubService))
 	admin.GET("/skill-spaces/detail", read, handleAdminSkillSpace(opts.SkillHubService))
-	admin.POST("/skill-spaces", manage, handleAdminCreateSkillSpace(opts.SkillHubService))
-	admin.PATCH("/skill-spaces", manage, handleAdminUpdateSkillSpace(opts.SkillHubService))
+	admin.POST("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceCreate), handleAdminCreateSkillSpace(opts.SkillHubService))
+	admin.PATCH("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
-	admin.GET("/skill-spaces/member-candidates", manage, handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
-	admin.POST("/skill-spaces/account-grants", manage, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
-	admin.PATCH("/skill-spaces/account-grants", manage, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
-	admin.POST("/skill-spaces/account-grants/remove", manage, handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
+	memberUpdate := skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate)
+	admin.GET("/skill-spaces/member-candidates", memberUpdate, handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
+	admin.POST("/skill-spaces/account-grants", memberUpdate, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
+	admin.PATCH("/skill-spaces/account-grants", memberUpdate, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
+	admin.POST("/skill-spaces/account-grants/remove", memberUpdate, handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
 }
 
 func handleAppSkillSpaces(service *skillhub.Service) gin.HandlerFunc {

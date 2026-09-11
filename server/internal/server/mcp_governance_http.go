@@ -131,7 +131,7 @@ func adminGateDecisionError(c *gin.Context, gate mcpgateway.GateRequest, err err
 }
 
 func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
-	admin.POST("/mcp/grants", requirePermission(opts.RBACService, rbac.PermissionMCPGrantManage), func(c *gin.Context) {
+	admin.POST("/mcp/grants", requirePermission(opts.RBACService, rbac.PermissionMCPGrantCreate), func(c *gin.Context) {
 		if opts.ProxyGateway == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})
 			return
@@ -293,7 +293,7 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 		c.JSON(http.StatusOK, gate)
 	}
 	admin.GET("/mcp/gates/detail", requirePermission(opts.RBACService, rbac.PermissionMCPGateRead), gateDetail)
-	admin.POST("/mcp/gates/decide", requirePermission(opts.RBACService, rbac.PermissionMCPGateManage), func(c *gin.Context) {
+	admin.POST("/mcp/gates/decide", func(c *gin.Context) {
 		if opts.ProxyGateway == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})
 			return
@@ -301,6 +301,13 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 		var req rejectGateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		permissionCode := rbac.PermissionMCPGateReject
+		if req.Decision == "approved" || req.Decision == "accepted" {
+			permissionCode = rbac.PermissionMCPGateApprove
+		}
+		if !authorizePermission(c, opts.RBACService, permissionCode) {
 			return
 		}
 		var gate mcpgateway.GateRequest
@@ -349,7 +356,7 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 		}
 		c.Status(http.StatusNoContent)
 	}
-	admin.POST("/mcp/grants/remove", requirePermission(opts.RBACService, rbac.PermissionMCPGrantManage), removeGrant)
+	admin.POST("/mcp/grants/remove", requirePermission(opts.RBACService, rbac.PermissionMCPGrantRevoke), removeGrant)
 	admin.GET("/mcp/audits", requirePermission(opts.RBACService, rbac.PermissionMCPAuditRead), func(c *gin.Context) {
 		if opts.ProxyGateway == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})

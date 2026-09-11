@@ -300,7 +300,7 @@ jobs:
             gh release create "$TAG" "${args[@]}"
           fi
           mkdir -p artifacts
-          gh release view "$TAG" --json body --jq .body > artifacts/release-notes.md
+          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
           gh release view "$TAG" --json createdAt --jq .createdAt \
             | sed 's/^/PUBLISHED_AT=/' >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
@@ -329,7 +329,7 @@ jobs:
             --artifacts artifacts \
             --stage cos-stage \
             --manifest artifacts/release-manifest.json \
-            --release-notes artifacts/release-notes.md \
+            --release-notes "$RUNNER_TEMP/release-notes.md" \
             --version "$VERSION" \
             --tag "$TAG" \
             --commit "$GITHUB_SHA" \

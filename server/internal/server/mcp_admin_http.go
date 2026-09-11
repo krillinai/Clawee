@@ -861,43 +861,46 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 	}
 
 	upstreamRead := requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamRead)
-	upstreamManage := requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamManage)
 	agentRead := requireAnyPermission(opts.RBACService, rbac.PermissionAgentRead, rbac.PermissionMCPGrantRead)
-	agentManage := requirePermission(opts.RBACService, rbac.PermissionAgentManage)
-	capabilityRead := requireAnyPermission(opts.RBACService, rbac.PermissionMCPCapabilityRead, rbac.PermissionMCPGrantManage)
-	capabilityManage := requirePermission(opts.RBACService, rbac.PermissionMCPCapabilityManage)
-	admin.POST("/mcp/upstream-servers", upstreamManage, createUpstream)
+	capabilityRead := requireAnyPermission(opts.RBACService, rbac.PermissionMCPCapabilityRead, rbac.PermissionMCPGrantCreate)
+	admin.POST("/mcp/upstream-servers", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamCreate), createUpstream)
 	admin.GET("/mcp/upstream-servers", upstreamRead, listUpstreams)
 	admin.GET("/mcp/upstream-servers/detail", upstreamRead, upstreamDetail)
-	admin.PATCH("/mcp/upstream-servers", upstreamManage, updateUpstream)
-	admin.POST("/mcp/upstream-servers/remove", upstreamManage, removeUpstream)
-	admin.POST("/mcp/upstream-servers/sync-tools", upstreamManage, syncUpstream)
+	admin.PATCH("/mcp/upstream-servers", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamUpdate), updateUpstream)
+	admin.POST("/mcp/upstream-servers/remove", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamDelete), removeUpstream)
+	admin.POST("/mcp/upstream-servers/sync-tools", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamSync), syncUpstream)
 
-	admin.POST("/mcp/agents", agentManage, createAgent)
+	admin.POST("/mcp/agents", requirePermission(opts.RBACService, rbac.PermissionAgentCreate), createAgent)
 	admin.GET("/mcp/agents", agentRead, listAgents)
 	admin.GET("/mcp/agents/detail", agentRead, agentDetail)
-	admin.POST("/mcp/agents/remove", agentManage, removeAgent)
-	admin.GET("/mcp/accounts/token", agentManage, accountTokenMetadata)
-	admin.POST("/mcp/accounts/token/reveal", agentManage, revealAccountToken)
-	admin.POST("/mcp/accounts/token/rotate", agentManage, rotateAccountToken)
-	admin.POST("/mcp/accounts/token/revoke", agentManage, revokeAccountToken)
+	admin.POST("/mcp/agents/remove", requirePermission(opts.RBACService, rbac.PermissionAgentDelete), removeAgent)
+	admin.GET("/mcp/accounts/token", requireAnyPermission(opts.RBACService, rbac.PermissionAgentTokenReveal, rbac.PermissionAgentTokenRotate, rbac.PermissionAgentTokenRevoke), accountTokenMetadata)
+	admin.POST("/mcp/accounts/token/reveal", requirePermission(opts.RBACService, rbac.PermissionAgentTokenReveal), revealAccountToken)
+	admin.POST("/mcp/accounts/token/rotate", requirePermission(opts.RBACService, rbac.PermissionAgentTokenRotate), rotateAccountToken)
+	admin.POST("/mcp/accounts/token/revoke", requirePermission(opts.RBACService, rbac.PermissionAgentTokenRevoke), revokeAccountToken)
 
 	admin.GET("/mcp/capabilities", capabilityRead, listCapabilities)
 	admin.GET("/mcp/capabilities/detail", capabilityRead, capabilityDetail)
-	admin.POST("/mcp/capabilities/remove", capabilityManage, removeCapability)
-	admin.PATCH("/mcp/capabilities", capabilityManage, func(c *gin.Context) {
+	admin.POST("/mcp/capabilities/remove", requirePermission(opts.RBACService, rbac.PermissionMCPCapabilityDelete), removeCapability)
+	admin.PATCH("/mcp/capabilities", func(c *gin.Context) {
 		var req updateCapabilityStatusRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		if strings.TrimSpace(req.ExposedName) != "" {
+			if !authorizePermission(c, opts.RBACService, rbac.PermissionMCPCapabilityRename) {
+				return
+			}
 			renameCapabilityFromRequest(c, opts, renameCapabilityRequest{CapabilityID: req.CapabilityID, ExposedName: req.ExposedName})
+			return
+		}
+		if !authorizePermission(c, opts.RBACService, rbac.PermissionMCPCapabilityUpdateStatus) {
 			return
 		}
 		updateCapabilityStatusFromRequest(c, opts, req)
 	})
-	admin.PUT("/mcp/capabilities/gate-policy", capabilityManage, updateCapabilityGates)
+	admin.PUT("/mcp/capabilities/gate-policy", requirePermission(opts.RBACService, rbac.PermissionMCPCapabilityUpdateGatePolicy), updateCapabilityGates)
 }
 
 func upstreamServerID(c *gin.Context) string {

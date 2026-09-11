@@ -35,13 +35,13 @@ func mountOfficeAdminRoutes(admin *gin.RouterGroup, opts Options) {
 		admin.GET("/collectors", requirePermission(opts.RBACService, rbac.PermissionCollectorRead), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorsHandler()))
 		admin.GET("/collectors/detail", requirePermission(opts.RBACService, rbac.PermissionCollectorRead), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorDetailHandler()))
 		admin.GET("/collectors/overview", requirePermission(opts.RBACService, rbac.PermissionCollectorRead), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorsOverviewHandler()))
-		admin.POST("/collectors/token/revoke", requirePermission(opts.RBACService, rbac.PermissionCollectorManage), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorTokenRevokeHandler()))
-		admin.POST("/collectors/remove", requirePermission(opts.RBACService, rbac.PermissionCollectorManage), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorDeleteHandler()))
-		admin.GET("/collector-registration-codes", requirePermission(opts.RBACService, rbac.PermissionCollectorManage), wrapOfficeHandler(opts.OfficeManagementAPI.RegistrationCodeHandler()))
-		admin.POST("/collector-registration-codes", requirePermission(opts.RBACService, rbac.PermissionCollectorManage), wrapOfficeHandler(opts.OfficeManagementAPI.RegistrationCodeHandler()))
-		admin.PUT("/activity/mcp-agent-binding", requirePermission(opts.RBACService, rbac.PermissionAgentManage), wrapOfficeHandler(opts.OfficeManagementAPI.AgentBindingHandler()))
-		admin.POST("/activity/mcp-agent-binding/remove", requirePermission(opts.RBACService, rbac.PermissionAgentManage), wrapOfficeHandler(opts.OfficeManagementAPI.AgentUnbindingHandler()))
-		admin.POST("/activity/agents/remove", requirePermission(opts.RBACService, rbac.PermissionAgentManage), wrapOfficeHandler(opts.OfficeManagementAPI.AgentDeleteHandler()))
+		admin.POST("/collectors/token/revoke", requirePermission(opts.RBACService, rbac.PermissionCollectorTokenRevoke), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorTokenRevokeHandler()))
+		admin.POST("/collectors/remove", requirePermission(opts.RBACService, rbac.PermissionCollectorDelete), wrapOfficeHandler(opts.OfficeManagementAPI.CollectorDeleteHandler()))
+		admin.GET("/collector-registration-codes", requirePermission(opts.RBACService, rbac.PermissionCollectorRegistrationCodeCreate), wrapOfficeHandler(opts.OfficeManagementAPI.RegistrationCodeHandler()))
+		admin.POST("/collector-registration-codes", requirePermission(opts.RBACService, rbac.PermissionCollectorRegistrationCodeCreate), wrapOfficeHandler(opts.OfficeManagementAPI.RegistrationCodeHandler()))
+		admin.PUT("/activity/mcp-agent-binding", requirePermission(opts.RBACService, rbac.PermissionAgentBind), wrapOfficeHandler(opts.OfficeManagementAPI.AgentBindingHandler()))
+		admin.POST("/activity/mcp-agent-binding/remove", requirePermission(opts.RBACService, rbac.PermissionAgentUnbind), wrapOfficeHandler(opts.OfficeManagementAPI.AgentUnbindingHandler()))
+		admin.POST("/activity/agents/remove", requirePermission(opts.RBACService, rbac.PermissionAgentDelete), wrapOfficeHandler(opts.OfficeManagementAPI.AgentDeleteHandler()))
 	}
 
 	if opts.OfficeDashboardAPI != nil {

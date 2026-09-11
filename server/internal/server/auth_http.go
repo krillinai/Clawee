@@ -381,28 +381,39 @@ func requireAdminAccess(service *rbac.Service) gin.HandlerFunc {
 
 func requireAnyPermission(service *rbac.Service, permissionCodes ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		account, ok := currentAccount(c)
-		if !ok {
-			abortAuthorizationError(c, http.StatusUnauthorized, "unauthorized", "未认证")
-			return
+		if authorizeAnyPermission(c, service, permissionCodes...) {
+			c.Next()
 		}
-		if service == nil {
-			abortAuthorizationError(c, http.StatusServiceUnavailable, "authorization_unavailable", "权限服务不可用")
-			return
-		}
-		for _, permissionCode := range permissionCodes {
-			allowed, err := service.HasPermission(c.Request.Context(), account.UserID, permissionCode)
-			if err != nil {
-				abortAuthorizationError(c, http.StatusInternalServerError, "permission_check_failed", "权限检查失败")
-				return
-			}
-			if allowed {
-				c.Next()
-				return
-			}
-		}
-		abortAuthorizationError(c, http.StatusForbidden, "forbidden", "无权访问")
 	}
+}
+
+func authorizePermission(c *gin.Context, service *rbac.Service, permissionCode string) bool {
+	return authorizeAnyPermission(c, service, permissionCode)
+}
+
+func authorizeAnyPermission(c *gin.Context, service *rbac.Service, permissionCodes ...string) bool {
+	account, ok := currentAccount(c)
+	if !ok {
+		abortAuthorizationError(c, http.StatusUnauthorized, "unauthorized", "未认证")
+		return false
+	}
+	if service == nil {
+		abortAuthorizationError(c, http.StatusServiceUnavailable, "authorization_unavailable", "权限服务不可用")
+		return false
+	}
+	for _, permissionCode := range permissionCodes {
+		allowed, err := service.HasPermission(c.Request.Context(), account.UserID, permissionCode)
+		if err != nil {
+			abortAuthorizationError(c, http.StatusInternalServerError, "permission_check_failed", "权限检查失败")
+			return false
+
+		}
+		if allowed {
+			return true
+		}
+	}
+	abortAuthorizationError(c, http.StatusForbidden, "forbidden", "无权访问")
+	return false
 }
 
 func abortAuthorizationError(c *gin.Context, status int, code, message string) {
