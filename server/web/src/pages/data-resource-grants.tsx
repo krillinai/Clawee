@@ -40,7 +40,10 @@ function resourceTypeLabel(resourceType: DataResourceType) {
 }
 
 export function DataResourceGrantsPage() {
-  const canManage = useAdminPermission(permissions.dataResourceGrantManage);
+  const canCreate = useAdminPermission(permissions.dataResourceGrantCreate);
+  const canUpdate = useAdminPermission(permissions.dataResourceGrantUpdate);
+  const canDelete = useAdminPermission(permissions.dataResourceGrantDelete);
+  const canManage = canCreate || canUpdate || canDelete;
   const queryClient = useQueryClient();
   const [resourceType, setResourceType] = useState<DataResourceType["resourceType"]>("shared_space");
   const [resourceQuery, setResourceQuery] = useState("");
@@ -220,7 +223,9 @@ export function DataResourceGrantsPage() {
 
       <MemberAuthorizationDrawer
         adapter={authorizationAdapter}
-        canManage={canManage}
+        canAdd={canCreate}
+        canRemove={canDelete}
+        canUpdate={canUpdate}
         memberCount={authorizationTarget?.userCount}
         onChanged={refreshAuthorizationSummary}
         onClose={closeDetails}

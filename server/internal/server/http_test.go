@@ -1308,6 +1308,12 @@ func TestAdminMCPGatewayRoutesRejectInvalidInputs(t *testing.T) {
 			body:   `{"capability_id":"crm.customer.search","status":""}`,
 		},
 		{
+			name:   "upstream status mixed with configuration",
+			method: http.MethodPatch,
+			path:   "/api/v1/admin/mcp/upstream-servers",
+			body:   `{"server_id":"crm-main","status":"disabled","endpoint":"http://attacker.example/mcp"}`,
+		},
+		{
 			name:   "empty grant agent id",
 			method: http.MethodPost,
 			path:   "/api/v1/admin/mcp/grants",

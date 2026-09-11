@@ -205,9 +205,13 @@ func handleSkillSourceUpdate(service *skillhub.GitHubSourceService) gin.HandlerF
 			return
 		}
 		c.Set(skillSourceIDKey, strings.TrimSpace(request.SourceID))
+		token := request.Token
+		if token != nil && *token == "" {
+			token = nil
+		}
 		source, err := service.Update(c.Request.Context(), strings.TrimSpace(request.SourceID), skillhub.UpdateGitHubSourceInput{
 			RepositoryOwner: request.RepositoryOwner, RepositoryName: request.RepositoryName, Branch: request.Branch,
-			ScanRoot: request.ScanRoot, ExcludePaths: request.ExcludePaths, Token: request.Token,
+			ScanRoot: request.ScanRoot, ExcludePaths: request.ExcludePaths, Token: token,
 			AutoPublish: request.AutoPublish, Schedule: request.Schedule,
 		})
 		if err != nil {

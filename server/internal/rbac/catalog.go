@@ -62,7 +62,9 @@ const (
 	PermissionKnowledgeCreate                    = "console:knowledge:create"
 	PermissionKnowledgeUpdate                    = "console:knowledge:update"
 	PermissionKnowledgeDelete                    = "console:knowledge:delete"
+	PermissionKnowledgeMemberCreate              = "console:knowledge:member_create"
 	PermissionKnowledgeMemberUpdate              = "console:knowledge:member_update"
+	PermissionKnowledgeMemberDelete              = "console:knowledge:member_delete"
 	PermissionKnowledgeDocumentUpload            = "console:knowledge:document_upload"
 	PermissionKnowledgeDocumentSync              = "console:knowledge:document_sync"
 	PermissionKnowledgeDocumentDelete            = "console:knowledge:document_delete"
@@ -74,7 +76,9 @@ const (
 	PermissionSkillUnpublish                     = "console:skill:unpublish"
 	PermissionSkillSpaceCreate                   = "console:skill:space_create"
 	PermissionSkillSpaceUpdate                   = "console:skill:space_update"
+	PermissionSkillSpaceMemberCreate             = "console:skill:space_member_create"
 	PermissionSkillSpaceMemberUpdate             = "console:skill:space_member_update"
+	PermissionSkillSpaceMemberDelete             = "console:skill:space_member_delete"
 	PermissionSkillSourceCreate                  = "console:skill:source_create"
 	PermissionSkillSourceUpdate                  = "console:skill:source_update"
 	PermissionSkillSourceTokenReveal             = "console:skill:source_token_reveal"
@@ -89,7 +93,9 @@ const (
 	PermissionSharedFilesManage                  = "console:shared_files:manage"
 	PermissionSharedFilesSpaceCreate             = "console:shared_files:space_create"
 	PermissionSharedFilesSpaceUpdate             = "console:shared_files:space_update"
+	PermissionSharedFilesMemberCreate            = "console:shared_files:member_create"
 	PermissionSharedFilesMemberUpdate            = "console:shared_files:member_update"
+	PermissionSharedFilesMemberDelete            = "console:shared_files:member_delete"
 	PermissionSharedFilesDownload                = "console:shared_files:download"
 	PermissionSharedFilesUpload                  = "console:shared_files:upload"
 	PermissionDataResourceGrantRead              = "console:data_resource_grant:read"
@@ -167,7 +173,9 @@ var permissionCatalog = []Permission{
 	{PermissionKnowledgeCreate, "knowledge", "create", "新增知识库", "创建知识库"},
 	{PermissionKnowledgeUpdate, "knowledge", "update", "编辑知识库", "修改知识库信息和状态"},
 	{PermissionKnowledgeDelete, "knowledge", "delete", "删除知识库", "删除知识库"},
-	{PermissionKnowledgeMemberUpdate, "knowledge", "member_update", "管理知识库成员", "新增、修改或移除知识库成员授权"},
+	{PermissionKnowledgeMemberCreate, "knowledge", "member_create", "新增知识库成员", "新增知识库成员授权"},
+	{PermissionKnowledgeMemberUpdate, "knowledge", "member_update", "编辑知识库成员", "修改知识库成员授权"},
+	{PermissionKnowledgeMemberDelete, "knowledge", "member_delete", "移除知识库成员", "移除知识库成员授权"},
 	{PermissionKnowledgeDocumentUpload, "knowledge", "document_upload", "上传知识库文档", "上传知识库文档"},
 	{PermissionKnowledgeDocumentSync, "knowledge", "document_sync", "同步知识库文档", "触发知识库文档同步"},
 	{PermissionKnowledgeDocumentDelete, "knowledge", "document_delete", "删除知识库文档", "删除知识库文档"},
@@ -179,7 +187,9 @@ var permissionCatalog = []Permission{
 	{PermissionSkillUnpublish, "skill", "unpublish", "取消技能发布", "取消技能当前发布版本"},
 	{PermissionSkillSpaceCreate, "skill", "space_create", "新增技能空间", "创建技能空间"},
 	{PermissionSkillSpaceUpdate, "skill", "space_update", "编辑技能空间", "修改技能空间信息"},
-	{PermissionSkillSpaceMemberUpdate, "skill", "space_member_update", "管理技能空间成员", "新增、修改或移除技能空间成员授权"},
+	{PermissionSkillSpaceMemberCreate, "skill", "space_member_create", "新增技能空间成员", "新增技能空间成员授权"},
+	{PermissionSkillSpaceMemberUpdate, "skill", "space_member_update", "编辑技能空间成员", "修改技能空间成员授权"},
+	{PermissionSkillSpaceMemberDelete, "skill", "space_member_delete", "移除技能空间成员", "移除技能空间成员授权"},
 	{PermissionSkillSourceCreate, "skill", "source_create", "新增技能来源", "创建 GitHub 技能来源"},
 	{PermissionSkillSourceUpdate, "skill", "source_update", "编辑技能来源", "修改 GitHub 技能来源"},
 	{PermissionSkillSourceTokenReveal, "skill", "source_token_reveal", "查看技能来源 Token", "查看 GitHub 技能来源 Token"},
@@ -194,7 +204,9 @@ var permissionCatalog = []Permission{
 	{PermissionSharedFilesManage, "shared_files", "manage", "网盘管理", "查看并执行共享网盘的全部操作"},
 	{PermissionSharedFilesSpaceCreate, "shared_files", "space_create", "新增共享空间", "创建共享空间"},
 	{PermissionSharedFilesSpaceUpdate, "shared_files", "space_update", "编辑共享空间", "修改共享空间信息"},
-	{PermissionSharedFilesMemberUpdate, "shared_files", "member_update", "管理共享空间成员", "新增、修改或移除共享空间成员授权"},
+	{PermissionSharedFilesMemberCreate, "shared_files", "member_create", "新增共享空间成员", "新增共享空间成员授权"},
+	{PermissionSharedFilesMemberUpdate, "shared_files", "member_update", "编辑共享空间成员", "修改共享空间成员授权"},
+	{PermissionSharedFilesMemberDelete, "shared_files", "member_delete", "移除共享空间成员", "移除共享空间成员授权"},
 	{PermissionSharedFilesDownload, "shared_files", "download", "下载共享文件", "下载共享空间文件"},
 	{PermissionSharedFilesUpload, "shared_files", "upload", "上传共享文件", "上传文件或新版本"},
 	{PermissionDataResourceGrantRead, "data_resource_grant", "read", "数据权限查看", "查看数据资源 Action 和被授权用户"},

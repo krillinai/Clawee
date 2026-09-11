@@ -65,7 +65,7 @@ describe("SkillSpacesPanel", () => {
   });
 
   it("reuses the member authorization flow for adding, editing and removing members", async () => {
-    renderPanel(true);
+    renderPanel({ canCreate: true, canCreateMembers: true, canDeleteMembers: true, canUpdate: true, canUpdateMembers: true });
 
     const panel = screen.getByRole("region", { name: "技能空间" });
     expect(panel).toHaveClass("gap-5");
@@ -106,7 +106,7 @@ describe("SkillSpacesPanel", () => {
   });
 
   it("keeps the authorization drawer read-only when management is unavailable", async () => {
-    renderPanel(false);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: false, canUpdateMembers: false });
 
     fireEvent.click(await screen.findByRole("button", { name: "管理研发技能成员授权" }));
     const drawer = await screen.findByRole("dialog", { name: "研发技能" });
@@ -115,9 +115,24 @@ describe("SkillSpacesPanel", () => {
     expect(within(drawer).queryByRole("button", { name: /编辑.*成员授权/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: /删除.*成员授权/ })).not.toBeInTheDocument();
   });
+
+  it.each([
+    { operation: "新增", canCreateMembers: true, canUpdateMembers: false, canDeleteMembers: false },
+    { operation: "编辑", canCreateMembers: false, canUpdateMembers: true, canDeleteMembers: false },
+    { operation: "删除", canCreateMembers: false, canUpdateMembers: false, canDeleteMembers: true }
+  ])("shows only the independently granted $operation member action", async ({ canCreateMembers, canUpdateMembers, canDeleteMembers }) => {
+    renderPanel({ canCreate: false, canCreateMembers, canDeleteMembers, canUpdate: false, canUpdateMembers });
+
+    fireEvent.click(await screen.findByRole("button", { name: "管理研发技能成员授权" }));
+    const drawer = await screen.findByRole("dialog", { name: "研发技能" });
+    expect(await within(drawer).findByText("zhang@example.com")).toBeInTheDocument();
+    expect(Boolean(within(drawer).queryByRole("button", { name: "添加成员授权" }))).toBe(canCreateMembers);
+    expect(Boolean(within(drawer).queryByRole("button", { name: /编辑.*成员授权/ }))).toBe(canUpdateMembers);
+    expect(Boolean(within(drawer).queryByRole("button", { name: /删除.*成员授权/ }))).toBe(canDeleteMembers);
+  });
 });
 
-function renderPanel(canManage: boolean) {
+function renderPanel(permissions: Parameters<typeof SkillSpacesPanel>[0]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><SkillSpacesPanel canManage={canManage} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><SkillSpacesPanel {...permissions} /></QueryClientProvider>);
 }

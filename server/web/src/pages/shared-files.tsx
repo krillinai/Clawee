@@ -42,7 +42,11 @@ import {
 type SpaceForm = { mode: "create" | "edit"; spaceId: string; name: string; description: string };
 
 export function SharedFilesPage() {
-  const canManage = useAdminPermission(permissions.sharedFilesManage);
+  const canCreate = useAdminPermission(permissions.sharedFilesSpaceCreate);
+  const canUpdate = useAdminPermission(permissions.sharedFilesSpaceUpdate);
+  const canCreateMembers = useAdminPermission(permissions.sharedFilesMemberCreate);
+  const canUpdateMembers = useAdminPermission(permissions.sharedFilesMemberUpdate);
+  const canDeleteMembers = useAdminPermission(permissions.sharedFilesMemberDelete);
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState("");
@@ -123,7 +127,7 @@ export function SharedFilesPage() {
 
   return (
     <PageShell>
-      <PageHeader title="网盘" actions={canManage ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建共享空间</Button> : null}>
+      <PageHeader title="网盘" actions={canCreate ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建共享空间</Button> : null}>
         管理共享空间、文件和成员授权。
       </PageHeader>
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
@@ -141,7 +145,7 @@ export function SharedFilesPage() {
           {spacesQuery.isLoading ? <TableStateRow colSpan={6}>正在加载共享空间...</TableStateRow> : null}
           {spacesQuery.isError ? <TableStateRow colSpan={6} tone="danger">{spacesQuery.error.message}</TableStateRow> : null}
           {!spacesQuery.isLoading && !spacesQuery.isError && spaces.length === 0 ? (
-            <TableRow><TableCell colSpan={6}><EmptyState title="暂无共享空间" description={canManage ? "创建空间后即可添加成员。" : "当前没有可查看的共享空间。"} /></TableCell></TableRow>
+            <TableRow><TableCell colSpan={6}><EmptyState title="暂无共享空间" description={canCreate ? "创建空间后即可添加成员。" : "当前没有可查看的共享空间。"} /></TableCell></TableRow>
           ) : null}
           {spaces.map((space) => (
             <TableRow key={space.spaceId}>
@@ -162,7 +166,7 @@ export function SharedFilesPage() {
         <Button disabled={!spacesQuery.data?.meta.has_next || spacesQuery.isFetching} variant="outline" onClick={nextPage}>下一页</Button>
       </div>
 
-      <DetailDrawer open={Boolean(selectedId)} title={selected?.name ?? "共享空间"} subtitle={selected?.description || "未填写空间说明"} contextLabel="空间详情" onClose={() => setSelectedId(null)} titleAction={canManage && selected ? <Button size="sm" variant="outline" onClick={() => openEdit(selected)}><Pencil data-icon="inline-start" />编辑</Button> : null}>
+      <DetailDrawer open={Boolean(selectedId)} title={selected?.name ?? "共享空间"} subtitle={selected?.description || "未填写空间说明"} contextLabel="空间详情" onClose={() => setSelectedId(null)} titleAction={canUpdate && selected ? <Button size="sm" variant="outline" onClick={() => openEdit(selected)}><Pencil data-icon="inline-start" />编辑</Button> : null}>
         {detailQuery.isError ? <ErrorAlert>{detailQuery.error.message}</ErrorAlert> : null}
         {selected ? <KeyValueList items={[
           { label: "空间名称", value: selected.name }, { label: "空间说明", value: selected.description || "-" },
@@ -175,7 +179,9 @@ export function SharedFilesPage() {
 
       <MemberAuthorizationDrawer
         adapter={authorizationAdapter}
-        canManage={canManage}
+        canAdd={canCreateMembers}
+        canRemove={canDeleteMembers}
+        canUpdate={canUpdateMembers}
         memberCount={authorizationTarget?.memberCount}
         onChanged={refreshAuthorizationSummary}
         onClose={() => setAuthorizationId(null)}

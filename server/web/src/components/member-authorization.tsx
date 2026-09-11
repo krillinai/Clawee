@@ -68,7 +68,9 @@ export function MemberAuthorizationDrawer({
   resourceName,
   resourceLabel,
   memberCount,
-  canManage,
+  canAdd,
+  canUpdate,
+  canRemove,
   permissions,
   adapter,
   onClose,
@@ -79,12 +81,15 @@ export function MemberAuthorizationDrawer({
   resourceName: string;
   resourceLabel: string;
   memberCount?: number;
-  canManage: boolean;
+  canAdd: boolean;
+  canUpdate: boolean;
+  canRemove: boolean;
   permissions: AuthorizationPermission[];
   adapter: MemberAuthorizationAdapter;
   onClose: () => void;
   onChanged?: () => void;
 }) {
+  const hasActions = canAdd || canUpdate || canRemove;
   const queryClient = useQueryClient();
   const [memberQuery, setMemberQuery] = useState("");
   const debouncedMemberQuery = useDebouncedValue(memberQuery, 300);
@@ -226,7 +231,7 @@ export function MemberAuthorizationDrawer({
               setMemberCursorHistory([]);
             }}
           />
-          {canManage ? (
+          {canAdd ? (
             <Button onClick={openAdd} size="sm">
               <Plus data-icon="inline-start" aria-hidden="true" />
               添加成员授权
@@ -239,14 +244,14 @@ export function MemberAuthorizationDrawer({
               <TableHead>账户</TableHead>
               <TableHead>权限</TableHead>
               <TableHead>更新时间</TableHead>
-              {canManage ? <TableHead className="text-right">操作</TableHead> : null}
+              {hasActions ? <TableHead className="text-right">操作</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {membersQuery.isLoading ? <TableStateRow colSpan={canManage ? 4 : 3}><LoadingState label="正在加载授权成员" /></TableStateRow> : null}
-            {membersQuery.isError ? <TableStateRow colSpan={canManage ? 4 : 3} tone="danger"><ErrorAlert>成员授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
+            {membersQuery.isLoading ? <TableStateRow colSpan={hasActions ? 4 : 3}><LoadingState label="正在加载授权成员" /></TableStateRow> : null}
+            {membersQuery.isError ? <TableStateRow colSpan={hasActions ? 4 : 3} tone="danger"><ErrorAlert>成员授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
             {!membersQuery.isLoading && !membersQuery.isError && members.length === 0 ? (
-              <TableStateRow colSpan={canManage ? 4 : 3}>
+              <TableStateRow colSpan={hasActions ? 4 : 3}>
                 <EmptyState title={memberQuery ? "暂无匹配成员" : "暂无成员授权"} description={memberQuery ? "请调整搜索条件。" : "添加成员后即可配置当前资源的访问权限。"} />
               </TableStateRow>
             ) : null}
@@ -259,18 +264,18 @@ export function MemberAuthorizationDrawer({
                 </TableCell>
                 <TableCell><div className="flex flex-wrap gap-1">{member.actions.map((action) => <Badge key={action} variant="muted">{permissionLabel(permissions, action)}</Badge>)}</div></TableCell>
                 <TableCell className="font-mono text-xs">{formatDateTime(member.updatedAt)}</TableCell>
-                {canManage ? (
+                {hasActions ? (
                   <TableCell className="text-right">
                     <TooltipProvider delayDuration={150}>
                       <div className="flex justify-end gap-1">
-                        <Tooltip>
+                        {canUpdate ? <Tooltip>
                           <TooltipTrigger asChild><Button aria-label={`编辑${member.name || member.userId}成员授权`} onClick={() => openEdit(member)} size="icon" variant="ghost"><Pencil aria-hidden="true" /></Button></TooltipTrigger>
                           <TooltipContent>编辑权限</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
+                        </Tooltip> : null}
+                        {canRemove ? <Tooltip>
                           <TooltipTrigger asChild><Button aria-label={`删除${member.name || member.userId}成员授权`} onClick={() => { removeMutation.reset(); setMemberToRemove(member); }} size="icon" variant="ghost"><Trash2 aria-hidden="true" /></Button></TooltipTrigger>
                           <TooltipContent>删除授权</TooltipContent>
-                        </Tooltip>
+                        </Tooltip> : null}
                       </div>
                     </TooltipProvider>
                   </TableCell>

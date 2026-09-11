@@ -65,7 +65,8 @@ export type SkillDetailData = {
 };
 
 type SkillDetailManagement = {
-  canManage: boolean;
+  canPublish: boolean;
+  canUnpublish: boolean;
   clearPending: boolean;
   publishPending: boolean;
   onClear: () => void;
@@ -87,7 +88,8 @@ type SkillDetailViewProps = {
 };
 
 export function SkillDetailPage() {
-  const canManage = useAdminPermission(permissions.skillManage);
+  const canPublish = useAdminPermission(permissions.skillPublish);
+  const canUnpublish = useAdminPermission(permissions.skillUnpublish);
   const [searchParams] = useSearchParams();
   const skillId = searchParams.get("skill_id") ?? "";
   const queryClient = useQueryClient();
@@ -142,7 +144,8 @@ export function SkillDetailPage() {
         loadFile={getSkillVersionFile}
         loadFiles={listSkillVersionFiles}
         management={{
-          canManage,
+          canPublish,
+          canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,
           onClear: () => {
@@ -318,12 +321,12 @@ export function SkillDetailView({
                         : "将当前查看版本设为用户侧可安装版本。"}
                     </p>
                   </div>
-                  {management.canManage && viewedVersion.versionId === detail.skill.currentVersionId ? (
+                  {management.canUnpublish && viewedVersion.versionId === detail.skill.currentVersionId ? (
                     <Button disabled={management.clearPending} onClick={management.onClear} size="sm" variant="destructive">
                       取消当前发布
                     </Button>
                   ) : null}
-                  {management.canManage && viewedVersion.versionId !== detail.skill.currentVersionId ? (
+                  {management.canPublish && viewedVersion.versionId !== detail.skill.currentVersionId ? (
                     <Button
                       aria-label={`设为当前查看版本 ${viewedVersion.version}`}
                       disabled={management.publishPending}
@@ -374,7 +377,7 @@ export function SkillDetailView({
 
                 <TabsContent className="mt-5" value="history">
                   <VersionHistory
-                    canManage={management?.canManage ?? false}
+                    canPublish={management?.canPublish ?? false}
                     currentVersionId={detail.skill.currentVersionId}
                     latestVersionId={sortedVersions[0]?.versionId ?? null}
                     onPublish={(item) => management?.onPublish(item)}
@@ -543,7 +546,7 @@ function FilePreview({ content, error, file, loading }: { content?: string; erro
 }
 
 function VersionHistory({
-  canManage,
+  canPublish,
   currentVersionId,
   latestVersionId,
   onPublish,
@@ -553,7 +556,7 @@ function VersionHistory({
   versions,
   viewedVersionId
 }: {
-  canManage: boolean;
+  canPublish: boolean;
   currentVersionId: string | null;
   latestVersionId: string | null;
   onPublish: (version: SkillVersion) => void;
@@ -596,7 +599,7 @@ function VersionHistory({
                   <Button aria-label={`查看此版本 ${item.version}`} disabled={viewed} onClick={() => onView(item.versionId)} size="sm" variant="ghost">
                     {viewed ? "正在查看" : "查看"}
                   </Button>
-                  {canManage && !current ? (
+                  {canPublish && !current ? (
                     <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
                   ) : null}
                 </div>

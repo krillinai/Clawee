@@ -67,7 +67,7 @@ describe("SkillSourceForm", () => {
     });
   });
 
-  it("shows the saved edit token and submits an empty value to clear it", () => {
+  it("shows the saved edit token and omits an empty value to preserve it", () => {
     const onSubmit = vi.fn();
     render(<SkillSourceForm initialToken="github_pat_saved" onCancel={vi.fn()} onSubmit={onSubmit} source={githubSource()} />);
 
@@ -84,7 +84,6 @@ describe("SkillSourceForm", () => {
       branch: "main",
       scanRoot: "skills/",
       excludePaths: ["archive/"],
-      token: "",
       autoPublish: true,
       schedule: "hourly"
     });

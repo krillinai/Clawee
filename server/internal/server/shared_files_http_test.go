@@ -315,6 +315,74 @@ func TestSharedFileAdminRoutesEnforceReadAndManagePermissions(t *testing.T) {
 	}
 }
 
+func TestSharedFileMemberMutationPermissionsAreIndependent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	accountService := accounts.NewService(accounts.Config{Store: accounts.NewMemoryStore()})
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountService})
+	users := map[string]accounts.Account{}
+	permissions := map[string]string{
+		"creator": rbac.PermissionSharedFilesMemberCreate,
+		"updater": rbac.PermissionSharedFilesMemberUpdate,
+		"deleter": rbac.PermissionSharedFilesMemberDelete,
+	}
+	for user, permission := range permissions {
+		registered, err := accountService.Register(ctx, accounts.RegisterRequest{Email: user + "@example.com", Name: user, Password: "passw0rd!"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		users[user] = registered.Account
+		role, err := rbacService.CreateRole(ctx, "admin", rbac.CreateRoleInput{Code: "shared_member_" + user, Name: user, Permissions: []string{permission}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rbacService.AssignAccountRole(ctx, "admin", registered.Account.UserID, role.RoleID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storage, err := sharedfiles.NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		if account, ok := users[c.GetHeader("X-Test-User")]; ok {
+			c.Set(accountContextKey, account)
+		}
+		c.Next()
+	})
+	mountSharedFileRoutes(router.Group("/app"), router.Group("/admin"), Options{
+		SharedFilesService: sharedfiles.NewService(sharedfiles.NewMemoryStore(), storage, nil),
+		AccountService:     accountService,
+		RBACService:        rbacService,
+	})
+
+	routes := []struct {
+		method string
+		path   string
+		user   string
+	}{
+		{method: http.MethodPost, path: "/admin/shared-spaces/account-grants", user: "creator"},
+		{method: http.MethodPatch, path: "/admin/shared-spaces/account-grants", user: "updater"},
+		{method: http.MethodPost, path: "/admin/shared-spaces/account-grants/remove", user: "deleter"},
+	}
+	for _, route := range routes {
+		for user := range users {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(route.method, route.path, strings.NewReader(`{}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-Test-User", user)
+			router.ServeHTTP(recorder, request)
+			if user == route.user && recorder.Code != http.StatusBadRequest {
+				t.Fatalf("%s %s status=%d for %s, want %d", route.method, route.path, recorder.Code, user, http.StatusBadRequest)
+			}
+			if user != route.user && recorder.Code != http.StatusForbidden {
+				t.Fatalf("%s %s status=%d for %s, want %d", route.method, route.path, recorder.Code, user, http.StatusForbidden)
+			}
+		}
+	}
+}
+
 func newSharedFileHTTPService(t *testing.T) (*sharedfiles.Service, string) {
 	t.Helper()
 	ctx := context.Background()

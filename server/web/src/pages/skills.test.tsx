@@ -325,7 +325,7 @@ describe("SkillsPage", () => {
     expect(screen.getByText("失败")).toBeInTheDocument();
   });
 
-  it("loads the saved token for editing and saves an empty value to clear it", async () => {
+  it("loads the saved token for editing and preserves it when the field is cleared", async () => {
     renderPage();
 
     clickTab(await screen.findByRole("tab", { name: "GitHub 来源" }));
@@ -337,7 +337,8 @@ describe("SkillsPage", () => {
     fireEvent.change(within(dialog).getByLabelText("访问 Token"), { target: { value: "" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "保存来源" }));
 
-    await waitFor(() => expect(updateGitHubSourceMock).toHaveBeenCalledWith("source-1", expect.objectContaining({ token: "" })));
+    await waitFor(() => expect(updateGitHubSourceMock).toHaveBeenCalledWith("source-1", expect.anything()));
+    expect(updateGitHubSourceMock.mock.calls[0]?.[1]).not.toHaveProperty("token");
   });
 
   it("shows the stable service error when queuing a sync fails", async () => {

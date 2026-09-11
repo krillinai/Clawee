@@ -398,11 +398,11 @@ func mountKnowledgeDataGrantRoutes(admin *gin.RouterGroup, opts Options, read, m
 		c.JSON(http.StatusOK, itemsResponse(items))
 	}
 	admin.GET("/knowledge-bases/account-grants", read, list)
-	admin.POST("/knowledge-bases/account-grants", memberUpdate, createOrReplace(false))
+	admin.POST("/knowledge-bases/account-grants", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberCreate), createOrReplace(false))
 	admin.PATCH("/knowledge-bases/account-grants", memberUpdate, createOrReplace(true))
-	admin.POST("/knowledge-bases/account-grants/remove", memberUpdate, remove)
+	admin.POST("/knowledge-bases/account-grants/remove", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberDelete), remove)
 	admin.GET("/knowledge-bases/members", read, listMembers)
-	admin.GET("/knowledge-bases/member-candidates", memberUpdate, listCandidates)
+	admin.GET("/knowledge-bases/member-candidates", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberCreate), listCandidates)
 }
 
 func knowledgeMembers(c *gin.Context, opts Options) ([]knowledgeMemberResponse, error) {

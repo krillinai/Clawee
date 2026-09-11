@@ -47,7 +47,9 @@ export function CollectorManagementView({
   selectedCollectorID?: string | null;
   onCloseDetail?: () => void;
 }) {
-  const canManage = useAdminPermission(permissions.collectorManage);
+  const canCreateRegistrationCode = useAdminPermission(permissions.collectorRegistrationCodeCreate);
+  const canRevokeToken = useAdminPermission(permissions.collectorTokenRevoke);
+  const canDelete = useAdminPermission(permissions.collectorDelete);
   const canReadAccounts = useAdminPermission(permissions.accountRead);
   const queryClient = useQueryClient();
   const [selectedUserID, setSelectedUserID] = useState("");
@@ -61,14 +63,14 @@ export function CollectorManagementView({
   const accountsQuery = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
-    enabled: canManage && canReadAccounts,
+    enabled: canCreateRegistrationCode && canReadAccounts,
   });
   const activeAccounts = (accountsQuery.data ?? []).filter((account) => account.status === "active");
   const registrationCodeQueryKey = ["office", "collector-registration-code", selectedUserID] as const;
   const registrationCodeQuery = useQuery({
     queryKey: registrationCodeQueryKey,
     queryFn: () => fetchRegistrationCode(selectedUserID),
-    enabled: canManage && Boolean(selectedUserID),
+    enabled: canCreateRegistrationCode && Boolean(selectedUserID),
   });
 
   const collectors = overviewQuery.data?.collectors ?? [];
@@ -127,7 +129,7 @@ export function CollectorManagementView({
       {revokeError ? <ErrorAlert>撤销失败：{revokeError}</ErrorAlert> : null}
 
       <section className="grid min-w-0 gap-4">
-        {canManage ? <RegistrationCodePanel
+        {canCreateRegistrationCode ? <RegistrationCodePanel
           allowAccountLookup={canReadAccounts}
           copyableRegistrationCode={copyableRegistrationCode}
           createdAt={registration?.created_at}
@@ -187,7 +189,8 @@ export function CollectorManagementView({
               <EmptyState title="没有匹配的采集器" description="请调整搜索条件。" />
             ) : (
               <CollectorTable
-                canManage={canManage}
+                canDelete={canDelete}
+                canRevokeToken={canRevokeToken}
                 collectors={filteredCollectors}
                 revokingCollectorId={revokeCollectorMutation.variables}
                 onDelete={(collector) => {
@@ -361,13 +364,15 @@ function RegistrationCodePanel({
 }
 
 function CollectorTable({
-  canManage,
+  canDelete,
+  canRevokeToken,
   collectors,
   revokingCollectorId,
   onDelete,
   onRevoke,
 }: {
-  canManage: boolean;
+  canDelete: boolean;
+  canRevokeToken: boolean;
   collectors: CollectorItem[];
   revokingCollectorId?: string;
   onDelete: (collector: CollectorItem) => void;
@@ -436,7 +441,7 @@ function CollectorTable({
                     <Button asChild size="sm" variant="secondary">
                       <Link to={`/admin/collectors/detail?collector_id=${encodeURIComponent(collector.collector_id)}`}>查看</Link>
                     </Button>
-                    {canManage ? <Button
+                    {canRevokeToken ? <Button
                       aria-label={`撤销 ${collector.collector_id} Token`}
                       disabled={collector.token_status !== "active" || revokingCollectorId === collector.collector_id}
                       onClick={() => onRevoke(collector)}
@@ -446,7 +451,7 @@ function CollectorTable({
                       <ShieldOff aria-hidden="true" data-icon="inline-start" />
                       撤销 Token
                     </Button> : null}
-                    {canManage && collector.token_status === "revoked" ? (
+                    {canDelete && collector.token_status === "revoked" ? (
                       <Button
                         aria-label={`删除 ${collector.collector_id}`}
                         onClick={() => onDelete(collector)}

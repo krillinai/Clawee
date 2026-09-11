@@ -20,10 +20,13 @@ import { assignAccountRole, listAccountRoles, listRoles, permissions, removeAcco
 const accountsKey = ["accounts"] as const;
 
 export function UsersPage() {
-  const canManageAccounts = useAdminPermission(permissions.accountManage);
+  const canCreateAccount = useAdminPermission(permissions.accountCreate);
+  const canUpdateAccountName = useAdminPermission(permissions.accountUpdateName);
+  const canUpdateAccountStatus = useAdminPermission(permissions.accountUpdateStatus);
+  const canResetAccountPassword = useAdminPermission(permissions.accountResetPassword);
   const canMergeAccounts = useAdminPermission(permissions.accountMerge);
   const canReadRoles = useAdminPermission(permissions.rbacRead);
-  const canManageRoles = useAdminPermission(permissions.rbacManage);
+  const canUpdateAccountRoles = useAdminPermission(permissions.rbacAccountRoleUpdate);
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ email: "", name: "", password: "", status: "active" as AccountStatus });
@@ -38,7 +41,7 @@ export function UsersPage() {
   const [mergeReason, setMergeReason] = useState("");
 
   const accountsQuery = useQuery({ queryKey: accountsKey, queryFn: listAccounts });
-  const rolesQuery = useQuery({ queryKey: ["rbac", "roles"], queryFn: listRoles, enabled: canManageRoles });
+  const rolesQuery = useQuery({ queryKey: ["rbac", "roles"], queryFn: listRoles, enabled: canReadRoles });
   const assignedRolesQuery = useQuery({
     queryKey: ["rbac", "account-roles", roleAccount?.userId],
     queryFn: () => listAccountRoles(roleAccount?.userId ?? ""),
@@ -145,7 +148,7 @@ export function UsersPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="账号管理"
-        actions={canManageAccounts ? <Button onClick={() => setCreateOpen(true)}><Plus data-icon="inline-start" />新增账号</Button> : undefined}
+        actions={canCreateAccount ? <Button onClick={() => setCreateOpen(true)}><Plus data-icon="inline-start" />新增账号</Button> : undefined}
       >
         管理账号昵称、状态、密码和后台角色。所有启用账号都可使用前台应用，后台访问由角色权限单独决定。
       </PageHeader>
@@ -180,11 +183,11 @@ export function UsersPage() {
               <TableCell>{account.agent ? <div className="flex flex-col gap-1"><span className="font-mono text-xs">{account.agent.agentId}</span><span className="text-xs text-muted-foreground">{mcpStatusLabel(account.agent.status)}</span></div> : <span className="text-muted-foreground">未绑定</span>}</TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
-                  {canManageRoles ? <Button onClick={() => setRoleAccount(account)} size="sm" variant="outline"><Shield data-icon="inline-start" />角色</Button> : null}
-                  {canManageAccounts ? <Button onClick={() => { setNameAccount(account); setAccountName(account.name); nameMutation.reset(); }} size="sm" variant="outline"><Pencil data-icon="inline-start" />修改昵称</Button> : null}
-                  {canManageAccounts ? <Button onClick={() => { setPasswordAccount(account); setPassword(""); }} size="sm" variant="outline"><KeyRound data-icon="inline-start" />重置密码</Button> : null}
+                  {canUpdateAccountRoles && canReadRoles ? <Button onClick={() => setRoleAccount(account)} size="sm" variant="outline"><Shield data-icon="inline-start" />角色</Button> : null}
+                  {canUpdateAccountName ? <Button onClick={() => { setNameAccount(account); setAccountName(account.name); nameMutation.reset(); }} size="sm" variant="outline"><Pencil data-icon="inline-start" />修改昵称</Button> : null}
+                  {canResetAccountPassword ? <Button onClick={() => { setPasswordAccount(account); setPassword(""); }} size="sm" variant="outline"><KeyRound data-icon="inline-start" />重置密码</Button> : null}
                   {canMergeAccounts && account.status === "disabled" ? <Button onClick={() => openMerge(account)} size="sm" variant="outline"><GitMerge data-icon="inline-start" />合并</Button> : null}
-                  {canManageAccounts ? (
+                  {canUpdateAccountStatus ? (
                     <Button
                       disabled={statusMutation.isPending}
                       onClick={() => statusMutation.mutate({ account, status: account.status === "active" ? "disabled" : "active" })}

@@ -109,11 +109,18 @@ type ConfirmState =
   | { kind: "deleteGrant"; grant: MCPGrant };
 
 export function MCPAgentsGrantsPage() {
-  const canManageAgents = useAdminPermission(permissions.agentManage);
+  const canCreateAgent = useAdminPermission(permissions.agentCreate);
+  const canDeleteAgent = useAdminPermission(permissions.agentDelete);
+  const canRevealToken = useAdminPermission(permissions.agentTokenReveal);
+  const canRotateToken = useAdminPermission(permissions.agentTokenRotate);
+  const canRevokeToken = useAdminPermission(permissions.agentTokenRevoke);
+  const canBindAgent = useAdminPermission(permissions.agentBind);
+  const canUnbindAgent = useAdminPermission(permissions.agentUnbind);
   const canTransferAgents = useAdminPermission(permissions.agentTransfer);
   const canReadGrants = useAdminPermission(permissions.mcpGrantRead);
-  const canManageGrants = useAdminPermission(permissions.mcpGrantManage);
-  const canReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead) || canManageGrants;
+  const canCreateGrant = useAdminPermission(permissions.mcpGrantCreate);
+  const canRevokeGrant = useAdminPermission(permissions.mcpGrantRevoke);
+  const canReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead) || canCreateGrant;
   const canReadUpstreams = useAdminPermission(permissions.mcpUpstreamRead);
   const canReadAccounts = useAdminPermission(permissions.accountRead);
   const canReadActivity = useAdminPermission(permissions.activityRead);
@@ -160,7 +167,7 @@ export function MCPAgentsGrantsPage() {
   const accountsQuery = useQuery({
     queryKey: accountsQueryKey,
     queryFn: listAccounts,
-    enabled: (canManageAgents || canTransferAgents) && canReadAccounts
+    enabled: (canCreateAgent || canTransferAgents) && canReadAccounts
   });
   const officeAgentsQuery = useQuery({
     queryKey: officeAgentsQueryKey,
@@ -474,7 +481,7 @@ export function MCPAgentsGrantsPage() {
   return (
     <PageShell>
       <PageHeader
-        actions={canManageAgents ?
+        actions={canCreateAgent ?
           <Button onClick={openCreateAgent} variant="primary">
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
             创建智能体
@@ -517,8 +524,11 @@ export function MCPAgentsGrantsPage() {
             </FilterSelect>
           </FilterRow>
           <AgentGovernanceTable
-            canManageAgents={canManageAgents}
+            canBindAgents={canBindAgent}
+            canDeleteAgents={canDeleteAgent}
+            canOpenToken={canRevealToken || canRotateToken || canRevokeToken}
             canTransferAgents={canTransferAgents}
+            canUnbindAgents={canUnbindAgent}
             canReadGrants={canReadGrants}
             rows={hasLoadError ? [] : filteredRows}
             grantsByUserID={grantsByUserID}
@@ -546,7 +556,9 @@ export function MCPAgentsGrantsPage() {
 
       <MCPAgentTokenDrawer
         agent={tokenDrawerAgent}
-        canManage={canManageAgents}
+        canReveal={canRevealToken}
+        canRevoke={canRevokeToken}
+        canRotate={canRotateToken}
         mode="admin"
         onClose={closeTokenDrawer}
         onRevealToken={(agent) => copyTokenMutation.mutate(agent)}
@@ -565,7 +577,7 @@ export function MCPAgentsGrantsPage() {
 
       <MCPAgentGrantsDrawer
         actionSlot={
-          canManageGrants && canReadCapabilities ?
+          canCreateGrant && canReadCapabilities ?
           <Button className="h-7 px-2 text-xs" disabled={!grantsDrawerAgent} onClick={() => openAddGrant()} variant="primary">
             添加授权
           </Button> : undefined
@@ -575,7 +587,7 @@ export function MCPAgentsGrantsPage() {
         grants={drawerGrants}
         mode="admin"
         onClose={() => setGrantsDrawerAgentID(null)}
-        onDeleteGrant={canManageGrants ? (grant) => openConfirm({ kind: "deleteGrant", grant }) : undefined}
+        onDeleteGrant={canRevokeGrant ? (grant) => openConfirm({ kind: "deleteGrant", grant }) : undefined}
         open={canReadGrants && Boolean(grantsDrawerAgent)}
         serverByID={serverByID}
       />
@@ -642,12 +654,12 @@ export function MCPAgentsGrantsPage() {
           <FieldGroup className="gap-4">
             <Field>
               <FieldLabel htmlFor="agent-transfer-target">目标账号</FieldLabel>
-              <NativeSelect id="agent-transfer-target" value={transferTargetUserID} onChange={(event) => setTransferTargetUserID(event.target.value)}>
+              {canReadAccounts ? <NativeSelect id="agent-transfer-target" value={transferTargetUserID} onChange={(event) => setTransferTargetUserID(event.target.value)}>
                 <option value="">选择启用账号</option>
                 {activeAccounts.filter((account) => account.userId !== transferAgent?.boundUserId).map((account) => (
                   <option key={account.userId} value={account.userId}>{account.name || account.email} ({account.email})</option>
                 ))}
-              </NativeSelect>
+              </NativeSelect> : <Input id="agent-transfer-target" placeholder="输入目标账号 user_id" required value={transferTargetUserID} onChange={(event) => setTransferTargetUserID(event.target.value)} />}
             </Field>
             <Field>
               <FieldLabel htmlFor="agent-transfer-reason">迁移原因</FieldLabel>

@@ -73,7 +73,12 @@ function mapAuthResponse(response: AuthAPIResponse): AuthResponse {
 }
 
 export function hasAdminPermission(account: Account, permissionCode: string) {
-  return account.adminPermissions?.includes(permissionCode) === true;
+  const granted = account.adminPermissions ?? [];
+  if (granted.includes(permissionCode)) return true;
+  const segments = permissionCode.split(":");
+  if (segments.length < 3) return false;
+  segments[segments.length - 1] = "manage";
+  return granted.includes(segments.join(":"));
 }
 
 export function hasAnyAdminPermission(account: Account) {

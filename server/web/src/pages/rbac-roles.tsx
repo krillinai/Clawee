@@ -20,7 +20,9 @@ type RoleForm = { roleId: string; code: string; name: string; permissionCodes: s
 const emptyForm: RoleForm = { roleId: "", code: "", name: "", permissionCodes: [] };
 
 export function RBACRolesPage() {
-  const canManage = useAdminPermission(permissions.rbacManage);
+  const canCreate = useAdminPermission(permissions.rbacRoleCreate);
+  const canUpdate = useAdminPermission(permissions.rbacRoleUpdate);
+  const canDelete = useAdminPermission(permissions.rbacRoleDelete);
   const queryClient = useQueryClient();
   const [form, setForm] = useState<RoleForm>(emptyForm);
   const [formOpen, setFormOpen] = useState(false);
@@ -93,7 +95,7 @@ export function RBACRolesPage() {
     <PageShell>
       <PageHeader
         title="角色管理"
-        actions={canManage ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建角色</Button> : undefined}
+        actions={canCreate ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建角色</Button> : undefined}
       >
         管理后台自定义角色及其权限。系统管理员角色始终拥有完整权限，不可编辑或删除。
       </PageHeader>
@@ -118,10 +120,10 @@ export function RBACRolesPage() {
               <TableCell><Badge variant={role.isSystem ? "default" : "muted"}>{role.isSystem ? "系统内置" : "自定义"}</Badge></TableCell>
               <TableCell>{role.permissionCodes.length}</TableCell>
               <TableCell className="text-right">
-                {canManage && !role.isSystem ? (
+                {(canUpdate || canDelete) && !role.isSystem ? (
                   <div className="flex justify-end gap-2">
-                    <Button onClick={() => openEdit(role)} size="sm" variant="outline">编辑</Button>
-                    <Button aria-label={`删除 ${role.name}`} onClick={() => setDeleteTarget(role)} size="icon" variant="destructive"><Trash2 /></Button>
+                    {canUpdate ? <Button onClick={() => openEdit(role)} size="sm" variant="outline">编辑</Button> : null}
+                    {canDelete ? <Button aria-label={`删除 ${role.name}`} onClick={() => setDeleteTarget(role)} size="icon" variant="destructive"><Trash2 /></Button> : null}
                   </div>
                 ) : <span className="text-xs text-muted-foreground">只读</span>}
               </TableCell>

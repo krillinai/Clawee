@@ -24,7 +24,8 @@ const permissionGroupLabels: Record<string, string> = {
   knowledge: "知识库",
   skill: "技能",
   shared_files: "共享网盘",
-  data_resource_grant: "数据资源授权"
+  data_resource_grant: "数据资源授权",
+  platform_branding: "平台外观"
 };
 
 export function permissionGroupLabel(node: PermissionGroupNode) {

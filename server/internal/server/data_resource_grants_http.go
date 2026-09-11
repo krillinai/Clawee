@@ -100,16 +100,15 @@ func mountDataResourceGrantRoutes(admin *gin.RouterGroup, opts Options) {
 		return
 	}
 	read := requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantRead)
-	manage := requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantManage)
 	admin.GET("/data-resource-grants/resource-types", read, handleDataResourceGrantTypes(opts))
 	admin.POST("/data-resource-grants/resources/search", read, handleDataResourceGrantResources(opts))
 	admin.POST("/data-resource-grants/actions/search", read, handleDataResourceGrantActions(opts))
 	admin.POST("/data-resource-grants/users/search", read, handleDataResourceGrantUsers(opts))
 	admin.POST("/data-resource-grants/members/search", read, handleDataResourceGrantMembers(opts))
-	admin.POST("/data-resource-grants/member-candidates/search", manage, handleDataResourceGrantMemberCandidates(opts))
-	admin.POST("/data-resource-grants", manage, handleDataResourceGrantMutation(opts, false))
-	admin.PATCH("/data-resource-grants", manage, handleDataResourceGrantMutation(opts, true))
-	admin.POST("/data-resource-grants/remove", manage, handleDataResourceGrantRemove(opts))
+	admin.POST("/data-resource-grants/member-candidates/search", requireAnyPermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMemberCandidates(opts))
+	admin.POST("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate), handleDataResourceGrantMutation(opts, false))
+	admin.PATCH("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMutation(opts, true))
+	admin.POST("/data-resource-grants/remove", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantDelete), handleDataResourceGrantRemove(opts))
 }
 
 func handleDataResourceGrantMutation(opts Options, replace bool) gin.HandlerFunc {

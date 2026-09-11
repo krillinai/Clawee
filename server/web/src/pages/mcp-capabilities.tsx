@@ -88,7 +88,10 @@ type GatesDraft = {
 };
 
 export function MCPCapabilitiesPage() {
-  const canManage = useAdminPermission(permissions.mcpCapabilityManage);
+  const canUpdateStatus = useAdminPermission(permissions.mcpCapabilityUpdateStatus);
+  const canRename = useAdminPermission(permissions.mcpCapabilityRename);
+  const canDelete = useAdminPermission(permissions.mcpCapabilityDelete);
+  const canUpdateGatePolicy = useAdminPermission(permissions.mcpCapabilityUpdateGatePolicy);
   const canReadUpstreams = useAdminPermission(permissions.mcpUpstreamRead);
   const canReadGrants = useAdminPermission(permissions.mcpGrantRead);
   const canReadAudits = useAdminPermission(permissions.mcpAuditRead);
@@ -529,7 +532,7 @@ export function MCPCapabilitiesPage() {
                             <Eye aria-hidden="true" />
                             详情
                           </Button>
-                          {canManage && capability.status === "pending" ? (
+                          {canUpdateStatus && capability.status === "pending" ? (
                             <Button
                               disabled={statusMutation.isPending}
                               onClick={() => {
@@ -544,7 +547,7 @@ export function MCPCapabilitiesPage() {
                               启用
                             </Button>
                           ) : null}
-                          {canManage && capability.status === "active" ? (
+                          {canUpdateStatus && capability.status === "active" ? (
                             <Button
                               disabled={statusMutation.isPending}
                               onClick={() => {
@@ -559,7 +562,7 @@ export function MCPCapabilitiesPage() {
                               禁用
                             </Button>
                           ) : null}
-                          {canManage && canOpenRename(capability) ? (
+                          {canRename && canOpenRename(capability) ? (
                             <Button
                               onClick={() => openRename(capability)}
                               size="sm"
@@ -568,7 +571,7 @@ export function MCPCapabilitiesPage() {
                               编辑
                             </Button>
                           ) : null}
-                          {canManage && capability.status === "missing" ? (
+                          {canDelete && capability.status === "missing" ? (
                             <Button
                               onClick={() => {
                                 deleteMutation.reset();
@@ -597,7 +600,7 @@ export function MCPCapabilitiesPage() {
       </Card>
 
       <CapabilityDrawer
-        canManage={canManage}
+        canUpdateGatePolicy={canUpdateGatePolicy}
         canReadAudits={canReadAudits}
         canReadGrants={canReadGrants}
         capability={selectedCapability}
@@ -726,7 +729,7 @@ export function MCPCapabilitiesPage() {
 }
 
 function CapabilityDrawer({
-  canManage,
+  canUpdateGatePolicy,
   canReadAudits,
   canReadGrants,
   capability,
@@ -736,7 +739,7 @@ function CapabilityDrawer({
   onSaveGates,
   onClose
 }: {
-  canManage: boolean;
+  canUpdateGatePolicy: boolean;
   canReadAudits: boolean;
   canReadGrants: boolean;
   capability: CapabilityRowView | null;
@@ -812,7 +815,7 @@ function CapabilityDrawer({
             </Card>
           ) : null}
 
-          {canManage ? <CapabilityGateSettings
+          {canUpdateGatePolicy ? <CapabilityGateSettings
             capability={capability}
             error={gatesError}
             isPending={gatesPending}

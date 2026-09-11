@@ -3,6 +3,7 @@ package rbac
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -54,12 +55,14 @@ func TestServiceCombinesRolesAndExpandsManagePermission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertStringsEqual(t, permissions, []string{
-		PermissionActivityRead,
-		PermissionAgentManage,
-		PermissionAgentRead,
-		PermissionMCPAuditRead,
-	})
+	want := []string{PermissionActivityRead, PermissionMCPAuditRead}
+	for _, permission := range PermissionCatalog() {
+		if permission.Module == "agent" {
+			want = append(want, permission.Code)
+		}
+	}
+	sort.Strings(want)
+	assertStringsEqual(t, permissions, want)
 
 	allowed, err := service.HasPermission(ctx, account.UserID, PermissionAgentRead)
 	if err != nil {
@@ -67,6 +70,48 @@ func TestServiceCombinesRolesAndExpandsManagePermission(t *testing.T) {
 	}
 	if !allowed {
 		t.Fatal("manage permission did not include read permission")
+	}
+	allowed, err = service.HasPermission(ctx, account.UserID, PermissionAgentTokenRotate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("manage permission did not include action permission")
+	}
+}
+
+func TestServiceActionPermissionDoesNotGrantSiblingActions(t *testing.T) {
+	service, _, accountService := newTestService(t)
+	ctx := context.Background()
+	account := createAccount(t, accountService, "token-operator@example.com")
+	role, err := service.CreateRole(ctx, "usr_admin", CreateRoleInput{
+		Code:        "token_rotator",
+		Name:        "Token 轮换员",
+		Permissions: []string{PermissionAgentTokenRotate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AssignAccountRole(ctx, "usr_admin", account.UserID, role.RoleID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		permission string
+		want       bool
+	}{
+		{PermissionAgentTokenRotate, true},
+		{PermissionAgentTokenReveal, false},
+		{PermissionAgentTokenRevoke, false},
+		{PermissionAgentRead, false},
+	} {
+		allowed, err := service.HasPermission(ctx, account.UserID, test.permission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed != test.want {
+			t.Fatalf("HasPermission(%q) = %v, want %v", test.permission, allowed, test.want)
+		}
 	}
 }
 

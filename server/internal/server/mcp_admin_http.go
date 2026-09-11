@@ -370,6 +370,19 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		permissionCode := rbac.PermissionMCPUpstreamUpdate
+		if strings.TrimSpace(req.Status) != "" {
+			if strings.TrimSpace(req.Name) != "" || strings.TrimSpace(req.Domain) != "" || strings.TrimSpace(req.Transport) != "" ||
+				strings.TrimSpace(req.Endpoint) != "" || hasStdioConfig(req.Stdio) || strings.TrimSpace(req.Namespace) != "" ||
+				strings.TrimSpace(req.OwnerTeam) != "" || req.RoutingDescription != nil || req.CollectorID != nil || strings.TrimSpace(req.Token) != "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "status update cannot include upstream configuration"})
+				return
+			}
+			permissionCode = rbac.PermissionMCPUpstreamUpdateStatus
+		}
+		if !authorizePermission(c, opts.RBACService, permissionCode) {
+			return
+		}
 		serverID := strings.TrimSpace(req.ServerID)
 		if serverID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "server_id is required"})
@@ -866,7 +879,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/mcp/upstream-servers", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamCreate), createUpstream)
 	admin.GET("/mcp/upstream-servers", upstreamRead, listUpstreams)
 	admin.GET("/mcp/upstream-servers/detail", upstreamRead, upstreamDetail)
-	admin.PATCH("/mcp/upstream-servers", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamUpdate), updateUpstream)
+	admin.PATCH("/mcp/upstream-servers", updateUpstream)
 	admin.POST("/mcp/upstream-servers/remove", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamDelete), removeUpstream)
 	admin.POST("/mcp/upstream-servers/sync-tools", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamSync), syncUpstream)
 

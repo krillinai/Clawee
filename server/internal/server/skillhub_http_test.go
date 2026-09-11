@@ -184,11 +184,15 @@ func TestSkillSourceRoutesEnforcePermissionsAndSupportLifecycle(t *testing.T) {
 	}
 	clearTokenBody := `{"source_id":"` + created.SourceID + `","branch":"main","scan_root":".","exclude_paths":[],"token":"","auto_publish":true,"schedule":"hourly"}`
 	recorder = sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-sources", clearTokenBody, adminCookies)
+	if recorder.Code != http.StatusOK || !decodeAPIJSONResource[skillhub.GitHubSource](t, recorder.Body.Bytes()).HasToken {
+		t.Fatalf("empty token update status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	recorder = sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skill-sources/token/remove", `{"source_id":"`+created.SourceID+`"}`, adminCookies)
 	if recorder.Code != http.StatusOK || decodeAPIJSONResource[skillhub.GitHubSource](t, recorder.Body.Bytes()).HasToken {
-		t.Fatalf("clear token update status=%d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf("remove token status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
-	for _, path := range []string{"disable", "enable", "token/remove"} {
+	for _, path := range []string{"disable", "enable"} {
 		recorder = sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skill-sources/"+path, `{"source_id":"`+created.SourceID+`"}`, adminCookies)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", path, recorder.Code, recorder.Body.String())

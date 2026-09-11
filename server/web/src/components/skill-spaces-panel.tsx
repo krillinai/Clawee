@@ -22,7 +22,19 @@ import {
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 
-export function SkillSpacesPanel({ canManage }: { canManage: boolean }) {
+export function SkillSpacesPanel({
+  canCreate,
+  canCreateMembers,
+  canDeleteMembers,
+  canUpdate,
+  canUpdateMembers
+}: {
+  canCreate: boolean;
+  canCreateMembers: boolean;
+  canDeleteMembers: boolean;
+  canUpdate: boolean;
+  canUpdateMembers: boolean;
+}) {
   const queryClient = useQueryClient();
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const [editing, setEditing] = useState<SkillSpace | null | undefined>(undefined);
@@ -69,7 +81,7 @@ export function SkillSpacesPanel({ canManage }: { canManage: boolean }) {
   }
 
   return <section aria-label="技能空间" className="grid gap-5">
-    {canManage ? (
+    {canCreate ? (
       <div className="flex justify-end">
         <Button onClick={() => openEditor(null)} variant="primary"><UserPlus data-icon="inline-start" aria-hidden="true" />新建空间</Button>
       </div>
@@ -84,7 +96,7 @@ export function SkillSpacesPanel({ canManage }: { canManage: boolean }) {
           <TableCell><div className="text-sm font-medium leading-5">{space.name}</div><div className="mt-0.5 max-w-96 truncate text-[13px] leading-5 text-muted-foreground">{space.description || "-"}</div></TableCell>
           <TableCell className="text-right font-mono text-sm">{space.memberCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.skillCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.publishedCount}</TableCell>
           <TableCell className="font-mono text-[13px] text-muted-foreground">{formatDateTime(space.updatedAt)}</TableCell>
-          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canManage ? <Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button> : null}</div></TableCell>
+          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button> : null}</div></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
@@ -95,7 +107,9 @@ export function SkillSpacesPanel({ canManage }: { canManage: boolean }) {
 
     <MemberAuthorizationDrawer
       adapter={authorizationAdapter}
-      canManage={canManage}
+      canAdd={canCreateMembers}
+      canRemove={canDeleteMembers}
+      canUpdate={canUpdateMembers}
       memberCount={authorizationTarget?.memberCount}
       onChanged={() => void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] })}
       onClose={() => setAuthorizationId(null)}

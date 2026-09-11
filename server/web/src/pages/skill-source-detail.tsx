@@ -27,7 +27,9 @@ import { permissions } from "@/lib/rbac-api";
 type BindTarget = { sourceItemId: string; skillId: string };
 
 export function SkillSourceDetailPage() {
-  const canManage = useAdminPermission(permissions.skillManage);
+  const canScan = useAdminPermission(permissions.skillSourceScan);
+  const canBind = useAdminPermission(permissions.skillSourceBind);
+  const canUnbind = useAdminPermission(permissions.skillSourceUnbind);
   const [searchParams] = useSearchParams();
   const sourceId = searchParams.get("source_id") ?? "";
   const queryClient = useQueryClient();
@@ -113,7 +115,7 @@ export function SkillSourceDetailPage() {
         {source.lastErrorSummary ? <ErrorAlert>最近错误：{source.lastErrorSummary}</ErrorAlert> : null}
 
         {manualClone ? <ManualCloneRecovery
-          canManage={canManage}
+          canScan={canScan}
           error={localScanMutation.isError ? `本地仓库扫描提交失败：${errorMessage(localScanMutation.error)}。` : undefined}
           hasToken={source.hasToken}
           instructions={manualClone}
@@ -133,7 +135,7 @@ export function SkillSourceDetailPage() {
             <TableHeader><TableRow><TableHead>路径</TableHead><TableHead>发现名称</TableHead><TableHead>状态</TableHead><TableHead>绑定 Skill</TableHead><TableHead>最近 Commit</TableHead><TableHead>版本</TableHead><TableHead>错误</TableHead><TableHead>缺失时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
             <TableBody>
               {items.length === 0 ? <TableStateRow colSpan={9}><EmptyState title="暂无来源项" description="来源同步完成后会显示发现的 Skill。" /></TableStateRow> : null}
-              {items.map((item) => <SourceItemRow key={item.sourceItemId} canManage={canManage} candidates={skills.filter((skill) => skill.name === item.discoveredName)} item={item} onBind={(target) => bindMutation.mutate(target)} onUnbind={setUnbindTarget} pending={bindMutation.isPending || unbindMutation.isPending} />)}
+              {items.map((item) => <SourceItemRow key={item.sourceItemId} canBind={canBind} canUnbind={canUnbind} candidates={skills.filter((skill) => skill.name === item.discoveredName)} item={item} onBind={(target) => bindMutation.mutate(target)} onUnbind={setUnbindTarget} pending={bindMutation.isPending || unbindMutation.isPending} />)}
             </TableBody>
           </DataTableShell>
         </section>
@@ -172,7 +174,7 @@ export function SkillSourceDetailPage() {
   );
 }
 
-function ManualCloneRecovery({ canManage, error, hasToken, instructions, onContinue, pending }: { canManage: boolean; error?: string; hasToken: boolean; instructions: ManualCloneInstructions; onContinue: (completed: () => void) => void; pending: boolean }) {
+function ManualCloneRecovery({ canScan, error, hasToken, instructions, onContinue, pending }: { canScan: boolean; error?: string; hasToken: boolean; instructions: ManualCloneInstructions; onContinue: (completed: () => void) => void; pending: boolean }) {
   const [open, setOpen] = useState(false);
   return <>
     <section className="border-b border-border pb-5">
@@ -205,7 +207,7 @@ function ManualCloneRecovery({ canManage, error, hasToken, instructions, onConti
       {error ? <ErrorAlert>{error}</ErrorAlert> : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button onClick={() => setOpen(false)} variant="outline">关闭</Button>
-        {canManage ? <Button disabled={pending} onClick={() => onContinue(() => setOpen(false))}>
+        {canScan ? <Button disabled={pending} onClick={() => onContinue(() => setOpen(false))}>
           <Search data-icon="inline-start" aria-hidden="true" />
           {pending ? "提交中..." : "使用本地仓库继续扫描"}
         </Button> : null}
@@ -224,7 +226,7 @@ function CopyableCommand({ label, value }: { label: string; value: string }) {
   </div>;
 }
 
-function SourceItemRow({ canManage, candidates, item, onBind, onUnbind, pending }: { canManage: boolean; candidates: { skillId: string; name: string }[]; item: SkillSourceItem; onBind: (target: BindTarget) => void; onUnbind: (item: SkillSourceItem) => void; pending: boolean }) {
+function SourceItemRow({ canBind, canUnbind, candidates, item, onBind, onUnbind, pending }: { canBind: boolean; canUnbind: boolean; candidates: { skillId: string; name: string }[]; item: SkillSourceItem; onBind: (target: BindTarget) => void; onUnbind: (item: SkillSourceItem) => void; pending: boolean }) {
   return <TableRow>
     <TableCell className="max-w-64 font-mono text-xs"><span className="block truncate" title={item.skillPath}>{item.skillPath}</span></TableCell>
     <TableCell className="font-medium">{item.discoveredName}</TableCell>
@@ -235,8 +237,8 @@ function SourceItemRow({ canManage, candidates, item, onBind, onUnbind, pending 
     <TableCell className="max-w-56 text-muted-foreground"><span className="block truncate" title={item.lastErrorSummary || undefined}>{item.lastErrorSummary || "-"}</span></TableCell>
     <TableCell className="font-mono text-xs">{formatDateTime(item.missingSince)}</TableCell>
     <TableCell className="text-right">
-      {canManage && item.status === "name_conflict" ? <div className="flex justify-end gap-1">{candidates.map((skill) => <Button aria-label={`绑定到现有 Skill ${skill.name}`} disabled={pending} key={skill.skillId} onClick={() => onBind({ sourceItemId: item.sourceItemId, skillId: skill.skillId })} size="sm" variant="secondary"><Link2 data-icon="inline-start" aria-hidden="true" />绑定到现有 Skill</Button>)}</div> : null}
-      {canManage && item.skillId ? <Button aria-label={`解绑 ${item.discoveredName}`} disabled={pending} onClick={() => onUnbind(item)} size="sm" variant="outline"><Unlink data-icon="inline-start" aria-hidden="true" />解绑</Button> : null}
+      {canBind && item.status === "name_conflict" ? <div className="flex justify-end gap-1">{candidates.map((skill) => <Button aria-label={`绑定到现有 Skill ${skill.name}`} disabled={pending} key={skill.skillId} onClick={() => onBind({ sourceItemId: item.sourceItemId, skillId: skill.skillId })} size="sm" variant="secondary"><Link2 data-icon="inline-start" aria-hidden="true" />绑定到现有 Skill</Button>)}</div> : null}
+      {canUnbind && item.skillId ? <Button aria-label={`解绑 ${item.discoveredName}`} disabled={pending} onClick={() => onUnbind(item)} size="sm" variant="outline"><Unlink data-icon="inline-start" aria-hidden="true" />解绑</Button> : null}
     </TableCell>
   </TableRow>;
 }

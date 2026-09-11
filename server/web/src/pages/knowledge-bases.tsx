@@ -59,7 +59,12 @@ type KnowledgeBaseEditForm = {
 };
 
 export function KnowledgeBasesPage() {
-  const canManage = useAdminPermission(permissions.knowledgeManage);
+  const canCreate = useAdminPermission(permissions.knowledgeCreate);
+  const canUpdate = useAdminPermission(permissions.knowledgeUpdate);
+  const canDelete = useAdminPermission(permissions.knowledgeDelete);
+  const canCreateMembers = useAdminPermission(permissions.knowledgeMemberCreate);
+  const canUpdateMembers = useAdminPermission(permissions.knowledgeMemberUpdate);
+  const canDeleteMembers = useAdminPermission(permissions.knowledgeMemberDelete);
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -220,7 +225,7 @@ export function KnowledgeBasesPage() {
   return (
     <PageShell>
       <PageHeader
-        actions={canManage ? (
+        actions={canCreate ? (
           <Button onClick={openCreate} variant="primary">
             <Plus data-icon="inline-start" aria-hidden="true" />
             创建知识库
@@ -349,13 +354,13 @@ export function KnowledgeBasesPage() {
       >
         {selected ? (
           <>
-            {canManage ? <Card className="shadow-none">
+            {canUpdate || canDelete ? <Card className="shadow-none">
               <CardHeader className="flex-row items-start justify-between gap-4">
                 <div className="grid gap-1.5">
                   <CardTitle>基础信息</CardTitle>
                   <CardDescription>当前项目维护逻辑知识库与底层 Provider 的固定绑定。</CardDescription>
                 </div>
-                <Button
+                {canUpdate ? <Button
                   aria-label="编辑知识库基础信息"
                   onClick={() => openEditKnowledgeBase(selected)}
                   size="sm"
@@ -363,7 +368,7 @@ export function KnowledgeBasesPage() {
                 >
                   <Pencil data-icon="inline-start" aria-hidden="true" />
                   编辑
-                </Button>
+                </Button> : null}
               </CardHeader>
               <CardContent className="grid gap-4">
                 <KeyValueList
@@ -389,10 +394,10 @@ export function KnowledgeBasesPage() {
                 <CardDescription>删除前请先撤销有效授权。删除成功后，该知识库及其文档将不再参与检索。</CardDescription>
               </CardHeader>
               <CardFooter className="justify-end">
-                <Button onClick={() => openDelete(selected)} size="sm" variant="destructive">
+                {canDelete ? <Button onClick={() => openDelete(selected)} size="sm" variant="destructive">
                   <Trash2 data-icon="inline-start" aria-hidden="true" />
                   删除知识库
-                </Button>
+                </Button> : null}
               </CardFooter>
             </Card>
           </>
@@ -401,7 +406,9 @@ export function KnowledgeBasesPage() {
 
       <MemberAuthorizationDrawer
         adapter={authorizationAdapter}
-        canManage={canManage}
+        canAdd={canCreateMembers}
+        canRemove={canDeleteMembers}
+        canUpdate={canUpdateMembers}
         onClose={() => setAuthorizationId(null)}
         open={Boolean(authorizationTarget)}
         permissions={[

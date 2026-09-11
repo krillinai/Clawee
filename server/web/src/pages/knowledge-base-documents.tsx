@@ -38,7 +38,9 @@ import { permissions } from "@/lib/rbac-api";
 const knowledgeBasesKey = ["knowledge-bases"] as const;
 
 export function KnowledgeBaseDocumentsPage() {
-  const canManage = useAdminPermission(permissions.knowledgeManage);
+  const canUpload = useAdminPermission(permissions.knowledgeDocumentUpload);
+  const canSync = useAdminPermission(permissions.knowledgeDocumentSync);
+  const canDelete = useAdminPermission(permissions.knowledgeDocumentDelete);
   const [searchParams] = useSearchParams();
   const knowledgeBaseId = searchParams.get("knowledge_base_id") ?? "";
   const queryClient = useQueryClient();
@@ -91,13 +93,13 @@ export function KnowledgeBaseDocumentsPage() {
   });
 
   useEffect(() => {
-    if (!canManage || !isActive || !documentsQuery.isSuccess || uploadMutation.isPending || syncMutation.isPending) return;
+    if (!canSync || !isActive || !documentsQuery.isSuccess || uploadMutation.isPending || syncMutation.isPending) return;
     if (!documents.some((item) => item.status === "processing")) return;
     if (autoSyncedKnowledgeBasesRef.current.has(knowledgeBaseId)) return;
 
     autoSyncedKnowledgeBasesRef.current.add(knowledgeBaseId);
     syncMutation.mutate();
-  }, [canManage, documents, documentsQuery.isSuccess, isActive, knowledgeBaseId, syncMutation, uploadMutation.isPending]);
+  }, [canSync, documents, documentsQuery.isSuccess, isActive, knowledgeBaseId, syncMutation, uploadMutation.isPending]);
 
   function submitUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -150,7 +152,7 @@ export function KnowledgeBaseDocumentsPage() {
                 返回知识库
               </Link>
             </Button>
-            {canManage ? <Button
+            {canSync ? <Button
               disabled={!isActive || syncMutation.isPending || uploadMutation.isPending}
               onClick={runSync}
               variant="secondary"
@@ -158,7 +160,7 @@ export function KnowledgeBaseDocumentsPage() {
               <RefreshCw data-icon="inline-start" aria-hidden="true" />
               {syncMutation.isPending ? "同步中..." : "同步状态"}
             </Button> : null}
-            {canManage && knowledgeBase ? (
+            {canUpload && knowledgeBase ? (
               <Button
                 disabled={!isActive || syncMutation.isPending || uploadMutation.isPending}
                 onClick={openUpload}
@@ -255,7 +257,7 @@ export function KnowledgeBaseDocumentsPage() {
                         <TableCell className="font-mono text-xs">{item.uploadedBy || "-"}</TableCell>
                         <TableCell className="font-mono text-xs">{formatDateTime(item.updatedAt)}</TableCell>
                         <TableCell className="text-right">
-                          {canManage ? <Button
+                          {canDelete ? <Button
                             aria-label={`删除文档 ${item.name}`}
                             onClick={() => openDelete(item)}
                             size="icon"

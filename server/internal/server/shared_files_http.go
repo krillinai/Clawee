@@ -52,19 +52,18 @@ func mountSharedFileRoutes(app, admin *gin.RouterGroup, opts Options) {
 	appFiles.POST("/shared-files/content", handleAppSharedFileUpload(opts.SharedFilesService))
 
 	read := requirePermission(opts.RBACService, rbac.PermissionSharedFilesRead)
-	manage := requirePermission(opts.RBACService, rbac.PermissionSharedFilesManage)
 	admin.GET("/shared-spaces", read, handleAdminSharedSpaces(opts.SharedFilesService))
 	admin.GET("/shared-spaces/detail", read, handleAdminSharedSpaceDetail(opts.SharedFilesService))
-	admin.POST("/shared-spaces", manage, handleAdminCreateSharedSpace(opts.SharedFilesService))
-	admin.PATCH("/shared-spaces", manage, handleAdminUpdateSharedSpace(opts.SharedFilesService))
+	admin.POST("/shared-spaces", requirePermission(opts.RBACService, rbac.PermissionSharedFilesSpaceCreate), handleAdminCreateSharedSpace(opts.SharedFilesService))
+	admin.PATCH("/shared-spaces", requirePermission(opts.RBACService, rbac.PermissionSharedFilesSpaceUpdate), handleAdminUpdateSharedSpace(opts.SharedFilesService))
 	admin.GET("/shared-spaces/account-grants", read, handleAdminSharedMembers(opts.SharedFilesService))
-	admin.GET("/shared-spaces/member-candidates", manage, handleAdminSharedMemberCandidates(opts.SharedFilesService))
-	admin.POST("/shared-spaces/account-grants", manage, handleAdminAddSharedMember(opts.SharedFilesService))
-	admin.PATCH("/shared-spaces/account-grants", manage, handleAdminUpdateSharedMember(opts.SharedFilesService))
-	admin.POST("/shared-spaces/account-grants/remove", manage, handleAdminRemoveSharedMember(opts.SharedFilesService))
+	admin.GET("/shared-spaces/member-candidates", requirePermission(opts.RBACService, rbac.PermissionSharedFilesMemberCreate), handleAdminSharedMemberCandidates(opts.SharedFilesService))
+	admin.POST("/shared-spaces/account-grants", requirePermission(opts.RBACService, rbac.PermissionSharedFilesMemberCreate), handleAdminAddSharedMember(opts.SharedFilesService))
+	admin.PATCH("/shared-spaces/account-grants", requirePermission(opts.RBACService, rbac.PermissionSharedFilesMemberUpdate), handleAdminUpdateSharedMember(opts.SharedFilesService))
+	admin.POST("/shared-spaces/account-grants/remove", requirePermission(opts.RBACService, rbac.PermissionSharedFilesMemberDelete), handleAdminRemoveSharedMember(opts.SharedFilesService))
 	admin.GET("/shared-files", read, handleAdminSharedFiles(opts.SharedFilesService, opts.AccountService))
-	admin.GET("/shared-files/content", sharedFileOperationLog(opts.Logger, "download"), manage, handleAdminSharedFileDownload(opts.SharedFilesService))
-	admin.POST("/shared-files/content", sharedFileOperationLog(opts.Logger, "upload"), manage, handleAdminSharedFileUpload(opts.SharedFilesService))
+	admin.GET("/shared-files/content", sharedFileOperationLog(opts.Logger, "download"), requirePermission(opts.RBACService, rbac.PermissionSharedFilesDownload), handleAdminSharedFileDownload(opts.SharedFilesService))
+	admin.POST("/shared-files/content", sharedFileOperationLog(opts.Logger, "upload"), requirePermission(opts.RBACService, rbac.PermissionSharedFilesUpload), handleAdminSharedFileUpload(opts.SharedFilesService))
 }
 
 func requireClaweeFileCaller() gin.HandlerFunc {

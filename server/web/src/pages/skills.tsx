@@ -55,7 +55,21 @@ const skillSourcesKey = ["skill-sources"] as const;
 const skillSourceAvailabilityKey = ["skill-source-availability"] as const;
 
 export function SkillsPage() {
-  const canManage = useAdminPermission(permissions.skillManage);
+  const canUpload = useAdminPermission(permissions.skillVersionUpload);
+  const canMove = useAdminPermission(permissions.skillMove);
+  const canPublish = useAdminPermission(permissions.skillPublish);
+  const canCreateSpace = useAdminPermission(permissions.skillSpaceCreate);
+  const canUpdateSpace = useAdminPermission(permissions.skillSpaceUpdate);
+  const canCreateSpaceMembers = useAdminPermission(permissions.skillSpaceMemberCreate);
+  const canUpdateSpaceMembers = useAdminPermission(permissions.skillSpaceMemberUpdate);
+  const canDeleteSpaceMembers = useAdminPermission(permissions.skillSpaceMemberDelete);
+  const canCreateSource = useAdminPermission(permissions.skillSourceCreate);
+  const canUpdateSource = useAdminPermission(permissions.skillSourceUpdate);
+  const canRevealSourceToken = useAdminPermission(permissions.skillSourceTokenReveal);
+  const canSyncSource = useAdminPermission(permissions.skillSourceSync);
+  const canEnableSource = useAdminPermission(permissions.skillSourceEnable);
+  const canDisableSource = useAdminPermission(permissions.skillSourceDisable);
+  const canSelectSkills = canMove || canPublish;
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [publication, setPublication] = useState("all");
@@ -262,7 +276,13 @@ export function SkillsPage() {
     sourceTokenMutation.reset();
     setSourceActionError(null);
     if (source) {
-      sourceTokenMutation.mutate(source);
+      if (canRevealSourceToken) {
+        sourceTokenMutation.mutate(source);
+      } else {
+        setEditingSource(source);
+        setEditingToken("");
+        setSourceFormOpen(true);
+      }
       return;
     }
     setEditingSource(null);
@@ -375,24 +395,24 @@ export function SkillsPage() {
     <PageShell>
       <PageHeader
         title="技能中心"
-        actions={canManage && activeTab === "skills" ? (
+        actions={(canSelectSkills || canUpload) && activeTab === "skills" ? (
           <>
             {selectedSkills.length > 0 ? (
               <>
-                <Button disabled={spacesQuery.isLoading} onClick={openBatchSpace} variant="outline">
+                {canMove ? <Button disabled={spacesQuery.isLoading} onClick={openBatchSpace} variant="outline">
                   <FolderInput data-icon="inline-start" aria-hidden="true" />
                   调整空间（{selectedSkills.length}）
-                </Button>
-                <Button onClick={openBatchPublish} variant="outline">
+                </Button> : null}
+                {canPublish ? <Button onClick={openBatchPublish} variant="outline">
                   <PackageCheck data-icon="inline-start" aria-hidden="true" />
                   批量发布（{selectedSkills.length}）
-                </Button>
+                </Button> : null}
               </>
             ) : null}
-            <Button onClick={openUpload} variant="primary">
+            {canUpload ? <Button onClick={openUpload} variant="primary">
               <PackagePlus data-icon="inline-start" aria-hidden="true" />
               上传版本
-            </Button>
+            </Button> : null}
           </>
         ) : undefined}
       >
@@ -428,10 +448,10 @@ export function SkillsPage() {
               </FilterSelect>
             </FilterRow>
 
-            <DataTableShell dense minWidth={canManage ? 960 : 920}>
+            <DataTableShell dense minWidth={canSelectSkills ? 960 : 920}>
               <TableHeader>
                 <TableRow>
-                  {canManage ? (
+                  {canSelectSkills ? (
                     <TableHead className="w-10">
                       <Checkbox
                         aria-label="选择当前可见的 Skill"
@@ -452,12 +472,12 @@ export function SkillsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {skillsQuery.isLoading ? <TableStateRow colSpan={canManage ? 9 : 8}><LoadingState label="正在加载 Skill" /></TableStateRow> : null}
+                {skillsQuery.isLoading ? <TableStateRow colSpan={canSelectSkills ? 9 : 8}><LoadingState label="正在加载 Skill" /></TableStateRow> : null}
                 {skillsQuery.isError ? (
-                  <TableStateRow colSpan={canManage ? 9 : 8} tone="danger"><ErrorAlert>Skill 加载失败：{errorMessage(skillsQuery.error)}。请稍后重试。</ErrorAlert></TableStateRow>
+                  <TableStateRow colSpan={canSelectSkills ? 9 : 8} tone="danger"><ErrorAlert>Skill 加载失败：{errorMessage(skillsQuery.error)}。请稍后重试。</ErrorAlert></TableStateRow>
                 ) : null}
                 {!skillsQuery.isLoading && !skillsQuery.isError && filtered.length === 0 ? (
-                  <TableStateRow colSpan={canManage ? 9 : 8}>
+                  <TableStateRow colSpan={canSelectSkills ? 9 : 8}>
                     <EmptyState
                       title={skills.length === 0 ? "暂无 Skill" : "暂无匹配的 Skill"}
                       description={skills.length === 0 ? "上传 ZIP 包后即可创建首个 Skill 版本。" : "请调整搜索词或发布状态筛选。"}
@@ -466,7 +486,7 @@ export function SkillsPage() {
                 ) : null}
                 {!skillsQuery.isLoading && !skillsQuery.isError ? filtered.map((item) => (
                   <TableRow data-state={selectedSkillIds.has(item.skillId) ? "selected" : undefined} key={item.skillId}>
-                    {canManage ? (
+                    {canSelectSkills ? (
                       <TableCell>
                         <Checkbox
                           aria-label={`选择 ${item.name}`}
@@ -493,10 +513,22 @@ export function SkillsPage() {
             </DataTableShell>
           </section>
         </TabsContent>
-        <TabsContent className="mt-6" value="spaces"><SkillSpacesPanel canManage={canManage} /></TabsContent>
+        <TabsContent className="mt-6" value="spaces">
+          <SkillSpacesPanel
+            canCreate={canCreateSpace}
+            canCreateMembers={canCreateSpaceMembers}
+            canDeleteMembers={canDeleteSpaceMembers}
+            canUpdate={canUpdateSpace}
+            canUpdateMembers={canUpdateSpaceMembers}
+          />
+        </TabsContent>
         {skillSourceEnabled ? <TabsContent className="mt-6" value="sources">
           <SkillSourcesTable
-            canManage={canManage}
+            canCreate={canCreateSource}
+            canDisable={canDisableSource}
+            canEdit={canUpdateSource}
+            canEnable={canEnableSource}
+            canSync={canSyncSource}
             error={sourcesQuery.isError ? errorMessage(sourcesQuery.error) : null}
             actionError={sourceActionError}
             loading={sourcesQuery.isLoading}
@@ -635,7 +667,11 @@ function PublicationBadge({ published }: { published: boolean }) {
 
 function SkillSourcesTable({
   actionError,
-  canManage,
+  canCreate,
+  canDisable,
+  canEdit,
+  canEnable,
+  canSync,
   error,
   editPending,
   loading,
@@ -649,7 +685,11 @@ function SkillSourcesTable({
   syncPending
 }: {
   actionError: string | null;
-  canManage: boolean;
+  canCreate: boolean;
+  canDisable: boolean;
+  canEdit: boolean;
+  canEnable: boolean;
+  canSync: boolean;
   error: string | null;
   editPending: boolean;
   loading: boolean;
@@ -664,7 +704,7 @@ function SkillSourcesTable({
 }) {
   return (
     <section aria-label="GitHub 来源" className="grid gap-5">
-      {canManage ? (
+      {canCreate ? (
         <div className="flex justify-end">
           <Button onClick={onCreate} variant="primary"><Plus data-icon="inline-start" aria-hidden="true" />新增来源</Button>
         </div>
@@ -710,11 +750,10 @@ function SkillSourcesTable({
               <TableCell className="text-right">
                 <div className="flex justify-end gap-1">
                   <Button asChild aria-label={`查看 ${sourceName} 来源详情`} size="sm" variant="secondary"><Link to={`/admin/skills/source-detail?source_id=${encodeURIComponent(source.sourceId)}`}>详情</Link></Button>
-                {canManage ? <>
-                  <Button aria-label={`编辑 ${sourceName}`} disabled={editPending} onClick={() => onEdit(source)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button>
-                  <Button aria-label={`立即同步 ${sourceName}`} disabled={syncPending} onClick={() => onSync(source)} size="sm" variant="secondary"><RefreshCw data-icon="inline-start" aria-hidden="true" />同步</Button>
-                  {isEnabled ? <Button aria-label={`禁用 ${sourceName}`} disabled={statusPending} onClick={() => onDisable(source)} size="sm" variant="secondary"><PowerOff data-icon="inline-start" aria-hidden="true" />停用</Button> : <Button aria-label={`启用 ${sourceName}`} disabled={statusPending} onClick={() => onEnable(source)} size="sm" variant="secondary"><Power data-icon="inline-start" aria-hidden="true" />启用</Button>}
-                </> : null}</div>
+                {canEdit ? <Button aria-label={`编辑 ${sourceName}`} disabled={editPending} onClick={() => onEdit(source)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button> : null}
+                {canSync ? <Button aria-label={`立即同步 ${sourceName}`} disabled={syncPending} onClick={() => onSync(source)} size="sm" variant="secondary"><RefreshCw data-icon="inline-start" aria-hidden="true" />同步</Button> : null}
+                {isEnabled && canDisable ? <Button aria-label={`禁用 ${sourceName}`} disabled={statusPending} onClick={() => onDisable(source)} size="sm" variant="secondary"><PowerOff data-icon="inline-start" aria-hidden="true" />停用</Button> : null}
+                {!isEnabled && canEnable ? <Button aria-label={`启用 ${sourceName}`} disabled={statusPending} onClick={() => onEnable(source)} size="sm" variant="secondary"><Power data-icon="inline-start" aria-hidden="true" />启用</Button> : null}</div>
               </TableCell>
             </TableRow>;
           }) : null}

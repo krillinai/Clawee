@@ -13,8 +13,11 @@ import type { AgentListItem } from "@/lib/office-api";
 import { agentCreationSourceLabel } from "@/lib/agent-source";
 
 type Props = {
-  canManageAgents: boolean;
+  canBindAgents: boolean;
+  canDeleteAgents: boolean;
+  canOpenToken: boolean;
   canTransferAgents: boolean;
+  canUnbindAgents: boolean;
   canReadGrants: boolean;
   rows: AgentGovernanceRow[];
   grantsByUserID: Map<string, MCPGrant[]>;
@@ -29,8 +32,11 @@ type Props = {
 };
 
 export function AgentGovernanceTable({
-  canManageAgents,
+  canBindAgents,
+  canDeleteAgents,
+  canOpenToken,
   canTransferAgents,
+  canUnbindAgents,
   canReadGrants,
   rows,
   grantsByUserID,
@@ -160,7 +166,7 @@ export function AgentGovernanceTable({
                     <div className="flex flex-wrap items-center gap-2">
                       {mcp ? (
                         <>
-                          {mcp.boundUserId ? <Button
+                          {canOpenToken && mcp.boundUserId ? <Button
                             aria-label={`查看 ${row.displayName} 令牌详情`}
                             onClick={(event) => stopAndRun(event, () => onOpenToken(mcp))}
                             size="sm"
@@ -177,7 +183,7 @@ export function AgentGovernanceTable({
                               <MoveRight data-icon="inline-start" />迁移
                             </Button>
                           ) : null}
-                          {canManageAgents ? (
+                          {canDeleteAgents ? (
                             <Button
                               aria-label={`删除 MCP 身份 ${row.displayName}`}
                               onClick={(event) => stopAndRun(event, () => onDelete(mcp))}
@@ -190,12 +196,12 @@ export function AgentGovernanceTable({
                           ) : null}
                         </>
                       ) : null}
-                      {canManageAgents && office && !mcp ? (
+                      {office && !mcp ? (
                         <>
-                          <Button onClick={(event) => stopAndRun(event, () => onBind(office))} size="sm" variant="primary">
+                          {canBindAgents ? <Button onClick={(event) => stopAndRun(event, () => onBind(office))} size="sm" variant="primary">
                             接入 MCP
-                          </Button>
-                          <Button
+                          </Button> : null}
+                          {canDeleteAgents ? <Button
                             aria-label={`清理运行实例 ${row.displayName}`}
                             onClick={(event) => stopAndRun(event, () => onDeleteOfficeAgent(office))}
                             size="sm"
@@ -203,10 +209,10 @@ export function AgentGovernanceTable({
                           >
                             <Trash2 aria-hidden="true" data-icon="inline-start" />
                             清理运行实例
-                          </Button>
+                          </Button> : null}
                         </>
                       ) : null}
-                      {canManageAgents && office && mcp ? (
+                      {canUnbindAgents && office && mcp ? (
                         <Button onClick={(event) => stopAndRun(event, () => onUnbind(office))} size="sm" variant="outline">
                           解除关联
                         </Button>

@@ -49,11 +49,10 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceCreate), handleAdminCreateSkillSpace(opts.SkillHubService))
 	admin.PATCH("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
-	memberUpdate := skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate)
-	admin.GET("/skill-spaces/member-candidates", memberUpdate, handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
-	admin.POST("/skill-spaces/account-grants", memberUpdate, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
-	admin.PATCH("/skill-spaces/account-grants", memberUpdate, handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
-	admin.POST("/skill-spaces/account-grants/remove", memberUpdate, handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
+	admin.GET("/skill-spaces/member-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
+	admin.POST("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
+	admin.PATCH("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
+	admin.POST("/skill-spaces/account-grants/remove", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberDelete), handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
 }
 
 func handleAppSkillSpaces(service *skillhub.Service) gin.HandlerFunc {

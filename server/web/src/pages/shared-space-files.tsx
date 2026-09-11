@@ -41,7 +41,8 @@ type UploadForm = {
 };
 
 export function SharedSpaceFilesPage() {
-  const canManage = useAdminPermission(permissions.sharedFilesManage);
+  const canDownload = useAdminPermission(permissions.sharedFilesDownload);
+  const canUpload = useAdminPermission(permissions.sharedFilesUpload);
   const [searchParams] = useSearchParams();
   const spaceId = searchParams.get("space_id") ?? "";
   const queryClient = useQueryClient();
@@ -121,7 +122,7 @@ export function SharedSpaceFilesPage() {
                 返回网盘
               </Link>
             </Button>
-            {canManage && spaceQuery.data ? (
+            {canUpload && spaceQuery.data ? (
               <Button onClick={openUpload}>
                 <Upload data-icon="inline-start" aria-hidden="true" />
                 上传文件
@@ -188,7 +189,7 @@ export function SharedSpaceFilesPage() {
                 {filesQuery.isLoading ? <TableStateRow colSpan={6}>正在加载文件...</TableStateRow> : null}
                 {filesQuery.isError ? <TableStateRow colSpan={6} tone="danger">{filesQuery.error.message}</TableStateRow> : null}
                 {!filesQuery.isLoading && !filesQuery.isError && files.length === 0 ? (
-                  <TableStateRow colSpan={6}><EmptyState title="暂无文件" description={canManage ? "点击上传文件后，可在这里查看当前版本。" : "当前共享空间中暂无文件。"} /></TableStateRow>
+                  <TableStateRow colSpan={6}><EmptyState title="暂无文件" description={canUpload ? "点击上传文件后，可在这里查看当前版本。" : "当前共享空间中暂无文件。"} /></TableStateRow>
                 ) : null}
                 {!filesQuery.isLoading && !filesQuery.isError ? files.map((file) => (
                   <TableRow key={file.fileId}>
@@ -204,17 +205,17 @@ export function SharedSpaceFilesPage() {
                       <div className="font-mono text-xs text-muted-foreground">{formatDateTime(file.updatedAt)}</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {canManage ? <div className="flex justify-end gap-1">
-                        <Button asChild size="sm" variant="ghost">
+                      {canDownload || canUpload ? <div className="flex justify-end gap-1">
+                        {canDownload ? <Button asChild size="sm" variant="ghost">
                           <a aria-label={`下载文件 ${file.fileName}`} href={sharedFileDownloadURL(file.fileId)}>
                             <Download data-icon="inline-start" aria-hidden="true" />
                             下载
                           </a>
-                        </Button>
-                        <Button aria-label={`上传新版本 ${file.fileName}`} size="sm" variant="outline" onClick={() => openReplace(file)}>
+                        </Button> : null}
+                        {canUpload ? <Button aria-label={`上传新版本 ${file.fileName}`} size="sm" variant="outline" onClick={() => openReplace(file)}>
                           <FileUp data-icon="inline-start" aria-hidden="true" />
                           新版本
-                        </Button>
+                        </Button> : null}
                       </div> : null}
                     </TableCell>
                   </TableRow>

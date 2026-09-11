@@ -72,7 +72,7 @@ export function SkillSourceForm({
       branch: branch.trim(),
       scanRoot: scanRoot.trim(),
       excludePaths: excludePrefixes.split("\n").map((item) => item.trim()).filter(Boolean),
-      ...(isEditing || token.trim() ? { token: token.trim() } : { token: undefined }),
+      ...(token.trim() ? { token: token.trim() } : {}),
       autoPublish,
       schedule
     });
@@ -121,7 +121,7 @@ export function SkillSourceForm({
           <FieldLabel htmlFor="source-token">访问 Token</FieldLabel>
           <Input autoComplete="new-password" id="source-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} />
           <FieldDescription>
-            {isEditing ? "清空并保存将移除现有 Token。" : "可选，用于访问私有 GitHub 仓库。"}{" "}
+            {isEditing ? "留空将保留现有 Token。" : "可选，用于访问私有 GitHub 仓库。"}{" "}
             <a href="https://github.com/settings/personal-access-tokens/new" rel="noreferrer" target="_blank">前往 GitHub 创建 Token</a>，并授予目标仓库 Contents 只读权限。
           </FieldDescription>
         </Field>

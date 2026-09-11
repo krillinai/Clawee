@@ -3,6 +3,7 @@ import { ImageUp, Moon, RotateCcw, Save, Sun, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ErrorAlert, LoadingState, PageHeader, PageShell } from "@/components/governance-ui";
+import { useAdminPermission } from "@/components/admin-permissions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -13,6 +14,7 @@ import {
   type PlatformBrandingAction
 } from "@/lib/platform-branding-api";
 import { cn } from "@/lib/utils";
+import { permissions } from "@/lib/rbac-api";
 
 const MAX_IMAGE_BYTES = 1024 * 1024;
 
@@ -23,6 +25,7 @@ type LogoDraft = {
 };
 
 export function PlatformBrandingPage() {
+  const canUpdate = useAdminPermission(permissions.platformBrandingUpdate);
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["platform-branding"], queryFn: getPlatformBranding });
   const [background, setBackground] = useState<"light" | "dark">("light");
@@ -102,7 +105,7 @@ export function PlatformBrandingPage() {
     <PageShell>
       <PageHeader
         title="平台外观"
-        actions={
+        actions={canUpdate ?
           <>
             <Button disabled={!hasCustomBranding || saving} onClick={restoreDefaults} variant="outline">
               <RotateCcw aria-hidden="true" />
@@ -112,7 +115,7 @@ export function PlatformBrandingPage() {
               <Save aria-hidden="true" />
               {saving ? "保存中" : "保存"}
             </Button>
-          </>
+          </> : undefined
         }
       />
 
@@ -141,6 +144,7 @@ export function PlatformBrandingPage() {
           background={background}
           configured={branding.sidebarLogoConfigured}
           draft={sidebarLogo}
+          editable={canUpdate}
           inputId="sidebar-logo-file"
           kind="expanded"
           label="展开态 Logo"
@@ -153,6 +157,7 @@ export function PlatformBrandingPage() {
           background={background}
           configured={branding.sidebarCompactLogoConfigured}
           draft={compactLogo}
+          editable={canUpdate}
           inputId="sidebar-compact-logo-file"
           kind="compact"
           label="折叠态小 Logo"
@@ -175,6 +180,7 @@ function LogoEditor(props: {
   background: "light" | "dark";
   configured: boolean;
   draft: LogoDraft;
+  editable: boolean;
   inputId: string;
   kind: "expanded" | "compact";
   label: string;
@@ -207,7 +213,7 @@ function LogoEditor(props: {
             {props.draft.action === "replace" ? props.draft.file?.name : customSource ? "已配置" : "使用默认"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {props.editable ? <div className="flex items-center gap-2">
           <input
             accept="image/png,image/jpeg"
             className="sr-only"
@@ -228,7 +234,7 @@ function LogoEditor(props: {
             <Trash2 aria-hidden="true" />
             清除配置
           </Button>
-        </div>
+        </div> : null}
       </div>
       <div
         className={cn(

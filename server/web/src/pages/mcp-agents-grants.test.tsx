@@ -261,6 +261,34 @@ describe("MCPAgentsGrantsPage", () => {
     expect(revokeMCPAccountTokenMock).not.toHaveBeenCalled();
   });
 
+  it("allows an Agent transfer without account read permission", async () => {
+    const account: Account = {
+      userId: "usr_transfer_operator",
+      email: "transfer@example.com",
+      name: "迁移操作员",
+      status: "active",
+      applications: { frontend: true, admin: true },
+      adminRoles: ["agent_transfer_operator"],
+      adminPermissions: [permissions.agentRead, permissions.agentTransfer]
+    };
+    renderPage(account);
+
+    const row = await findRowByText("agent_sales");
+    fireEvent.click(within(row).getByRole("button", { name: "迁移" }));
+    const dialog = await screen.findByRole("dialog", { name: "迁移 Agent" });
+    expect(listAccountsMock).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText("目标账号"), { target: { value: "usr_2" } });
+    fireEvent.change(within(dialog).getByLabelText("迁移原因"), { target: { value: "账号调整" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认迁移" }));
+
+    await waitFor(() => expect(transferMCPAgentMock).toHaveBeenCalledWith({
+      agentId: "agent_sales",
+      sourceUserId: "usr_1",
+      targetUserId: "usr_2",
+      reason: "账号调整"
+    }));
+  });
+
   it("supports a grant-only account without requesting unrelated modules", async () => {
     const account: Account = {
       userId: "usr_grant_reader",

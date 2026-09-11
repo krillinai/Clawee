@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authMethods, currentAccount, login, unbindDingTalk } from "./auth-api";
+import { authMethods, currentAccount, hasAdminPermission, login, unbindDingTalk, type Account } from "./auth-api";
 
 const mockFetch = vi.fn();
 
 function response(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function account(adminPermissions: string[]): Account {
+  return {
+    userId: "usr_test",
+    email: "test@example.com",
+    name: "测试账号",
+    status: "active",
+    adminPermissions
+  };
 }
 
 describe("auth-api", () => {
@@ -77,5 +87,22 @@ describe("auth-api", () => {
       "/api/v1/auth/dingtalk/unbind",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ password: "passw0rd!" }) })
     );
+  });
+});
+
+describe("hasAdminPermission", () => {
+  it("允许精确匹配的操作权限，但不授予同模块的其他操作", () => {
+    const current = account(["console:agent:token_rotate"]);
+
+    expect(hasAdminPermission(current, "console:agent:token_rotate")).toBe(true);
+    expect(hasAdminPermission(current, "console:agent:token_reveal")).toBe(false);
+    expect(hasAdminPermission(current, "console:agent:read")).toBe(false);
+  });
+
+  it("保留 manage 对同模块全部操作的兼容授权", () => {
+    const current = account(["console:mcp:upstream:manage"]);
+
+    expect(hasAdminPermission(current, "console:mcp:upstream:sync")).toBe(true);
+    expect(hasAdminPermission(current, "console:mcp:capability:sync")).toBe(false);
   });
 });

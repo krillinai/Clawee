@@ -202,7 +202,9 @@ export function CollectorStatusBadge({ status }: { status?: string }) {
 
 export function MCPAgentTokenDrawer({
   agent,
-  canManage,
+  canReveal,
+  canRevoke,
+  canRotate,
   mode,
   open,
   tokenResult,
@@ -215,7 +217,9 @@ export function MCPAgentTokenDrawer({
   onRevokeToken
 }: {
   agent: MCPAgent | null;
-  canManage?: boolean;
+  canReveal?: boolean;
+  canRevoke?: boolean;
+  canRotate?: boolean;
   open: boolean;
   mode: AgentTableMode;
   tokenResult: MCPAccountTokenResponse | null;
@@ -228,7 +232,11 @@ export function MCPAgentTokenDrawer({
   onRevokeToken: (agent: MCPAgent) => void;
 }) {
   if (!open || !agent) return null;
-  const allowTokenManagement = canManage ?? mode === "user";
+  const allowReveal = canReveal ?? mode === "user";
+  const allowRotate = canRotate ?? mode === "user";
+  const allowRevoke = canRevoke ?? mode === "user";
+  const allowTokenManagement = allowReveal || allowRotate || allowRevoke;
+  const allowTokenSecrets = allowReveal || allowRotate;
   const isActive = tokenInfo?.tokenStatus === "active";
   const isCopyDisabled = !isActive || tokenPending || !tokenResult;
   const mcpConfig = tokenResult ? accountMCPConfig(tokenResult.token, agent.agentId) : undefined;
@@ -259,20 +267,20 @@ export function MCPAgentTokenDrawer({
         ]}
       />
       {allowTokenManagement ? <div className="flex flex-wrap gap-2">
-        {onRevealToken && isActive && !tokenResult ? (
+        {allowReveal && onRevealToken && isActive && !tokenResult ? (
           <Button disabled={tokenPending} onClick={() => onRevealToken(agent)} variant="secondary">
             <Eye aria-hidden="true" />
             显示令牌
           </Button>
         ) : null}
-        <Button disabled={tokenPending} onClick={() => onRotateToken(agent)} variant="primary">
+        {allowRotate ? <Button disabled={tokenPending} onClick={() => onRotateToken(agent)} variant="primary">
           <RotateCw className="mr-2 h-4 w-4" aria-hidden="true" />
           {tokenInfo ? "轮换访问令牌" : "生成访问令牌"}
-        </Button>
-        <Button disabled={tokenPending || !isActive} onClick={() => onRevokeToken(agent)} size="sm" variant="destructive">吊销访问令牌</Button>
+        </Button> : null}
+        {allowRevoke ? <Button disabled={tokenPending || !isActive} onClick={() => onRevokeToken(agent)} size="sm" variant="destructive">吊销访问令牌</Button> : null}
       </div> : null}
       {tokenError ? <ErrorAlert>{tokenError}</ErrorAlert> : null}
-      {allowTokenManagement ? <ResourceList>
+      {allowTokenSecrets ? <ResourceList>
         <TokenSecretPane
           disabled={isCopyDisabled}
           title="Token"

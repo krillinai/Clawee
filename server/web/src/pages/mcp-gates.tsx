@@ -61,7 +61,8 @@ const riskOptions = ["all", "high", "medium", "low"] as const;
 const decisionTerminalStatuses = new Set(["rejected", "expired", "failed", "cancelled"]);
 
 export function MCPGatesPage() {
-  const canManage = useAdminPermission(permissions.mcpGateManage);
+  const canApprove = useAdminPermission(permissions.mcpGateApprove);
+  const canReject = useAdminPermission(permissions.mcpGateReject);
   const [searchParams] = useSearchParams();
   const gateID = searchParams.get("gate_id") ?? undefined;
   const queryClient = useQueryClient();
@@ -324,7 +325,8 @@ export function MCPGatesPage() {
                             详情
                           </Button>
                           <GateDecisionActions
-                            canManage={canManage}
+                            canApprove={canApprove}
+                            canReject={canReject}
                             gate={gate}
                             onAccept={(event) => openAcceptFromRow(event, gate)}
                             onReject={(event) => openRejectFromRow(event, gate)}
@@ -340,7 +342,8 @@ export function MCPGatesPage() {
       </Card>
 
       <GateDrawer
-        canManage={canManage}
+        canApprove={canApprove}
+        canReject={canReject}
         gate={selectedGate}
         onAccept={openAccept}
         onClose={() => setSelectedGateId(null)}
@@ -361,13 +364,15 @@ export function MCPGatesPage() {
 }
 
 function GateDrawer({
-  canManage,
+  canApprove,
+  canReject,
   gate,
   onAccept,
   onClose,
   onReject
 }: {
-  canManage: boolean;
+  canApprove: boolean;
+  canReject: boolean;
   gate: MCPGate | null;
   onAccept: (gate: MCPGate) => void;
   onClose: () => void;
@@ -530,7 +535,7 @@ function GateDrawer({
               <CardTitle>操作区</CardTitle>
             </CardHeader>
             <CardContent>
-              <DrawerOperationState auditHref={auditHref} canManage={canManage} gate={gate} onAccept={onAccept} onReject={onReject} />
+              <DrawerOperationState auditHref={auditHref} canApprove={canApprove} canReject={canReject} gate={gate} onAccept={onAccept} onReject={onReject} />
             </CardContent>
           </Card>
         </>
@@ -541,26 +546,28 @@ function GateDrawer({
 
 function DrawerOperationState({
   auditHref,
-  canManage,
+  canApprove,
+  canReject,
   gate,
   onAccept,
   onReject
 }: {
   auditHref: string;
-  canManage: boolean;
+  canApprove: boolean;
+  canReject: boolean;
   gate: MCPGate;
   onAccept: (gate: MCPGate) => void;
   onReject: (gate: MCPGate) => void;
 }) {
-  if (canManage && canDecideMCPGate(gate.status, gate.expiresAt)) {
+  if ((canApprove || canReject) && canDecideMCPGate(gate.status, gate.expiresAt)) {
     return (
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => onAccept(gate)} size="sm" variant="primary">
+        {canApprove ? <Button onClick={() => onAccept(gate)} size="sm" variant="primary">
           通过
-        </Button>
-        <Button onClick={() => onReject(gate)} size="sm" variant="destructive">
+        </Button> : null}
+        {canReject ? <Button onClick={() => onReject(gate)} size="sm" variant="destructive">
           拒绝
-        </Button>
+        </Button> : null}
       </div>
     );
   }
@@ -588,17 +595,19 @@ function DrawerOperationState({
 }
 
 function GateDecisionActions({
-  canManage,
+  canApprove,
+  canReject,
   gate,
   onAccept,
   onReject
 }: {
-  canManage: boolean;
+  canApprove: boolean;
+  canReject: boolean;
   gate: MCPGate;
   onAccept: (event: MouseEvent) => void;
   onReject: (event: MouseEvent) => void;
 }) {
-  if (!canManage) return null;
+  if (!canApprove && !canReject) return null;
 
   if (!canDecideMCPGate(gate.status, gate.expiresAt)) {
     return (
@@ -610,12 +619,12 @@ function GateDecisionActions({
 
   return (
     <div className="flex flex-col gap-1">
-      <Button onClick={onAccept} size="sm" variant="primary">
+      {canApprove ? <Button onClick={onAccept} size="sm" variant="primary">
         通过
-      </Button>
-      <Button onClick={onReject} size="sm" variant="destructive">
+      </Button> : null}
+      {canReject ? <Button onClick={onReject} size="sm" variant="destructive">
         拒绝
-      </Button>
+      </Button> : null}
     </div>
   );
 }

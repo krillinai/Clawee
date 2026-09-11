@@ -35,7 +35,7 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-compact-logo", opts.PlatformBrandingService, true)
 
 	protected := admin.Group("/platform-branding")
-	protected.Use(requirePermission(opts.RBACService, rbac.PermissionPlatformBrandingManage))
+	protected.Use(requirePermission(opts.RBACService, rbac.PermissionPlatformBrandingRead))
 	protected.GET("", func(c *gin.Context) {
 		configuration, err := opts.PlatformBrandingService.Get(c.Request.Context())
 		if err != nil {
@@ -47,7 +47,7 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 	})
 	mountPlatformBrandingImageRoute(protected, "/sidebar-logo", opts.PlatformBrandingService, false)
 	mountPlatformBrandingImageRoute(protected, "/sidebar-compact-logo", opts.PlatformBrandingService, true)
-	protected.PUT("", func(c *gin.Context) {
+	admin.PUT("/platform-branding", requirePermission(opts.RBACService, rbac.PermissionPlatformBrandingUpdate), func(c *gin.Context) {
 		account, ok := currentAccount(c)
 		if !ok {
 			abortAuthorizationError(c, http.StatusUnauthorized, "unauthorized", "未认证")

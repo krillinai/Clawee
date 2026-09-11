@@ -104,7 +104,11 @@ const emptyCreateServerForm: CreateServerForm = {
 };
 
 export function MCPUpstreamServersPage() {
-  const canManage = useAdminPermission(permissions.mcpUpstreamManage);
+  const canCreate = useAdminPermission(permissions.mcpUpstreamCreate);
+  const canUpdate = useAdminPermission(permissions.mcpUpstreamUpdate);
+  const canDelete = useAdminPermission(permissions.mcpUpstreamDelete);
+  const canSync = useAdminPermission(permissions.mcpUpstreamSync);
+  const canUpdateStatus = useAdminPermission(permissions.mcpUpstreamUpdateStatus);
   const canReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead);
   const canReadGrants = useAdminPermission(permissions.mcpGrantRead);
   const canReadAudits = useAdminPermission(permissions.mcpAuditRead);
@@ -372,7 +376,7 @@ export function MCPUpstreamServersPage() {
   return (
     <PageShell>
       <PageHeader
-        actions={canManage ?
+        actions={canCreate ?
           <Button onClick={openCreateModal} variant="primary">
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
             新增上游服务
@@ -550,7 +554,7 @@ export function MCPUpstreamServersPage() {
                             <Eye aria-hidden="true" />
                             查看详情
                           </Button>
-                          {canManage && server.transport !== "builtin" ? <Button
+                          {canUpdate && server.transport !== "builtin" ? <Button
                             aria-label={`编辑 ${server.id}`}
                             onClick={() => openEditModal(server)}
                             size="sm"
@@ -558,7 +562,7 @@ export function MCPUpstreamServersPage() {
                           >
                             <Edit3 aria-hidden="true" />
                           </Button> : null}
-                          {canManage && server.transport !== "builtin" ? <Button
+                          {canDelete && (server.status === "disabled" || canUpdateStatus) && server.transport !== "builtin" ? <Button
                             aria-label={`删除 ${server.id}`}
                             onClick={() => openDeleteConfirm(server)}
                             size="sm"
@@ -593,12 +597,12 @@ export function MCPUpstreamServersPage() {
                     保存上游服务只登记接入点，不会自动同步或向智能体暴露工具。
                   </p>
                 </div>
-                {canManage ? <div className="flex flex-wrap items-center gap-2">
-                  {selectedServer.transport !== "builtin" ? <Button onClick={() => openEditModal(selectedServer)} size="sm" variant="secondary">
+                {canUpdate || canDelete || canSync || canUpdateStatus ? <div className="flex flex-wrap items-center gap-2">
+                  {canUpdate && selectedServer.transport !== "builtin" ? <Button onClick={() => openEditModal(selectedServer)} size="sm" variant="secondary">
                     <Edit3 className="mr-2 h-4 w-4" aria-hidden="true" />
                     编辑
                   </Button> : null}
-                  {selectedServer.transport !== "builtin" ? <Button
+                  {canDelete && (selectedServer.status === "disabled" || canUpdateStatus) && selectedServer.transport !== "builtin" ? <Button
                     onClick={() => openDeleteConfirm(selectedServer)}
                     size="sm"
                     variant="destructive"
@@ -606,7 +610,7 @@ export function MCPUpstreamServersPage() {
                     <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
                     删除
                   </Button> : null}
-                  <Button
+                  {canSync ? <Button
                     disabled={syncMutation.isPending}
                     onClick={() => syncMutation.mutate(selectedServer.id)}
                     size="sm"
@@ -614,8 +618,8 @@ export function MCPUpstreamServersPage() {
                   >
                     <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
                     同步工具
-                  </Button>
-                  {selectedServer.transport !== "builtin" ? <Button
+                  </Button> : null}
+                  {canUpdateStatus && selectedServer.transport !== "builtin" ? <Button
                     disabled={statusMutation.isPending}
                     onClick={() =>
                       statusMutation.mutate({
