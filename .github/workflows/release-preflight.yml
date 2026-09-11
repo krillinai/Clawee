@@ -9,6 +9,11 @@ on:
         description: 要验证的分支、Tag 或 Commit SHA
         required: false
         type: string
+    secrets:
+      TENCENT_CLOUD_SECRET_ID:
+        required: true
+      TENCENT_CLOUD_SECRET_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       ref:

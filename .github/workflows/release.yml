@@ -20,6 +20,9 @@ jobs:
     uses: ./.github/workflows/release-preflight.yml
     with:
       ref: ${{ github.sha }}
+    secrets:
+      TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
+      TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
 
   gate:
     needs: preflight

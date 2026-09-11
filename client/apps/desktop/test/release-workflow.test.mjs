@@ -88,6 +88,12 @@ describe('Release workflows', () => {
       'uses: ./.github/workflows/release-preflight.yml'
     );
     expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');
+    expect(releaseWorkflow).toContain(
+      'TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}'
+    );
+    expect(releaseWorkflow).toContain(
+      'TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}'
+    );
     expect(releaseWorkflow).toContain('statuses: write');
     expect(releaseWorkflow).toContain('gate:\n    needs: preflight');
     expect(releaseWorkflow).toContain(
@@ -181,8 +187,8 @@ describe('Release workflows', () => {
   });
 
   it('centralizes COS credentials and publishes immutable objects before channel pointers', () => {
-    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_ID/g) ?? [])).toHaveLength(1);
-    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_KEY/g) ?? [])).toHaveLength(1);
+    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_ID/g) ?? [])).toHaveLength(2);
+    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_KEY/g) ?? [])).toHaveLength(2);
     expect((preflightWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_ID/g) ?? [])).toHaveLength(1);
     expect((preflightWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_KEY/g) ?? [])).toHaveLength(1);
     expect(releaseWorkflow).toContain('group: cos-production-release');
