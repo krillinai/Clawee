@@ -22,14 +22,23 @@ const serverCiWorkflow = readFileSync(
   resolve(process.cwd(), '../../../.github/workflows/server-ci.yml'),
   'utf8'
 );
+const sourceSecurityWorkflow = readFileSync(
+  resolve(process.cwd(), '../../../.github/workflows/source-security.yml'),
+  'utf8'
+);
 
 describe('Release workflows', () => {
-  it('runs ordinary CI for branch pushes while keeping it off version tags', () => {
+  it('keeps ordinary CI manual and automatic workflows off branches', () => {
     for (const workflow of [ciWorkflow, serverCiWorkflow]) {
-      expect(workflow).toContain('branches:');
-      expect(workflow).toContain("- '**'");
-      expect(workflow).not.toContain('tags-ignore:');
+      expect(workflow).toContain('workflow_dispatch:');
+      expect(workflow).not.toMatch(/\n  push:/);
+      expect(workflow).not.toContain('pull_request:');
+      expect(workflow).not.toContain('branches:');
     }
+    expect(sourceSecurityWorkflow).toContain('workflow_dispatch:');
+    expect(sourceSecurityWorkflow).toContain("tags:\n      - 'v*'");
+    expect(sourceSecurityWorkflow).not.toContain('pull_request:');
+    expect(sourceSecurityWorkflow).not.toContain('branches:');
   });
 
   it('runs client, server, package, container and unsigned Desktop preflight for an explicit ref', () => {
