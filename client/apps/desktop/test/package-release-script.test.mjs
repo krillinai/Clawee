@@ -49,6 +49,16 @@ describe('Desktop package release script', () => {
     );
   });
 
+  it('embeds the COS generic feed only in official stable packages', () => {
+    expect(builderConfig).toContain('provider: generic');
+    expect(builderConfig).toContain('url: ${env.CLAWEE_UPDATE_URL}');
+    expect(builderConfig).toContain('useMultipleRangeRequest: false');
+    expect(packageScript).toContain('COS_PUBLIC_BASE_URL');
+    expect(packageScript).toContain('COS_PREFIX');
+    expect(packageScript).toContain('/updates/stable');
+    expect(packageScript).toContain('https://updates.invalid/clawee/disabled');
+  });
+
   it('prepares and records the embedded Codex Runtime before packaging', () => {
     const desktopBuild = packageScript.indexOf("'构建 Desktop'");
     const runtimePreparation = packageScript.indexOf("'准备 Codex Runtime'");

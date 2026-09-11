@@ -261,6 +261,57 @@ jobs:
       - run: docker build -f server/Dockerfile -t clawee-server:preflight .
       - run: CLAWEE_TEST_IMAGE=clawee-server:preflight node scripts/container-smoke.mjs
 
+  cos-preflight-upload:
+    needs: [client, server, desktop, server-package, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    env:
+      TARGET_SHA: ${{ needs.client.outputs.target-sha }}
+      COS_BUCKET: ${{ vars.COS_BUCKET }}
+      COS_REGION: ${{ vars.COS_REGION }}
+      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
+      COS_PREFIX: ${{ vars.COS_PREFIX }}
+      TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
+      TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: clawee-desktop-preflight-macos-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: clawee-desktop-preflight-windows-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: clawee-server-preflight-linux-*
+          merge-multiple: true
+      - name: 检出受保护分支的发布器
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: publisher
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: publisher/client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: publisher/client/pnpm-lock.yaml
+      - run: pnpm --dir publisher/client install --frozen-lockfile --ignore-scripts
+      - name: 上传并验证 COS Preflight 目录
+        run: >-
+          node publisher/scripts/cos-publish.mjs preflight
+          --artifacts artifacts
+          --target-sha "$TARGET_SHA"
+          --run-id "$GITHUB_RUN_ID"
+
   record:
     if: always() && needs.client.outputs.target-sha != ''
     needs:
@@ -269,6 +320,7 @@ jobs:
       - desktop
       - server-package
       - container
+      - cos-preflight-upload
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -282,6 +334,7 @@ jobs:
           DESKTOP_RESULT: ${{ needs.desktop.result }}
           SERVER_PACKAGE_RESULT: ${{ needs.server-package.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
+          COS_PREFLIGHT_RESULT: ${{ needs.cos-preflight-upload.result }}
         shell: bash
         run: |
           state=failure
@@ -290,7 +343,8 @@ jobs:
             && "$SERVER_RESULT" == 'success' \
             && "$DESKTOP_RESULT" == 'success' \
             && "$SERVER_PACKAGE_RESULT" == 'success' \
-            && "$CONTAINER_RESULT" == 'success' ]]; then
+            && "$CONTAINER_RESULT" == 'success' \
+            && "$COS_PREFLIGHT_RESULT" == 'success' ]]; then
             state=success
             description='Clawee 客户端与服务端预发布验证通过'
           fi

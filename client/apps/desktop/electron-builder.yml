@@ -2,11 +2,10 @@ appId: com.clawee.desktop
 productName: Clawee
 asar: true
 publish:
-  provider: github
-  owner: krillinai
-  repo: Clawee
+  provider: generic
+  url: ${env.CLAWEE_UPDATE_URL}
   channel: latest
-  releaseType: release
+  useMultipleRangeRequest: false
 npmRebuild: false
 electronFuses:
   runAsNode: false

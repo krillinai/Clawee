@@ -31,11 +31,13 @@ test('生成统一发布清单和校验文件', () => {
       tag: 'v0.1.0',
       commit: 'a'.repeat(40),
       image: 'ghcr.io/krillinai/clawee-server',
-      imageDigest: `sha256:${'b'.repeat(64)}`
+      imageDigest: `sha256:${'b'.repeat(64)}`,
+      generatedAt: '2026-09-10T10:00:00.000Z'
     });
 
     assert.equal(result.manifest.prerelease, false);
     assert.equal(result.manifest.desktop.windowsSigning, 'unsigned');
+    assert.equal(result.manifest.generatedAt, '2026-09-10T10:00:00.000Z');
     assert.deepEqual(
       result.manifest.artifacts.map(artifact => artifact.name),
       ['Clawee-0.1.0.dmg', 'clawee-server-v0.1.0-linux-amd64.tar.gz']

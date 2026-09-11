@@ -26,6 +26,12 @@ export function buildReleaseManifest(input) {
   if (!/^sha256:[0-9a-f]{64}$/.test(input.imageDigest)) {
     throw new Error(`Invalid image digest: ${input.imageDigest}`);
   }
+  const generatedAt = input.generatedAt === undefined
+    ? new Date()
+    : new Date(input.generatedAt);
+  if (Number.isNaN(generatedAt.getTime())) {
+    throw new Error(`Invalid release manifest timestamp: ${input.generatedAt}`);
+  }
 
   const files = listFiles(artifactDirectory)
     .filter(path => !['release-manifest.json', 'SHA256SUMS'].includes(basename(path)));
@@ -52,7 +58,7 @@ export function buildReleaseManifest(input) {
     tag: release.tag,
     commit: input.commit,
     prerelease: release.prerelease,
-    generatedAt: new Date().toISOString(),
+    generatedAt: generatedAt.toISOString(),
     desktop: {
       macosSigning: 'developer-id-notarized',
       windowsSigning: 'unsigned'
@@ -126,7 +132,8 @@ function runCli() {
       'Usage: node scripts/build-release-manifest.mjs',
       '  --artifacts <directory> --output <directory>',
       '  --version <version> --tag <tag> --commit <sha>',
-      '  --image <name> --image-digest <sha256:digest>'
+      '  --image <name> --image-digest <sha256:digest>',
+      '  [--generated-at <ISO timestamp>]'
     ].join('\n'));
     return;
   }
@@ -137,7 +144,8 @@ function runCli() {
     tag: requiredOption(args, '--tag'),
     commit: requiredOption(args, '--commit'),
     image: requiredOption(args, '--image'),
-    imageDigest: requiredOption(args, '--image-digest')
+    imageDigest: requiredOption(args, '--image-digest'),
+    generatedAt: readOption(args, '--generated-at')
   });
   console.log(JSON.stringify({
     manifestPath: relative(repositoryRoot, result.manifestPath),

@@ -59,7 +59,8 @@ describe('Release workflows', () => {
       'SERVER_RESULT',
       'DESKTOP_RESULT',
       'SERVER_PACKAGE_RESULT',
-      'CONTAINER_RESULT'
+      'CONTAINER_RESULT',
+      'COS_PREFLIGHT_RESULT'
     ]) {
       expect(preflightWorkflow).toContain(result);
     }
@@ -159,5 +160,54 @@ describe('Release workflows', () => {
       'needs: [gate, desktop, server, image]'
     );
     expect(releaseWorkflow).toContain('--draft --verify-tag');
+  });
+
+  it('centralizes COS credentials and publishes immutable objects before channel pointers', () => {
+    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_ID/g) ?? [])).toHaveLength(1);
+    expect((releaseWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_KEY/g) ?? [])).toHaveLength(1);
+    expect((preflightWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_ID/g) ?? [])).toHaveLength(1);
+    expect((preflightWorkflow.match(/secrets\.TENCENT_CLOUD_SECRET_KEY/g) ?? [])).toHaveLength(1);
+    expect(releaseWorkflow).toContain('group: cos-production-release');
+    expect(releaseWorkflow.indexOf('release-immutable')).toBeLessThan(
+      releaseWorkflow.indexOf('公开 GitHub Release')
+    );
+    expect(releaseWorkflow.indexOf('公开 GitHub Release')).toBeLessThan(
+      releaseWorkflow.indexOf('release-promote')
+    );
+    expect(preflightWorkflow).toContain('cos-preflight-upload:');
+    expect(preflightWorkflow).toContain('ref: ${{ github.event.repository.default_branch }}');
+    expect(preflightWorkflow).toContain('publisher/scripts/cos-publish.mjs preflight');
+  });
+
+  it('reuses published GitHub Release assets for COS-only promotion retries', () => {
+    expect(releaseWorkflow).toContain(
+      'release_published: ${{ steps.release_state.outputs.published }}'
+    );
+    expect(releaseWorkflow).toContain(
+      "if: needs.gate.outputs.release_published != 'true'"
+    );
+    expect(releaseWorkflow).toContain("if: env.RELEASE_ALREADY_PUBLISHED == 'true'");
+    expect(releaseWorkflow).toContain("gh release download \"$TAG\" --pattern 'release.json'");
+    expect(releaseWorkflow).toContain("gh release download \"$TAG\" --pattern 'latest*.yml'");
+    expect(releaseWorkflow).toContain('args+=(--verify-immutable)');
+    for (const step of [
+      '生成统一发布清单',
+      '生成 COS 版本目录和官网目录文件',
+      '上传并验证 COS 不可变版本目录',
+      '发布版本镜像标签'
+    ]) {
+      const start = releaseWorkflow.indexOf(`- name: ${step}`);
+      expect(releaseWorkflow.slice(start, start + 180)).toContain(
+        "if: env.RELEASE_ALREADY_PUBLISHED != 'true'"
+      );
+    }
+  });
+
+  it('bootstraps an empty COS channel before exposing the migration release', () => {
+    expect(releaseWorkflow.indexOf('release-bootstrap')).toBeLessThan(
+      releaseWorkflow.indexOf('公开 GitHub Release')
+    );
+    expect(releaseWorkflow).toContain('--version "$VERSION"');
+    expect(releaseWorkflow).toContain('--commit "$GITHUB_SHA"');
   });
 });

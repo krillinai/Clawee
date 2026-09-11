@@ -157,6 +157,9 @@ const officialRelease = isStableReleaseVersion(desktopVersion)
   && process.env.CLAWEE_OFFICIAL_RELEASE === '1'
   && process.env.GITHUB_REPOSITORY === 'krillinai/Clawee'
   && process.env.GITHUB_REF_NAME === `v${desktopVersion}`;
+env.CLAWEE_UPDATE_URL = officialRelease
+  ? officialUpdateUrl(process.env)
+  : 'https://updates.invalid/clawee/disabled';
 if (officialRelease) {
   writeFileSync(join(dirname(enterpriseGatewayConfigStage), 'official-release.json'), '{"channel":"stable"}\n');
 }
@@ -407,6 +410,34 @@ function electronBuilderArguments(packageMode, targetPlatform, targetArch, baseE
     args.push(`--config.electronDist=${installedElectronDist}`);
   }
   return { args, builderEnv: nextEnv };
+}
+
+function officialUpdateUrl(targetEnv) {
+  const base = targetEnv.COS_PUBLIC_BASE_URL?.trim();
+  const prefix = targetEnv.COS_PREFIX?.trim();
+  if (!base || !prefix) {
+    throw new Error('Official Desktop releases require COS_PUBLIC_BASE_URL and COS_PREFIX');
+  }
+  const url = new URL(base);
+  if (
+    url.protocol !== 'https:'
+    || url.pathname !== '/'
+    || url.search !== ''
+    || url.hash !== ''
+    || base.endsWith('/')
+  ) {
+    throw new Error('COS_PUBLIC_BASE_URL must be an HTTPS origin without a trailing slash');
+  }
+  if (
+    prefix.startsWith('/')
+    || prefix.endsWith('/')
+    || prefix.includes('..')
+    || prefix.includes('\\')
+    || prefix.includes('//')
+  ) {
+    throw new Error(`Invalid COS_PREFIX: ${prefix}`);
+  }
+  return `${base}/${prefix}/updates/stable`;
 }
 
 function disableImplicitMacSigning(targetPlatform, targetEnv, args) {

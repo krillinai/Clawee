@@ -21,6 +21,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      release_published: ${{ steps.release_state.outputs.published }}
     env:
       MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
       MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -40,7 +41,22 @@ jobs:
           node scripts/release-version.mjs check
           --tag "$GITHUB_REF_NAME"
           --github-output "$GITHUB_OUTPUT"
+      - id: release_state
+        name: 检查 GitHub Release 状态
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          published=false
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"
+            if [[ "$is_draft" != 'true' ]]; then
+              published=true
+            fi
+          fi
+          echo "published=${published}" >> "$GITHUB_OUTPUT"
       - name: 验证同提交 Release Preflight
+        if: steps.release_state.outputs.published != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -55,6 +71,7 @@ jobs:
             exit 1
           fi
       - name: 验证 macOS 正式签名凭据
+        if: steps.release_state.outputs.published != 'true'
         shell: bash
         run: |
           missing=()
@@ -76,6 +93,7 @@ jobs:
 
   desktop:
     needs: gate
+    if: needs.gate.outputs.release_published != 'true'
     timeout-minutes: 90
     permissions:
       contents: read
@@ -109,6 +127,8 @@ jobs:
       APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
       CLAWEE_APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
       CLAWEE_OFFICIAL_RELEASE: ${{ needs.gate.outputs.prerelease == 'false' && '1' || '0' }}
+      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
+      COS_PREFIX: ${{ vars.COS_PREFIX }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -177,12 +197,14 @@ jobs:
 
   server:
     needs: gate
+    if: needs.gate.outputs.release_published != 'true'
     uses: ./.github/workflows/server-release.yml
     permissions:
       contents: read
 
   image:
     needs: [gate, desktop, server]
+    if: needs.gate.outputs.release_published != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -217,7 +239,22 @@ jobs:
 
   publish:
     needs: [gate, desktop, server, image]
+    if: >-
+      always() &&
+      needs.gate.result == 'success' &&
+      (
+        needs.gate.outputs.release_published == 'true' ||
+        (
+          needs.desktop.result == 'success' &&
+          needs.server.result == 'success' &&
+          needs.image.result == 'success'
+        )
+      )
     runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: cos-production-release
+      cancel-in-progress: false
     permissions:
       contents: write
       packages: write
@@ -227,35 +264,27 @@ jobs:
       VERSION: ${{ needs.gate.outputs.version }}
       PRERELEASE: ${{ needs.gate.outputs.prerelease }}
       TAG: ${{ github.ref_name }}
+      COS_BUCKET: ${{ vars.COS_BUCKET }}
+      COS_REGION: ${{ vars.COS_REGION }}
+      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
+      COS_PREFIX: ${{ vars.COS_PREFIX }}
+      TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
+      TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
+      RELEASE_ALREADY_PUBLISHED: ${{ needs.gate.outputs.release_published }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: clawee-*-release-*
-          merge-multiple: true
-      - name: 生成统一发布清单
-        run: |
-          node scripts/build-release-manifest.mjs \
-            --artifacts artifacts \
-            --output artifacts \
-            --version "$VERSION" \
-            --tag "$TAG" \
-            --commit "$GITHUB_SHA" \
-            --image "$IMAGE" \
-            --image-digest "$IMAGE_DIGEST"
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: 创建草稿 Release 并上传产物
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm --dir client install --frozen-lockfile --ignore-scripts
+      - name: 创建草稿 Release 并提取发布说明
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -264,8 +293,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
             if [[ "$is_draft" != 'true' ]]; then
-              echo "::error::Release ${TAG} 已公开，禁止覆盖。"
-              exit 1
+              echo 'RELEASE_ALREADY_PUBLISHED=true' >> "$GITHUB_ENV"
             fi
           else
             args=(--generate-notes --draft --verify-tag)
@@ -274,10 +302,82 @@ jobs:
             fi
             gh release create "$TAG" "${args[@]}"
           fi
+          mkdir -p artifacts
+          gh release view "$TAG" --json body --jq .body > artifacts/release-notes.md
+          gh release view "$TAG" --json createdAt --jq .createdAt \
+            | sed 's/^/PUBLISHED_AT=/' >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        with:
+          path: artifacts
+          pattern: clawee-*-release-*
+          merge-multiple: true
+      - name: 生成统一发布清单
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        run: |
+          node scripts/build-release-manifest.mjs \
+            --artifacts artifacts \
+            --output artifacts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$GITHUB_SHA" \
+            --image "$IMAGE" \
+            --image-digest "$IMAGE_DIGEST" \
+            --generated-at "$(git show -s --format=%cI "$GITHUB_SHA")"
+      - name: 生成 COS 版本目录和官网目录文件
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        shell: bash
+        run: |
+          node scripts/cos-publish.mjs prepare-release \
+            --artifacts artifacts \
+            --stage cos-stage \
+            --manifest artifacts/release-manifest.json \
+            --release-notes artifacts/release-notes.md \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit "$GITHUB_SHA" \
+            --published-at "$PUBLISHED_AT"
+      - name: 上传并验证 COS 不可变版本目录
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        run: |
+          node scripts/cos-publish.mjs release-immutable \
+            --stage cos-stage \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$GITHUB_SHA"
+      - name: 恢复已公开 Release 的 COS 晋级输入
+        if: env.RELEASE_ALREADY_PUBLISHED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          version_root="cos-stage/releases/${TAG}"
+          mkdir -p "${version_root}/updates"
+          gh release download "$TAG" --pattern 'release.json' --dir "$version_root"
+          gh release download "$TAG" --pattern 'latest*.yml' --dir "${version_root}/updates"
+      - name: 上传 GitHub 草稿 Release 产物
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh release edit "$TAG" \
+            --notes-file "cos-stage/releases/${TAG}/release-notes.md"
           while IFS= read -r -d '' file; do
             gh release upload "$TAG" "$file" --clobber
-          done < <(find artifacts -type f -print0)
+          done < <(find "cos-stage/releases/${TAG}" -type f -print0)
+      - uses: docker/setup-buildx-action@v3
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+      - uses: docker/login-action@v3
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: 发布版本镜像标签
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
         shell: bash
         run: |
           tags=(--tag "${IMAGE}:${VERSION}")
@@ -287,7 +387,16 @@ jobs:
           docker buildx imagetools create \
             "${tags[@]}" \
             "${IMAGE}@${IMAGE_DIGEST}"
+      - name: 首次初始化 COS 渠道
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        run: |
+          node scripts/cos-publish.mjs release-bootstrap \
+            --stage cos-stage \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --commit "$GITHUB_SHA"
       - name: 公开 GitHub Release
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -298,3 +407,17 @@ jobs:
           else
             gh release edit "$TAG" --draft=false --latest
           fi
+      - name: 晋级 COS 更新源和官网目录
+        shell: bash
+        run: |
+          args=(
+            release-promote
+            --stage cos-stage
+            --tag "$TAG"
+            --version "$VERSION"
+            --commit "$GITHUB_SHA"
+          )
+          if [[ "$RELEASE_ALREADY_PUBLISHED" == 'true' ]]; then
+            args+=(--verify-immutable)
+          fi
+          node scripts/cos-publish.mjs "${args[@]}"
