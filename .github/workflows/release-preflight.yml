@@ -3,6 +3,12 @@ name: Release Preflight
 run-name: Release Preflight · ${{ inputs.ref || github.ref_name }}
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 要验证的分支、Tag 或 Commit SHA
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       ref:

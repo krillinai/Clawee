@@ -42,6 +42,7 @@ describe('Release workflows', () => {
   });
 
   it('runs client, server, package, container and unsigned Desktop preflight for an explicit ref', () => {
+    expect(preflightWorkflow).toContain('workflow_call:');
     expect(preflightWorkflow).toContain('workflow_dispatch:');
     expect(preflightWorkflow).toContain('description: 要验证的分支、Tag 或 Commit SHA');
     expect(preflightWorkflow).toContain('os: macos-15-intel');
@@ -75,18 +76,20 @@ describe('Release workflows', () => {
     }
   });
 
-  it('gates version tags on the same commit preflight result and unified version', () => {
+  it('runs reusable preflight before gating version tags and unified version', () => {
     expect(releaseWorkflow).toContain("- 'v*'");
     expect(releaseWorkflow).not.toContain('workflow_dispatch:');
-    expect(releaseWorkflow).toContain('statuses: read');
+    expect(releaseWorkflow).toContain(
+      'uses: ./.github/workflows/release-preflight.yml'
+    );
+    expect(releaseWorkflow).toContain('ref: ${{ github.sha }}');
+    expect(releaseWorkflow).toContain('statuses: write');
+    expect(releaseWorkflow).toContain('gate:\n    needs: preflight');
     expect(releaseWorkflow).toContain(
       'node scripts/release-version.mjs check'
     );
-    expect(releaseWorkflow).toContain(
+    expect(releaseWorkflow).not.toContain(
       'select(.context == "release-preflight")'
-    );
-    expect(releaseWorkflow).toContain(
-      '的 Release Preflight 状态为 ${state}，禁止正式发布'
     );
   });
 

@@ -7,14 +7,22 @@ on:
 
 permissions:
   contents: read
-  statuses: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    permissions:
+      contents: read
+      statuses: write
+    uses: ./.github/workflows/release-preflight.yml
+    with:
+      ref: ${{ github.sha }}
+
   gate:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: release
@@ -55,21 +63,6 @@ jobs:
             fi
           fi
           echo "published=${published}" >> "$GITHUB_OUTPUT"
-      - name: 验证同提交 Release Preflight
-        if: steps.release_state.outputs.published != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          target_sha="$(git rev-parse HEAD)"
-          state="$(
-            gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}/status" \
-              --jq '[.statuses[] | select(.context == "release-preflight")][0].state // "missing"'
-          )"
-          if [[ "$state" != 'success' ]]; then
-            echo "::error::Commit ${target_sha} 的 Release Preflight 状态为 ${state}，禁止正式发布。"
-            exit 1
-          fi
       - name: 验证 macOS 正式签名凭据
         if: steps.release_state.outputs.published != 'true'
         shell: bash
