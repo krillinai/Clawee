@@ -77,6 +77,7 @@ test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 �
       (await storage.get('clawee/releases/v1.0.0/artifact.bin')).toString(),
       'content'
     );
+    assert.equal(await storage.get('clawee/catalog/stable/latest.json'), null);
     const calls = readFileSync(logPath, 'utf8').trim().split('\n').map(JSON.parse);
     const versioning = calls.find(args => args[0] === 'bucket-versioning');
     assert.equal(versioning.includes('--disable-log'), false);
@@ -545,7 +546,8 @@ const objectPath = value => join(process.env.FAKE_COS_ROOT, value.replace(/^cos:
 if (args[0] === 'stat') {
   const source = objectPath(args[1]);
   if (!existsSync(source)) {
-    console.error('NoSuchKey: status code 404');
+    const logIndex = args.indexOf('--log-path');
+    writeFileSync(args[logIndex + 1], 'NoSuchKey: status code 404');
     process.exit(1);
   }
   console.log('Content-Length: ' + statSync(source).size);
@@ -560,7 +562,6 @@ if (args[0] !== 'cp') process.exit(2);
 if (args[1].startsWith('cos://')) {
   const source = objectPath(args[1]);
   if (!existsSync(source)) {
-    console.error('NoSuchKey: status code 404');
     process.exit(1);
   }
   mkdirSync(dirname(args[2]), { recursive: true });

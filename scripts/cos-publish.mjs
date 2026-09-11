@@ -370,6 +370,29 @@ export function createCoscliStorage(input) {
     }
     return `${result.stdout}\n${result.stderr}`;
   };
+  const stat = async key => {
+    const logPath = join(work, 'stat-logs', `${createHash('sha256').update(key).digest('hex')}.log`);
+    mkdirSync(dirname(logPath), { recursive: true });
+    rmSync(logPath, { force: true });
+    const result = spawnSync(input.coscliPath, [
+      'stat', `cos://${config.bucket}/${key}`,
+      '--log-path', logPath,
+      ...common
+    ], { encoding: 'utf8', timeout: 60_000 });
+    const output = `${result.stderr}\n${result.stdout}\n${
+      existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''
+    }`;
+    if (result.status !== 0) {
+      if (/NoSuchKey|StatusCode:\s*404|status code\s*404|\b404\b/i.test(output)) {
+        return null;
+      }
+      throw new Error(`COS object stat failed: ${key}`);
+    }
+    const bytes = /Content-Length:\s*(\d+)/i.exec(output)?.[1];
+    if (bytes === undefined) throw new Error(`COS object stat is missing Content-Length: ${key}`);
+    const sha256 = /x-cos-meta-sha256:\s*([0-9a-f]{64})/i.exec(output)?.[1] ?? null;
+    return { bytes: Number(bytes), sha256 };
+  };
   return {
     async assertVersioningEnabled() {
       const output = run([
@@ -380,6 +403,7 @@ export function createCoscliStorage(input) {
       }
     },
     async get(key) {
+      if (await stat(key) === null) return null;
       const path = join(work, 'downloads', createHash('sha256').update(key).digest('hex'));
       mkdirSync(dirname(path), { recursive: true });
       const result = spawnSync(input.coscliPath, [
@@ -397,24 +421,7 @@ export function createCoscliStorage(input) {
       }
       return readFileSync(path);
     },
-    async stat(key) {
-      const result = spawnSync(input.coscliPath, [
-        'stat', `cos://${config.bucket}/${key}`,
-        '--log-path', join(work, 'stat.log'),
-        ...common
-      ], { encoding: 'utf8', timeout: 60_000 });
-      const output = `${result.stderr}\n${result.stdout}`;
-      if (result.status !== 0) {
-        if (/NoSuchKey|StatusCode:\s*404|status code\s*404|\b404\b/i.test(output)) {
-          return null;
-        }
-        throw new Error(`COS object stat failed: ${key}`);
-      }
-      const bytes = /Content-Length:\s*(\d+)/i.exec(output)?.[1];
-      if (bytes === undefined) throw new Error(`COS object stat is missing Content-Length: ${key}`);
-      const sha256 = /x-cos-meta-sha256:\s*([0-9a-f]{64})/i.exec(output)?.[1] ?? null;
-      return { bytes: Number(bytes), sha256 };
-    },
+    stat,
     async put(key, path, metadata, options = {}) {
       const details = fileDetails(path);
       console.log(`[cos-publish] key=${key} bytes=${details.bytes} sha256=${details.sha256}`);
