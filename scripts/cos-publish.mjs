@@ -586,8 +586,11 @@ function assertCompletePreflight(names) {
   }
   for (const name of values.filter(value => /^Clawee-.*\.dmg$/.test(value))) {
     const stem = name.slice(0, -'.dmg'.length);
-    for (const suffix of ['.zip', '.zip.blockmap']) {
-      if (!names.has(`${stem}${suffix}`)) missing.push(`${stem}${suffix}`);
+    const zip = [`${stem}.zip`, `${stem}-mac.zip`].find(candidate => names.has(candidate));
+    if (zip === undefined) {
+      missing.push(`${stem}.zip or ${stem}-mac.zip`);
+    } else if (!names.has(`${zip}.blockmap`)) {
+      missing.push(`${zip}.blockmap`);
     }
   }
   for (const name of values.filter(value => /^Clawee-Setup-.*\.exe$/.test(value))) {

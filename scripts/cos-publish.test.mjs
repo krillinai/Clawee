@@ -291,13 +291,13 @@ test('Preflight 拒绝缺少 updater ZIP 或 blockmap 的产物集', async () =>
   const sha = 'd'.repeat(40);
   try {
     createPreflightArtifacts(root, sha);
-    rmSync(join(root, 'Clawee-1.0.0.zip'));
+    rmSync(join(root, 'Clawee-1.0.0-mac.zip'));
     await assert.rejects(publishPreflight({
       storage: new MemoryStorage(), prefix: 'clawee', artifactDirectory: root,
       targetSha: sha, runId: '124'
-    }), /Clawee-1\.0\.0\.zip/);
+    }), /Clawee-1\.0\.0(?:-mac)?\.zip/);
 
-    writeFileSync(join(root, 'Clawee-1.0.0.zip'), 'zip');
+    writeFileSync(join(root, 'Clawee-1.0.0-mac.zip'), 'zip');
     rmSync(join(root, 'Clawee-Setup-1.0.0.exe.blockmap'));
     await assert.rejects(publishPreflight({
       storage: new MemoryStorage(), prefix: 'clawee', artifactDirectory: root,
@@ -415,9 +415,9 @@ function createServerArchive(root, arch, commit) {
 
 function createPreflightArtifacts(root, sha) {
   for (const name of [
-    'Clawee-1.0.0.dmg', 'Clawee-1.0.0.zip', 'Clawee-1.0.0.zip.blockmap',
-    'Clawee-1.0.0-arm64.dmg', 'Clawee-1.0.0-arm64.zip',
-    'Clawee-1.0.0-arm64.zip.blockmap', 'Clawee-Setup-1.0.0.exe',
+    'Clawee-1.0.0.dmg', 'Clawee-1.0.0-mac.zip', 'Clawee-1.0.0-mac.zip.blockmap',
+    'Clawee-1.0.0-arm64.dmg', 'Clawee-1.0.0-arm64-mac.zip',
+    'Clawee-1.0.0-arm64-mac.zip.blockmap', 'Clawee-Setup-1.0.0.exe',
     'Clawee-Setup-1.0.0.exe.blockmap', 'latest.yml', 'latest-mac.yml',
     'latest-arm64-mac.yml'
   ]) writeFileSync(join(root, name), name);

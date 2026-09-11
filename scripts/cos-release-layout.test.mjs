@@ -39,11 +39,11 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
     mkdirSync(artifacts);
     const files = {
       'Clawee-1.2.3.dmg': 'dmg-x64',
-      'Clawee-1.2.3.zip': 'zip-x64',
-      'Clawee-1.2.3.zip.blockmap': 'blockmap-x64',
+      'Clawee-1.2.3-mac.zip': 'zip-x64',
+      'Clawee-1.2.3-mac.zip.blockmap': 'blockmap-x64',
       'Clawee-1.2.3-arm64.dmg': 'dmg-arm64',
-      'Clawee-1.2.3-arm64.zip': 'zip-arm64',
-      'Clawee-1.2.3-arm64.zip.blockmap': 'blockmap-arm64',
+      'Clawee-1.2.3-arm64-mac.zip': 'zip-arm64',
+      'Clawee-1.2.3-arm64-mac.zip.blockmap': 'blockmap-arm64',
       'Clawee-Setup-1.2.3.exe': 'exe',
       'Clawee-Setup-1.2.3.exe.blockmap': 'exe-map',
       'clawee-desktop-build-manifest-mac-x64.json': '{}',
@@ -53,8 +53,8 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
       'clawee-server-v1.2.3-linux-arm64.tar.gz': 'server-arm64',
       'server-linux-amd64-SHA256SUMS': 'sum-amd64',
       'server-linux-arm64-SHA256SUMS': 'sum-arm64',
-      'latest-mac.yml': updater('1.2.3', 'Clawee-1.2.3.zip'),
-      'latest-arm64-mac.yml': updater('1.2.3', 'Clawee-1.2.3-arm64.zip'),
+      'latest-mac.yml': updater('1.2.3', 'Clawee-1.2.3-mac.zip'),
+      'latest-arm64-mac.yml': updater('1.2.3', 'Clawee-1.2.3-arm64-mac.zip'),
       'latest.yml': updater('1.2.3', 'Clawee-Setup-1.2.3.exe')
     };
     for (const [name, value] of Object.entries(files)) writeFileSync(join(artifacts, name), value);
@@ -88,7 +88,7 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
     assert.equal(result.release.serverImage.digest, `sha256:${'b'.repeat(64)}`);
     assert.equal(result.release.desktop.windowsSigning, 'unsigned');
     const macFeed = readFileSync(join(result.versionRoot, 'updates/latest-mac.yml'), 'utf8');
-    assert.match(macFeed, /https:\/\/download\.example\.com\/clawee\/releases\/v1\.2\.3\/desktop\/macos\/x64\/Clawee-1\.2\.3\.zip/);
+    assert.match(macFeed, /https:\/\/download\.example\.com\/clawee\/releases\/v1\.2\.3\/desktop\/macos\/x64\/Clawee-1\.2\.3-mac\.zip/);
     assert.match(macFeed, /sha512:/);
     const sums = readFileSync(join(result.versionRoot, 'SHA256SUMS'), 'utf8');
     assert.match(sums, /release\.json/);
@@ -139,8 +139,8 @@ test('版本目录按 SemVer 降序并隔离预发布渠道', () => {
 
 function updater(version, name) {
   const values = {
-    'Clawee-1.2.3.zip': 'zip-x64',
-    'Clawee-1.2.3-arm64.zip': 'zip-arm64',
+    'Clawee-1.2.3-mac.zip': 'zip-x64',
+    'Clawee-1.2.3-arm64-mac.zip': 'zip-arm64',
     'Clawee-Setup-1.2.3.exe': 'exe'
   };
   const content = values[name];

@@ -328,10 +328,15 @@ function classifyArtifact(name, version) {
     const format = name.endsWith('.blockmap') ? 'blockmap' : 'exe';
     return artifact('desktop', 'windows', 'x64', format, `desktop/windows/x64/${name}`, name);
   }
-  const desktop = new RegExp(`^Clawee-${escapeRegex(version)}(-arm64)?\\.(dmg|zip)(\\.blockmap)?$`).exec(name);
+  const desktop = new RegExp(
+    `^Clawee-${escapeRegex(version)}(-arm64)?(-mac)?\\.(dmg|zip)(\\.blockmap)?$`
+  ).exec(name);
   if (desktop) {
+    if (desktop[2] && desktop[3] !== 'zip') {
+      throw new Error(`Unknown release artifact: ${name}`);
+    }
     const arch = desktop[1] ? 'arm64' : 'x64';
-    const format = desktop[3] ? 'blockmap' : desktop[2];
+    const format = desktop[4] ? 'blockmap' : desktop[3];
     return artifact('desktop', 'macos', arch, format, `desktop/macos/${arch}/${name}`, name);
   }
   throw new Error(`Unknown release artifact: ${name}`);
