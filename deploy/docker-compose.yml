@@ -15,7 +15,7 @@ services:
       timeout: 3s
       retries: 20
   gateway:
-    image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-0.1.6}
+    image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-0.1.7}
     build:
       context: ..
       dockerfile: server/Dockerfile

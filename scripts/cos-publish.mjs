@@ -521,14 +521,23 @@ async function fetchWithRetry(fetchImpl, url, options) {
 }
 
 function assertPublicHeaders(response, input) {
-  const cache = response.headers.get('cache-control')?.replaceAll(' ', '').toLowerCase();
-  if (cache !== input.cacheControl.toLowerCase()) {
+  const cache = normalizeCacheControl(response.headers.get('cache-control'));
+  if (cache !== normalizeCacheControl(input.cacheControl)) {
     throw new Error(`Public object Cache-Control mismatch: ${input.url}`);
   }
   const type = response.headers.get('content-type')?.toLowerCase();
   if (type !== input.contentType.toLowerCase()) {
     throw new Error(`Public object Content-Type mismatch: ${input.url}`);
   }
+}
+
+function normalizeCacheControl(value) {
+  return value
+    ?.split(',')
+    .map(directive => directive.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join(',');
 }
 
 function cacheBust(url) {

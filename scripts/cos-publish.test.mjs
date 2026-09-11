@@ -520,7 +520,7 @@ function publicImmutableFixture(root) {
         ? 'application/yaml; charset=utf-8'
         : key.endsWith('.zip') ? 'application/zip' : 'application/octet-stream';
     const headers = {
-      'Cache-Control': 'public,max-age=31536000,immutable',
+      'Cache-Control': 'public, immutable, max-age=31536000',
       'Content-Type': type,
       'Content-Length': String(content?.length ?? 0)
     };
