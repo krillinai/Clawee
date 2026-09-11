@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageUp, Moon, RotateCcw, Save, Sun } from "lucide-react";
+import { ImageUp, Moon, RotateCcw, Save, Sun, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ErrorAlert, LoadingState, PageHeader, PageShell } from "@/components/governance-ui";
@@ -45,6 +45,8 @@ export function PlatformBrandingPage() {
 
   const branding = query.data;
   const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep";
+  const hasCustomBranding = hasCustomLogo(sidebarLogo, branding.sidebarLogoConfigured)
+    || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured);
 
   function replaceDraft(current: LogoDraft, file: File, update: (draft: LogoDraft) => void) {
     if (!isSupportedImage(file)) {
@@ -62,6 +64,11 @@ export function PlatformBrandingPage() {
     releaseObjectUrl(current.objectUrl);
     update({ action: "reset" });
     setNotice(undefined);
+  }
+
+  function restoreDefaults() {
+    resetDraft(sidebarLogo, setSidebarLogo);
+    resetDraft(compactLogo, setCompactLogo);
   }
 
   async function save() {
@@ -96,10 +103,16 @@ export function PlatformBrandingPage() {
       <PageHeader
         title="平台外观"
         actions={
-          <Button disabled={!hasChanges || saving} onClick={() => void save()}>
-            <Save aria-hidden="true" />
-            {saving ? "保存中" : "保存"}
-          </Button>
+          <>
+            <Button disabled={!hasCustomBranding || saving} onClick={restoreDefaults} variant="outline">
+              <RotateCcw aria-hidden="true" />
+              恢复默认配置
+            </Button>
+            <Button disabled={!hasChanges || saving} onClick={() => void save()}>
+              <Save aria-hidden="true" />
+              {saving ? "保存中" : "保存"}
+            </Button>
+          </>
         }
       />
 
@@ -205,8 +218,15 @@ function LogoEditor(props: {
           <Button asChild size="sm" variant="outline">
             <label htmlFor={props.inputId}><ImageUp aria-hidden="true" />选择图片</label>
           </Button>
-          <Button aria-label={`恢复${props.label} 默认值`} onClick={props.onReset} size="icon" title="恢复默认" variant="ghost">
-            <RotateCcw aria-hidden="true" />
+          <Button
+            aria-label={`清除${props.label} 配置`}
+            disabled={!hasCustomLogo(props.draft, props.configured)}
+            onClick={props.onReset}
+            size="sm"
+            variant="ghost"
+          >
+            <Trash2 aria-hidden="true" />
+            清除配置
           </Button>
         </div>
       </div>
@@ -242,4 +262,8 @@ function isSupportedImage(file: File) {
   return file.size > 0
     && file.size <= MAX_IMAGE_BYTES
     && (file.type === "image/png" || file.type === "image/jpeg");
+}
+
+function hasCustomLogo(draft: LogoDraft, configured: boolean) {
+  return draft.action === "replace" || (draft.action === "keep" && configured);
 }
