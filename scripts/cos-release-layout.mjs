@@ -47,6 +47,17 @@ export function validateCosConfiguration(input) {
   ) {
     throw new Error(`Invalid COS prefix: ${values.prefix}`);
   }
+  const uploadEndpoint = input.uploadEndpoint?.trim();
+  if (uploadEndpoint) {
+    const allowedEndpoints = new Set([
+      `cos.${values.region}.myqcloud.com`,
+      'cos.accelerate.myqcloud.com'
+    ]);
+    if (!allowedEndpoints.has(uploadEndpoint)) {
+      throw new Error(`Invalid COS upload endpoint: ${uploadEndpoint}`);
+    }
+    values.uploadEndpoint = uploadEndpoint;
+  }
   return values;
 }
 

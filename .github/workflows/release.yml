@@ -264,6 +264,7 @@ jobs:
       COS_REGION: ${{ vars.COS_REGION }}
       COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
       COS_PREFIX: ${{ vars.COS_PREFIX }}
+      COS_UPLOAD_ENDPOINT: ${{ vars.COS_UPLOAD_ENDPOINT }}
       TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
       TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
       RELEASE_ALREADY_PUBLISHED: ${{ needs.gate.outputs.release_published }}

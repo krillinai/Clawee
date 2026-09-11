@@ -285,6 +285,7 @@ jobs:
       COS_REGION: ${{ vars.COS_REGION }}
       COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
       COS_PREFIX: ${{ vars.COS_PREFIX }}
+      COS_UPLOAD_ENDPOINT: ${{ vars.COS_UPLOAD_ENDPOINT }}
       TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
       TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
     steps:
@@ -318,7 +319,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: publisher/client/pnpm-lock.yaml
       - run: pnpm --dir publisher/client install --frozen-lockfile --ignore-scripts
-      - name: 上传并验证 COS Preflight 目录
+      - name: 上传并验证 COS Preflight 清单
         run: >-
           node publisher/scripts/cos-publish.mjs preflight
           --artifacts artifacts

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -9,7 +8,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,10 +39,9 @@ export async function publishImmutableObjects(input) {
   for (const path of files) {
     const relativePath = relative(input.versionRoot, path).split(sep).join('/');
     const key = `${input.prefix}/releases/${input.tag}/${relativePath}`;
-    const local = readFileSync(path);
-    const remote = await input.storage.get(key);
-    if (remote !== null) {
-      if (!sameContent(local, remote)) {
+    const existing = await storedFileState(input.storage, key, path);
+    if (existing.exists) {
+      if (!existing.matches) {
         throw new Error(`Refusing to overwrite immutable COS object: ${key}`);
       }
       continue;
@@ -52,8 +49,8 @@ export async function publishImmutableObjects(input) {
     await input.storage.put(key, path, objectMetadata(key, 'immutable'), {
       forbidOverwrite: true
     });
-    const verified = await input.storage.get(key);
-    if (verified === null || !sameContent(local, verified)) {
+    const verified = await storedFileState(input.storage, key, path);
+    if (!verified.matches) {
       throw new Error(`COS object verification failed: ${key}`);
     }
     uploaded.push(key);
@@ -212,7 +209,6 @@ export async function publishPreflight(input) {
   assertCompletePreflight(names);
   const work = mkdtempSync(join(tmpdir(), 'clawee-cos-preflight-'));
   try {
-    for (const artifact of artifacts) copyFileSync(artifact.path, join(work, artifact.name));
     const manifestPath = join(work, 'preflight-manifest.json');
     writeJson(manifestPath, {
       schemaVersion: 1,
@@ -223,13 +219,11 @@ export async function publishPreflight(input) {
       artifacts: artifacts.map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 }))
     });
     const root = `${input.prefix}/preflight/${input.targetSha}/${input.runId}`;
-    for (const path of listFiles(work)) {
-      const key = `${root}/${basename(path)}`;
-      await input.storage.put(key, path, objectMetadata(key, 'preflight'));
-      const remote = await input.storage.get(key);
-      if (remote === null || !sameContent(readFileSync(path), remote)) {
-        throw new Error(`COS preflight object verification failed: ${key}`);
-      }
+    const manifestKey = `${root}/preflight-manifest.json`;
+    await input.storage.put(manifestKey, manifestPath, objectMetadata(manifestKey, 'preflight'));
+    const verified = await storedFileState(input.storage, manifestKey, manifestPath);
+    if (!verified.matches) {
+      throw new Error(`COS preflight object verification failed: ${manifestKey}`);
     }
     return { root, manifestPath: `${root}/preflight-manifest.json` };
   } finally {
@@ -258,10 +252,9 @@ export async function verifyPublicImmutableRelease(input) {
     for (const file of document.files) {
       if (referencedUrls.has(file.url)) continue;
       referencedUrls.add(file.url);
-      await verifyPublicSha512({
+      await verifyPublicRange({
         fetchImpl: input.fetchImpl ?? fetch,
         url: file.url,
-        sha512: file.sha512,
         bytes: file.size,
         cacheControl: 'public,max-age=31536000,immutable',
         contentType: contentType(file.url)
@@ -353,7 +346,7 @@ export function createCoscliStorage(input) {
     `    - name: ${JSON.stringify(config.bucket)}`,
     `      alias: ${JSON.stringify(config.bucket)}`,
     `      region: ${JSON.stringify(config.region)}`,
-    `      endpoint: ${JSON.stringify(`cos.${config.region}.myqcloud.com`)}`,
+    `      endpoint: ${JSON.stringify(config.uploadEndpoint ?? `cos.${config.region}.myqcloud.com`)}`,
     '      ofs: false',
     '      customized: false',
     ''
@@ -367,8 +360,9 @@ export function createCoscliStorage(input) {
       encoding: 'utf8', timeout: 30 * 60_000
     });
     if (result.status !== 0) {
+      const failure = result.error?.code ?? result.signal ?? result.status;
       throw new Error(
-        `COSCLI failed (${result.status}): ${redactCoscliOutput(
+        `COSCLI failed (${failure}): ${redactCoscliOutput(
           result.stderr || result.stdout,
           input
         )}`
@@ -403,15 +397,38 @@ export function createCoscliStorage(input) {
       }
       return readFileSync(path);
     },
+    async stat(key) {
+      const result = spawnSync(input.coscliPath, [
+        'stat', `cos://${config.bucket}/${key}`,
+        '--log-path', join(work, 'stat.log'),
+        ...common
+      ], { encoding: 'utf8', timeout: 60_000 });
+      const output = `${result.stderr}\n${result.stdout}`;
+      if (result.status !== 0) {
+        if (/NoSuchKey|StatusCode:\s*404|status code\s*404|\b404\b/i.test(output)) {
+          return null;
+        }
+        throw new Error(`COS object stat failed: ${key}`);
+      }
+      const bytes = /Content-Length:\s*(\d+)/i.exec(output)?.[1];
+      if (bytes === undefined) throw new Error(`COS object stat is missing Content-Length: ${key}`);
+      const sha256 = /x-cos-meta-sha256:\s*([0-9a-f]{64})/i.exec(output)?.[1] ?? null;
+      return { bytes: Number(bytes), sha256 };
+    },
     async put(key, path, metadata, options = {}) {
-      console.log(`[cos-publish] key=${key} bytes=${statSync(path).size} sha256=${fileDetails(path).sha256}`);
+      const details = fileDetails(path);
+      console.log(`[cos-publish] key=${key} bytes=${details.bytes} sha256=${details.sha256}`);
       run([
         'cp', path, `cos://${config.bucket}/${key}`,
         '--disable-checksum=false', '--check-point=true',
         '--err-retry-num=5', '--process-log=false', '--fail-output=false',
         ...(options.forbidOverwrite ? ['--forbid-overwrite=true'] : []),
-        '--meta', Object.entries(metadata).map(([name, value]) => `${name}:${value}`).join('#')
+        '--meta', Object.entries({
+          ...metadata,
+          'x-cos-meta-sha256': details.sha256
+        }).map(([name, value]) => `${name}:${value}`).join('#')
       ]);
+      console.log(`[cos-publish] uploaded key=${key}`);
     },
     close() {
       rmSync(work, { recursive: true, force: true });
@@ -461,32 +478,6 @@ async function verifyPublicRange(input) {
   });
   if (range.status !== 206 || Buffer.from(await range.arrayBuffer()).length !== 1) {
     throw new Error(`Public object does not support byte ranges: ${input.url}`);
-  }
-}
-
-async function verifyPublicSha512(input) {
-  const response = await fetchWithRetry(input.fetchImpl, cacheBust(input.url), {
-    headers: { 'Cache-Control': 'no-cache' }
-  });
-  if (!response.ok || response.body === null) {
-    throw new Error(`Updater artifact returned HTTP ${response.status}: ${input.url}`);
-  }
-  assertPublicHeaders(response, input);
-  const length = response.headers.get('content-length');
-  if (input.bytes !== undefined && length !== null && Number(length) !== input.bytes) {
-    throw new Error(`Updater artifact Content-Length mismatch: ${input.url}`);
-  }
-  const hash = createHash('sha512');
-  let bytes = 0;
-  for await (const chunk of response.body) {
-    hash.update(chunk);
-    bytes += chunk.byteLength;
-  }
-  if (
-    hash.digest('base64') !== input.sha512
-    || (input.bytes !== undefined && bytes !== input.bytes)
-  ) {
-    throw new Error(`Updater artifact sha512 or size mismatch: ${input.url}`);
   }
 }
 
@@ -624,6 +615,25 @@ function sameContent(left, right) {
     && createHash('sha256').update(left).digest('hex') === createHash('sha256').update(right).digest('hex');
 }
 
+async function storedFileState(storage, key, path) {
+  const local = fileDetails(path);
+  if (typeof storage.stat === 'function') {
+    const remote = await storage.stat(key);
+    if (remote === null) return { exists: false, matches: false };
+    if (remote.sha256 !== null) {
+      return {
+        exists: true,
+        matches: remote.bytes === local.bytes && remote.sha256 === local.sha256
+      };
+    }
+  }
+  const remote = await storage.get(key);
+  return {
+    exists: remote !== null,
+    matches: remote !== null && sameContent(readFileSync(path), remote)
+  };
+}
+
 function fileDetails(path) {
   const content = readFileSync(path);
   return { bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') };
@@ -646,7 +656,8 @@ function environmentConfiguration() {
     bucket: process.env.COS_BUCKET,
     region: process.env.COS_REGION,
     publicBaseUrl: process.env.COS_PUBLIC_BASE_URL,
-    prefix: process.env.COS_PREFIX
+    prefix: process.env.COS_PREFIX,
+    uploadEndpoint: process.env.COS_UPLOAD_ENDPOINT
   });
 }
 

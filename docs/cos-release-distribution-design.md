@@ -98,10 +98,11 @@ CI 必须从官方 Release 下载 COSCLI，校验 SHA256 后再执行。不得�
 | Variable | `COS_REGION` | 是 | 例如 `ap-guangzhou` |
 | Variable | `COS_PUBLIC_BASE_URL` | 是 | 例如 `https://download.example.com`，末尾不得带 `/` |
 | Variable | `COS_PREFIX` | 是 | 默认并建议使用 `clawee`，不得以 `/` 开头或结尾 |
+| Variable | `COS_UPLOAD_ENDPOINT` | 否 | 开启全球加速后配置为 `cos.accelerate.myqcloud.com`；未配置时使用 Region 默认端点 |
 
-配置路径为仓库 `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`。这四项需要配置为 Repository Variables，不要只配置在 `release` Environment 中，否则不声明该 Environment 的 Desktop Preflight Job 无法读取公开更新地址。
+配置路径为仓库 `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`。这些值需要配置为 Repository Variables，不要只配置在 `release` Environment 中，否则不声明该 Environment 的 Desktop Preflight Job 无法读取公开更新地址。
 
-上传端点由 `COS_REGION` 计算为 `cos.${COS_REGION}.myqcloud.com`，一期不增加单独的 `COS_ENDPOINT` 配置。
+上传端点优先使用 `COS_UPLOAD_ENDPOINT`；未配置时由 `COS_REGION` 计算为 `cos.${COS_REGION}.myqcloud.com`。全球加速必须先在 Bucket 的“域名与传输管理”中开启，然后将 `COS_UPLOAD_ENDPOINT` 设置为 `cos.accelerate.myqcloud.com`。公开下载域名仍由 `COS_PUBLIC_BASE_URL` 控制，不受上传端点影响。
 
 正式上传 Job 和 Preflight 集中上传 Job 都声明 `environment: release`，从同一受保护 Environment 读取两个 Secret。Repository Variables 不包含凭据，可以被构建 Job 读取。
 
@@ -116,6 +117,7 @@ COS 发布脚本启动时必须拒绝以下情况：
 - `COS_PREFIX` 包含 `..`、反斜杠、连续斜杠或首尾斜杠。
 - `COS_BUCKET` 不是包含 APPID 后缀的完整桶名。
 - `COS_REGION` 不符合腾讯云 Region 标识格式。
+- `COS_UPLOAD_ENDPOINT` 不是当前 Region 默认端点或 `cos.accelerate.myqcloud.com`。
 - Tag、根 `package.json` 版本和统一发布清单版本不一致。
 
 日志只输出 Bucket、Region、对象 Key、文件大小和非敏感校验值。不得输出 Secret、授权头、COSCLI 配置文件内容或预签名 URL。
@@ -182,13 +184,11 @@ COS Bucket 应开启版本控制，以便误发布时恢复这些对象的上一
 
 ### 6.3 Preflight 对象
 
-Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行互相覆盖。目录至少包含：
+Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行互相覆盖。完整安装包和服务端包保留在 GitHub Actions Artifacts 中，COS 目录只包含：
 
-- 三个平台的 Desktop 内部测试安装包及 build manifest。
-- Linux amd64/arm64 服务端预检包。
-- `preflight-manifest.json`，记录 Commit SHA、Run ID、创建时间和文件 SHA256。
+- `preflight-manifest.json`，记录 Commit SHA、Run ID、创建时间，以及完整产物集的文件名、字节数和 SHA256。
 
-该目录不进入官网目录，不供客户端更新使用。COS 生命周期规则应自动删除超过 14 天的 `clawee/preflight/` 对象。
+发布器仍须先在本地严格校验完整产物集、Desktop build manifest 和服务端包内 Commit，再生成并上传清单。该目录不进入官网目录，不供客户端更新使用。COS 生命周期规则应自动删除超过 14 天的 `clawee/preflight/` 对象。
 
 ## 7. 官网发布目录协议
 
@@ -369,7 +369,7 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 - 声明 `environment: release`，只有该 Job 读取 COS Secret。
 - 下载 `clawee-desktop-preflight-*` 和 `clawee-server-preflight-*` artifacts。
 - 严格校验允许的文件名、扩展名、路径和 target SHA。
-- 生成并上传 `preflight-manifest.json`。
+- 校验完整产物集，只生成并上传 `preflight-manifest.json`；完整包仅保留在 GitHub Actions Artifacts。
 - 上传到 `preflight/<target-sha>/<github-run-id>/`。
 - 远端验证失败则整个 Preflight 失败，不写 `release-preflight=success` 状态。
 
@@ -436,10 +436,10 @@ COS 不提供跨多个对象的事务。发布脚本按以下规则获得可接�
 
 - 上传前重新计算所有文件 SHA256，与统一发布清单比较。
 - COSCLI 启用错误重试、断点续传和整体 CRC64 校验，不使用 `--disable-checksum=true` 的默认行为。
-- 上传后通过 COS `stat` 或读取响应确认对象存在、字节数正确。
+- 上传时写入 SHA256 自定义元数据，上传后通过 COS `stat` 确认对象存在、字节数和 SHA256 元数据正确；历史对象缺少元数据时才回退为完整下载校验。
 - 对 JSON/YML 从公开域名重新下载并解析，确认 CDN/COS 返回的是刚发布内容。
 - 抽查每个平台主安装包的 Range 请求、`Content-Length`、`Content-Type` 和缓存头。
-- updater YML 中每个 URL 都必须公开可访问，且 `sha512` 与实际文件一致。
+- updater YML 中每个 URL 都必须通过公开域名的 HEAD、`Content-Length` 和 Range 检查；`sha512` 在上传前与本地产物核对。
 - `release.json` 中的 SHA256、文件大小、版本、Commit 和 GHCR digest 必须与当前 Release 一致。
 
 COS multipart ETag 不能作为文件 SHA256 使用。官网展示和用户校验统一以 `SHA256SUMS`、`release.json` 中的 SHA256 为准。
@@ -530,7 +530,7 @@ COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600
 - 隔离 COS 前缀上传真实小文件并验证元数据。
 - 上传大于分片阈值的测试文件，验证断点续传和 CRC64。
 - 使用公开域名执行 HEAD、GET、Range 请求。
-- 从 `latest*.yml` 解析实际包 URL并完成下载与 sha512 校验。
+- 从 `latest*.yml` 解析实际包 URL，并完成 HEAD、Range 和文件大小校验。
 - 官网目录能够列出最新和指定历史版本。
 - Preflight 生命周期和访问策略符合预期。
 
@@ -550,7 +550,7 @@ COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600
 满足以下条件才视为 COS 分发一期完成：
 
 - GitHub Actions 中只有集中上传 Job 可以访问 COS Secret。
-- 正式版本和 Preflight 均按本文目录上传，且生命周期策略生效。
+- 正式版本按本文目录上传完整产物，Preflight 只上传包含完整产物摘要的清单，且生命周期策略生效。
 - 官网默认下载指向稳定版 `latest.json`，历史版本可按版本选择。
 - Desktop 使用官网/COS generic feed，并完成跨版本真实升级。
 - stable、prerelease 不会互相覆盖，旧版本不能反向覆盖新版本。
@@ -563,6 +563,7 @@ COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600
 - [腾讯云官方 COS Action](https://github.com/TencentCloud/cos-action)
 - [腾讯云 COSCLI 仓库](https://github.com/tencentyun/coscli)
 - [腾讯云 COSCLI 官方文档](https://cloud.tencent.com/document/product/436/63143)
+- [腾讯云 COS 全球加速](https://cloud.tencent.com/document/product/436/38866)
 - [腾讯云 COS 临时密钥说明](https://cloud.tencent.com/document/product/436/14048)
 - [腾讯云 COS CDN 加速配置](https://cloud.tencent.com/document/product/436/18670)
 - [Tencent Cloud COS Node.js SDK](https://github.com/tencentyun/cos-nodejs-sdk-v5)

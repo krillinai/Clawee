@@ -21,13 +21,21 @@ const config = {
 
 test('校验 COS 配置和对象 URL', () => {
   assert.deepEqual(validateCosConfiguration(config), config);
+  assert.deepEqual(validateCosConfiguration({
+    ...config,
+    uploadEndpoint: 'cos.accelerate.myqcloud.com'
+  }), {
+    ...config,
+    uploadEndpoint: 'cos.accelerate.myqcloud.com'
+  });
   assert.equal(publicObjectUrl(config, 'releases/v1.0.0/a file.dmg'), 'https://download.example.com/clawee/releases/v1.0.0/a%20file.dmg');
   for (const invalid of [
     { ...config, publicBaseUrl: 'http://download.example.com' },
     { ...config, publicBaseUrl: 'https://download.example.com/' },
     { ...config, prefix: '../clawee' },
     { ...config, bucket: 'clawee-release' },
-    { ...config, region: 'Guangzhou' }
+    { ...config, region: 'Guangzhou' },
+    { ...config, uploadEndpoint: 'uploads.example.com' }
   ]) assert.throws(() => validateCosConfiguration(invalid));
   assert.throws(() => publicObjectUrl(config, '../secret'));
 });

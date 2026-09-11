@@ -33,7 +33,7 @@ test('固定 COSCLI 版本和官方摘要', () => {
   assert.equal(coscliSha256, 'a07de5ba2800147a700ed29036b0c76a4229088cee68e1682d0eae19b638a915');
 });
 
-test('COSCLI 适配器启用整体校验、覆盖保护并清理 0600 凭据文件', async () => {
+test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 凭据文件', async () => {
   const root = mkdtempSync(join(tmpdir(), 'clawee-fake-coscli-'));
   const previousRoot = process.env.FAKE_COS_ROOT;
   const previousLog = process.env.FAKE_COS_LOG;
@@ -49,6 +49,7 @@ test('COSCLI 适配器启用整体校验、覆盖保护并清理 0600 凭据文�
     const storage = createCoscliStorage({
       bucket: 'clawee-1250000000',
       region: 'ap-guangzhou',
+      uploadEndpoint: 'cos.accelerate.myqcloud.com',
       publicBaseUrl: 'https://download.example.com',
       prefix: 'clawee',
       coscliPath: executable,
@@ -65,6 +66,13 @@ test('COSCLI 适配器启用整体校验、覆盖保护并清理 0600 凭据文�
       { 'Cache-Control': 'immutable', 'Content-Type': 'application/octet-stream' },
       { forbidOverwrite: true }
     );
+    assert.deepEqual(
+      await storage.stat('clawee/releases/v1.0.0/artifact.bin'),
+      {
+        bytes: 7,
+        sha256: createHash('sha256').update('content').digest('hex')
+      }
+    );
     assert.equal(
       (await storage.get('clawee/releases/v1.0.0/artifact.bin')).toString(),
       'content'
@@ -76,7 +84,9 @@ test('COSCLI 适配器启用整体校验、覆盖保护并清理 0600 凭据文�
     const upload = calls.find(args => args[0] === 'cp' && !args[1].startsWith('cos://'));
     assert.ok(upload.includes('--disable-checksum=false'));
     assert.ok(upload.includes('--forbid-overwrite=true'));
+    assert.match(upload[upload.indexOf('--meta') + 1], /x-cos-meta-sha256:[0-9a-f]{64}/);
     const configPath = upload[upload.indexOf('-c') + 1];
+    assert.match(readFileSync(configPath, 'utf8'), /endpoint: "cos\.accelerate\.myqcloud\.com"/);
     assert.equal(statSync(configPath).mode & 0o777, 0o600);
     storage.close();
     assert.equal(existsSync(configPath), false);
@@ -95,11 +105,12 @@ test('不可变对象先校验后上传且相同内容可幂等重跑', async ()
     mkdirSync(join(root, 'updates'));
     writeFileSync(join(root, 'artifact.bin'), 'artifact');
     writeFileSync(join(root, 'updates', 'latest.yml'), 'feed');
-    const storage = new MemoryStorage();
+    const storage = new MetadataStorage();
     await publishImmutableObjects({ storage, versionRoot: root, prefix: 'clawee', tag: 'v1.0.0' });
     const firstPutCount = storage.operations.filter(item => item.startsWith('put:')).length;
     await publishImmutableObjects({ storage, versionRoot: root, prefix: 'clawee', tag: 'v1.0.0' });
     assert.equal(storage.operations.filter(item => item.startsWith('put:')).length, firstPutCount);
+    assert.equal(storage.operations.some(item => item.startsWith('get:')), false);
     storage.values.set('clawee/releases/v1.0.0/artifact.bin', Buffer.from('different'));
     await assert.rejects(
       publishImmutableObjects({ storage, versionRoot: root, prefix: 'clawee', tag: 'v1.0.0' }),
@@ -281,6 +292,12 @@ test('Preflight 只接受完整产物集并写入 SHA 与 Run ID 目录', async 
     });
     assert.equal(result.root, `clawee/preflight/${sha}/123`);
     assert.ok(storage.values.has(`${result.root}/preflight-manifest.json`));
+    assert.deepEqual(
+      storage.operations.filter(item => item.startsWith('put:')),
+      [`put:${result.root}/preflight-manifest.json`]
+    );
+    const manifest = JSON.parse(storage.values.get(`${result.root}/preflight-manifest.json`));
+    assert.equal(manifest.artifacts.length, 16);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -325,15 +342,18 @@ test('Preflight 拒绝子目录中的合法文件名', async () => {
   }
 });
 
-test('公网校验实际下载 updater 包并核对 sha512', async () => {
+test('公网校验只通过 HEAD 和 Range 检查 updater 包', async () => {
   const root = mkdtempSync(join(tmpdir(), 'clawee-cos-public-immutable-'));
   try {
     const fixture = publicImmutableFixture(root);
     await verifyPublicImmutableRelease({ ...fixture, fetchImpl: fixture.fetchImpl });
-    fixture.objects.set(fixture.zipUrl, Buffer.from('bad-content'));
+    const zipRequests = fixture.requests.filter(item => item.url === fixture.zipUrl);
+    assert.deepEqual(zipRequests.map(item => item.method), ['HEAD', 'GET']);
+    assert.equal(zipRequests[1].range, 'bytes=0-0');
+    fixture.objects.set(fixture.zipUrl, Buffer.from('bad'));
     await assert.rejects(
       verifyPublicImmutableRelease({ ...fixture, fetchImpl: fixture.fetchImpl }),
-      /sha512 or size mismatch/
+      /Content-Length mismatch/
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -381,6 +401,23 @@ class MemoryStorage {
       throw new Error('injected failure');
     }
     this.values.set(key, readFileSync(path));
+  }
+}
+
+class MetadataStorage extends MemoryStorage {
+  async stat(key) {
+    this.operations.push(`stat:${key}`);
+    const value = this.values.get(key);
+    if (value === undefined) return null;
+    return {
+      bytes: value.length,
+      sha256: createHash('sha256').update(value).digest('hex')
+    };
+  }
+
+  async get(key) {
+    this.operations.push(`get:${key}`);
+    throw new Error('metadata-backed storage should not download objects');
   }
 }
 
@@ -465,10 +502,16 @@ function publicImmutableFixture(root) {
     [zipUrl, zip],
     [blockmapUrl, blockmap]
   ]);
+  const requests = [];
   const fetchImpl = async (url, options = {}) => {
     const cleanUrl = new URL(url);
     cleanUrl.search = '';
     const key = cleanUrl.toString();
+    requests.push({
+      url: key,
+      method: options.method ?? 'GET',
+      range: options.headers?.Range
+    });
     const content = objects.get(key);
     const type = key.endsWith('.json')
       ? 'application/json; charset=utf-8'
@@ -485,12 +528,12 @@ function publicImmutableFixture(root) {
     if (options.headers?.Range) return new Response(content.subarray(0, 1), { status: 206, headers });
     return new Response(content, { status: 200, headers });
   };
-  return { config, release, versionRoot, objects, zipUrl, fetchImpl };
+  return { config, release, versionRoot, objects, zipUrl, requests, fetchImpl };
 }
 
 function fakeCoscliSource() {
   return `#!/usr/bin/env node
-import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
 appendFileSync(process.env.FAKE_COS_LOG, JSON.stringify(args) + '\\n');
@@ -498,8 +541,22 @@ if (args[0] === 'bucket-versioning') {
   if (!args.includes('--disable-log')) console.log('bucket versioning status is Enabled');
   process.exit(0);
 }
-if (args[0] !== 'cp') process.exit(2);
 const objectPath = value => join(process.env.FAKE_COS_ROOT, value.replace(/^cos:\\/\\/[^/]+\\//, ''));
+if (args[0] === 'stat') {
+  const source = objectPath(args[1]);
+  if (!existsSync(source)) {
+    console.error('NoSuchKey: status code 404');
+    process.exit(1);
+  }
+  console.log('Content-Length: ' + statSync(source).size);
+  const metadataPath = source + '.metadata';
+  if (existsSync(metadataPath)) {
+    const match = /x-cos-meta-sha256:([0-9a-f]{64})/i.exec(readFileSync(metadataPath, 'utf8'));
+    if (match) console.log('x-cos-meta-sha256: ' + match[1]);
+  }
+  process.exit(0);
+}
+if (args[0] !== 'cp') process.exit(2);
 if (args[1].startsWith('cos://')) {
   const source = objectPath(args[1]);
   if (!existsSync(source)) {
@@ -512,6 +569,8 @@ if (args[1].startsWith('cos://')) {
   const destination = objectPath(args[2]);
   mkdirSync(dirname(destination), { recursive: true });
   copyFileSync(args[1], destination);
+  const metadataIndex = args.indexOf('--meta');
+  if (metadataIndex !== -1) writeFileSync(destination + '.metadata', args[metadataIndex + 1]);
 }
 `;
 }
