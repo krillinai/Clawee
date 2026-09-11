@@ -6371,8 +6371,9 @@ describe('App', () => {
     await waitFor(() => expect(subscriptionSequence).toBe(1));
 
     await user.click(screen.getByRole('button', { name: '在 secondary 中新建会话' }));
+    const sendButton = await screen.findByRole('button', { name: '发送' });
     await user.type(screen.getByRole('textbox', { name: '输入任务' }), '新任务');
-    await user.click(screen.getByRole('button', { name: '发送' }));
+    await user.click(sendButton);
     await waitFor(() => expect(subscriptionSequence).toBe(2));
 
     await act(async () => {
