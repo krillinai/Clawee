@@ -59,7 +59,12 @@ describe('Release workflows', () => {
   });
 
   it('records unified preflight status against the checked-out commit', () => {
-    expect(preflightWorkflow).toContain('statuses: write');
+    expect(preflightWorkflow).toContain(
+      'permissions:\n  contents: read\n\nconcurrency:'
+    );
+    expect(preflightWorkflow).toContain(
+      'client:\n    permissions:\n      contents: read\n      statuses: write'
+    );
     expect(preflightWorkflow).toContain('context=release-preflight');
     expect(preflightWorkflow).toContain(
       '"repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}"'
@@ -91,6 +96,7 @@ describe('Release workflows', () => {
     expect(releaseWorkflow).not.toContain(
       'select(.context == "release-preflight")'
     );
+    expect(releaseWorkflow).not.toContain('secrets: inherit');
   });
 
   it('creates signed macOS and explicitly unsigned Windows release packages', () => {

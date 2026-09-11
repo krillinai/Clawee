@@ -18,7 +18,6 @@ on:
 
 permissions:
   contents: read
-  statuses: write
 
 concurrency:
   group: release-preflight-${{ inputs.ref || github.ref }}
@@ -26,6 +25,9 @@ concurrency:
 
 jobs:
   client:
+    permissions:
+      contents: read
+      statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 35
     outputs:

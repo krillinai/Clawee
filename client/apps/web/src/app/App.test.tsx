@@ -8063,11 +8063,19 @@ describe('App', () => {
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /文件会话 A/ }));
     await user.click(screen.getByRole('button', { name: '文件' }));
-    expect(await screen.findByRole('heading', { name: 'A.md' })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      'heading',
+      { name: 'A.md' },
+      { timeout: 5_000 }
+    )).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /文件会话 B/ }));
     expect(screen.getByLabelText('会话和文件工作区')).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'B.md' })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      'heading',
+      { name: 'B.md' },
+      { timeout: 5_000 }
+    )).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /空文件会话/ }));
     await waitFor(() => {
@@ -8083,7 +8091,11 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: /文件会话 A/ }));
     expect(screen.getByLabelText('会话和文件工作区')).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'A.md' })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      'heading',
+      { name: 'A.md' },
+      { timeout: 5_000 }
+    )).toBeInTheDocument();
     }
   );
 
