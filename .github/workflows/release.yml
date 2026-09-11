@@ -29,7 +29,7 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -130,7 +130,7 @@ jobs:
       COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
       COS_PREFIX: ${{ vars.COS_PREFIX }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
@@ -213,7 +213,7 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: docker/setup-qemu-action@v3
@@ -272,7 +272,7 @@ jobs:
       TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
       RELEASE_ALREADY_PUBLISHED: ${{ needs.gate.outputs.release_published }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4

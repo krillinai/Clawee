@@ -11,13 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
+          cache-dependency-path: server/go.sum
       - name: 安装固定版本扫描器
         run: go install github.com/zricethezav/gitleaks/v8@v8.24.3
       - name: 扫描公开历史

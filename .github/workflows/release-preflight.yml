@@ -25,7 +25,7 @@ jobs:
     outputs:
       target-sha: ${{ steps.target.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
@@ -80,11 +80,11 @@ jobs:
           - 5432:5432
         options: --health-cmd "pg_isready -U claw_mcp -d claw_mcp_test" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.client.outputs.target-sha }}
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
@@ -137,7 +137,7 @@ jobs:
       CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
       CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.client.outputs.target-sha }}
           persist-credentials: false
@@ -209,11 +209,11 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.client.outputs.target-sha }}
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
@@ -245,7 +245,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.client.outputs.target-sha }}
           persist-credentials: false
@@ -291,7 +291,7 @@ jobs:
           pattern: clawee-server-preflight-linux-*
           merge-multiple: true
       - name: 检出受保护分支的发布器
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: publisher
