@@ -20,8 +20,8 @@ import {
 
 test('统一发布版本与所有产品版本标记一致', () => {
   assert.deepEqual(inspectReleaseVersion(), {
-    version: '0.1.1',
-    tag: 'v0.1.1',
+    version: '0.1.2',
+    tag: 'v0.1.2',
     prerelease: false,
     channel: 'stable'
   });
@@ -72,7 +72,7 @@ test('发布检查拒绝与版本不一致的 Tag', () => {
     encoding: 'utf8'
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /does not match version 0\.1\.1/);
+  assert.match(result.stderr, /does not match version 0\.1\.2/);
 });
 
 test('版本目标校验失败时不写入部分文件', () => {
