@@ -3,6 +3,7 @@ import type {
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
   EnterpriseActivityStatisticsResponse,
+  EnterpriseBilibiliDashboardRange,
   EnterpriseBillingOverviewResponse,
   EnterpriseBilibiliDashboardResponse,
   EnterpriseKnowledgeBaseListResponse,
@@ -115,9 +116,16 @@ export function createEnterpriseService(client: ClientLike) {
       const query = new URLSearchParams({ range });
       return client.get(`/enterprise/billing/overview?${query.toString()}`);
     },
-    getBilibiliDashboard(): Promise<EnterpriseBilibiliDashboardResponse> {
+    getBilibiliDashboard(input: {
+      range?: EnterpriseBilibiliDashboardRange;
+      sourceId?: string;
+    } = {}): Promise<EnterpriseBilibiliDashboardResponse> {
+      const query = new URLSearchParams();
+      if (input.range !== undefined) query.set('range', input.range);
+      if (input.sourceId !== undefined) query.set('sourceId', input.sourceId);
+      const suffix = query.size === 0 ? '' : `?${query.toString()}`;
       return client.get(
-        '/enterprise/business-dashboards/bilibili-operation'
+        `/enterprise/business-dashboards/bilibili-operation${suffix}`
       );
     },
     createRechargeSession(): Promise<EnterpriseRechargeSessionResponse> {

@@ -1,18 +1,22 @@
-import type { EnterpriseBilibiliDashboardResponse } from '@clawee/protocol';
+import type { EnterpriseBilibiliDashboardRange, EnterpriseBilibiliDashboardResponse } from '@clawee/protocol';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Eye, Heart, Plus, RefreshCw, Save, Sparkles, Tv, UserPlus, Video, X } from 'lucide-react';
+import { Plus, Save, Sparkles, Tv, X } from 'lucide-react';
 import { ApiClientError } from '../../runtime/client.js';
+import {
+  BilibiliDashboardDetail,
+  type BilibiliDashboardFilters,
+  type BilibiliLoadState
+} from './BilibiliDashboardDetail.js';
 import './dashboard.css';
 import './dashboard-layout.css';
 
 type DashboardRole = 'admin' | 'employee';
 type DashboardDetailId = 'bilibili';
-type BilibiliLoadState =
-  | { status: 'idle' | 'loading' }
-  | { status: 'loaded'; dashboard: EnterpriseBilibiliDashboardResponse }
-  | { status: 'error'; forbidden: boolean };
 type DashboardEnterpriseService = {
-  getBilibiliDashboard(): Promise<EnterpriseBilibiliDashboardResponse>;
+  getBilibiliDashboard(input?: {
+    range?: EnterpriseBilibiliDashboardRange;
+    sourceId?: string;
+  }): Promise<EnterpriseBilibiliDashboardResponse>;
 };
 type BusinessModule = {
   id: string; title: string; description: string; icon: typeof Tv;
@@ -21,7 +25,7 @@ type BusinessModule = {
 };
 
 const initialBusinessModules: BusinessModule[] = [
-  { id: 'bilibili', title: '哔哩哔哩运营', description: '查看账号粉丝、稿件播放与互动表现', icon: Tv, primaryLabel: '当前粉丝', primaryValue: '—', secondaryLabel: '累计播放', secondaryValue: '—', signal: '等待企业数据', tone: 'neutral', scope: 'enterprise' }
+  { id: 'bilibili', title: '哔哩哔哩运营', description: '查看账号粉丝、稿件播放与互动表现', icon: Tv, primaryLabel: '当前粉丝', primaryValue: '-', secondaryLabel: '累计播放', secondaryValue: '-', signal: '等待企业数据', tone: 'neutral', scope: 'enterprise' }
 ];
 
 export function DashboardPage(props: {
@@ -34,6 +38,8 @@ export function DashboardPage(props: {
   const [businessModules, setBusinessModules] = useState(initialBusinessModules);
   const [detailId, setDetailId] = useState<DashboardDetailId>();
   const [bilibili, setBilibili] = useState<BilibiliLoadState>({ status: 'idle' });
+  const [bilibiliFilters, setBilibiliFilters] = useState<BilibiliDashboardFilters>({ range: '7d' });
+  const [bilibiliReload, setBilibiliReload] = useState(0);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState({ title: '', description: '' });
   const createDashboard = () => {
@@ -42,13 +48,20 @@ export function DashboardPage(props: {
     setCreating(false); setDraft({ title: '', description: '' });
   };
 
-  const loadBilibili = () => {
-    if (props.service === null || props.service === undefined) return;
+  useEffect(() => {
+    if (props.connected !== true || props.enterpriseSignedIn !== true || props.service === null || props.service === undefined) {
+      setBilibili({ status: 'idle' });
+      return;
+    }
     let active = true;
     setBilibili({ status: 'loading' });
-    void props.service.getBilibiliDashboard()
+    void props.service.getBilibiliDashboard(bilibiliFilters)
       .then(dashboard => {
-        if (active) setBilibili({ status: 'loaded', dashboard });
+        if (!active) return;
+        setBilibili({ status: 'loaded', dashboard });
+        if (bilibiliFilters.sourceId === undefined && dashboard.account?.sourceId !== undefined) {
+          setBilibiliFilters(current => ({ ...current, sourceId: dashboard.account?.sourceId }));
+        }
       })
       .catch(error => {
         if (!active) return;
@@ -63,15 +76,7 @@ export function DashboardPage(props: {
         });
       });
     return () => { active = false; };
-  };
-
-  useEffect(() => {
-    if (props.connected !== true || props.enterpriseSignedIn !== true) {
-      setBilibili({ status: 'idle' });
-      return;
-    }
-    return loadBilibili();
-  }, [props.connected, props.enterpriseSignedIn, props.service]);
+  }, [props.connected, props.enterpriseSignedIn, props.service, bilibiliFilters.range, bilibiliFilters.sourceId, bilibiliReload]);
 
   const visibleModules = businessModules.map(module => (
     module.id === 'bilibili'
@@ -79,7 +84,13 @@ export function DashboardPage(props: {
       : module
   ));
 
-  if (detailId === 'bilibili') return <BilibiliDashboardDetail state={bilibili} onBack={() => setDetailId(undefined)} onRetry={loadBilibili} />;
+  if (detailId === 'bilibili') return <BilibiliDashboardDetail
+    state={bilibili}
+    filters={bilibiliFilters}
+    onBack={() => setDetailId(undefined)}
+    onRetry={() => setBilibiliReload(value => value + 1)}
+    onFiltersChange={setBilibiliFilters}
+  />;
 
   return <main className="dashboard-page"><div className="dashboard-page__inner">
     <header className="dashboard-header"><div><div className="dashboard-title-row"><h1>数据看板</h1><span>企业数据</span></div><p>业务运营数据与关键指标概览</p></div><div className="dashboard-period"><span>统计周期</span><strong>近 7 天</strong></div></header>
@@ -102,13 +113,13 @@ function bilibiliModuleSummary(
   state: BilibiliLoadState,
   props: { connected?: boolean; enterpriseSignedIn?: boolean }
 ): Pick<BusinessModule, 'primaryValue' | 'secondaryValue' | 'signal' | 'tone'> {
-  if (props.connected !== true) return { primaryValue: '—', secondaryValue: '—', signal: '本地运行内核未连接', tone: 'warning' };
-  if (props.enterpriseSignedIn !== true) return { primaryValue: '—', secondaryValue: '—', signal: '登录企业账号后查看', tone: 'neutral' };
-  if (state.status === 'loading') return { primaryValue: '—', secondaryValue: '—', signal: '正在加载企业数据', tone: 'neutral' };
-  if (state.status === 'error') return { primaryValue: '—', secondaryValue: '—', signal: state.forbidden ? '当前账号无查看权限' : '企业数据加载失败', tone: 'warning' };
-  if (state.status !== 'loaded') return { primaryValue: '—', secondaryValue: '—', signal: '等待企业数据', tone: 'neutral' };
-  if (state.dashboard.status === 'unconfigured') return { primaryValue: '未配置', secondaryValue: '—', signal: '数据源尚未接入', tone: 'warning' };
-  if (state.dashboard.status === 'unavailable' || state.dashboard.data === undefined) return { primaryValue: '待同步', secondaryValue: '—', signal: '暂无可用采集数据', tone: 'warning' };
+  if (props.connected !== true) return { primaryValue: '-', secondaryValue: '-', signal: '本地运行内核未连接', tone: 'warning' };
+  if (props.enterpriseSignedIn !== true) return { primaryValue: '-', secondaryValue: '-', signal: '登录企业账号后查看', tone: 'neutral' };
+  if (state.status === 'loading') return { primaryValue: '-', secondaryValue: '-', signal: '正在加载企业数据', tone: 'neutral' };
+  if (state.status === 'error') return { primaryValue: '-', secondaryValue: '-', signal: state.forbidden ? '当前账号无查看权限' : '企业数据加载失败', tone: 'warning' };
+  if (state.status !== 'loaded') return { primaryValue: '-', secondaryValue: '-', signal: '等待企业数据', tone: 'neutral' };
+  if (state.dashboard.status === 'unconfigured') return { primaryValue: '未配置', secondaryValue: '-', signal: '数据源尚未接入', tone: 'warning' };
+  if (state.dashboard.status === 'unavailable' || state.dashboard.data === undefined) return { primaryValue: '待同步', secondaryValue: '-', signal: '暂无可用采集数据', tone: 'warning' };
   return {
     primaryValue: formatInteger(state.dashboard.data.followerCount),
     secondaryValue: formatInteger(state.dashboard.data.viewCount),
@@ -117,55 +128,6 @@ function bilibiliModuleSummary(
   };
 }
 
-function BilibiliDashboardDetail(props: {
-  state: BilibiliLoadState;
-  onBack(): void;
-  onRetry(): void;
-}) {
-  const data = props.state.status === 'loaded'
-    && (props.state.dashboard.status === 'available' || props.state.dashboard.status === 'partial')
-    ? props.state.dashboard.data
-    : undefined;
-  return <main className="dashboard-page dashboard-detail-page"><div className="dashboard-page__inner">
-    <header className="dashboard-detail-header"><button aria-label="返回数据看板" onClick={props.onBack} type="button"><ArrowLeft size={18} aria-hidden="true" /></button><div><span>内容运营详情</span><h1>哔哩哔哩运营</h1><p>{data === undefined ? '企业业务数据' : `采集于 ${formatDateTime(data.capturedAt)}`}</p></div></header>
-    {data === undefined ? <BilibiliDashboardState state={props.state} onRetry={props.onRetry} /> : <>
-      <section className="dashboard-detail-metrics" aria-label="哔哩哔哩运营核心指标">{[
-        { label: '当前粉丝', value: data.followerCount, icon: UserPlus },
-        { label: '已采集稿件', value: data.collectedContentCount, icon: Video },
-        { label: '稿件累计播放', value: data.viewCount, icon: Eye },
-        { label: '稿件累计互动', value: data.interactionCount, icon: Heart }
-      ].map(item => { const Icon = item.icon; return <article key={item.label}><Icon size={18} aria-hidden="true" /><span>{item.label}</span><strong>{formatInteger(item.value)}</strong></article>; })}</section>
-      <section className="dashboard-detail-panel"><header><div><span>PERFORMANCE</span><h2>热门稿件</h2></div><small>按累计播放量排序</small></header>{data.topContents.length === 0 ? <div className="dashboard-detail-empty">暂无稿件数据</div> : <div className="dashboard-detail-table dashboard-detail-table--bilibili"><div><span>稿件</span><span>数据时间</span><span>播放量</span><span>互动量</span></div>{data.topContents.map(item => <div key={item.externalContentId}><span title={item.title || item.externalContentId}>{item.title || item.externalContentId}</span><span>{formatDateTime(item.capturedAt)}</span><span>{formatInteger(item.viewCount)}</span><span>{formatInteger(item.interactionCount)}</span></div>)}</div>}</section>
-    </>}
-  </div></main>;
-}
-
-function BilibiliDashboardState(props: { state: BilibiliLoadState; onRetry(): void }) {
-  let title = '正在加载哔哩哔哩数据';
-  let message = '正在从企业服务读取最新运营数据。';
-  if (props.state.status === 'idle') {
-    title = '企业数据暂不可用';
-    message = '请确认本地运行内核已连接并登录企业账号。';
-  } else if (props.state.status === 'error') {
-    title = props.state.forbidden ? '暂无查看权限' : '哔哩哔哩数据加载失败';
-    message = props.state.forbidden ? '请联系管理员开通哔哩哔哩运营数据权限。' : '企业服务暂时无法返回数据，请稍后重试。';
-  } else if (props.state.status === 'loaded') {
-    title = props.state.dashboard.status === 'unconfigured' ? '数据源尚未接入' : '暂无可用采集数据';
-    message = props.state.dashboard.status === 'unconfigured' ? '请先在企业管理端完成哔哩哔哩账号接入。' : '数据源已启用，但还没有成功同步的数据。';
-  }
-  return <section className="dashboard-detail-state" role={props.state.status === 'error' ? 'alert' : 'status'}><Tv size={22} aria-hidden="true" /><h2>{title}</h2><p>{message}</p>{props.state.status === 'error' && !props.state.forbidden ? <button type="button" onClick={props.onRetry}><RefreshCw size={15} aria-hidden="true" />重试</button> : null}</section>;
-}
-
 function formatInteger(value: number): string {
   return new Intl.NumberFormat('zh-CN').format(value);
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-CN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Shanghai'
-  }).format(date);
 }

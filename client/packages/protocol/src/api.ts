@@ -908,22 +908,81 @@ export type EnterpriseBusinessDataStatus =
   | 'partial'
   | 'unavailable';
 
+export type EnterpriseBilibiliDashboardRange = 'today' | '7d' | '30d';
+
+export type EnterpriseBilibiliSource = {
+  sourceId: string;
+  name: string;
+  status: 'active' | 'disabled';
+  statusReason: string;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  nextSyncAt?: string;
+  activeRunStatus?: string;
+};
+
+export type EnterpriseBilibiliDashboardAccount = {
+  sourceId: string;
+  name: string;
+  status: string;
+  statusReason: string;
+  lastSuccessAt?: string;
+};
+
+export type EnterpriseBilibiliTrendPoint = {
+  date: string;
+  followerCount: number;
+  viewCount: number;
+  interactionCount: number;
+  followerCountDelta: number;
+  viewCountDelta: number;
+  interactionCountDelta: number;
+};
+
 export type EnterpriseBilibiliTopContent = {
+  sourceId: string;
+  accountName: string;
   externalContentId: string;
   title: string;
+  publishedAt?: string;
+  status: string;
   capturedAt: string;
   viewCount: number;
+  danmakuCount?: number;
+  replyCount?: number;
+  favoriteCount?: number;
+  coinCount?: number;
+  shareCount?: number;
+  likeCount?: number;
   interactionCount: number;
 };
 
 export type EnterpriseBilibiliDashboardResponse = {
   status: EnterpriseBusinessDataStatus;
+  account?: EnterpriseBilibiliDashboardAccount;
+  range: EnterpriseBilibiliDashboardRange;
+  timezone?: string;
+  startDate?: string;
+  endDate?: string;
+  generatedAt?: string;
+  lastSyncedAt?: string;
+  unavailableParts: string[];
+  sources: EnterpriseBilibiliSource[];
   data?: {
     capturedAt: string;
     followerCount: number;
+    followingCount?: number;
+    publishedCount?: number;
     collectedContentCount: number;
     viewCount: number;
+    danmakuCount?: number;
+    replyCount?: number;
+    favoriteCount?: number;
+    coinCount?: number;
+    shareCount?: number;
+    likeCount?: number;
     interactionCount: number;
+    trend: EnterpriseBilibiliTrendPoint[];
     topContents: EnterpriseBilibiliTopContent[];
   };
 };

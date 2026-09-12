@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import type {
   EnterpriseBusinessDashboardManager
 } from '../enterprise/business-dashboard-manager-2026-08-30.js';
@@ -7,15 +8,27 @@ import {
 } from '../enterprise/business-dashboard-manager-2026-08-30.js';
 import { apiError } from './errors.js';
 
+const dashboardQuerySchema = z.object({
+  range: z.enum(['today', '7d', '30d']).optional().default('7d'),
+  sourceId: z.string().trim().min(1).max(512).optional()
+}).strict();
+
 export async function registerEnterpriseBusinessDashboardRoutes(
   server: FastifyInstance,
   manager: EnterpriseBusinessDashboardManager
 ): Promise<void> {
-  server.get(
+  server.get<{ Querystring: unknown }>(
     '/enterprise/business-dashboards/bilibili-operation',
-    async (_request, reply) => {
+    async (request, reply) => {
+      const parsed = dashboardQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return reply.code(400).send(apiError(
+          'VALIDATION_FAILED',
+          'Bilibili dashboard request is invalid'
+        ));
+      }
       try {
-        return await manager.getBilibiliDashboard();
+        return await manager.getBilibiliDashboard(parsed.data);
       } catch (error) {
         return sendDashboardError(reply, error);
       }

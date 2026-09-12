@@ -11,21 +11,71 @@ describe('enterprise Bilibili dashboard HTTP client', () => {
       url: string | URL | Request,
       _init?: RequestInit
     ) => new Response(JSON.stringify(String(url).endsWith('/business-data-sources/bilibili') ? {
-      data: { items: [{ source_id: 'bdsrc/account', status: 'active' }] }
+      data: { items: [{
+        source_id: 'bdsrc/account',
+        name: '品牌官方账号',
+        status: 'active',
+        status_reason: '',
+        last_attempt_at: '2026-08-30T01:29:00Z',
+        last_success_at: '2026-08-30T01:30:00Z',
+        next_sync_at: '2026-08-30T02:30:00Z',
+        active_run_status: ''
+      }] }
     } : {
       data: {
         status: 'available',
+        account: {
+          source_id: 'bdsrc/account',
+          name: '品牌官方账号',
+          status: 'active',
+          status_reason: '',
+          last_success_at: '2026-08-30T01:30:00Z'
+        },
+        range: '30d',
+        timezone: 'Asia/Shanghai',
+        start_date: '2026-08-01',
+        end_date: '2026-08-30',
+        generated_at: '2026-08-30T01:31:00Z',
+        last_synced_at: '2026-08-30T01:30:00Z',
+        unavailable_parts: [],
         data: {
           captured_at: '2026-08-30T01:30:00Z',
           follower_count: 128600,
+          following_count: 86,
+          published_count: 30,
           collected_content_count: 24,
           view_count: 8650000,
+          danmaku_count: 12800,
+          reply_count: 9600,
+          favorite_count: 48000,
+          coin_count: 32000,
+          share_count: 6400,
+          like_count: 208000,
           interaction_count: 316800,
+          trend: [{
+            date: '2026-08-30',
+            follower_count: 128600,
+            view_count: 8650000,
+            interaction_count: 316800,
+            follower_count_delta: 700,
+            view_count_delta: 170000,
+            interaction_count_delta: 9800
+          }],
           top_contents: [{
+            source_id: 'bdsrc/account',
+            account_name: '品牌官方账号',
             external_content_id: 'BV1test',
             title: '夏日新品开箱',
+            published_at: '2026-08-26T03:00:00Z',
+            status: '0',
             captured_at: '2026-08-30T01:20:00Z',
             view_count: 680000,
+            danmaku_count: 1100,
+            reply_count: 800,
+            favorite_count: 4200,
+            coin_count: 3100,
+            share_count: 600,
+            like_count: 18800,
             interaction_count: 28600
           }]
         }
@@ -33,19 +83,33 @@ describe('enterprise Bilibili dashboard HTTP client', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
 
-    await expect(client.getBilibiliDashboard!('access-token')).resolves.toEqual({
+    await expect(client.getBilibiliDashboard!('access-token', {
+      range: '30d',
+      sourceId: 'bdsrc/account'
+    })).resolves.toMatchObject({
       status: 'available',
+      account: { sourceId: 'bdsrc/account', name: '品牌官方账号' },
+      range: '30d',
+      startDate: '2026-08-01',
+      endDate: '2026-08-30',
+      sources: [{ sourceId: 'bdsrc/account', name: '品牌官方账号' }],
       data: {
         capturedAt: '2026-08-30T01:30:00Z',
         followerCount: 128600,
+        followingCount: 86,
+        publishedCount: 30,
         collectedContentCount: 24,
         viewCount: 8650000,
+        likeCount: 208000,
         interactionCount: 316800,
+        trend: [{ viewCountDelta: 170000 }],
         topContents: [{
+          sourceId: 'bdsrc/account',
           externalContentId: 'BV1test',
           title: '夏日新品开箱',
-          capturedAt: '2026-08-30T01:20:00Z',
+          publishedAt: '2026-08-26T03:00:00Z',
           viewCount: 680000,
+          likeCount: 18800,
           interactionCount: 28600
         }]
       }
@@ -54,7 +118,7 @@ describe('enterprise Bilibili dashboard HTTP client', () => {
       `${ORIGIN}/api/v1/app/business-data-sources/bilibili`
     );
     expect(String(fetch.mock.calls[1]?.[0])).toBe(
-      `${ORIGIN}/api/v1/app/business-dashboards/bilibili-operation?range=7d&source_id=bdsrc%2Faccount`
+      `${ORIGIN}/api/v1/app/business-dashboards/bilibili-operation?range=30d&source_id=bdsrc%2Faccount`
     );
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({
       method: 'GET',
@@ -85,7 +149,10 @@ describe('enterprise Bilibili dashboard HTTP client', () => {
     const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
 
     await expect(client.getBilibiliDashboard!('access-token')).resolves.toEqual({
-      status: 'unconfigured'
+      status: 'unconfigured',
+      range: '7d',
+      unavailableParts: [],
+      sources: []
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -110,9 +177,13 @@ describe('enterprise Bilibili dashboard HTTP client', () => {
     ), { status: 200, headers: { 'content-type': 'application/json' } }));
     const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
 
-    await expect(client.getBilibiliDashboard!('access-token')).resolves.toMatchObject({
+    const result = await client.getBilibiliDashboard!('access-token');
+    expect(result).toMatchObject({
       status: 'partial',
       data: { followerCount: 10 }
     });
+    expect(result.data?.followingCount).toBeUndefined();
+    expect(result.data?.publishedCount).toBeUndefined();
+    expect(result.data?.likeCount).toBeUndefined();
   });
 });

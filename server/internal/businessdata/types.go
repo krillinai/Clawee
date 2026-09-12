@@ -249,13 +249,21 @@ type DouyinAdsDashboardData struct {
 }
 
 type BilibiliTopContent struct {
-	SourceID          string    `json:"source_id"`
-	AccountName       string    `json:"account_name"`
-	ExternalContentID string    `json:"external_content_id"`
-	Title             string    `json:"title"`
-	CapturedAt        time.Time `json:"captured_at"`
-	ViewCount         int64     `json:"view_count"`
-	InteractionCount  int64     `json:"interaction_count"`
+	SourceID          string     `json:"source_id"`
+	AccountName       string     `json:"account_name"`
+	ExternalContentID string     `json:"external_content_id"`
+	Title             string     `json:"title"`
+	PublishedAt       *time.Time `json:"published_at,omitempty"`
+	Status            string     `json:"status"`
+	CapturedAt        time.Time  `json:"captured_at"`
+	ViewCount         int64      `json:"view_count"`
+	DanmakuCount      int64      `json:"danmaku_count"`
+	ReplyCount        int64      `json:"reply_count"`
+	FavoriteCount     int64      `json:"favorite_count"`
+	CoinCount         int64      `json:"coin_count"`
+	ShareCount        int64      `json:"share_count"`
+	LikeCount         int64      `json:"like_count"`
+	InteractionCount  int64      `json:"interaction_count"`
 }
 
 type BilibiliDashboardAccount struct {
@@ -281,8 +289,16 @@ type BilibiliDashboardData struct {
 	Account               BilibiliDashboardAccount
 	CapturedAt            time.Time
 	FollowerCount         int64
+	FollowingCount        int64
+	PublishedCount        int64
 	CollectedContentCount int64
 	ViewCount             int64
+	DanmakuCount          int64
+	ReplyCount            int64
+	FavoriteCount         int64
+	CoinCount             int64
+	ShareCount            int64
+	LikeCount             int64
 	InteractionCount      int64
 	Trend                 []BilibiliTrendPoint
 	TopContents           []BilibiliTopContent

@@ -45,15 +45,23 @@ type BilibiliDashboardResponse struct {
 	EndDate          string                   `json:"end_date"`
 	GeneratedAt      time.Time                `json:"generated_at"`
 	Data             *BilibiliDashboardDTO    `json:"data,omitempty"`
-	LastSyncedAt     *time.Time               `json:"-"`
+	LastSyncedAt     *time.Time               `json:"last_synced_at,omitempty"`
 	UnavailableParts []string                 `json:"unavailable_parts,omitempty"`
 }
 
 type BilibiliDashboardDTO struct {
 	CapturedAt            time.Time            `json:"captured_at"`
 	FollowerCount         int64                `json:"follower_count"`
+	FollowingCount        int64                `json:"following_count"`
+	PublishedCount        int64                `json:"published_count"`
 	CollectedContentCount int64                `json:"collected_content_count"`
 	ViewCount             int64                `json:"view_count"`
+	DanmakuCount          int64                `json:"danmaku_count"`
+	ReplyCount            int64                `json:"reply_count"`
+	FavoriteCount         int64                `json:"favorite_count"`
+	CoinCount             int64                `json:"coin_count"`
+	ShareCount            int64                `json:"share_count"`
+	LikeCount             int64                `json:"like_count"`
 	InteractionCount      int64                `json:"interaction_count"`
 	Trend                 []BilibiliTrendPoint `json:"trend"`
 	TopContents           []BilibiliTopContent `json:"top_contents"`
@@ -176,7 +184,11 @@ func (s *DashboardService) Bilibili(ctx context.Context, sourceID, requestedRang
 	}
 	response.Data = &BilibiliDashboardDTO{
 		CapturedAt: data.CapturedAt.UTC(), FollowerCount: data.FollowerCount,
+		FollowingCount: data.FollowingCount, PublishedCount: data.PublishedCount,
 		CollectedContentCount: data.CollectedContentCount, ViewCount: data.ViewCount,
+		DanmakuCount: data.DanmakuCount, ReplyCount: data.ReplyCount,
+		FavoriteCount: data.FavoriteCount, CoinCount: data.CoinCount,
+		ShareCount: data.ShareCount, LikeCount: data.LikeCount,
 		InteractionCount: data.InteractionCount, Trend: data.Trend, TopContents: data.TopContents,
 	}
 	return response, nil
@@ -254,8 +266,16 @@ func (s *DashboardService) BilibiliView(ctx context.Context, requestedRange stri
 			continue
 		}
 		result.Data.FollowerCount += response.Data.FollowerCount
+		result.Data.FollowingCount += response.Data.FollowingCount
+		result.Data.PublishedCount += response.Data.PublishedCount
 		result.Data.CollectedContentCount += response.Data.CollectedContentCount
 		result.Data.ViewCount += response.Data.ViewCount
+		result.Data.DanmakuCount += response.Data.DanmakuCount
+		result.Data.ReplyCount += response.Data.ReplyCount
+		result.Data.FavoriteCount += response.Data.FavoriteCount
+		result.Data.CoinCount += response.Data.CoinCount
+		result.Data.ShareCount += response.Data.ShareCount
+		result.Data.LikeCount += response.Data.LikeCount
 		result.Data.InteractionCount += response.Data.InteractionCount
 		if response.Data.CapturedAt.After(result.Data.CapturedAt) {
 			result.Data.CapturedAt = response.Data.CapturedAt

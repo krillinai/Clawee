@@ -3,6 +3,7 @@ import type {
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
   EnterpriseActivityStatisticsResponse,
+  EnterpriseBilibiliDashboardRange,
   EnterpriseBilibiliDashboardResponse,
   EnterpriseBillingOverviewResponse,
   EnterpriseListMeta,
@@ -130,17 +131,58 @@ const qrLoginStatusResponseSchema = z.object({
 const bilibiliDashboardResponseSchema = z.object({
   data: z.object({
     status: z.enum(['unconfigured', 'available', 'partial', 'unavailable']),
+    account: z.object({
+      source_id: z.string(),
+      name: z.string(),
+      status: z.string(),
+      status_reason: z.string(),
+      last_success_at: z.string().datetime({ offset: true }).nullable().optional()
+    }).optional(),
+    range: z.enum(['today', '7d', '30d']).optional(),
+    timezone: z.string().optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    generated_at: z.string().datetime({ offset: true }).optional(),
+    last_synced_at: z.string().datetime({ offset: true }).nullable().optional(),
+    unavailable_parts: z.array(z.string()).optional().default([]),
     data: z.object({
       captured_at: z.string().datetime({ offset: true }),
       follower_count: z.number().int().nonnegative(),
+      following_count: z.number().int().nonnegative().optional(),
+      published_count: z.number().int().nonnegative().optional(),
       collected_content_count: z.number().int().nonnegative(),
       view_count: z.number().int().nonnegative(),
+      danmaku_count: z.number().int().nonnegative().optional(),
+      reply_count: z.number().int().nonnegative().optional(),
+      favorite_count: z.number().int().nonnegative().optional(),
+      coin_count: z.number().int().nonnegative().optional(),
+      share_count: z.number().int().nonnegative().optional(),
+      like_count: z.number().int().nonnegative().optional(),
       interaction_count: z.number().int().nonnegative(),
+      trend: z.array(z.object({
+        date: z.string(),
+        follower_count: z.number().int(),
+        view_count: z.number().int(),
+        interaction_count: z.number().int(),
+        follower_count_delta: z.number().int(),
+        view_count_delta: z.number().int(),
+        interaction_count_delta: z.number().int()
+      })).optional().default([]),
       top_contents: z.array(z.object({
+        source_id: z.string().optional().default(''),
+        account_name: z.string().optional().default(''),
         external_content_id: z.string().min(1),
         title: z.string(),
+        published_at: z.string().datetime({ offset: true }).nullable().optional(),
+        status: z.string().optional().default(''),
         captured_at: z.string().datetime({ offset: true }),
         view_count: z.number().int().nonnegative(),
+        danmaku_count: z.number().int().nonnegative().optional(),
+        reply_count: z.number().int().nonnegative().optional(),
+        favorite_count: z.number().int().nonnegative().optional(),
+        coin_count: z.number().int().nonnegative().optional(),
+        share_count: z.number().int().nonnegative().optional(),
+        like_count: z.number().int().nonnegative().optional(),
         interaction_count: z.number().int().nonnegative()
       }))
     }).optional()
@@ -150,7 +192,13 @@ const bilibiliSourcesResponseSchema = z.object({
   data: z.object({
     items: z.array(z.object({
       source_id: z.string().min(1),
-      status: z.enum(['active', 'disabled'])
+      name: z.string().optional().default(''),
+      status: z.enum(['active', 'disabled']),
+      status_reason: z.string().optional().default(''),
+      last_attempt_at: z.string().datetime({ offset: true }).nullable().optional(),
+      last_success_at: z.string().datetime({ offset: true }).nullable().optional(),
+      next_sync_at: z.string().datetime({ offset: true }).nullable().optional(),
+      active_run_status: z.string().optional().default('')
     }))
   })
 });
@@ -869,7 +917,8 @@ export type EnterpriseHttpClient = {
     range: EnterpriseActivityRange
   ): Promise<EnterpriseBillingOverviewResponse>;
   getBilibiliDashboard?(
-    accessToken: string
+    accessToken: string,
+    input?: { range?: EnterpriseBilibiliDashboardRange; sourceId?: string }
   ): Promise<EnterpriseBilibiliDashboardResponse>;
   createRechargeSession?(
     accessToken: string
@@ -1748,7 +1797,8 @@ export function createEnterpriseHttpClient(input: {
       };
     },
 
-    async getBilibiliDashboard(accessToken) {
+    async getBilibiliDashboard(accessToken, input = {}) {
+      const range = input.range ?? '7d';
       const sourcesResponse = await requestJson({
         accessToken,
         domain: 'business-data',
@@ -1757,10 +1807,27 @@ export function createEnterpriseHttpClient(input: {
         schema: bilibiliSourcesResponseSchema
       });
       const sources = sourcesResponse.data.items;
-      const source = sources.find(item => item.status === 'active') ?? sources[0];
-      if (source === undefined) return { status: 'unconfigured' };
+      const mappedSources = sources.map(item => ({
+        sourceId: item.source_id,
+        name: item.name || item.source_id,
+        status: item.status,
+        statusReason: item.status_reason ?? '',
+        ...(item.last_attempt_at ? { lastAttemptAt: item.last_attempt_at } : {}),
+        ...(item.last_success_at ? { lastSuccessAt: item.last_success_at } : {}),
+        ...(item.next_sync_at ? { nextSyncAt: item.next_sync_at } : {}),
+        ...(item.active_run_status ? { activeRunStatus: item.active_run_status } : {})
+      }));
+      const source = input.sourceId === undefined
+        ? sources.find(item => item.status === 'active') ?? sources[0]
+        : sources.find(item => item.source_id === input.sourceId);
+      if (source === undefined) return {
+        status: 'unconfigured',
+        range,
+        unavailableParts: [],
+        sources: mappedSources
+      };
       const query = new URLSearchParams({
-        range: '7d',
+        range,
         source_id: source.source_id
       });
       const response = await requestJson({
@@ -1773,18 +1840,62 @@ export function createEnterpriseHttpClient(input: {
       const dashboard = response.data;
       return {
         status: dashboard.status,
+        ...(dashboard.account === undefined ? {} : {
+          account: {
+            sourceId: dashboard.account.source_id,
+            name: dashboard.account.name,
+            status: dashboard.account.status,
+            statusReason: dashboard.account.status_reason,
+            ...(dashboard.account.last_success_at ? { lastSuccessAt: dashboard.account.last_success_at } : {})
+          }
+        }),
+        range: dashboard.range ?? range,
+        ...(dashboard.timezone === undefined ? {} : { timezone: dashboard.timezone }),
+        ...(dashboard.start_date === undefined ? {} : { startDate: dashboard.start_date }),
+        ...(dashboard.end_date === undefined ? {} : { endDate: dashboard.end_date }),
+        ...(dashboard.generated_at === undefined ? {} : { generatedAt: dashboard.generated_at }),
+        ...(dashboard.last_synced_at ? { lastSyncedAt: dashboard.last_synced_at } : {}),
+        unavailableParts: dashboard.unavailable_parts ?? [],
+        sources: mappedSources,
         ...(dashboard.data === undefined ? {} : {
           data: {
             capturedAt: dashboard.data.captured_at,
             followerCount: dashboard.data.follower_count,
+            ...(dashboard.data.following_count === undefined ? {} : { followingCount: dashboard.data.following_count }),
+            ...(dashboard.data.published_count === undefined ? {} : { publishedCount: dashboard.data.published_count }),
             collectedContentCount: dashboard.data.collected_content_count,
             viewCount: dashboard.data.view_count,
+            ...(dashboard.data.danmaku_count === undefined ? {} : { danmakuCount: dashboard.data.danmaku_count }),
+            ...(dashboard.data.reply_count === undefined ? {} : { replyCount: dashboard.data.reply_count }),
+            ...(dashboard.data.favorite_count === undefined ? {} : { favoriteCount: dashboard.data.favorite_count }),
+            ...(dashboard.data.coin_count === undefined ? {} : { coinCount: dashboard.data.coin_count }),
+            ...(dashboard.data.share_count === undefined ? {} : { shareCount: dashboard.data.share_count }),
+            ...(dashboard.data.like_count === undefined ? {} : { likeCount: dashboard.data.like_count }),
             interactionCount: dashboard.data.interaction_count,
+            trend: (dashboard.data.trend ?? []).map(point => ({
+              date: point.date,
+              followerCount: point.follower_count,
+              viewCount: point.view_count,
+              interactionCount: point.interaction_count,
+              followerCountDelta: point.follower_count_delta,
+              viewCountDelta: point.view_count_delta,
+              interactionCountDelta: point.interaction_count_delta
+            })),
             topContents: dashboard.data.top_contents.map(item => ({
+              sourceId: item.source_id ?? '',
+              accountName: item.account_name ?? '',
               externalContentId: item.external_content_id,
               title: item.title,
+              ...(item.published_at ? { publishedAt: item.published_at } : {}),
+              status: item.status ?? '',
               capturedAt: item.captured_at,
               viewCount: item.view_count,
+              ...(item.danmaku_count === undefined ? {} : { danmakuCount: item.danmaku_count }),
+              ...(item.reply_count === undefined ? {} : { replyCount: item.reply_count }),
+              ...(item.favorite_count === undefined ? {} : { favoriteCount: item.favorite_count }),
+              ...(item.coin_count === undefined ? {} : { coinCount: item.coin_count }),
+              ...(item.share_count === undefined ? {} : { shareCount: item.share_count }),
+              ...(item.like_count === undefined ? {} : { likeCount: item.like_count }),
               interactionCount: item.interaction_count
             }))
           }
