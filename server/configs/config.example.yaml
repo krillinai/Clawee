@@ -22,6 +22,21 @@ logging:
 static:
   dir: ""
 
+# 以下内容会匿名公开；仅填写本 Gateway 的下载信息，不放置任何凭据。
+client_downloads:
+  gateway: "" # 留空使用下载页 origin；分域部署必须明确填写 HTTPS origin。
+  standard:
+    url: "https://github.com/krillinai/Clawee/releases/latest"
+    # 替换为标准安装包镜像时，必须同时填写 version 和 sha256。
+  packages: []
+  # packages:
+  #   - platform: "macos" # macos / windows
+  #     arch: "arm64" # macos 支持 arm64 / x64，windows 仅支持 x64
+  #     version: "0.1.7"
+  #     url: "https://downloads.example.com/demo/0.1.7/完整提交SHA/macos/arm64/Clawee.dmg"
+  #     sha256: "填写实际安装包的64位SHA256"
+  #     signature: "signed_notarized" # macOS: signed_notarized / unsigned；Windows: signed / unsigned
+
 office:
   install:
     public_base_url: ""

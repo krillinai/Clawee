@@ -361,6 +361,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			BilibiliWebhookSecret:      cfg.Bilibili.ClientSecret,
 			Logger:                     log,
 			StaticDir:                  cfg.Static.Dir,
+			ClientDownloads:            cfg.ClientDownloads,
 			SessionCookieName:          cfg.Security.SessionCookieName,
 			AdminSessionCookieName:     cfg.Security.AdminSessionCookieName,
 			SessionCookieSecure:        cfg.Security.SessionCookieSecure,

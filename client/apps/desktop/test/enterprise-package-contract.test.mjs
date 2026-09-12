@@ -20,6 +20,30 @@ afterEach(() => {
 });
 
 describe('Desktop enterprise package contract', () => {
+  it('uses an explicit absolute config without changing the default or falling back', () => {
+    const root = mkdtempSync(join(tmpdir(), 'clawee-gateway-source-'));
+    tempRoots.push(root);
+    const original = join(root, 'default.toml');
+    const customer = join(root, 'customer.toml');
+    writeFileSync(original, 'gateway = "http://127.0.0.1:1904"\n');
+    writeFileSync(customer, 'gateway = "https://gateway.demo.example.com"\n');
+    expect(readEnterpriseGatewayPackageConfig(original, 'release').gateway)
+      .toBe('http://127.0.0.1:1904');
+    expect(readEnterpriseGatewayPackageConfig(original, 'release', customer).gateway)
+      .toBe('https://gateway.demo.example.com');
+    expect(() => readEnterpriseGatewayPackageConfig(original, 'release', join(root, 'missing.toml')))
+      .toThrow('ENTERPRISE_CONFIG_INVALID');
+    for (const path of ['', 'relative.toml']) {
+      expect(() => readEnterpriseGatewayPackageConfig(original, 'release', path))
+        .toThrow('ENTERPRISE_CONFIG_PATH_MUST_BE_ABSOLUTE');
+    }
+    writeFileSync(customer, 'invalid toml');
+    expect(() => readEnterpriseGatewayPackageConfig(original, 'release', customer))
+      .toThrow('ENTERPRISE_CONFIG_INVALID');
+    expect(readEnterpriseGatewayPackageConfig(original, 'release').gateway)
+      .toBe('http://127.0.0.1:1904');
+  });
+
   it('allows local HTTP builds while requiring HTTPS for remote gateways', () => {
     expect(assertEnterpriseReleaseTransport({
       mode: 'dir',

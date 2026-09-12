@@ -91,6 +91,7 @@ const RBACRolesPage = lazy(() => import("./pages/rbac-roles").then((module) => (
 const RBACPermissionsPage = lazy(() => import("./pages/rbac-permissions").then((module) => ({ default: module.RBACPermissionsPage })));
 const DataResourceGrantsPage = lazy(() => import("./pages/data-resource-grants").then((module) => ({ default: module.DataResourceGrantsPage })));
 const PlatformBrandingPage = lazy(() => import("./pages/platform-branding").then((module) => ({ default: module.PlatformBrandingPage })));
+const DownloadsPage = lazy(() => import("./pages/downloads").then((module) => ({ default: module.DownloadsPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}>{element}</AuthGate>;
@@ -120,6 +121,7 @@ export function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/downloads" element={<DownloadsPage />} />
             <Route path="/" element={<Navigate to="/app" replace />} />
             <Route path="/app" element={<Navigate to="/app/agents" replace />} />
             <Route

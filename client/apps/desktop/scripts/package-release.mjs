@@ -139,7 +139,8 @@ ensureElectronBuilderCacheScope(env.ELECTRON_BUILDER_CACHE);
 rmSync(manifestPath, { force: true });
 const enterpriseRelease = readEnterpriseGatewayPackageConfig(
   enterpriseGatewayConfigSource,
-  mode
+  mode,
+  process.env.CLAWEE_DESKTOP_GATEWAY_CONFIG_PATH
 );
 rmSync(dirname(enterpriseGatewayConfigStage), {
   force: true,

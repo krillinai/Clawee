@@ -19,22 +19,23 @@ const (
 )
 
 type Config struct {
-	Server      ServerConfig      `mapstructure:"server"`
-	Database    DatabaseConfig    `mapstructure:"database"`
-	Security    SecurityConfig    `mapstructure:"security"`
-	Logging     LoggingConfig     `mapstructure:"logging"`
-	Static      StaticConfig      `mapstructure:"static"`
-	MCP         MCPConfig         `mapstructure:"mcp"`
-	Office      OfficeConfig      `mapstructure:"office"`
-	Knowledge   KnowledgeConfig   `mapstructure:"knowledge"`
-	SkillHub    SkillHubConfig    `mapstructure:"skillhub"`
-	SharedFiles SharedFilesConfig `mapstructure:"shared_files"`
-	ClawAdmin   ClawAdminConfig   `mapstructure:"claw_admin"`
-	Sub2API     Sub2APIConfig     `mapstructure:"sub2api"`
-	DingTalk    DingTalkConfig    `mapstructure:"dingtalk"`
-	Bilibili    BilibiliConfig    `mapstructure:"bilibili"`
-	ModelAccess ModelAccessConfig `mapstructure:"model_access"`
-	Activity    ActivityConfig    `mapstructure:"agent_activity"`
+	ClientDownloads ClientDownloadsConfig `mapstructure:"client_downloads"`
+	Server          ServerConfig          `mapstructure:"server"`
+	Database        DatabaseConfig        `mapstructure:"database"`
+	Security        SecurityConfig        `mapstructure:"security"`
+	Logging         LoggingConfig         `mapstructure:"logging"`
+	Static          StaticConfig          `mapstructure:"static"`
+	MCP             MCPConfig             `mapstructure:"mcp"`
+	Office          OfficeConfig          `mapstructure:"office"`
+	Knowledge       KnowledgeConfig       `mapstructure:"knowledge"`
+	SkillHub        SkillHubConfig        `mapstructure:"skillhub"`
+	SharedFiles     SharedFilesConfig     `mapstructure:"shared_files"`
+	ClawAdmin       ClawAdminConfig       `mapstructure:"claw_admin"`
+	Sub2API         Sub2APIConfig         `mapstructure:"sub2api"`
+	DingTalk        DingTalkConfig        `mapstructure:"dingtalk"`
+	Bilibili        BilibiliConfig        `mapstructure:"bilibili"`
+	ModelAccess     ModelAccessConfig     `mapstructure:"model_access"`
+	Activity        ActivityConfig        `mapstructure:"agent_activity"`
 }
 
 type ActivityConfig struct {
@@ -305,6 +306,9 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.Bilibili.Validate(); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.ClientDownloads.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

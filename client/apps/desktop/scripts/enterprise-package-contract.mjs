@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { parse, stringify } from '@iarna/toml';
 
 const ENTERPRISE_AGENT_ID_PATTERN =
@@ -20,7 +21,13 @@ export function assertEnterpriseReleaseTransport(input) {
   };
 }
 
-export function readEnterpriseGatewayPackageConfig(path, mode) {
+export function readEnterpriseGatewayPackageConfig(path, mode, overridePath) {
+  if (overridePath !== undefined) {
+    if (!isAbsolute(overridePath)) {
+      throw new Error('ENTERPRISE_CONFIG_PATH_MUST_BE_ABSOLUTE');
+    }
+    path = overridePath;
+  }
   let parsed;
   try {
     parsed = parse(readFileSync(path, 'utf8'));
