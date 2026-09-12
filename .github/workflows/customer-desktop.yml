@@ -1,0 +1,236 @@
+name: 客户客户端打包
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: customers.json 中的客户 ID
+        required: true
+        type: string
+      sha:
+        description: customer-packaging 分支上待验证的完整提交 SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer-desktop-${{ inputs.customer }}-${{ inputs.sha }}
+  cancel-in-progress: false
+
+env:
+  CLAWEE_OFFICIAL_RELEASE: '0'
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/customer-packaging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      sha: ${{ steps.customer.outputs.sha }}
+      customer: ${{ steps.customer.outputs.customer }}
+      version: ${{ steps.customer.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: customer-packaging
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - name: 验证提交属于受维护交付分支
+        id: target
+        shell: bash
+        env:
+          CUSTOMER_SHA: ${{ inputs.sha }}
+        run: |
+          [[ "$CUSTOMER_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo '::error::需要完整提交 SHA'; exit 1; }
+          git cat-file -e "$CUSTOMER_SHA^{commit}"
+          git merge-base --is-ancestor "$CUSTOMER_SHA" HEAD
+          echo "sha=$CUSTOMER_SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: client
+      - name: 校验客户和公共基线
+        id: customer
+        env:
+          CUSTOMER_ID: ${{ inputs.customer }}
+          CUSTOMER_SHA: ${{ steps.target.outputs.sha }}
+        run: node packaging/customer-config.mjs validate "$CUSTOMER_ID"
+      - name: 客户打包脚本测试
+        run: node --test packaging/*.test.mjs
+      - name: 客户端测试、类型及 Runtime 契约
+        working-directory: client
+        run: |
+          pnpm --filter @clawee/desktop exec node -e "require('electron')"
+          pnpm test
+          pnpm typecheck
+          pnpm codex:runtime:verify
+
+  desktop:
+    needs: validate
+    timeout-minutes: 90
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-x64
+            os: macos-15-intel
+            platform: mac
+            arch: x64
+          - name: macos-arm64
+            os: macos-14
+            platform: mac
+            arch: arm64
+          - name: windows-x64-unsigned
+            os: windows-latest
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: client
+        shell: bash
+    env:
+      CUSTOMER_ID: ${{ needs.validate.outputs.customer }}
+      CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
+      CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
+      CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
+      CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: |
+            client/apps/desktop/.cache/electron
+            client/apps/desktop/.cache/electron-builder
+            client/apps/desktop/.cache/node-gyp
+            client/apps/desktop/.cache/npm
+            client/apps/desktop/.cache/codex-runtime
+          key: desktop-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('client/pnpm-lock.yaml', 'client/apps/desktop/package.json', 'client/config/codex-runtime.json') }}
+          restore-keys: |
+            desktop-build-${{ runner.os }}-${{ matrix.arch }}-
+      - name: 在临时目录生成当前客户 TOML
+        run: node ../packaging/customer-config.mjs generate "$CUSTOMER_ID"
+      - name: macOS 签名、公证及安装包验证
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CLAWEE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [[ -n "${!name}" ]] || { echo "::error::release Environment 缺少签名凭据: $name"; exit 1; }
+          done
+          pnpm desktop:release
+      - name: Windows 未签名 NSIS 安装包
+        if: matrix.platform == 'win'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm desktop:dist
+      - name: 验证包内 Runtime E2E
+        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
+      - name: 验证真实 Codex 会话
+        env:
+          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
+        run: pnpm --filter @clawee/desktop e2e:real-codex
+      - name: 从 DMG 或 NSIS 安装到隔离目录
+        run: node ../packaging/install-smoke.mjs
+      - name: 验证实际 App 首次启动与旧配置保留
+        env:
+          CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ env.CUSTOMER_INSTALLED_BUILD_MANIFEST }}
+        run: pnpm exec playwright test --config ../packaging/playwright.config.ts
+      - name: 生成客户交付清单及校验文件
+        env:
+          CLAWEE_APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+        run: node ../packaging/customer-manifest.mjs build "$CUSTOMER_ID" "$CLAWEE_DESKTOP_BUILD_MANIFEST" "$RUNNER_TEMP/customer-delivery"
+      - name: 上传平台交付中转文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-${{ needs.validate.outputs.customer }}-${{ needs.validate.outputs.sha }}-${{ matrix.name }}
+          path: ${{ env.CUSTOMER_DELIVERY_ROOT }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: 上传验证证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-evidence-${{ needs.validate.outputs.customer }}-${{ needs.validate.outputs.sha }}-${{ matrix.name }}
+          path: |
+            client/test-results/clawee-desktop-embedded-runtime-e2e.json
+            client/test-results/clawee-desktop-runtime-tool-loop-e2e.json
+            client/test-results/clawee-desktop-real-codex-smoke.json
+            client/test-results/customer-first-launch.json
+            client/test-results/customer-first-launch
+            client/test-results/desktop-embedded-runtime-playwright
+            client/test-results/desktop-real-codex-playwright
+          if-no-files-found: warn
+          retention-days: 14
+
+  delivery:
+    needs: [validate, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: client/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: client/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: client
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: customer-${{ needs.validate.outputs.customer }}-${{ needs.validate.outputs.sha }}-*
+          path: ${{ runner.temp }}/customer-delivery
+          merge-multiple: true
+      - name: 汇总并复核三个平台文件
+        env:
+          CUSTOMER_ID: ${{ needs.validate.outputs.customer }}
+        run: node packaging/customer-manifest.mjs collect "$CUSTOMER_ID" "$RUNNER_TEMP/customer-delivery"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: customer-delivery-${{ needs.validate.outputs.customer }}-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.sha }}
+          path: ${{ runner.temp }}/customer-delivery
+          if-no-files-found: error
+          retention-days: 14

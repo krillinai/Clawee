@@ -68,6 +68,7 @@ func isStaticAppRoute(urlPath string) bool {
 		urlPath == "/app" ||
 		strings.HasPrefix(urlPath, "/app/") ||
 		urlPath == "/login" ||
+		urlPath == "/downloads" ||
 		urlPath == "/register"
 }
 

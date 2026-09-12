@@ -1,0 +1,4 @@
+{
+  "demo": { "gateway": "https://gateway.demo.example.com" },
+  "customer-a": { "gateway": "https://gateway.customer-a.example.com" }
+}

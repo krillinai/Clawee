@@ -2,7 +2,7 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { LogIn, ScanLine } from "lucide-react";
+import { Download, LogIn, ScanLine } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { AuthShell } from "@/components/auth-shell";
@@ -128,6 +128,9 @@ export function LoginPage() {
             </Link>
           </p>
         </form>
+        <div className="mt-5 flex justify-center">
+          <Button asChild variant="ghost"><Link to="/downloads"><Download />下载客户端</Link></Button>
+        </div>
         <p className="mt-8 text-center text-xs leading-5 text-muted-foreground">
           Agent 访问凭证与管理台登录会话相互独立。
         </p>

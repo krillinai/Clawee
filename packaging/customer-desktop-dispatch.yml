@@ -1,0 +1,23 @@
+# 试点期间，复制为旧默认分支的 .github/workflows/customer-desktop.yml。
+# GitHub 登记入口后，手动运行时必须选择 customer-packaging 分支。
+name: 客户客户端打包
+on:
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: customers.json 中的客户 ID
+        required: true
+        type: string
+      sha:
+        description: customer-packaging 分支上待验证的完整提交 SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  select-delivery-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '::error::请在手动运行入口选择 customer-packaging 分支'
+          exit 1
