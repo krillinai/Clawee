@@ -139,9 +139,16 @@ describe('enterprise service', () => {
     const service = createEnterpriseService(createClient({ get }));
 
     await service.getBilibiliDashboard();
+    await service.getBilibiliDashboard({
+      range: '30d',
+      sourceId: 'bdsrc/account'
+    });
 
-    expect(get).toHaveBeenCalledWith(
+    expect(get).toHaveBeenNthCalledWith(1,
       '/enterprise/business-dashboards/bilibili-operation'
+    );
+    expect(get).toHaveBeenNthCalledWith(2,
+      '/enterprise/business-dashboards/bilibili-operation?range=30d&sourceId=bdsrc%2Faccount'
     );
   });
 

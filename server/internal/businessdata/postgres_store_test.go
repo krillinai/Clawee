@@ -183,9 +183,9 @@ func TestPostgresStoreBilibiliSnapshotIdempotenceAndLatestDashboard(t *testing.T
 		run := insertRunningRun(t, pool, runID, "bdsrc_bili", date, captured)
 		batch := Batch{
 			SourceName:               "B 站账号",
-			Contents:                 []Content{{ExternalContentID: "BV1", Title: "稿件", ContentType: "video"}},
-			BilibiliAccountSnapshots: []BilibiliAccountSnapshot{{SnapshotDate: date, CapturedAt: captured, FollowerCount: views / 10}},
-			BilibiliContentSnapshots: []BilibiliContentSnapshot{{ExternalContentID: "BV1", SnapshotDate: date, CapturedAt: captured, ViewCount: views, LikeCount: 2, CoinCount: 1}},
+			Contents:                 []Content{{ExternalContentID: "BV1", Title: "稿件", ContentType: "video", Status: "published", PublishedAt: &captured}},
+			BilibiliAccountSnapshots: []BilibiliAccountSnapshot{{SnapshotDate: date, CapturedAt: captured, FollowerCount: views / 10, FollowingCount: 9, PublishedCount: 5}},
+			BilibiliContentSnapshots: []BilibiliContentSnapshot{{ExternalContentID: "BV1", SnapshotDate: date, CapturedAt: captured, ViewCount: views, DanmakuCount: 3, ReplyCount: 4, FavoriteCount: 5, CoinCount: 1, ShareCount: 6, LikeCount: 2}},
 		}
 		if count, err := store.UpsertBatch(ctx, run.SourceID, run.RunID, batch, captured); err != nil || count != 3 {
 			t.Fatalf("count=%d err=%v", count, err)
@@ -209,8 +209,12 @@ func TestPostgresStoreBilibiliSnapshotIdempotenceAndLatestDashboard(t *testing.T
 	}
 	rangeDays := DashboardRange{StartDate: dayOne, EndDate: dayTwo}
 	dashboard, err := store.BilibiliDashboard(ctx, "bdsrc_bili", rangeDays)
-	if err != nil || dashboard.State.DataStatus != DataStatusAvailable || dashboard.ViewCount != 220 || dashboard.FollowerCount != 22 || len(dashboard.TopContents) != 1 || dashboard.TopContents[0].InteractionCount != 3 {
+	if err != nil || dashboard.State.DataStatus != DataStatusAvailable || dashboard.ViewCount != 220 || dashboard.FollowerCount != 22 || dashboard.FollowingCount != 9 || dashboard.PublishedCount != 5 || dashboard.DanmakuCount != 3 || dashboard.ReplyCount != 4 || dashboard.FavoriteCount != 5 || dashboard.CoinCount != 1 || dashboard.ShareCount != 6 || dashboard.LikeCount != 2 || dashboard.InteractionCount != 21 || len(dashboard.TopContents) != 1 || dashboard.TopContents[0].InteractionCount != 21 {
 		t.Fatalf("dashboard=%#v err=%v", dashboard, err)
+	}
+	top := dashboard.TopContents[0]
+	if top.Status != "published" || top.PublishedAt == nil || top.DanmakuCount != 3 || top.ReplyCount != 4 || top.FavoriteCount != 5 || top.CoinCount != 1 || top.ShareCount != 6 || top.LikeCount != 2 {
+		t.Fatalf("top content=%#v", top)
 	}
 	if len(dashboard.Trend) != 2 || dashboard.Trend[0].ViewCount != 150 || dashboard.Trend[1].ViewCountDelta != 70 || dashboard.Trend[1].FollowerCountDelta != 7 {
 		t.Fatalf("trend=%#v", dashboard.Trend)

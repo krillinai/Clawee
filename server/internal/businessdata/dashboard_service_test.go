@@ -46,13 +46,22 @@ func TestBilibiliDashboardResponseUsesLatestCumulativeContract(t *testing.T) {
 	service := newDashboardService(dashboardFixtureStore{b: BilibiliDashboardData{
 		State:   DashboardState{DataStatus: DataStatusAvailable, LastSyncedAt: &captured},
 		Account: BilibiliDashboardAccount{SourceID: "bdsrc_1", Name: "账号一", Status: SourceStatusActive, LastSuccessAt: &captured}, CapturedAt: captured,
-		FollowerCount: 10, CollectedContentCount: 2, ViewCount: 100, InteractionCount: 20,
+		FollowerCount: 10, FollowingCount: 3, PublishedCount: 4, CollectedContentCount: 2,
+		ViewCount: 100, DanmakuCount: 1, ReplyCount: 2, FavoriteCount: 3, CoinCount: 4,
+		ShareCount: 5, LikeCount: 6, InteractionCount: 21,
 		Trend:       []BilibiliTrendPoint{{Date: "2026-08-28", FollowerCount: 10, ViewCount: 100, InteractionCount: 20}},
-		TopContents: []BilibiliTopContent{{ExternalContentID: "BV1", CapturedAt: captured, ViewCount: 80}},
+		TopContents: []BilibiliTopContent{{ExternalContentID: "BV1", CapturedAt: captured, ViewCount: 80, DanmakuCount: 1, ReplyCount: 2, FavoriteCount: 3, CoinCount: 4, ShareCount: 5, LikeCount: 6, InteractionCount: 21}},
 	}}, nil)
 	response, err := service.Bilibili(context.Background(), "bdsrc_1", Range7Days)
 	if err != nil || response.Status != DataStatusAvailable || response.Account.SourceID != "bdsrc_1" || response.Range != Range7Days || response.Data == nil || response.Data.ViewCount != 100 || len(response.Data.TopContents) != 1 || len(response.Data.Trend) != 1 {
 		t.Fatalf("response=%#v err=%v", response, err)
+	}
+	if response.Data.FollowingCount != 3 || response.Data.PublishedCount != 4 || response.Data.DanmakuCount != 1 || response.Data.ReplyCount != 2 || response.Data.FavoriteCount != 3 || response.Data.CoinCount != 4 || response.Data.ShareCount != 5 || response.Data.LikeCount != 6 || response.Data.InteractionCount != 21 {
+		t.Fatalf("detailed summary=%#v", response.Data)
+	}
+	top := response.Data.TopContents[0]
+	if top.DanmakuCount != 1 || top.ReplyCount != 2 || top.FavoriteCount != 3 || top.CoinCount != 4 || top.ShareCount != 5 || top.LikeCount != 6 || top.InteractionCount != 21 {
+		t.Fatalf("detailed top content=%#v", top)
 	}
 	if _, err := service.Bilibili(context.Background(), "", Range7Days); err != ErrInvalidRequest {
 		t.Fatalf("empty source error=%v", err)
@@ -107,7 +116,11 @@ func TestFillBilibiliTrendCarriesMissingDatesAndComputesDeltas(t *testing.T) {
 	location, _ := time.LoadLocation(Timezone)
 	start := time.Date(2026, 8, 12, 0, 0, 0, 0, location)
 	r := DashboardRange{StartDate: start, EndDate: start.AddDate(0, 0, 2)}
-	baseline := BilibiliTrendPoint{FollowerCount: 90, ViewCount: 900, InteractionCount: 50}
+	baseline := bilibiliTrendBaseline{
+		BilibiliTrendPoint: BilibiliTrendPoint{FollowerCount: 90, ViewCount: 900, InteractionCount: 50},
+		followerAvailable:  true,
+		contentAvailable:   true,
+	}
 	trend := fillBilibiliTrend(r, baseline, map[string]int64{
 		"2026-08-13": 100,
 	}, map[string]BilibiliTrendPoint{
@@ -115,6 +128,23 @@ func TestFillBilibiliTrendCarriesMissingDatesAndComputesDeltas(t *testing.T) {
 	})
 	if len(trend) != 3 || trend[0].FollowerCount != 90 || trend[0].FollowerCountDelta != 0 || trend[1].ViewCount != 1000 || trend[1].ViewCountDelta != 100 || trend[2].InteractionCount != 60 || trend[2].InteractionCountDelta != 0 {
 		t.Fatalf("trend=%#v", trend)
+	}
+}
+
+func TestFillBilibiliTrendTreatsFirstSnapshotAsBaseline(t *testing.T) {
+	location, _ := time.LoadLocation(Timezone)
+	start := time.Date(2026, 8, 12, 0, 0, 0, 0, location)
+	r := DashboardRange{StartDate: start, EndDate: start.AddDate(0, 0, 2)}
+	trend := fillBilibiliTrend(r, bilibiliTrendBaseline{}, map[string]int64{
+		"2026-08-13": 100,
+	}, map[string]BilibiliTrendPoint{
+		"2026-08-13": {ViewCount: 8_260_000, InteractionCount: 144_000},
+	})
+	if len(trend) != 3 || trend[1].FollowerCount != 100 || trend[1].ViewCount != 8_260_000 || trend[1].InteractionCount != 144_000 {
+		t.Fatalf("trend=%#v", trend)
+	}
+	if trend[1].FollowerCountDelta != 0 || trend[1].ViewCountDelta != 0 || trend[1].InteractionCountDelta != 0 {
+		t.Fatalf("first snapshot must not be reported as growth: %#v", trend[1])
 	}
 }
 
@@ -154,7 +184,8 @@ func TestBilibiliViewAggregatesAllActiveSources(t *testing.T) {
 		bBySource: map[string]BilibiliDashboardData{
 			"bili-1": {
 				State: state, Account: BilibiliDashboardAccount{SourceID: "bili-1", Name: "账号一", Status: SourceStatusActive}, CapturedAt: now.Add(-time.Minute),
-				FollowerCount: 10, CollectedContentCount: 1, ViewCount: 100, InteractionCount: 10,
+				FollowerCount: 10, FollowingCount: 1, PublishedCount: 2, CollectedContentCount: 1,
+				ViewCount: 100, DanmakuCount: 1, ReplyCount: 2, FavoriteCount: 3, CoinCount: 4, ShareCount: 5, LikeCount: 6, InteractionCount: 21,
 				Trend: []BilibiliTrendPoint{{Date: "2026-09-01", FollowerCount: 10, ViewCount: 100, InteractionCount: 10}},
 				TopContents: []BilibiliTopContent{
 					{SourceID: "bili-1", ExternalContentID: "BV9", ViewCount: 120},
@@ -163,7 +194,8 @@ func TestBilibiliViewAggregatesAllActiveSources(t *testing.T) {
 			},
 			"bili-2": {
 				State: state, Account: BilibiliDashboardAccount{SourceID: "bili-2", Name: "账号二", Status: SourceStatusActive}, CapturedAt: now,
-				FollowerCount: 20, CollectedContentCount: 2, ViewCount: 200, InteractionCount: 20,
+				FollowerCount: 20, FollowingCount: 10, PublishedCount: 20, CollectedContentCount: 2,
+				ViewCount: 200, DanmakuCount: 10, ReplyCount: 20, FavoriteCount: 30, CoinCount: 40, ShareCount: 50, LikeCount: 60, InteractionCount: 210,
 				Trend:       []BilibiliTrendPoint{{Date: "2026-09-01", FollowerCount: 20, ViewCount: 200, InteractionCount: 20}},
 				TopContents: []BilibiliTopContent{{SourceID: "bili-2", ExternalContentID: "BV2", ViewCount: 120}},
 			},
@@ -174,7 +206,7 @@ func TestBilibiliViewAggregatesAllActiveSources(t *testing.T) {
 	if err != nil || response.Status != DataStatusAvailable || response.Data == nil {
 		t.Fatalf("response=%#v err=%v", response, err)
 	}
-	if response.Data.FollowerCount != 30 || response.Data.CollectedContentCount != 3 || response.Data.ViewCount != 300 || response.Data.InteractionCount != 30 {
+	if response.Data.FollowerCount != 30 || response.Data.FollowingCount != 11 || response.Data.PublishedCount != 22 || response.Data.CollectedContentCount != 3 || response.Data.ViewCount != 300 || response.Data.DanmakuCount != 11 || response.Data.ReplyCount != 22 || response.Data.FavoriteCount != 33 || response.Data.CoinCount != 44 || response.Data.ShareCount != 55 || response.Data.LikeCount != 66 || response.Data.InteractionCount != 231 {
 		t.Fatalf("summary=%#v", response.Data)
 	}
 	if len(response.Data.Trend) != 1 || response.Data.Trend[0].ViewCount != 300 || len(response.Data.TopContents) != 3 || response.Data.TopContents[0].SourceID != "bili-1" || response.Data.TopContents[1].SourceID != "bili-2" {

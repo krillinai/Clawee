@@ -94,4 +94,7 @@ func TestBilibiliConnectorPaginationAndMissingArchive(t *testing.T) {
 	if batch.BilibiliAccountSnapshots[0].SnapshotDate.Format("2006-01-02") != "2026-08-29" || len(batch.ContentDailyMetrics) != 0 || len(batch.AccountDailyMetrics) != 0 {
 		t.Fatalf("unexpected snapshot mapping: %#v", batch)
 	}
+	if publishedAt := batch.Contents[0].PublishedAt; publishedAt == nil || publishedAt.Unix() != 1_700_000_000 {
+		t.Fatalf("publishedAt=%v", publishedAt)
+	}
 }

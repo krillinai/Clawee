@@ -774,9 +774,10 @@ func (s *PostgresStore) BilibiliDashboard(ctx context.Context, sourceID string, 
 		return data, err
 	}
 	var capturedAt *time.Time
-	err = s.pool.QueryRow(ctx, `SELECT captured_at,follower_count
+	err = s.pool.QueryRow(ctx, `SELECT captured_at,follower_count,following_count,published_count
 FROM bilibili_account_metric_snapshots WHERE source_id=$1
-ORDER BY snapshot_date DESC,captured_at DESC LIMIT 1`, sourceID).Scan(&capturedAt, &data.FollowerCount)
+ORDER BY snapshot_date DESC,captured_at DESC LIMIT 1`, sourceID).Scan(
+		&capturedAt, &data.FollowerCount, &data.FollowingCount, &data.PublishedCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		data.State.DataStatus = DataStatusUnavailable
 		return data, nil
@@ -790,9 +791,12 @@ ORDER BY snapshot_date DESC,captured_at DESC LIMIT 1`, sourceID).Scan(&capturedA
 	FROM bilibili_content_metric_snapshots m WHERE m.source_id=$1
 	ORDER BY m.external_content_id,m.snapshot_date DESC,m.captured_at DESC
 )
-SELECT COUNT(*),COALESCE(SUM(view_count),0),
+SELECT COUNT(*),COALESCE(SUM(view_count),0),COALESCE(SUM(danmaku_count),0),
+COALESCE(SUM(reply_count),0),COALESCE(SUM(favorite_count),0),COALESCE(SUM(coin_count),0),
+COALESCE(SUM(share_count),0),COALESCE(SUM(like_count),0),
 COALESCE(SUM(like_count+coin_count+favorite_count+reply_count+danmaku_count+share_count),0) FROM latest`, sourceID).Scan(
-		&data.CollectedContentCount, &data.ViewCount, &data.InteractionCount)
+		&data.CollectedContentCount, &data.ViewCount, &data.DanmakuCount, &data.ReplyCount,
+		&data.FavoriteCount, &data.CoinCount, &data.ShareCount, &data.LikeCount, &data.InteractionCount)
 	if err != nil {
 		return BilibiliDashboardData{}, err
 	}
@@ -806,7 +810,8 @@ COALESCE(SUM(like_count+coin_count+favorite_count+reply_count+danmaku_count+shar
 	FROM bilibili_content_metric_snapshots m WHERE m.source_id=$1
 	ORDER BY m.external_content_id,m.snapshot_date DESC,m.captured_at DESC
 )
-SELECT l.external_content_id,c.title,l.captured_at,l.view_count,
+SELECT l.external_content_id,c.title,c.published_at,c.status,l.captured_at,l.view_count,
+l.danmaku_count,l.reply_count,l.favorite_count,l.coin_count,l.share_count,l.like_count,
 l.like_count+l.coin_count+l.favorite_count+l.reply_count+l.danmaku_count+l.share_count AS interaction_count
 FROM latest l JOIN business_contents c USING(source_id,external_content_id)
 ORDER BY l.view_count DESC,l.external_content_id ASC LIMIT 20`, sourceID)
@@ -816,12 +821,19 @@ ORDER BY l.view_count DESC,l.external_content_id ASC LIMIT 20`, sourceID)
 	defer rows.Close()
 	for rows.Next() {
 		var item BilibiliTopContent
-		if err := rows.Scan(&item.ExternalContentID, &item.Title, &item.CapturedAt, &item.ViewCount, &item.InteractionCount); err != nil {
+		if err := rows.Scan(&item.ExternalContentID, &item.Title, &item.PublishedAt, &item.Status,
+			&item.CapturedAt, &item.ViewCount, &item.DanmakuCount, &item.ReplyCount,
+			&item.FavoriteCount, &item.CoinCount, &item.ShareCount, &item.LikeCount,
+			&item.InteractionCount); err != nil {
 			return BilibiliDashboardData{}, err
 		}
 		item.SourceID = account.SourceID
 		item.AccountName = account.Name
 		item.CapturedAt = item.CapturedAt.UTC()
+		if item.PublishedAt != nil {
+			publishedAt := item.PublishedAt.UTC()
+			item.PublishedAt = &publishedAt
+		}
 		data.TopContents = append(data.TopContents, item)
 	}
 	return data, rows.Err()
@@ -891,12 +903,15 @@ GROUP BY snapshot_date`, sourceID, r.StartDate, r.EndDate)
 		return nil, err
 	}
 
-	var baseline BilibiliTrendPoint
-	err = s.pool.QueryRow(ctx, `SELECT COALESCE((
+	var baseline bilibiliTrendBaseline
+	err = s.pool.QueryRow(ctx, `SELECT EXISTS(
+	SELECT 1 FROM bilibili_account_metric_snapshots
+	WHERE source_id=$1 AND snapshot_date < $2
+),COALESCE((
 	SELECT follower_count FROM bilibili_account_metric_snapshots
 	WHERE source_id=$1 AND snapshot_date < $2
 	ORDER BY snapshot_date DESC,captured_at DESC LIMIT 1
-),0)`, sourceID, r.StartDate).Scan(&baseline.FollowerCount)
+),0)`, sourceID, r.StartDate).Scan(&baseline.followerAvailable, &baseline.FollowerCount)
 	if err != nil {
 		return nil, err
 	}
@@ -907,35 +922,51 @@ GROUP BY snapshot_date`, sourceID, r.StartDate, r.EndDate)
 	WHERE m.source_id=$1 AND m.snapshot_date < $2
 	ORDER BY m.external_content_id,m.snapshot_date DESC,m.captured_at DESC
 )
-SELECT COALESCE(SUM(view_count),0),COALESCE(SUM(interaction_count),0) FROM latest`, sourceID, r.StartDate).Scan(
-		&baseline.ViewCount, &baseline.InteractionCount)
+SELECT COUNT(*) > 0,COALESCE(SUM(view_count),0),COALESCE(SUM(interaction_count),0) FROM latest`, sourceID, r.StartDate).Scan(
+		&baseline.contentAvailable, &baseline.ViewCount, &baseline.InteractionCount)
 	if err != nil {
 		return nil, err
 	}
 	return fillBilibiliTrend(r, baseline, accountDaily, contentDaily), nil
 }
 
-func fillBilibiliTrend(r DashboardRange, baseline BilibiliTrendPoint, accountDaily map[string]int64, contentDaily map[string]BilibiliTrendPoint) []BilibiliTrendPoint {
+type bilibiliTrendBaseline struct {
+	BilibiliTrendPoint
+	followerAvailable bool
+	contentAvailable  bool
+}
+
+func fillBilibiliTrend(r DashboardRange, baseline bilibiliTrendBaseline, accountDaily map[string]int64, contentDaily map[string]BilibiliTrendPoint) []BilibiliTrendPoint {
 	result := []BilibiliTrendPoint{}
-	current := baseline
-	previous := baseline
+	current := baseline.BilibiliTrendPoint
+	followerAvailable := baseline.followerAvailable
+	contentAvailable := baseline.contentAvailable
 	for date := r.StartDate; !date.After(r.EndDate); date = date.AddDate(0, 0, 1) {
 		key := dateKey(date)
+		var followerDelta, viewDelta, interactionDelta int64
 		if followers, ok := accountDaily[key]; ok {
+			if followerAvailable {
+				followerDelta = followers - current.FollowerCount
+			}
 			current.FollowerCount = followers
+			followerAvailable = true
 		}
 		if content, ok := contentDaily[key]; ok {
+			if contentAvailable {
+				viewDelta = content.ViewCount - current.ViewCount
+				interactionDelta = content.InteractionCount - current.InteractionCount
+			}
 			current.ViewCount = content.ViewCount
 			current.InteractionCount = content.InteractionCount
+			contentAvailable = true
 		}
 		result = append(result, BilibiliTrendPoint{
 			Date: key, FollowerCount: current.FollowerCount, ViewCount: current.ViewCount,
 			InteractionCount:      current.InteractionCount,
-			FollowerCountDelta:    current.FollowerCount - previous.FollowerCount,
-			ViewCountDelta:        current.ViewCount - previous.ViewCount,
-			InteractionCountDelta: current.InteractionCount - previous.InteractionCount,
+			FollowerCountDelta:    followerDelta,
+			ViewCountDelta:        viewDelta,
+			InteractionCountDelta: interactionDelta,
 		})
-		previous = current
 	}
 	return result
 }

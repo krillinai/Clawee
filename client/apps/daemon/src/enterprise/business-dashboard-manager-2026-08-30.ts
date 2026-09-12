@@ -1,4 +1,5 @@
 import type {
+  EnterpriseBilibiliDashboardRange,
   EnterpriseBilibiliDashboardResponse,
   RuntimeErrorCode
 } from '@clawee/protocol';
@@ -8,7 +9,10 @@ import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 
 export type EnterpriseBusinessDashboardManager = {
-  getBilibiliDashboard(): Promise<EnterpriseBilibiliDashboardResponse>;
+  getBilibiliDashboard(input?: {
+    range?: EnterpriseBilibiliDashboardRange;
+    sourceId?: string;
+  }): Promise<EnterpriseBilibiliDashboardResponse>;
 };
 
 export class EnterpriseBusinessDashboardManagerError extends Error {
@@ -26,7 +30,7 @@ export function createEnterpriseBusinessDashboardManager(input: {
   httpClient: EnterpriseHttpClient;
 }): EnterpriseBusinessDashboardManager {
   return {
-    async getBilibiliDashboard() {
+    async getBilibiliDashboard(options) {
       let accessToken: string;
       try {
         accessToken = await input.sessionManager.requireAccessToken();
@@ -48,7 +52,7 @@ export function createEnterpriseBusinessDashboardManager(input: {
         );
       }
       try {
-        return await loadDashboard(accessToken);
+        return await loadDashboard(accessToken, options);
       } catch (error) {
         if (!(error instanceof EnterpriseHttpError)) throw error;
         if (error.code === 'ENTERPRISE_UNAUTHORIZED') {
