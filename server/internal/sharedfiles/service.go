@@ -11,23 +11,44 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
-var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var (
+	digestPattern          = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	cleanupEnqueueFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "clawee",
+		Subsystem: "shared_files",
+		Name:      "cleanup_enqueue_failures_total",
+		Help:      "Number of shared file cleanup tasks that could not be persisted.",
+	}, []string{"source"})
+)
+
+func init() {
+	prometheus.MustRegister(cleanupEnqueueFailures)
+}
+
+func recordCleanupEnqueueFailure(source string) {
+	cleanupEnqueueFailures.WithLabelValues(source).Inc()
+}
 
 type Service struct {
-	store   Store
-	storage Storage
-	logger  *zap.Logger
-	clock   func() time.Time
+	store    Store
+	registry StorageRegistry
+	logger   *zap.Logger
+	clock    func() time.Time
 }
 
 func NewService(store Store, storage Storage, logger *zap.Logger) *Service {
+	return NewServiceWithRegistry(store, newStaticStorageRegistry(storage), logger)
+}
+
+func NewServiceWithRegistry(store Store, registry StorageRegistry, logger *zap.Logger) *Service {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{store: store, storage: storage, logger: logger, clock: func() time.Time { return time.Now().UTC() }}
+	return &Service{store: store, registry: registry, logger: logger, clock: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) CreateSpace(ctx context.Context, name, description, operator string) (SpaceSummary, error) {
@@ -218,7 +239,11 @@ func (s *Service) OpenFile(ctx context.Context, userID, fileID string) (File, io
 	if err != nil {
 		return File{}, nil, err
 	}
-	reader, err := s.storage.Open(ctx, file.StorageKey)
+	target, err := s.registry.Resolve(ctx, file.StorageProfileID)
+	if err != nil {
+		return File{}, nil, ErrStorageUnavailable
+	}
+	reader, err := target.Storage.Open(ctx, file.StorageKey)
 	if err != nil {
 		return File{}, nil, ErrStorageUnavailable
 	}
@@ -237,7 +262,11 @@ func (s *Service) OpenAdminFile(ctx context.Context, fileID string) (File, io.Re
 	if err != nil {
 		return File{}, nil, err
 	}
-	reader, err := s.storage.Open(ctx, file.StorageKey)
+	target, err := s.registry.Resolve(ctx, file.StorageProfileID)
+	if err != nil {
+		return File{}, nil, ErrStorageUnavailable
+	}
+	reader, err := target.Storage.Open(ctx, file.StorageKey)
 	if err != nil {
 		return File{}, nil, ErrStorageUnavailable
 	}
@@ -306,32 +335,37 @@ func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalP
 		fileID = current.FileID
 	}
 	storageKey := spaceID + "/" + fileID + "/" + newID("blob_")
-	size, digest, err := s.storage.Put(ctx, storageKey, src, MaxFileSizeBytes)
+	target, err := s.registry.Active(ctx)
+	if err != nil {
+		return UploadResult{}, ErrStorageUnavailable
+	}
+	metadata, err := target.Storage.Put(ctx, storageKey, src, PutOptions{
+		DeclaredSize: declaredSize, MaxBytes: MaxFileSizeBytes, ContentType: contentType,
+		FileID: fileID, ProfileID: target.ProfileID, SHA256: declaredDigest,
+	})
 	if err != nil {
 		if errors.Is(err, ErrFileTooLarge) || errors.Is(err, ErrContentLengthMismatch) {
 			return UploadResult{}, err
 		}
 		return UploadResult{}, ErrStorageUnavailable
 	}
-	cleanup := func() {
-		if err := s.storage.Delete(context.WithoutCancel(ctx), storageKey); err != nil {
-			s.logger.Error("清理共享文件新对象失败")
-		}
+	cleanup := func(source string) {
+		s.cleanupObject(context.WithoutCancel(ctx), ObjectRef{StorageProfileID: target.ProfileID, StorageKey: storageKey}, source, fileID, "")
 	}
-	if size != declaredSize {
-		cleanup()
+	if metadata.SizeBytes != declaredSize {
+		cleanup("upload_compensation")
 		return UploadResult{}, ErrContentLengthMismatch
 	}
-	if !admin && digest != declaredDigest {
-		cleanup()
+	if !admin && metadata.SHA256 != declaredDigest {
+		cleanup("upload_compensation")
 		return UploadResult{}, ErrDigestMismatch
 	}
 	now := s.clock()
-	file := File{FileID: fileID, SpaceID: spaceID, LogicalPath: logicalPath, FileName: path.Base(logicalPath), StorageKey: storageKey,
-		SizeBytes: size, SHA256: digest, ContentType: contentType, CreatedByUserID: userID, CreatedByAgentID: agentID,
+	file := File{FileID: fileID, SpaceID: spaceID, LogicalPath: logicalPath, FileName: path.Base(logicalPath), StorageProfileID: target.ProfileID, StorageKey: storageKey,
+		SizeBytes: metadata.SizeBytes, SHA256: metadata.SHA256, ContentType: contentType, CreatedByUserID: userID, CreatedByAgentID: agentID,
 		UpdatedByUserID: userID, UpdatedByAgentID: agentID, CreatedAt: now, UpdatedAt: now}
 	created := expectedRevision == nil
-	var oldKey string
+	var oldRef ObjectRef
 	if created {
 		if admin {
 			file, err = s.store.CreateAdminFile(ctx, file)
@@ -340,22 +374,41 @@ func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalP
 		}
 	} else {
 		if admin {
-			file, oldKey, err = s.store.ReplaceAdminFile(ctx, file, *expectedRevision)
+			file, oldRef, err = s.store.ReplaceAdminFile(ctx, file, *expectedRevision)
 		} else {
-			file, oldKey, err = s.store.ReplaceFileAuthorized(ctx, userID, file, *expectedRevision)
+			file, oldRef, err = s.store.ReplaceFileAuthorized(ctx, userID, file, *expectedRevision)
 		}
 	}
 	if err != nil {
-		cleanup()
+		cleanup("upload_compensation")
 		return UploadResult{}, err
 	}
-	if oldKey != "" {
-		if err := s.storage.Delete(context.WithoutCancel(ctx), oldKey); err != nil {
-			s.logger.Error("清理共享文件旧对象失败")
-		}
+	if oldRef.StorageKey != "" {
+		s.cleanupObject(context.WithoutCancel(ctx), oldRef, "replace_old_object", file.FileID, "")
 	}
 	return UploadResult{FileID: file.FileID, SpaceID: file.SpaceID, LogicalPath: file.LogicalPath, FileName: file.FileName,
 		SizeBytes: file.SizeBytes, SHA256: file.SHA256, ContentType: file.ContentType, Revision: file.Revision, Created: created, UpdatedAt: file.UpdatedAt}, nil
+}
+
+type cleanupRecorder interface {
+	EnqueueCleanup(context.Context, ObjectRef, string, string, string, time.Time) error
+}
+
+func (s *Service) cleanupObject(ctx context.Context, ref ObjectRef, source, fileID, migrationID string) {
+	target, resolveErr := s.registry.Resolve(ctx, ref.StorageProfileID)
+	if resolveErr == nil {
+		if deleteErr := target.Storage.Delete(ctx, ref.StorageKey); deleteErr == nil {
+			return
+		}
+	}
+	if recorder, ok := s.store.(cleanupRecorder); ok {
+		if err := recorder.EnqueueCleanup(ctx, ref, source, fileID, migrationID, s.clock()); err == nil {
+			return
+		}
+	}
+	recordCleanupEnqueueFailure(source)
+	s.logger.Error("清理共享文件对象失败",
+		zap.Bool("critical", true), zap.String("profile_id", ref.StorageProfileID), zap.String("file_id", fileID), zap.String("source", source))
 }
 
 func normalizePage(query string, limit int, cursor, kind string) (string, int, Cursor, error) {

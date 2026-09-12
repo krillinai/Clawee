@@ -58,6 +58,7 @@ type App struct {
 
 	skillSourceScheduler  interface{ Close() }
 	businessDataScheduler interface{ Close() }
+	storageMigration      interface{ Close() }
 	closeDatabases        func()
 }
 
@@ -242,6 +243,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, err
 	}
 	var sharedFilesSvc *sharedfiles.Service
+	var sharedFileStorageConfigSvc *sharedfiles.StorageConfigurationService
+	var sharedFileStorageMigrationSvc *sharedfiles.StorageMigrationService
 	if pool != nil {
 		sharedStorage, err := sharedfiles.NewFileSystemStorage(cfg.SharedFiles.StorageRoot)
 		if err != nil {
@@ -250,7 +253,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		if err := sharedStorage.CleanStaleTemp(time.Now().UTC()); err != nil {
 			return nil, fmt.Errorf("clean shared file temporary storage: %w", err)
 		}
-		sharedFilesSvc = sharedfiles.NewService(sharedfiles.NewPostgresStore(pool), sharedStorage, log)
+		sharedStore := sharedfiles.NewPostgresStore(pool)
+		ossFactory := sharedfiles.NewOSSStorageFactory(tokenCipher, log, cfg.SharedFiles.OSS.AllowedEndpointHosts...)
+		storageRegistry := sharedfiles.NewStorageRegistry(sharedStore, sharedStorage, ossFactory)
+		sharedFilesSvc = sharedfiles.NewServiceWithRegistry(sharedStore, storageRegistry, log)
+		sharedFileStorageConfigSvc = sharedfiles.NewStorageConfigurationService(
+			sharedStore, storageRegistry, ossFactory, tokenCipher, cfg.SharedFiles.OSS.AllowedEndpointHosts, log)
+		sharedFileStorageMigrationSvc = sharedfiles.NewStorageMigrationService(sharedStore, storageRegistry, log)
 	}
 
 	var officeCollectorAPI http.Handler
@@ -369,6 +378,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			SkillHubService:            skillHubRuntime.Service,
 			SkillSourceService:         skillHubRuntime.Sources,
 			SharedFilesService:         sharedFilesSvc,
+			SharedFileStorageService:   sharedFileStorageConfigSvc,
+			SharedFileMigrationService: sharedFileStorageMigrationSvc,
 			PlatformBrandingService:    platformBrandingSvc,
 			DingTalkAuth: server.DingTalkAuthOptions{
 				Enabled: cfg.DingTalk.Enabled, ProviderKey: cfg.DingTalk.ProviderKey,
@@ -393,6 +404,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		collectorSQLDB:        collectorSQLDB,
 		skillSourceScheduler:  skillHubRuntime.Scheduler,
 		businessDataScheduler: businessScheduler,
+		storageMigration:      sharedFileStorageMigrationSvc,
 		closeDatabases: func() {
 			if collectorSQLDB != nil {
 				collectorSQLDB.Close()
@@ -407,6 +419,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 				pool.Close()
 			}
 		},
+	}
+	if sharedFileStorageMigrationSvc != nil {
+		sharedFileStorageMigrationSvc.Start(ctx)
 	}
 	poolsOwned = false
 	return application, nil
@@ -662,6 +677,9 @@ func buildOfficeAPIs(adminDB *sql.DB, collectorDB *sql.DB, installConfig config.
 func (a *App) Close() {
 	if a == nil {
 		return
+	}
+	if a.storageMigration != nil {
+		a.storageMigration.Close()
 	}
 	if a.businessDataScheduler != nil {
 		a.businessDataScheduler.Close()

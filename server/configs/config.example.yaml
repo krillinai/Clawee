@@ -54,6 +54,9 @@ skillhub:
 
 shared_files:
   storage_root: "data/shared-files"
+  oss:
+    # 仅填写由部署者审核过的自定义 OSS CNAME；官方 aliyuncs.com Endpoint 无需配置。
+    allowed_endpoint_hosts: []
 
 claw_admin:
   base_url: ""

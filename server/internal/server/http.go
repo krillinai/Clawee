@@ -51,35 +51,37 @@ type Options struct {
 		CreateRechargeSession(context.Context) (clawadmin.RechargeSession, error)
 		ListRechargeOrders(context.Context, int, int) (clawadmin.RechargeOrderPage, error)
 	}
-	ModelAccessMode          ModelAccessMode
-	BusinessDashboardService *businessdata.DashboardService
-	Logger                   *zap.Logger
-	StaticDir                string
-	SessionCookieName        string
-	AdminSessionCookieName   string
-	SessionCookieSecure      bool
-	AccessLogEnabled         bool
-	ErrorResponseBodyLog     bool
-	MCPAuth                  MCPAuthOptions
-	OfficeCollectorAPI       http.Handler
-	OfficeDashboardAPI       *httpapi.DashboardAPI
-	OfficeUserDashboardAPI   http.Handler
-	OfficeManagementAPI      *httpapi.ManagementAPI
-	AgentCollectorLookup     AgentCollectorLookup
-	OfficeUserCollectorsAPI  http.Handler
-	ClaweeActivityReporter   ClaweeActivityReporter
-	ActivityReportingEnabled bool
-	KnowledgeService         *knowledge.Service
-	SkillHubService          *skillhub.Service
-	SkillSourceService       *skillhub.GitHubSourceService
-	SharedFilesService       *sharedfiles.Service
-	PlatformBrandingService  *platformbranding.Service
-	DingTalkAuth             DingTalkAuthOptions
-	BilibiliIntegration      BilibiliIntegration
-	BilibiliSyncRequester    BilibiliSyncRequester
-	BilibiliSourceManager    BilibiliSourceManager
-	BilibiliWebhookClientID  string
-	BilibiliWebhookSecret    string
+	ModelAccessMode            ModelAccessMode
+	BusinessDashboardService   *businessdata.DashboardService
+	Logger                     *zap.Logger
+	StaticDir                  string
+	SessionCookieName          string
+	AdminSessionCookieName     string
+	SessionCookieSecure        bool
+	AccessLogEnabled           bool
+	ErrorResponseBodyLog       bool
+	MCPAuth                    MCPAuthOptions
+	OfficeCollectorAPI         http.Handler
+	OfficeDashboardAPI         *httpapi.DashboardAPI
+	OfficeUserDashboardAPI     http.Handler
+	OfficeManagementAPI        *httpapi.ManagementAPI
+	AgentCollectorLookup       AgentCollectorLookup
+	OfficeUserCollectorsAPI    http.Handler
+	ClaweeActivityReporter     ClaweeActivityReporter
+	ActivityReportingEnabled   bool
+	KnowledgeService           *knowledge.Service
+	SkillHubService            *skillhub.Service
+	SkillSourceService         *skillhub.GitHubSourceService
+	SharedFilesService         *sharedfiles.Service
+	SharedFileStorageService   *sharedfiles.StorageConfigurationService
+	SharedFileMigrationService *sharedfiles.StorageMigrationService
+	PlatformBrandingService    *platformbranding.Service
+	DingTalkAuth               DingTalkAuthOptions
+	BilibiliIntegration        BilibiliIntegration
+	BilibiliSyncRequester      BilibiliSyncRequester
+	BilibiliSourceManager      BilibiliSourceManager
+	BilibiliWebhookClientID    string
+	BilibiliWebhookSecret      string
 }
 
 type BilibiliIntegration interface {
@@ -234,6 +236,7 @@ func NewRouter(opts Options) http.Handler {
 	mountKnowledgeAdminRoutes(adminAPI, opts)
 	mountAdminMCPRoutes(adminAPI, opts)
 	mountSharedFileRoutes(appAPI, adminAPI, opts)
+	mountSharedFileStorageRoutes(adminAPI, opts)
 	mountRBACRoutes(adminAPI.Group("/rbac"), opts)
 
 	registerStaticFallback(router, opts.StaticDir)

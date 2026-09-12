@@ -49,7 +49,7 @@ mcp.public_base_url             -> CLAW_MCP_MCP_PUBLIC_BASE_URL
 | `office.install` | Collector 下载地址和二进制目录 |
 | `knowledge` | 知识库开关及 Provider 配置 |
 | `skillhub` | Skill 包、Git 来源和工作目录 |
-| `shared_files` | 共享文件存储目录 |
+| `shared_files` | 共享文件本地目录与 OSS CNAME 允许列表 |
 | `dingtalk`、`bilibili` | 可选外部身份和数据集成 |
 | `claw_admin`、`sub2api`、`model_access` | 可选模型配置和计费集成 |
 | `agent_activity` | Agent 活动直报开关 |
@@ -71,6 +71,18 @@ mcp.public_base_url             -> CLAW_MCP_MCP_PUBLIC_BASE_URL
 ## 可选能力
 
 知识库、Skill Git 同步、钉钉、Bilibili、外部模型配置和计费集成均应显式启用。启用前必须同时提供对应 Provider 的完整配置；不使用时保持关闭，核心 Gateway 不应依赖这些服务。
+
+共享网盘默认使用 `shared_files.storage_root` 指向的本地目录。OSS Profile、加密凭据和当前激活存储在管理台维护；官方 `aliyuncs.com` OSS Endpoint 无需额外配置。仅当使用已审核的 OSS 自定义 CNAME 时，部署者才可在仓库外配置中加入：
+
+```yaml
+shared_files:
+  storage_root: "data/shared-files"
+  oss:
+    allowed_endpoint_hosts:
+      - "storage.example.com"
+```
+
+允许列表只接受主机名，不填写 Scheme、路径或端口。管理台不能放行任意 Endpoint。
 
 ## 生产校验
 

@@ -13,9 +13,24 @@ import (
 )
 
 type Storage interface {
-	Put(context.Context, string, io.Reader, int64) (int64, string, error)
+	Put(context.Context, string, io.Reader, PutOptions) (ObjectMetadata, error)
 	Open(context.Context, string) (io.ReadCloser, error)
 	Delete(context.Context, string) error
+	Probe(context.Context) error
+}
+
+type PutOptions struct {
+	DeclaredSize int64
+	MaxBytes     int64
+	ContentType  string
+	FileID       string
+	ProfileID    string
+	SHA256       string
+}
+
+type ObjectMetadata struct {
+	SizeBytes int64
+	SHA256    string
 }
 
 type FileSystemStorage struct {
@@ -47,47 +62,80 @@ func NewFileSystemStorage(root string) (*FileSystemStorage, error) {
 
 func (s *FileSystemStorage) Root() string { return s.root }
 
-func (s *FileSystemStorage) Put(ctx context.Context, storageKey string, src io.Reader, maxBytes int64) (int64, string, error) {
+func (s *FileSystemStorage) Put(ctx context.Context, storageKey string, src io.Reader, opts PutOptions) (ObjectMetadata, error) {
 	finalPath, err := s.resolve(storageKey)
 	if err != nil {
-		return 0, "", err
+		return ObjectMetadata{}, err
+	}
+	if opts.DeclaredSize < 0 || opts.MaxBytes < 0 || opts.DeclaredSize > opts.MaxBytes {
+		if opts.DeclaredSize > opts.MaxBytes {
+			return ObjectMetadata{}, ErrFileTooLarge
+		}
+		return ObjectMetadata{}, ErrContentLengthMismatch
 	}
 	tmp, err := os.CreateTemp(filepath.Join(s.root, ".tmp"), "upload-")
 	if err != nil {
-		return 0, "", ErrStorageUnavailable
+		return ObjectMetadata{}, ErrStorageUnavailable
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
 	hash := sha256.New()
 	reader := &contextReader{ctx: ctx, reader: src}
-	size, copyErr := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(reader, maxBytes+1))
+	size, copyErr := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(reader, opts.MaxBytes+1))
 	closeErr := tmp.Close()
 	if closeErr != nil {
-		return 0, "", ErrStorageUnavailable
+		return ObjectMetadata{}, ErrStorageUnavailable
 	}
 	if errors.Is(copyErr, io.ErrUnexpectedEOF) {
-		return 0, "", ErrContentLengthMismatch
+		return ObjectMetadata{}, ErrContentLengthMismatch
 	}
 	if copyErr != nil {
-		return 0, "", ErrStorageUnavailable
+		return ObjectMetadata{}, ErrStorageUnavailable
 	}
-	if size > maxBytes {
-		return 0, "", ErrFileTooLarge
+	if size > opts.MaxBytes {
+		return ObjectMetadata{}, ErrFileTooLarge
+	}
+	if size != opts.DeclaredSize {
+		return ObjectMetadata{}, ErrContentLengthMismatch
 	}
 	if err := s.rejectSymlinkComponents(filepath.Dir(finalPath)); err != nil {
-		return 0, "", err
+		return ObjectMetadata{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o750); err != nil {
-		return 0, "", ErrStorageUnavailable
+		return ObjectMetadata{}, ErrStorageUnavailable
 	}
 	if err := s.rejectSymlinkComponents(filepath.Dir(finalPath)); err != nil {
-		return 0, "", err
+		return ObjectMetadata{}, err
 	}
 	if err := os.Rename(tmpName, finalPath); err != nil {
-		return 0, "", ErrStorageUnavailable
+		return ObjectMetadata{}, ErrStorageUnavailable
 	}
-	return size, hex.EncodeToString(hash.Sum(nil)), nil
+	return ObjectMetadata{SizeBytes: size, SHA256: hex.EncodeToString(hash.Sum(nil))}, nil
+}
+
+func (s *FileSystemStorage) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(filepath.Join(s.root, ".tmp"), "probe-")
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	name := probe.Name()
+	if _, err := probe.Write([]byte("clawee-storage-probe")); err != nil {
+		_ = probe.Close()
+		_ = os.Remove(name)
+		return ErrStorageUnavailable
+	}
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(name)
+		return ErrStorageUnavailable
+	}
+	if err := os.Remove(name); err != nil {
+		return ErrStorageUnavailable
+	}
+	return nil
 }
 
 func (s *FileSystemStorage) Open(ctx context.Context, storageKey string) (io.ReadCloser, error) {

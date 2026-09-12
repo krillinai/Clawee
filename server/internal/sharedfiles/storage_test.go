@@ -18,9 +18,9 @@ func TestFileSystemStorageStreamsAndRejectsTraversal(t *testing.T) {
 	}
 	ctx := context.Background()
 	key := "space_one/file_one/blob_one"
-	size, digest, err := storage.Put(ctx, key, strings.NewReader("hello"), 5)
-	if err != nil || size != 5 || digest != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
-		t.Fatalf("Put() = %d, %q, %v", size, digest, err)
+	metadata, err := storage.Put(ctx, key, strings.NewReader("hello"), PutOptions{DeclaredSize: 5, MaxBytes: 5})
+	if err != nil || metadata.SizeBytes != 5 || metadata.SHA256 != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
+		t.Fatalf("Put() = %#v, %v", metadata, err)
 	}
 	reader, err := storage.Open(ctx, key)
 	if err != nil {
@@ -32,7 +32,7 @@ func TestFileSystemStorageStreamsAndRejectsTraversal(t *testing.T) {
 		t.Fatalf("Open() = %q, %v", contents, err)
 	}
 	for _, invalid := range []string{"../outside", "space_one/file_one/../../outside", "/space_one/file_one/blob_one", "space_one/file_one/not-a-blob"} {
-		if _, _, err := storage.Put(ctx, invalid, strings.NewReader("x"), 1); !errors.Is(err, ErrStorageUnavailable) {
+		if _, err := storage.Put(ctx, invalid, strings.NewReader("x"), PutOptions{DeclaredSize: 1, MaxBytes: 1}); !errors.Is(err, ErrStorageUnavailable) {
 			t.Fatalf("Put(%q) error = %v, want storage unavailable", invalid, err)
 		}
 	}
@@ -43,7 +43,7 @@ func TestFileSystemStorageEnforcesHardLimitAndCleansStaleTemp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := storage.Put(context.Background(), "space_one/file_one/blob_large", strings.NewReader("12345"), 4); !errors.Is(err, ErrFileTooLarge) {
+	if _, err := storage.Put(context.Background(), "space_one/file_one/blob_large", strings.NewReader("12345"), PutOptions{DeclaredSize: 5, MaxBytes: 4}); !errors.Is(err, ErrFileTooLarge) {
 		t.Fatalf("Put() error = %v, want file too large", err)
 	}
 	stale := filepath.Join(storage.Root(), ".tmp", "stale")
@@ -87,7 +87,7 @@ func TestFileSystemStorageRejectsSymlinkComponents(t *testing.T) {
 	}
 	ctx := context.Background()
 	key := "space_one/file_one/blob_one"
-	if _, _, err := storage.Put(ctx, key, strings.NewReader("changed"), 7); !errors.Is(err, ErrStorageUnavailable) {
+	if _, err := storage.Put(ctx, key, strings.NewReader("changed"), PutOptions{DeclaredSize: 7, MaxBytes: 7}); !errors.Is(err, ErrStorageUnavailable) {
 		t.Fatalf("Put() error = %v, want storage unavailable", err)
 	}
 	if _, err := storage.Open(ctx, key); !errors.Is(err, ErrStorageUnavailable) {
@@ -108,7 +108,7 @@ func TestFileSystemStoragePreservesUnexpectedEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := io.MultiReader(strings.NewReader("short"), unexpectedEOFReader{})
-	if _, _, err := storage.Put(context.Background(), "space_one/file_one/blob_one", reader, 10); !errors.Is(err, ErrContentLengthMismatch) {
+	if _, err := storage.Put(context.Background(), "space_one/file_one/blob_one", reader, PutOptions{DeclaredSize: 10, MaxBytes: 10}); !errors.Is(err, ErrContentLengthMismatch) {
 		t.Fatalf("Put() error = %v, want content length mismatch", err)
 	}
 }

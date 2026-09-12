@@ -214,7 +214,12 @@ type SkillHubConfig struct {
 }
 
 type SharedFilesConfig struct {
-	StorageRoot string `mapstructure:"storage_root"`
+	StorageRoot string               `mapstructure:"storage_root"`
+	OSS         SharedFilesOSSConfig `mapstructure:"oss"`
+}
+
+type SharedFilesOSSConfig struct {
+	AllowedEndpointHosts []string `mapstructure:"allowed_endpoint_hosts"`
 }
 
 type ClawAdminConfig struct {
@@ -425,6 +430,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("skillhub.github_sync_enabled", true)
 	v.SetDefault("skillhub.repository_root", "data/skillhub/repositories")
 	v.SetDefault("shared_files.storage_root", "data/shared-files")
+	v.SetDefault("shared_files.oss.allowed_endpoint_hosts", []string{})
 	v.SetDefault("claw_admin.base_url", "")
 	v.SetDefault("claw_admin.deployment_credential", "")
 	v.SetDefault("claw_admin.timeout", "10s")
@@ -479,6 +485,7 @@ func bindEnv(v *viper.Viper) {
 		"skillhub.enabled",
 		"skillhub.package_root",
 		"shared_files.storage_root",
+		"shared_files.oss.allowed_endpoint_hosts",
 		"claw_admin.base_url",
 		"claw_admin.deployment_credential",
 		"claw_admin.timeout",

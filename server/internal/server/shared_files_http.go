@@ -488,7 +488,21 @@ func writeSharedFileError(c *gin.Context, err error) {
 	case errors.Is(err, sharedfiles.ErrDigestMismatch):
 		status, code, message = 422, "digest_mismatch", "文件摘要校验失败"
 	case errors.Is(err, sharedfiles.ErrStorageUnavailable):
-		status, code, message = 500, "storage_unavailable", "文件存储不可用"
+		status, code, message = 503, "storage_unavailable", "文件存储不可用"
+	case errors.Is(err, sharedfiles.ErrInvalidStorageConfiguration):
+		status, code, message = 400, "invalid_storage_configuration", "存储配置无效"
+	case errors.Is(err, sharedfiles.ErrStorageProbeDeleteFailed):
+		status, code, message = 502, "storage_probe_failed", "测试对象删除失败，请检查删除权限"
+	case errors.Is(err, sharedfiles.ErrStorageProbeFailed):
+		status, code, message = 502, "storage_probe_failed", "存储连通性测试失败"
+	case errors.Is(err, sharedfiles.ErrStorageConfigurationConflict):
+		status, code, message = 409, "storage_configuration_conflict", "存储配置已被其他管理员修改"
+	case errors.Is(err, sharedfiles.ErrStorageProfileInUse):
+		status, code, message = 409, "storage_profile_in_use", "存储配置正在使用，不能修改或退役"
+	case errors.Is(err, sharedfiles.ErrStorageMigrationRunning):
+		status, code, message = 409, "storage_migration_running", "该来源存储已有迁移任务运行中"
+	case errors.Is(err, sharedfiles.ErrStorageProfileNotFound):
+		status, code, message = 404, "storage_profile_not_found", "存储配置不存在"
 	}
 	writeSharedFileCode(c, status, code, message)
 }

@@ -115,6 +115,30 @@ func TestServiceActionPermissionDoesNotGrantSiblingActions(t *testing.T) {
 	}
 }
 
+func TestSharedFilesManageDoesNotGrantStorageGovernance(t *testing.T) {
+	service, _, accountService := newTestService(t)
+	ctx := context.Background()
+	account := createAccount(t, accountService, "shared-files-manager@example.com")
+	role, err := service.CreateRole(ctx, "usr_admin", CreateRoleInput{
+		Code: "shared_files_manager", Name: "网盘管理员", Permissions: []string{PermissionSharedFilesManage},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AssignAccountRole(ctx, "usr_admin", account.UserID, role.RoleID); err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []string{PermissionSharedFilesStorageRead, PermissionSharedFilesStorageManage, PermissionSharedFilesStorageMigrate} {
+		allowed, err := service.HasPermission(ctx, account.UserID, permission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed {
+			t.Fatalf("旧网盘管理权限不应自动授予 %q", permission)
+		}
+	}
+}
+
 func TestAdminRoleAlwaysExpandsToCurrentCatalog(t *testing.T) {
 	service, _, accountService := newTestService(t)
 	ctx := context.Background()

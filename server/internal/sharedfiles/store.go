@@ -21,7 +21,7 @@ type Store interface {
 	GetAdminFile(context.Context, string) (File, error)
 	GetAdminFileByPath(context.Context, string, string) (File, error)
 	CreateFileAuthorized(context.Context, string, File) (File, error)
-	ReplaceFileAuthorized(context.Context, string, File, int64) (File, string, error)
+	ReplaceFileAuthorized(context.Context, string, File, int64) (File, ObjectRef, error)
 	CreateAdminFile(context.Context, File) (File, error)
-	ReplaceAdminFile(context.Context, File, int64) (File, string, error)
+	ReplaceAdminFile(context.Context, File, int64) (File, ObjectRef, error)
 }

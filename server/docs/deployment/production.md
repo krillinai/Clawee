@@ -114,6 +114,10 @@ CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-mcp serve
 - 共享文件目录；
 - 部署配置和 Secret 的版本记录。
 
+共享网盘切换到阿里云 OSS 后，还必须备份对应 Bucket 数据和 `security.agent_token_encryption_key`。PostgreSQL、对象数据和加密密钥必须来自一致的备份点；不能只恢复其中一项。建议在 Bucket 侧开启版本控制或跨区域复制，并保持 Bucket 为私有读写。
+
+使用 ECS RAM Role 时，将权限限制到实际 Bucket 和 Profile Prefix，至少包含对象上传、读取、删除，以及 Multipart Upload 的创建、上传分片、列出分片、完成和终止权限；不要授予 Bucket 创建、删除或 ACL 管理权限。非 ECS 环境可在管理台使用 AccessKey，凭据只会以 AES-GCM 密文保存。
+
 备份中的 Secret 与业务数据应加密，并使用与生产服务不同的访问权限。
 
 ## 升级与回滚
@@ -124,3 +128,7 @@ CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-mcp serve
 4. 发现问题时回退应用版本；数据库回退需根据对应迁移单独评估。
 
 不要假设应用二进制回滚能够自动撤销数据库结构变化。
+
+共享网盘一旦已有文件写入 OSS，不得直接回退到不识别 `storage_profile_id` 的版本。应先在当前版本中执行反向迁移，确认本地 Profile 包含全部文件且迁移失败数、待清理数均为零，再评估版本回退和本地持久卷变更。切换激活 Profile 只影响后续写入，不会自动搬迁存量文件。
+
+非迁移上传或替换产生的清理任务达到 10 次自动重试上限后，运维人员应先恢复对应存储，再在备份完成且限定具体 `cleanup_id` 的维护事务中，将该任务改回 `pending`、清零 `attempt_count` 并更新 `next_attempt_at`。禁止按 Profile 或全表批量重置，也不得手工删除仍被 `shared_files` 引用的对象。

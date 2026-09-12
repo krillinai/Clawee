@@ -379,50 +379,59 @@ func (s *MemoryStore) createFileLocked(file File) (File, error) {
 		}
 	}
 	file.Revision = 1
+	if file.StorageProfileID == "" {
+		file.StorageProfileID = LocalDefaultProfileID
+	}
 	file.UpdatedByUserID, file.UpdatedByAgentID, file.UpdatedAt = file.CreatedByUserID, file.CreatedByAgentID, file.CreatedAt
 	s.files[file.FileID] = file
 	return file, nil
 }
 
-func (s *MemoryStore) ReplaceFileAuthorized(ctx context.Context, userID string, file File, expectedRevision int64) (File, string, error) {
+func (s *MemoryStore) ReplaceFileAuthorized(ctx context.Context, userID string, file File, expectedRevision int64) (File, ObjectRef, error) {
 	if err := ctx.Err(); err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.grants[file.SpaceID][userID].Write {
-		return File{}, "", ErrSharedSpaceNotFound
+		return File{}, ObjectRef{}, ErrSharedSpaceNotFound
 	}
 	return s.replaceFileLocked(file, expectedRevision)
 }
 
-func (s *MemoryStore) ReplaceAdminFile(ctx context.Context, file File, expectedRevision int64) (File, string, error) {
+func (s *MemoryStore) ReplaceAdminFile(ctx context.Context, file File, expectedRevision int64) (File, ObjectRef, error) {
 	if err := ctx.Err(); err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.spaces[file.SpaceID]; !ok {
-		return File{}, "", ErrSharedSpaceNotFound
+		return File{}, ObjectRef{}, ErrSharedSpaceNotFound
 	}
 	return s.replaceFileLocked(file, expectedRevision)
 }
 
-func (s *MemoryStore) replaceFileLocked(file File, expectedRevision int64) (File, string, error) {
+func (s *MemoryStore) replaceFileLocked(file File, expectedRevision int64) (File, ObjectRef, error) {
 	for id, current := range s.files {
 		if current.SpaceID != file.SpaceID || current.LogicalPath != file.LogicalPath {
 			continue
 		}
 		if current.Revision != expectedRevision {
-			return File{}, "", &RevisionConflictError{CurrentRevision: current.Revision}
+			return File{}, ObjectRef{}, &RevisionConflictError{CurrentRevision: current.Revision}
 		}
-		oldKey := current.StorageKey
+		oldRef := ObjectRef{StorageProfileID: current.StorageProfileID, StorageKey: current.StorageKey}
+		if oldRef.StorageProfileID == "" {
+			oldRef.StorageProfileID = LocalDefaultProfileID
+		}
+		if file.StorageProfileID == "" {
+			file.StorageProfileID = LocalDefaultProfileID
+		}
 		file.FileID, file.Revision = current.FileID, current.Revision+1
 		file.CreatedByUserID, file.CreatedByAgentID, file.CreatedAt = current.CreatedByUserID, current.CreatedByAgentID, current.CreatedAt
 		s.files[id] = file
-		return file, oldKey, nil
+		return file, oldRef, nil
 	}
-	return File{}, "", ErrSharedFileNotFound
+	return File{}, ObjectRef{}, ErrSharedFileNotFound
 }
 
 func (s *MemoryStore) summaryLocked(space Space) SpaceSummary {

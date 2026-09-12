@@ -72,6 +72,9 @@ const SharedFilesPage = lazy(() =>
 const SharedSpaceFilesPage = lazy(() =>
   import("./pages/shared-space-files").then((module) => ({ default: module.SharedSpaceFilesPage }))
 );
+const SharedFileStoragePage = lazy(() =>
+  import("./pages/shared-file-storage").then((module) => ({ default: module.SharedFileStoragePage }))
+);
 const OfficeAgentActivityPage = lazy(() =>
   import("./pages/office-agent-activity").then((module) => ({
     default: module.OfficeAgentActivityPage
@@ -175,6 +178,7 @@ export function App() {
               <Route path="/admin/skills/source-detail" element={adminPage(permissions.skillRead, <SkillSourceDetailPage />)} />
               <Route path="/admin/shared-files" element={adminPage(permissions.sharedFilesRead, <SharedFilesPage />)} />
               <Route path="/admin/shared-files/detail" element={adminPage(permissions.sharedFilesRead, <SharedSpaceFilesPage />)} />
+              <Route path="/admin/shared-files/storage" element={adminPage(permissions.sharedFilesStorageRead, <SharedFileStoragePage />)} />
               <Route
                 path="/admin/knowledge-bases/documents"
                 element={adminPage(permissions.knowledgeRead, <KnowledgeBaseDocumentsPage />)}

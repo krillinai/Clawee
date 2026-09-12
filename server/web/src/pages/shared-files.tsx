@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus } from "lucide-react";
+import { Database, Pencil, Plus } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
@@ -43,6 +43,7 @@ type SpaceForm = { mode: "create" | "edit"; spaceId: string; name: string; descr
 
 export function SharedFilesPage() {
   const canCreate = useAdminPermission(permissions.sharedFilesSpaceCreate);
+  const canReadStorage = useAdminPermission(permissions.sharedFilesStorageRead);
   const canUpdate = useAdminPermission(permissions.sharedFilesSpaceUpdate);
   const canCreateMembers = useAdminPermission(permissions.sharedFilesMemberCreate);
   const canUpdateMembers = useAdminPermission(permissions.sharedFilesMemberUpdate);
@@ -127,7 +128,10 @@ export function SharedFilesPage() {
 
   return (
     <PageShell>
-      <PageHeader title="网盘" actions={canCreate ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建共享空间</Button> : null}>
+      <PageHeader title="网盘" actions={canCreate || canReadStorage ? <>
+        {canReadStorage ? <Button asChild variant="outline"><Link to="/admin/shared-files/storage"><Database data-icon="inline-start" />存储配置</Link></Button> : null}
+        {canCreate ? <Button onClick={openCreate}><Plus data-icon="inline-start" />创建共享空间</Button> : null}
+      </> : null}>
         管理共享空间、文件和成员授权。
       </PageHeader>
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}

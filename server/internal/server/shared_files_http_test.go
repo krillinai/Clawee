@@ -171,7 +171,7 @@ func TestSharedFileStableErrorMapping(t *testing.T) {
 		{sharedfiles.ErrFileTooLarge, 413, "file_too_large"},
 		{sharedfiles.ErrContentLengthMismatch, 422, "content_length_mismatch"},
 		{sharedfiles.ErrDigestMismatch, 422, "digest_mismatch"},
-		{sharedfiles.ErrStorageUnavailable, 500, "storage_unavailable"},
+		{sharedfiles.ErrStorageUnavailable, 503, "storage_unavailable"},
 		{errors.New("unknown"), 500, "internal_error"},
 	}
 	for _, test := range tests {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -118,17 +119,340 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 	}
 }
 
+func TestPostgresStorageMigrationStateTransitions(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	now := time.Now().UTC()
+	target := StorageProfile{ProfileID: "storage_profile_target", Name: "Target", Provider: "aliyun_oss",
+		Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Region: "cn-hangzhou", Bucket: "clawee-test", ObjectPrefix: "shared-files",
+		CredentialMode: "access_key", AccessKeyIDCiphertext: []byte("encrypted-id"), AccessKeySecretCiphertext: []byte("encrypted-secret"),
+		Status: "enabled", LastProbeStatus: "success", CreatedBy: "admin", UpdatedBy: "admin", CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateStorageProfile(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+
+	empty, err := store.CreateStorageMigration(ctx, LocalDefaultProfileID, target.ProfileID, "admin", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Status != "completed" || empty.TotalCount != 0 || empty.FinishedAt == nil {
+		t.Fatalf("empty migration = %#v", empty)
+	}
+	if _, err := store.ActivateStorageProfile(ctx, target.ProfileID, "admin", 99, now); !errors.Is(err, ErrStorageConfigurationConflict) {
+		t.Fatalf("activate conflict = %v", err)
+	}
+
+	migrationID := "migration_cleanup"
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migrations
+(migration_id,source_profile_id,target_profile_id,status,total_count,success_count,cleanup_pending_count,created_by,created_at,finished_at)
+VALUES ($1,$2,$3,'completed_with_cleanup_pending',1,1,1,'admin',$4,$4)`, migrationID, LocalDefaultProfileID, target.ProfileID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migration_items
+(migration_id,file_id,source_profile_id,source_storage_key,source_revision,source_size_bytes,source_sha256,target_storage_key,status)
+VALUES ($1,'file_cleanup',$2,'source-key',1,0,$3,'target-key','succeeded')`, migrationID, LocalDefaultProfileID, strings.Repeat("0", 64)); err != nil {
+		t.Fatal(err)
+	}
+	cleanup := CleanupTask{CleanupID: "cleanup_test", StorageProfileID: LocalDefaultProfileID, StorageKey: "source-key",
+		Source: "migration_source", FileID: "file_cleanup", MigrationID: migrationID, AttemptCount: 1}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_cleanup_tasks
+(cleanup_id,storage_profile_id,storage_key,source,file_id,migration_id,status,attempt_count,next_attempt_at,created_at)
+VALUES ($1,$2,$3,$4,$5,$6,'running',1,$7,$7)`, cleanup.CleanupID, cleanup.StorageProfileID, cleanup.StorageKey,
+		cleanup.Source, cleanup.FileID, cleanup.MigrationID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishCleanupTask(ctx, cleanup, true, "", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := store.GetStorageMigration(ctx, migrationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "completed" || completed.CleanupPendingCount != 0 {
+		t.Fatalf("completed migration = %#v", completed)
+	}
+
+	cancelledID := "migration_cancelled"
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migrations
+(migration_id,source_profile_id,target_profile_id,status,created_by,created_at,finished_at)
+VALUES ($1,$2,$3,'cancelled','admin',$4,$4)`, cancelledID, LocalDefaultProfileID, target.ProfileID, now); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshMigration(ctx, tx, cancelledID, now.Add(time.Second)); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := store.GetStorageMigration(ctx, cancelledID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("cancelled migration status = %q", cancelled.Status)
+	}
+}
+
+func TestPostgresStorageWorkersFenceExpiredLeases(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	now := time.Now().UTC()
+	target := StorageProfile{ProfileID: "storage_profile_target", Name: "Target", Provider: "aliyun_oss",
+		Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Region: "cn-hangzhou", Bucket: "clawee-test", ObjectPrefix: "shared-files",
+		CredentialMode: "access_key", AccessKeyIDCiphertext: []byte("encrypted-id"), AccessKeySecretCiphertext: []byte("encrypted-secret"),
+		Status: "enabled", LastProbeStatus: "success", CreatedBy: "admin", UpdatedBy: "admin", CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateStorageProfile(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	migrationID := "migration_lease"
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migrations
+(migration_id,source_profile_id,target_profile_id,status,total_count,created_by,created_at)
+VALUES ($1,$2,$3,'running',1,'admin',$4)`, migrationID, LocalDefaultProfileID, target.ProfileID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migration_items
+(migration_id,file_id,source_profile_id,source_storage_key,source_revision,source_size_bytes,source_sha256,target_storage_key,status)
+VALUES ($1,'file_lease',$2,'space_a/file_lease/blob_source',1,0,$3,'space_a/file_lease/blob_target','pending')`,
+		migrationID, LocalDefaultProfileID, strings.Repeat("0", 64)); err != nil {
+		t.Fatal(err)
+	}
+	first, _, ok, err := store.ClaimStorageMigrationItem(ctx, now)
+	if err != nil || !ok {
+		t.Fatalf("first claim = %#v, %v", first, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE shared_file_storage_migration_items SET heartbeat_at=$3
+WHERE migration_id=$1 AND file_id=$2`, migrationID, first.FileID, now.Add(-3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	second, _, ok, err := store.ClaimStorageMigrationItem(ctx, now)
+	if err != nil || !ok {
+		t.Fatalf("second claim = %#v, %v", second, err)
+	}
+	if first.AttemptCount != 1 || second.AttemptCount != 2 || first.TargetStorageKey == second.TargetStorageKey {
+		t.Fatalf("claims first=%#v second=%#v", first, second)
+	}
+	if migrated, err := store.CompleteStorageMigrationItem(ctx, first, target.ProfileID, now); err != nil || migrated {
+		t.Fatalf("expired completion migrated=%v err=%v", migrated, err)
+	}
+	if err := store.FailStorageMigrationItem(ctx, first, "storage_unavailable", false, now); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var attempts int
+	if err := pool.QueryRow(ctx, `SELECT status,attempt_count FROM shared_file_storage_migration_items
+WHERE migration_id=$1 AND file_id=$2`, migrationID, first.FileID).Scan(&status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != "running" || attempts != 2 {
+		t.Fatalf("current lease status=%q attempts=%d", status, attempts)
+	}
+	if err := store.FailStorageMigrationItem(ctx, second, "digest_mismatch", true, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status,attempt_count FROM shared_file_storage_migration_items
+WHERE migration_id=$1 AND file_id=$2`, migrationID, second.FileID).Scan(&status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || attempts != 2 {
+		t.Fatalf("permanent failure status=%q attempts=%d", status, attempts)
+	}
+
+	cleanupID := "cleanup_lease"
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_cleanup_tasks
+(cleanup_id,storage_profile_id,storage_key,source,status,attempt_count,next_attempt_at,created_at)
+VALUES ($1,$2,'space_a/file_a/blob_a','upload_compensation','running',1,$3,$4)`,
+		cleanupID, LocalDefaultProfileID, now.Add(-time.Minute), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cleanup, ok, err := store.ClaimCleanupTask(ctx, now)
+	if err != nil || !ok || cleanup.AttemptCount != 2 {
+		t.Fatalf("cleanup claim = %#v ok=%v err=%v", cleanup, ok, err)
+	}
+	stale := cleanup
+	stale.AttemptCount = 1
+	if err := store.FinishCleanupTask(ctx, stale, true, "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM shared_file_storage_cleanup_tasks WHERE cleanup_id=$1`, cleanupID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "running" {
+		t.Fatalf("stale cleanup changed status to %q", status)
+	}
+	if err := store.FinishCleanupTask(ctx, cleanup, true, "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM shared_file_storage_cleanup_tasks WHERE cleanup_id=$1`, cleanupID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "succeeded" {
+		t.Fatalf("current cleanup status = %q", status)
+	}
+}
+
+func TestPostgresStorageMigrationConcurrentFinalization(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	now := time.Now().UTC()
+	target := StorageProfile{ProfileID: "storage_profile_target", Name: "Target", Provider: "aliyun_oss",
+		Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Region: "cn-hangzhou", Bucket: "clawee-test", ObjectPrefix: "shared-files",
+		CredentialMode: "access_key", AccessKeyIDCiphertext: []byte("encrypted-id"), AccessKeySecretCiphertext: []byte("encrypted-secret"),
+		Status: "enabled", LastProbeStatus: "success", CreatedBy: "admin", UpdatedBy: "admin", CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateStorageProfile(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	migrationID := "migration_concurrent"
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migrations
+(migration_id,source_profile_id,target_profile_id,status,total_count,created_by,created_at)
+VALUES ($1,$2,$3,'running',2,'admin',$4)`, migrationID, LocalDefaultProfileID, target.ProfileID, now); err != nil {
+		t.Fatal(err)
+	}
+	items := []StorageMigrationItem{
+		{MigrationID: migrationID, FileID: "file_a", SourceProfileID: LocalDefaultProfileID, SourceStorageKey: "space_a/file_a/blob_source", SourceRevision: 1, TargetStorageKey: "space_a/file_a/blob_target-1", AttemptCount: 1},
+		{MigrationID: migrationID, FileID: "file_b", SourceProfileID: LocalDefaultProfileID, SourceStorageKey: "space_a/file_b/blob_source", SourceRevision: 1, TargetStorageKey: "space_a/file_b/blob_target-1", AttemptCount: 1},
+	}
+	for _, item := range items {
+		if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migration_items
+(migration_id,file_id,source_profile_id,source_storage_key,source_revision,source_size_bytes,source_sha256,target_storage_key,status,attempt_count,heartbeat_at)
+VALUES ($1,$2,$3,$4,$5,0,$6,$7,'running',$8,$9)`, item.MigrationID, item.FileID, item.SourceProfileID,
+			item.SourceStorageKey, item.SourceRevision, strings.Repeat("0", 64), item.TargetStorageKey, item.AttemptCount, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := make(chan struct{})
+	errorsOut := make(chan error, len(items))
+	var workers sync.WaitGroup
+	for _, item := range items {
+		item := item
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, err := store.CompleteStorageMigrationItem(ctx, item, target.ProfileID, now)
+			errorsOut <- err
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errorsOut)
+	for err := range errorsOut {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := store.GetStorageMigration(ctx, migrationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "completed" || result.SkippedCount != 2 {
+		t.Fatalf("concurrent final migration = %#v", result)
+	}
+}
+
+func TestPostgresStorageProfileConfigAndMigrationCAS(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	target := StorageProfile{ProfileID: "storage_profile_cas_target", Name: "Target", Provider: "aliyun_oss",
+		Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Region: "cn-hangzhou", Bucket: "clawee-test", ObjectPrefix: "shared-files",
+		CredentialMode: "ecs_ram_role", Status: "enabled", LastProbeStatus: "success", CreatedBy: "admin", UpdatedBy: "admin", CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateStorageProfile(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_spaces
+(space_id,name,description,created_by,updated_by,created_at,updated_at)
+VALUES ('space_cas','CAS','','admin','admin',$1,$1)`, now); err != nil {
+		t.Fatal(err)
+	}
+	sourceKey := "space_cas/file_cas/blob_source"
+	targetKey := "space_cas/file_cas/blob_target"
+	digest := strings.Repeat("a", 64)
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_files
+(file_id,space_id,logical_path,file_name,storage_key,size_bytes,sha256,content_type,revision,
+created_by_user_id,created_by_agent_id,updated_by_user_id,updated_by_agent_id,created_at,updated_at,storage_profile_id)
+VALUES ('file_cas','space_cas','file.txt','file.txt',$1,4,$2,'text/plain',7,'creator','agent_creator','updater','agent_updater',$3,$3,$4)`,
+		sourceKey, digest, now, LocalDefaultProfileID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migrations
+(migration_id,source_profile_id,target_profile_id,status,total_count,created_by,created_at,started_at)
+VALUES ('migration_cas',$1,$2,'running',1,'admin',$3,$3)`, LocalDefaultProfileID, target.ProfileID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_file_storage_migration_items
+(migration_id,file_id,source_profile_id,source_storage_key,source_revision,source_size_bytes,source_sha256,target_storage_key,status,attempt_count,heartbeat_at)
+VALUES ('migration_cas','file_cas',$1,$2,7,4,$3,$4,'running',1,$5)`, LocalDefaultProfileID, sourceKey, digest, targetKey, now); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := store.GetStorageProfileConfig(ctx, LocalDefaultProfileID)
+	if err != nil || config.FileCount != 0 || config.SizeBytes != 0 {
+		t.Fatalf("profile config = %#v, %v", config, err)
+	}
+	aggregated, err := store.GetStorageProfile(ctx, LocalDefaultProfileID)
+	if err != nil || aggregated.FileCount != 1 || aggregated.SizeBytes != 4 {
+		t.Fatalf("aggregated profile = %#v, %v", aggregated, err)
+	}
+
+	item := StorageMigrationItem{MigrationID: "migration_cas", FileID: "file_cas", SourceProfileID: LocalDefaultProfileID,
+		SourceStorageKey: sourceKey, SourceRevision: 7, SourceSizeBytes: 4, SourceSHA256: digest, TargetStorageKey: targetKey, AttemptCount: 1}
+	migrated, err := store.CompleteStorageMigrationItem(ctx, item, target.ProfileID, now.Add(time.Second))
+	if err != nil || !migrated {
+		t.Fatalf("complete migration migrated=%v err=%v", migrated, err)
+	}
+	var profileID, storageKey, updatedByUser, updatedByAgent string
+	var revision int64
+	var updatedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT storage_profile_id,storage_key,revision,updated_by_user_id,updated_by_agent_id,updated_at
+FROM shared_files WHERE file_id='file_cas'`).Scan(&profileID, &storageKey, &revision, &updatedByUser, &updatedByAgent, &updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if profileID != target.ProfileID || storageKey != targetKey || revision != 7 || updatedByUser != "updater" || updatedByAgent != "agent_updater" || !updatedAt.Equal(now) {
+		t.Fatalf("migrated file profile=%q key=%q revision=%d updater=%q/%q updated_at=%v", profileID, storageKey, revision, updatedByUser, updatedByAgent, updatedAt)
+	}
+}
+
+func TestPostgresStorageAuditIsIdempotentByAuditID(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	audit := StorageAudit{AuditID: "storage_audit_stable", RequestID: "migration-1", OperatorUserID: "admin",
+		Action: "migration_complete", ObjectID: "migration-1", Result: "success", Details: map[string]any{"status": "completed"}, CreatedAt: time.Now().UTC()}
+	if err := store.RecordStorageAudit(ctx, audit); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordStorageAudit(ctx, audit); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM shared_file_storage_audits WHERE audit_id=$1`, audit.AuditID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("audit count = %d", count)
+	}
+}
+
 type blockingStorage struct {
 	Storage
 	stored  chan struct{}
 	release chan struct{}
 }
 
-func (s *blockingStorage) Put(ctx context.Context, key string, src io.Reader, maxBytes int64) (int64, string, error) {
-	size, digest, err := s.Storage.Put(ctx, key, src, maxBytes)
+func (s *blockingStorage) Put(ctx context.Context, key string, src io.Reader, opts PutOptions) (ObjectMetadata, error) {
+	metadata, err := s.Storage.Put(ctx, key, src, opts)
 	close(s.stored)
 	<-s.release
-	return size, digest, err
+	return metadata, err
 }
 
 func openSharedFilesTestPool(t *testing.T) *pgxpool.Pool {
@@ -176,6 +500,7 @@ func openSharedFilesTestPool(t *testing.T) *pgxpool.Pool {
 	applySharedFilesMigration(t, pool, "../../db/migrations/00026_data_resource_grants.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00029_shared_files.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00030_shared_file_admin_actor.sql")
+	applySharedFilesMigration(t, pool, "../../db/migrations/00049_shared_file_storage_profiles.sql")
 	return pool
 }
 

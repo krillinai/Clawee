@@ -312,7 +312,7 @@ WHERE s.space_id=$4`, ResourceTypeSharedSpace, action, userID, spaceID).Scan(&ig
 
 func (s *PostgresStore) GetAuthorizedFile(ctx context.Context, userID, fileID, action string) (File, error) {
 	var item File
-	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
@@ -325,7 +325,7 @@ WHERE f.file_id=$4`, ResourceTypeSharedSpace, action, userID, fileID).Scan(fileD
 
 func (s *PostgresStore) GetAuthorizedFileByPath(ctx context.Context, userID, spaceID, logicalPath, action string) (File, error) {
 	var item File
-	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
@@ -338,7 +338,7 @@ WHERE f.space_id=$4 AND f.logical_path=$5`, ResourceTypeSharedSpace, action, use
 
 func (s *PostgresStore) GetAdminFile(ctx context.Context, fileID string) (File, error) {
 	var item File
-	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 WHERE f.file_id=$1`, fileID).Scan(fileDest(&item)...)
@@ -350,7 +350,7 @@ WHERE f.file_id=$1`, fileID).Scan(fileDest(&item)...)
 
 func (s *PostgresStore) GetAdminFileByPath(ctx context.Context, spaceID, logicalPath string) (File, error) {
 	var item File
-	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+	err := s.pool.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 WHERE f.space_id=$1 AND f.logical_path=$2`, spaceID, logicalPath).Scan(fileDest(&item)...)
@@ -382,9 +382,9 @@ func (s *PostgresStore) createFile(ctx context.Context, authorizedUserID string,
 		return File{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO shared_files
-(file_id,space_id,logical_path,file_name,storage_key,size_bytes,sha256,content_type,revision,created_by_user_id,created_by_agent_id,updated_by_user_id,updated_by_agent_id,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$9,$10,$11,$11)`, file.FileID, file.SpaceID, file.LogicalPath, file.FileName,
-		file.StorageKey, file.SizeBytes, file.SHA256, file.ContentType, file.CreatedByUserID, nullableString(file.CreatedByAgentID), file.CreatedAt)
+(file_id,space_id,logical_path,file_name,storage_profile_id,storage_key,size_bytes,sha256,content_type,revision,created_by_user_id,created_by_agent_id,updated_by_user_id,updated_by_agent_id,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$10,$11,$12,$12)`, file.FileID, file.SpaceID, file.LogicalPath, file.FileName,
+		file.StorageProfileID, file.StorageKey, file.SizeBytes, file.SHA256, file.ContentType, file.CreatedByUserID, nullableString(file.CreatedByAgentID), file.CreatedAt)
 	if err != nil {
 		return File{}, mapPostgresError(err, ErrFileAlreadyExists)
 	}
@@ -397,57 +397,57 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$9,$10,$11,$11)`, file.FileID, file.Spa
 	return file, nil
 }
 
-func (s *PostgresStore) ReplaceFileAuthorized(ctx context.Context, userID string, file File, expectedRevision int64) (File, string, error) {
+func (s *PostgresStore) ReplaceFileAuthorized(ctx context.Context, userID string, file File, expectedRevision int64) (File, ObjectRef, error) {
 	return s.replaceFile(ctx, userID, file, expectedRevision)
 }
 
-func (s *PostgresStore) ReplaceAdminFile(ctx context.Context, file File, expectedRevision int64) (File, string, error) {
+func (s *PostgresStore) ReplaceAdminFile(ctx context.Context, file File, expectedRevision int64) (File, ObjectRef, error) {
 	return s.replaceFile(ctx, "", file, expectedRevision)
 }
 
-func (s *PostgresStore) replaceFile(ctx context.Context, authorizedUserID string, file File, expectedRevision int64) (File, string, error) {
+func (s *PostgresStore) replaceFile(ctx context.Context, authorizedUserID string, file File, expectedRevision int64) (File, ObjectRef, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	defer tx.Rollback(ctx)
 	if authorizedUserID == "" {
 		if err := lockSharedSpace(ctx, tx, file.SpaceID); err != nil {
-			return File{}, "", err
+			return File{}, ObjectRef{}, err
 		}
 	} else if err := lockWriteGrant(ctx, tx, authorizedUserID, file.SpaceID); err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	var current File
-	err = tx.QueryRow(ctx, `SELECT file_id,storage_key,revision,created_by_user_id,COALESCE(created_by_agent_id,''),created_at
+	err = tx.QueryRow(ctx, `SELECT file_id,storage_profile_id,storage_key,revision,created_by_user_id,COALESCE(created_by_agent_id,''),created_at
 FROM shared_files WHERE space_id=$1 AND logical_path=$2 FOR UPDATE`, file.SpaceID, file.LogicalPath).
-		Scan(&current.FileID, &current.StorageKey, &current.Revision, &current.CreatedByUserID, &current.CreatedByAgentID, &current.CreatedAt)
+		Scan(&current.FileID, &current.StorageProfileID, &current.StorageKey, &current.Revision, &current.CreatedByUserID, &current.CreatedByAgentID, &current.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return File{}, "", ErrSharedFileNotFound
+		return File{}, ObjectRef{}, ErrSharedFileNotFound
 	}
 	if err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	if current.Revision != expectedRevision {
-		return File{}, "", &RevisionConflictError{CurrentRevision: current.Revision}
+		return File{}, ObjectRef{}, &RevisionConflictError{CurrentRevision: current.Revision}
 	}
-	tag, err := tx.Exec(ctx, `UPDATE shared_files SET storage_key=$3,size_bytes=$4,sha256=$5,content_type=$6,
-revision=revision+1,updated_by_user_id=$7,updated_by_agent_id=$8,updated_at=$9
-WHERE space_id=$1 AND logical_path=$2 AND revision=$10`, file.SpaceID, file.LogicalPath, file.StorageKey, file.SizeBytes,
+	tag, err := tx.Exec(ctx, `UPDATE shared_files SET storage_profile_id=$3,storage_key=$4,size_bytes=$5,sha256=$6,content_type=$7,
+revision=revision+1,updated_by_user_id=$8,updated_by_agent_id=$9,updated_at=$10
+WHERE space_id=$1 AND logical_path=$2 AND revision=$11`, file.SpaceID, file.LogicalPath, file.StorageProfileID, file.StorageKey, file.SizeBytes,
 		file.SHA256, file.ContentType, file.UpdatedByUserID, nullableString(file.UpdatedByAgentID), file.UpdatedAt, expectedRevision)
 	if err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	if tag.RowsAffected() == 0 {
-		return File{}, "", &RevisionConflictError{CurrentRevision: current.Revision}
+		return File{}, ObjectRef{}, &RevisionConflictError{CurrentRevision: current.Revision}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return File{}, "", err
+		return File{}, ObjectRef{}, err
 	}
 	file.FileID = current.FileID
 	file.Revision = expectedRevision + 1
 	file.CreatedByUserID, file.CreatedByAgentID, file.CreatedAt = current.CreatedByUserID, current.CreatedByAgentID, current.CreatedAt
-	return file, current.StorageKey, nil
+	return file, ObjectRef{StorageProfileID: current.StorageProfileID, StorageKey: current.StorageKey}, nil
 }
 
 type RevisionConflictError struct{ CurrentRevision int64 }
@@ -487,7 +487,7 @@ func spaceSummaryDest(item *SpaceSummary) []any {
 }
 
 func fileDest(item *File) []any {
-	return []any{&item.FileID, &item.SpaceID, &item.SpaceName, &item.LogicalPath, &item.FileName, &item.StorageKey, &item.SizeBytes,
+	return []any{&item.FileID, &item.SpaceID, &item.SpaceName, &item.LogicalPath, &item.FileName, &item.StorageProfileID, &item.StorageKey, &item.SizeBytes,
 		&item.SHA256, &item.ContentType, &item.Revision, &item.CreatedByUserID, &item.CreatedByAgentID,
 		&item.UpdatedByUserID, &item.UpdatedByAgentID, &item.CreatedAt, &item.UpdatedAt}
 }
