@@ -1,8 +1,10 @@
-# GitHub Actions 发布产物同步腾讯云 COS 方案
+# GitHub Actions 发布产物同步腾讯云 COS 设计与实现基线
 
-> 状态：方案已确认，可以进入实现。
+> 状态：已实现并投入正式发布。
 >
-> 更新日期：2026-09-10。
+> 更新日期：2026-09-12。
+>
+> 当前实现基线：`v0.1.7`，Commit `268e493a76782a2856504850170860e2f2004a27`。
 
 ## 1. 背景
 
@@ -14,15 +16,15 @@ Clawee 当前通过 GitHub Actions 构建并发布以下产物：
 - Linux amd64、Linux arm64 GHCR 容器镜像。
 - 统一发布清单、SHA256 校验文件和桌面构建清单。
 
-当前正式桌面客户端使用 GitHub Release 作为 `electron-updater` 更新源。为了让官网提供稳定、可控的下载入口，并降低最终用户访问 GitHub Release 的依赖，需要在现有发布流程后增加腾讯云 COS 分发，同时保留 GitHub Release 作为发布记录和回退镜像。
+当前稳定正式桌面客户端使用 COS 自定义域名下的 generic feed 作为 `electron-updater` 更新源。GitHub Release 继续作为公开发布记录、旧客户端迁移入口和回退镜像；GHCR 继续承载服务端容器镜像。
 
 本方案中的“COS 发布”只负责二进制、更新元数据和官网发布目录。它不改变本地任务、Runtime 会话、Gateway 数据或模型凭据的存储边界。
 
-## 2. 目标
+## 2. 当前能力
 
-一期必须实现：
+仓库当前已经实现：
 
-1. GitHub Actions 每次生成可分发包后，将产物集中上传到 COS。
+1. 正式 Release 将完整公开产物集中上传到 COS；Preflight 只上传完整候选产物集的摘要清单。
 2. 正式版本按版本号永久保存，官网可以下载最新版本和指定历史版本。
 3. 官网通过公开 JSON 目录获取稳定版、预发布版和历史版本信息，不依赖列举 COS Bucket。
 4. 正式桌面客户端通过官网/CDN 域名检查更新，并从同一域名下载更新包。
@@ -31,18 +33,18 @@ Clawee 当前通过 GitHub Actions 构建并发布以下产物：
 7. COS 密钥只进入受保护的集中上传 Job，不进入 macOS、Windows 或服务端构建矩阵。
 8. 正式发布继续同步到 GitHub Release，至少在 COS 更新源完成迁移和稳定运行前不移除 GitHub 分发。
 
-## 3. 非目标
+## 3. 当前实现不包含
 
-一期不包含：
+当前实现不包含：
 
 - 新增 Linux Desktop、Windows arm64、MSI、deb 或 rpm 产物。
 - 为当前 Windows 安装包增加 Authenticode 签名。COS 分发不能替代代码签名。
 - 在 COS 中公开源码、测试报告、运行日志或 Runtime E2E 证据。
 - 将普通 push/PR 的测试构建提升为正式版本。
-- 在客户端实现完整的更新公告中心。客户端一期继续使用现有更新提示流程。
+- 在客户端实现完整的更新公告中心。客户端继续使用现有更新提示流程。
 - 取消 GitHub Release 或 GHCR。
 
-## 4. 已确认决策
+## 4. 当前实现决策
 
 ### 4.1 上传工具
 
@@ -180,7 +182,7 @@ clawee/
 - `catalog/<channel>/latest.json`
 - `catalog/<channel>/versions.json`
 
-COS Bucket 应开启版本控制，以便误发布时恢复这些对象的上一版本。发布脚本不需要 `cos:DeleteObject` 权限。
+COS Bucket 必须开启版本控制，以便误发布时恢复这些对象的上一版本；发布器启动时会检查该状态。发布脚本不需要 `cos:DeleteObject` 权限。
 
 ### 6.3 Preflight 对象
 
@@ -189,6 +191,94 @@ Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行�
 - `preflight-manifest.json`，记录 Commit SHA、Run ID、创建时间，以及完整产物集的文件名、字节数和 SHA256。
 
 发布器仍须先在本地严格校验完整产物集、Desktop build manifest 和服务端包内 Commit，再生成并上传清单。该目录不进入官网目录，不供客户端更新使用。COS 生命周期规则应自动删除超过 14 天的 `clawee/preflight/` 对象。
+
+### 6.4 `v0.1.7` 实际文件清单与用途
+
+以下清单来自成功的 [Release Run 34622536741](https://github.com/krillinai/Clawee/actions/runs/34622536741)，对应 Tag `v0.1.7` 和 Commit `268e493a76782a2856504850170860e2f2004a27`。该版本实际使用 `clawee` 前缀；正式发布写入 24 个不可变版本对象，并将 5 个对象晋级为当前 `stable` 渠道。
+
+不可变版本目录的完整对象 Key：
+
+```text
+clawee/releases/v0.1.7/
+├── SHA256SUMS
+├── release-manifest.json
+├── release-notes.md
+├── release.json
+├── desktop/
+│   ├── macos/
+│   │   ├── arm64/
+│   │   │   ├── Clawee-0.1.7-arm64.dmg
+│   │   │   ├── Clawee-0.1.7-arm64.dmg.blockmap
+│   │   │   ├── Clawee-0.1.7-arm64-mac.zip
+│   │   │   ├── Clawee-0.1.7-arm64-mac.zip.blockmap
+│   │   │   └── clawee-desktop-build-manifest-mac-arm64.json
+│   │   └── x64/
+│   │       ├── Clawee-0.1.7.dmg
+│   │       ├── Clawee-0.1.7.dmg.blockmap
+│   │       ├── Clawee-0.1.7-mac.zip
+│   │       ├── Clawee-0.1.7-mac.zip.blockmap
+│   │       └── clawee-desktop-build-manifest-mac-x64.json
+│   └── windows/x64/
+│       ├── Clawee-Setup-0.1.7.exe
+│       ├── Clawee-Setup-0.1.7.exe.blockmap
+│       └── clawee-desktop-build-manifest-win-x64.json
+├── server/linux/
+│   ├── amd64/
+│   │   ├── clawee-server-v0.1.7-linux-amd64.tar.gz
+│   │   └── server-linux-amd64-SHA256SUMS
+│   └── arm64/
+│       ├── clawee-server-v0.1.7-linux-arm64.tar.gz
+│       └── server-linux-arm64-SHA256SUMS
+└── updates/
+    ├── latest-arm64-mac.yml
+    ├── latest-mac.yml
+    └── latest.yml
+```
+
+稳定渠道的完整可变对象 Key：
+
+```text
+clawee/
+├── updates/stable/
+│   ├── latest-arm64-mac.yml
+│   ├── latest-mac.yml
+│   └── latest.yml
+└── catalog/stable/
+    ├── versions.json
+    └── latest.json
+```
+
+各文件的作用如下：
+
+| 文件或文件组 | 数量 | 作用 |
+| --- | ---: | --- |
+| `SHA256SUMS` | 1 | 当前版本目录的总校验文件，覆盖其余 23 个不可变对象，不包含自身。 |
+| `release-manifest.json` | 1 | CI 构建阶段生成的统一输入清单，记录版本、Commit、签名状态、GHCR digest，以及进入 COS layout 前的 Desktop/Server 构建产物、字节数和 SHA256。 |
+| `release-notes.md` | 1 | 与 GitHub Release 同源的版本说明，供官网或其他发布消费者展示。 |
+| `release.json` | 1 | 官网发布协议的版本主清单，记录 20 个最终可下载 artifact 的 COS URL、字节数和 SHA256，并包含 Desktop 签名状态与 GHCR 镜像 digest。 |
+| macOS `*.dmg` | 2 | macOS x64、arm64 的用户安装镜像。 |
+| macOS `*.dmg.blockmap` | 2 | electron-builder 生成的 DMG 块映射，作为发布辅助文件保留；当前 macOS 自动更新 feed 主要引用 ZIP 及其 blockmap。 |
+| macOS `*-mac.zip` | 2 | macOS x64、arm64 的自动更新完整包，分别由 `latest-mac.yml` 和 `latest-arm64-mac.yml` 引用。 |
+| macOS `*-mac.zip.blockmap` | 2 | macOS ZIP 的差分块映射，供 electron-updater 尝试差分下载。 |
+| `Clawee-Setup-0.1.7.exe` | 1 | Windows x64 NSIS 安装包，也是 Windows 自动更新的完整包；`v0.1.7` 未进行 Authenticode 签名。 |
+| `Clawee-Setup-0.1.7.exe.blockmap` | 1 | Windows 安装包的差分块映射，供 electron-updater 尝试差分下载。 |
+| `clawee-desktop-build-manifest-*.json` | 3 | macOS x64、macOS arm64、Windows x64 的构建证据，记录 Commit、平台、架构、内嵌 Runtime、Web 构建哈希、正式发布标记和本平台产物摘要。 |
+| `clawee-server-*.tar.gz` | 2 | Linux amd64、arm64 的独立 Server 部署包。 |
+| `server-linux-*-SHA256SUMS` | 2 | 对应架构 Server 部署包的独立 SHA256 校验文件。 |
+| `releases/v0.1.7/updates/latest*.yml` | 3 | `v0.1.7` 的不可变 updater feed 快照，记录版本、最终 COS 包 URL、大小和 `sha512`，用于审计和重跑恢复。 |
+| `updates/stable/latest*.yml` | 3 | 客户端实际读取的当前稳定更新入口；晋级 `v0.1.7` 时内容与上述不可变快照一致，后续稳定版发布时会覆盖。 |
+| `catalog/stable/versions.json` | 1 | 稳定版历史索引，按 SemVer 从新到旧列出版本及其不可变 `release.json` URL。 |
+| `catalog/stable/latest.json` | 1 | 当前稳定版官网入口，内容与 `releases/v0.1.7/release.json` 一致，并作为渠道晋级最后写入的发布完成标志。 |
+
+`release.json` 的 20 个 artifact 是 13 个 Desktop 文件、4 个 Server 文件和 3 个不可变 updater YML；它不包含 `SHA256SUMS`、`release-manifest.json`、`release-notes.md` 和自身。GHCR 镜像层也不复制到 COS，只在 `release.json.serverImage` 中记录镜像名称与 digest。
+
+同一个 Release Run 还写入以下 Preflight 对象，但它不属于正式公开分发文件：
+
+```text
+clawee/preflight/268e493a76782a2856504850170860e2f2004a27/34622536741/preflight-manifest.json
+```
+
+该文件只记录候选构建完整产物集的文件名、字节数和 SHA256，使用 `private,no-store`，不进入官网 catalog 或 Desktop updater feed。GitHub Release 将上述 24 个不可变对象作为公开镜像上传，但资产位于 Release 根级，未保留 COS 的分层目录。
 
 ## 7. 官网发布目录协议
 
@@ -219,6 +309,10 @@ Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行�
       "downloadUrl": "https://download.example.com/clawee/releases/v0.2.0/desktop/macos/arm64/Clawee-0.2.0-arm64.dmg"
     }
   ],
+  "desktop": {
+    "macosSigning": "developer-id-notarized",
+    "windowsSigning": "unsigned"
+  },
   "serverImage": {
     "name": "ghcr.io/krillinai/clawee-server",
     "digest": "sha256:..."
@@ -229,6 +323,7 @@ Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行�
 约束：
 
 - `artifacts` 必须覆盖本次正式发布的二进制、更新辅助文件、服务端包和 build manifest；`release.json` 不记录自身，避免自引用摘要。
+- 当前 `v0.1.7` 的 `release.json` 包含 20 个 artifact；数量会随受支持平台或产物协议变化，消费者应按字段筛选，不应写死数量。
 - `downloadUrl` 必须位于 `COS_PUBLIC_BASE_URL/COS_PREFIX/releases/<tag>/` 下。
 - Desktop 安装包、更新 ZIP、blockmap、服务端 tar.gz、校验文件和 build manifest 都要记录。
 - Runtime E2E 证据、Playwright 报告和 CI 日志不得进入该文件。
@@ -271,7 +366,7 @@ Preflight 目录使用完整 Commit SHA 和 GitHub Run ID，避免不同运行�
 - 历史版本读取 `${COS_PUBLIC_BASE_URL}/${COS_PREFIX}/catalog/stable/versions.json`，再按 `releaseUrl` 读取指定版本。
 - 预发布入口只在官网明确提供预览渠道时读取 `catalog/prerelease/`，不与稳定版列表合并。
 
-官网上线不在本仓库内伪造占位实现；必须在官网所属仓库完成并按 16.2 节联调验收。
+官网上线不在本仓库内伪造占位实现；必须在官网所属仓库完成并按 16.3 节联调验收。
 
 ## 8. Desktop 自动更新设计
 
@@ -294,11 +389,11 @@ useMultipleRangeRequest: false
 - macOS x64 请求 `latest-mac.yml`。
 - macOS arm64 将 channel 设为 `latest-arm64`，请求 `latest-arm64-mac.yml`。
 
-开发构建和 Preflight 包没有 `deployment/official-release.json`，继续禁用自动更新，不得连接正式 COS 更新源执行安装。
+只有同时满足稳定 SemVer、`CLAWEE_OFFICIAL_RELEASE=1`、仓库为 `krillinai/Clawee` 且当前 Ref 为 `v<version>` 时，打包脚本才写入 `deployment/official-release.json` 并启用正式 COS 更新源。开发构建、预发布版本和 Preflight 包使用 `https://updates.invalid/clawee/disabled`，且不写入该标记，因此自动更新保持禁用。
 
 ### 8.2 YML 重写
 
-electron-builder 生成的 YML 默认使用同目录文件名。COS 发布准备脚本需要：
+electron-builder 生成的 YML 默认使用同目录文件名。COS 发布准备脚本当前执行：
 
 1. 使用结构化 YAML 解析器读取文件。
 2. 校验 `version` 与 Tag 一致。
@@ -311,18 +406,18 @@ electron-builder 生成的 YML 默认使用同目录文件名。COS 发布准备
 
 版本目录和文件名都包含版本号，因此 electron-updater 推导旧版本 blockmap 时可以定位到相同目录结构中的历史文件。发布后必须实际验证一次从上一稳定版到当前稳定版的差分下载；失败时仍应能够回退到完整包下载。
 
-### 8.3 老客户端迁移
+### 8.3 老客户端迁移与双发
 
-当前已发布的 `v0.1.0` 客户端内嵌 GitHub provider，无法通过修改 COS 文件改变其更新地址。
+旧客户端内嵌 GitHub provider，无法通过修改 COS 文件改变其更新地址；当前稳定正式包已经完成 COS generic provider 接入。
 
-第一个切换版本必须执行双发布：
+正式 Release 仍执行双发布：
 
-1. 新版本安装包内嵌 COS generic provider。
-2. 同一批安装包继续上传 GitHub Release，并保留 GitHub updater 元数据。
-3. `v0.1.0` 从 GitHub 检测并安装该迁移版本。
-4. 迁移版本之后从 COS 检测和下载更新。
+1. 新的稳定正式安装包内嵌 COS generic provider。
+2. 同一批安装包和 updater 元数据继续上传 GitHub Release。
+3. 尚未迁移的旧客户端仍可通过 GitHub Release 获取迁移版本。
+4. 已迁移客户端从 COS 检测和下载后续稳定版本。
 
-在确认迁移版本覆盖主要用户之前，不得停止生成 GitHub updater 文件。为降低迁移风险，建议长期保留 GitHub Release 镜像。
+旧版本到迁移版本、迁移版本到后续 COS 版本的真实跨版本升级仍属于发布验收项。除非有覆盖主要用户的升级数据和明确退役决策，否则不得停止生成 GitHub updater 文件；建议长期保留 GitHub Release 镜像。
 
 ## 9. 缓存、域名与访问控制
 
@@ -338,9 +433,11 @@ electron-builder 生成的 YML 默认使用同目录文件名。COS 发布准备
 | `catalog/<channel>/versions.json` | `no-cache,max-age=0,must-revalidate` |
 | `preflight/**` | `private,no-store` |
 
+当前发布器按上述策略写入对象元数据，并在公网校验时把 `Cache-Control` 解析为不区分大小写、空格和指令顺序的指令集合。工作流不调用 CDN 刷新 API；可变目录能否及时生效依赖 `no-cache,max-age=0,must-revalidate` 和 CDN 回源配置。`v0.1.6` 曾因 CDN 返回 `public, immutable, max-age=31536000` 导致校验失败，`v0.1.7` 已按当前比较规则和缓存策略完成发布。
+
 同时要求：
 
-- CDN 对 `updates/**`、`catalog/**` 配置不缓存或短缓存，发布后只刷新这些可变 Key。
+- CDN 对 `updates/**`、`catalog/**` 配置不缓存或每次重验证；如运维侧另行配置刷新能力，只刷新这些可变 Key。
 - COS/CDN 保留 `ETag`、`Last-Modified`、`Content-Length` 和 Range 请求能力。
 - JSON 使用 `application/json; charset=utf-8`。
 - YML 使用 `application/yaml; charset=utf-8`。
@@ -349,7 +446,7 @@ electron-builder 生成的 YML 默认使用同目录文件名。COS 发布准备
 
 官网固定的“下载最新版”URL 应由官网服务读取 `latest.json` 后返回 `302` 到不可变版本 URL，或由前端读取 JSON 后直接设置下载链接。不要在 COS 中维护一份会不断覆盖的 `downloads/latest/Clawee.dmg`。
 
-COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。首次发布前由配置人员在腾讯云控制台一次性确认：
+COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。配置人员应在腾讯云控制台配置并定期复核：
 
 - `${COS_PREFIX}/preflight/**` 对象的生命周期为 14 天后自动删除。
 - 公开域名允许 `GET`、`HEAD` 和 Range；CORS 只允许官网 Origin 的 `GET`、`HEAD`。
@@ -358,11 +455,11 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 
 验收结果需记录规则名称、目标 Bucket/前缀、公开域名和验收时间，但不记录 Secret。
 
-## 10. GitHub Actions 改造
+## 10. 当前 GitHub Actions 流程
 
 ### 10.1 `Release Preflight`
 
-在现有 Desktop 和 Server Package Job 成功后新增 `cos-preflight-upload`：
+现有工作流在 Desktop 和 Server Package Job 成功后运行 `cos-preflight-upload`：
 
 - `needs: [client, server, desktop, server-package, container]`。
 - 运行于 `ubuntu-latest`。
@@ -373,31 +470,31 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 - 上传到 `preflight/<target-sha>/<github-run-id>/`。
 - 远端验证失败则整个 Preflight 失败，不写 `release-preflight=success` 状态。
 
-现有 `record` Job 的 `needs`、结果环境变量和成功条件都必须加入 `cos-preflight-upload`；不能只让上传 Job 失败而仍把 Commit Status 记录为成功。
+`record` Job 的 `needs`、结果环境变量和成功条件均包含 `cos-preflight-upload`；上传失败时 Commit Status 不会被记录为成功。
 
-安全要求：该 Job 不得 checkout 或执行 `inputs.ref` 指向的候选代码。上传器必须来自受保护的默认分支，或完全由 workflow 内固定的 COSCLI 下载与命令组成。候选构建产物只作为不可信数据处理，不能执行其中的脚本或二进制。
+安全边界：该 Job 先下载候选构建产物，再另行 checkout 默认受保护分支到 `publisher/`，并从该目录运行 `publisher/scripts/cos-publish.mjs`。它不 checkout 或执行 `inputs.ref` 指向的候选代码；候选构建产物只作为不可信数据处理，不执行其中的脚本或二进制。
 
 ### 10.2 正式 `Release`
 
-现有 `publish` Job 已集中下载 `clawee-*-release-*` artifacts，适合承担正式 COS 发布。改造如下：
+正式 Tag Release 当前按以下顺序执行：
 
-1. 为 `publish` 增加 `environment: release`。
-2. 下载并校验所有 Desktop、Server artifacts。
-3. 生成统一清单、`release.json`、版本列表候选文件和 COS updater YML。
-4. 创建或复用 GitHub 草稿 Release，生成 `release-notes.md`。
-5. 上传并验证 COS 不可变版本目录。
-6. 将相同文件上传 GitHub 草稿 Release。
-7. 发布 GHCR 版本标签。
-8. 仅当该 COS 渠道尚未建立时，在无消费者的前提下完成一次 bootstrap。
-9. 公开 GitHub Release。
-10. 晋级 COS updater YML 和 `versions.json`。
-11. 最后上传 `catalog/<channel>/latest.json`，以该对象作为官网发布完成标志。
+1. Tag 触发 Release，并运行完整的 reusable Release Preflight。
+2. Gate 校验版本、Tag、签名/公证凭据和 GitHub Release 状态。
+3. 对尚未公开的版本构建 Desktop、Server 包和 `sha-<commit>` 多架构镜像。
+4. `publish` 创建或复用 GitHub 草稿 Release，读取 release notes 和 `createdAt`。
+5. 下载并校验产物，生成统一清单、COS staged layout、`release.json` 和 updater YML。
+6. 上传并验证 COS 不可变版本目录。
+7. 将发布资产上传到 GitHub 草稿 Release。
+8. 为已构建的 GHCR digest 发布版本 Tag；稳定版同时更新 `latest`。
+9. 仅当 COS 渠道尚未建立时，在无消费者的前提下执行 bootstrap。
+10. 公开 GitHub Release。
+11. 晋级 COS updater YML 和 `versions.json`，最后写入 `catalog/<channel>/latest.json`。
 
-COS 不可变文件失败时不得公开 GitHub Release。GitHub 已公开但 COS 晋级失败时，workflow 必须失败；修复后重跑同一 Tag，必须从已公开 GitHub Release 下载原始 `release.json` 和 updater YML，只重新执行 COS 晋级。该分支不得重建或覆盖 COS 不可变目录，也不得重新绑定 GHCR 版本标签。
+COS 不可变文件失败时不得公开 GitHub Release。GitHub 已公开但 COS 晋级失败时，workflow 会失败；重跑同一 Tag 时跳过 Desktop、Server 和镜像重建，从 GitHub Release 下载原始 `release.json` 与三个 updater YML，以 `--verify-immutable` 核对不可变目录后只重试 COS 渠道晋级。该分支不得重建不可变内容或重新绑定 GHCR 版本标签。
 
 ### 10.3 并发和版本顺序
 
-当前 Release concurrency 以 Tag 分组，不同 Tag 仍可能并行。COS 渠道晋级必须增加全局互斥：
+正式 `publish` 使用以下全局互斥，防止不同 Tag 并行晋级同一 COS 渠道：
 
 ```yaml
 concurrency:
@@ -419,12 +516,12 @@ COS 不提供跨多个对象的事务。发布脚本按以下规则获得可接�
 
 1. 先上传所有不可变二进制和版本元数据。
 2. 对每个远端对象执行存在性、字节数和校验验证。
-3. 备份当前渠道的 `latest*.yml`、`latest.json`、`versions.json` 内容和 VersionId。
+3. 读取并备份当前渠道三个 `latest*.yml`、`versions.json` 和 `latest.json` 的对象内容。
 4. 更新 updater YML。
 5. 更新 `versions.json`。
 6. 最后更新 `latest.json`。
 
-`latest.json` 是官网的单一发布完成标志。任何渠道文件更新失败时，脚本使用备份内容恢复已覆盖的渠道文件，并返回非零退出码。Bucket 版本控制是第二层人工恢复手段。
+`latest.json` 是官网的单一发布完成标志。任何渠道文件更新失败时，脚本按写入的逆序重新上传备份内容，并再次执行 COS 端和公网校验，然后返回非零退出码。发布器不读取或保存 COS `VersionId`；Bucket 版本控制是强制启动检查，也是自动恢复失败后的第二层人工恢复手段。若当前 `latest.json` 已存在但五个渠道对象中任一对象缺失，发布器会拒绝晋级，避免在没有完整备份时覆盖渠道。
 
 首次建立某个渠道时没有旧对象，在不授予 `DeleteObject` 且 COS 无跨对象事务的前提下，无法对“原本不存在”做严格回滚。发布脚本在不可变对象、GitHub 草稿产物和 GHCR 镜像已就绪后检查渠道；若 `latest.json` 不存在，它会在公开 GitHub Release 前执行一次 bootstrap。该操作只允许用于官网和 Desktop 尚未消费 COS 的空渠道；若中途失败，GitHub Release 保持草稿，直接重跑同一 Tag 补齐对象，直到三个 updater YML、`versions.json` 和最后的 `latest.json` 全部通过公开域名验证。建立基线后，bootstrap 自动跳过，后续晋级仍必须遵守上述备份恢复规则。
 
@@ -432,14 +529,15 @@ COS 不提供跨多个对象的事务。发布脚本按以下规则获得可接�
 
 ## 12. 上传与完整性校验
 
-发布脚本至少执行以下校验：
+发布脚本当前执行以下校验：
 
 - 上传前重新计算所有文件 SHA256，与统一发布清单比较。
 - COSCLI 启用错误重试、断点续传和整体 CRC64 校验，不使用 `--disable-checksum=true` 的默认行为。
 - 上传时写入 SHA256 自定义元数据，上传后通过 COS `stat` 确认对象存在、字节数和 SHA256 元数据正确；历史对象缺少元数据时才回退为完整下载校验。
-- 对 JSON/YML 从公开域名重新下载并解析，确认 CDN/COS 返回的是刚发布内容。
-- 抽查每个平台主安装包的 Range 请求、`Content-Length`、`Content-Type` 和缓存头。
-- updater YML 中每个 URL 都必须通过公开域名的 HEAD、`Content-Length` 和 Range 检查；`sha512` 在上传前与本地产物核对。
+- 对 `release.json` 和三个 updater YML 从公开域名执行完整 GET 并解析，确认 CDN/COS 返回的是刚发布内容。
+- updater 引用的包，以及其余 DMG、ZIP、EXE、blockmap 和 tar.gz，均通过公开域名执行 HEAD、`Content-Length`、`Content-Type`、`Cache-Control` 和 Range 校验。
+- `release-manifest.json`、`SHA256SUMS`、Desktop build manifest 等其他对象不逐个执行公网 GET，但均经过 COS `stat` 的字节数和自定义 SHA256 校验；缺少 SHA256 元数据时完整下载校验。
+- updater YML 的 `sha512` 在上传前与本地产物核对；公网 `Cache-Control` 校验忽略大小写、空格和指令顺序。
 - `release.json` 中的 SHA256、文件大小、版本、Commit 和 GHCR digest 必须与当前 Release 一致。
 
 COS multipart ETag 不能作为文件 SHA256 使用。官网展示和用户校验统一以 `SHA256SUMS`、`release.json` 中的 SHA256 为准。
@@ -448,7 +546,7 @@ COS multipart ETag 不能作为文件 SHA256 使用。官网展示和用户校�
 
 使用专用 CAM 子账号，不使用主账号密钥。正式账号只允许操作目标 Bucket 的 `${COS_PREFIX}/` 前缀。
 
-按照 COSCLI 上传与校验行为，一期需要：
+按照 COSCLI 当前的上传与校验行为，需要以下权限：
 
 - `cos:HeadBucket`
 - `cos:GetBucket`
@@ -468,52 +566,36 @@ COS multipart ETag 不能作为文件 SHA256 使用。官网展示和用户校�
 - 对象 ACL 修改权限
 - 其他 Bucket 或 `${COS_PREFIX}/` 之外的对象权限
 
-实现前根据实际 APPID、Bucket、Region 和前缀生成精确 CAM Policy JSON，由配置人员在腾讯云控制台创建并验证。Policy JSON 不包含 Secret，可以作为运维文档保存；真实 Secret 不进入仓库。
+根据实际 APPID、Bucket、Region 和前缀生成精确 CAM Policy JSON，由配置人员在腾讯云控制台创建并验证。Policy JSON 不包含 Secret，可以作为运维文档保存；真实 Secret 不进入仓库。
 
-COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600` 权限生成，Job 结束时通过 `if: always()` 清理。不得把该配置加入缓存或上传为 artifact。避免在命令日志中展开 Secret 参数。
+发布器在 `$RUNNER_TEMP` 下创建权限为 `0600` 的临时 COSCLI 配置，并在存储操作的 `finally` 清理临时目录。该配置不得加入缓存或上传为 artifact；命令日志不得展开 Secret 参数。
 
-## 14. 代码改动范围
+## 14. 当前实现位置与职责
 
-预计修改：
+- `.github/workflows/release.yml`：正式 Tag 发布门禁、构建、GitHub 草稿/公开 Release、GHCR 标记、COS 不可变上传和渠道晋级。
+- `.github/workflows/release-preflight.yml`：候选 SHA 的完整预检，以及从受保护默认分支执行 COS Preflight 清单上传。
+- `scripts/cos-release-layout.mjs`：对象 Key、公开 URL、artifact 分类、catalog、`release.json` 和 updater 元数据生成。
+- `scripts/cos-publish.mjs`：固定 COSCLI 安装、配置校验、上传、COS/公网验证、bootstrap、晋级和失败恢复。
+- `scripts/build-release-manifest.mjs`：生成 Desktop、Server 和 GHCR digest 的统一发布清单。
+- `scripts/release-version.mjs`：稳定版/预发布版 SemVer、Tag 和渠道解析。
+- `client/apps/desktop/electron-builder.yml`：正式包的 generic provider 模板和三种平台/架构 feed 约定。
+- `client/apps/desktop/scripts/package-release.mjs`：判断正式发布上下文、注入 COS URL，并只为稳定正式包生成 `official-release.json`。
+- `client/apps/desktop/src/main/updater.ts`：根据正式发布标记启用自动更新，并处理 macOS arm64 独立 channel。
 
-- `.github/workflows/release.yml`
-- `.github/workflows/release-preflight.yml`
-- `client/apps/desktop/electron-builder.yml`
-- `client/apps/desktop/scripts/package-release.mjs`
-- `client/apps/desktop/scripts/release-artifacts.mjs`
-- `client/apps/desktop/src/main/updater.ts`，仅在 generic provider 初始化确有需要时修改
-- `scripts/build-release-manifest.mjs`
-- `client/apps/desktop/test/release-workflow.test.mjs`
+COS 上传不在 Desktop、daemon 或 Gateway 业务层实现。发布行为由根脚本和 GitHub Actions 负责，后续修改应继续保持该边界。
 
-预计新增：
+## 15. 后续开发与变更规则
 
-- `scripts/cos-release-layout.mjs`：纯函数，负责对象 Key、公开 URL、catalog 和 updater 元数据生成。
-- `scripts/cos-release-layout.test.mjs`：目录、URL、SemVer、路径穿越和 schema 测试。
-- `scripts/cos-publish.mjs`：COSCLI 安装校验、上传、远端验证、晋级与恢复编排。
-- `scripts/cos-publish.test.mjs`：使用假 COSCLI/临时目录验证顺序、幂等和失败恢复，不访问真实 COS。
-
-不在 Desktop、daemon 或 Gateway 业务层直接实现 COS 上传。发布行为继续由根脚本和 GitHub Actions 负责。
-
-## 15. 实施步骤
-
-1. 实现对象目录与 catalog 生成器。
-   验证：单元测试覆盖正式版、预发布版、三种 Desktop feed、两种 Server 架构、非法路径和降级发布。
-2. 实现 COSCLI 下载、SHA256 固定和上传编排。
-   验证：假 COSCLI 测试证明不可变对象先于可变对象、`latest.json` 最后上传、失败时恢复旧渠道文件。
-3. 改造正式 Release，先只上传 COS 版本目录，不切换客户端更新源。
-   验证：测试版本上传到隔离前缀，公开域名下载、Range、缓存头、SHA256 全部通过。
-4. 增加 Preflight 集中上传和 14 天生命周期。
-   验证：目标 SHA/Run ID 目录正确，Preflight 不修改 stable/prerelease。
-5. 将 Desktop 正式包切换为 COS generic provider，继续双发 GitHub。
-   验证：解包检查 `app-update.yml` 指向 COS；从旧 GitHub 源版本升级到迁移版本，再从迁移版本升级到下一 COS 测试版本。
-6. 接入官网 `latest.json` 和 `versions.json`。
-   验证：默认下载选择最新稳定版，用户可以选择并下载指定历史版本，预发布版不会出现在稳定入口。
-7. 开启正式渠道晋级。
-   验证：完整执行本地发布门禁、远端 Release Preflight 和正式 Tag Release，并记录 COS/GitHub/GHCR 三方摘要。
+1. 新增平台、架构或产物格式时，同时更新 artifact 分类、完整产物集合、MIME 类型、`release.json` 契约和相关测试。
+2. 修改 updater 文件名、channel 或目录结构时，同时验证 electron-builder 输出、YML URL 改写、旧 blockmap 推导和真实跨版本升级。
+3. 修改渠道晋级逻辑时，必须保持不可变对象先完成、渠道对象可恢复、`latest.json` 最后写入、stable/prerelease 隔离和禁止降级。
+4. 修改 COS Secret 使用位置时，必须确保只有受保护的集中上传 Job 能读取凭据，候选 Ref 的代码不能在该权限上下文中执行。
+5. 修改公开目录 schema 时，应保持向后兼容；确需破坏性变更时提升 `schemaVersion`，并先协调官网消费者。
+6. 不得通过重建或移动正式 Tag 修复已发布内容；应发布新版本。对已公开但晋级失败的同一 Tag，只允许走现有恢复分支。
 
 ## 16. 测试要求
 
-### 16.1 单元和契约测试
+### 16.1 已自动化的单元和契约测试
 
 - JSON schema 和字段稳定性。
 - 文件名到平台、架构、格式的唯一映射。
@@ -525,16 +607,23 @@ COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600
 - 上传顺序和失败恢复。
 - Workflow 只有集中发布 Job 引用 COS Secret。
 
-### 16.2 集成测试
+当前主要测试入口：
 
-- 隔离 COS 前缀上传真实小文件并验证元数据。
-- 上传大于分片阈值的测试文件，验证断点续传和 CRC64。
-- 使用公开域名执行 HEAD、GET、Range 请求。
-- 从 `latest*.yml` 解析实际包 URL，并完成 HEAD、Range 和文件大小校验。
-- 官网目录能够列出最新和指定历史版本。
-- Preflight 生命周期和访问策略符合预期。
+```bash
+pnpm test
+pnpm --dir client --filter @clawee/desktop test
+```
 
-### 16.3 发布验收
+对应测试文件为 `scripts/cos-release-layout.test.mjs`、`scripts/cos-publish.test.mjs`、`client/apps/desktop/test/package-release-script.test.mjs` 和 `client/apps/desktop/test/release-workflow.test.mjs`。
+
+### 16.2 Release 中的真实 COS/CDN 校验
+
+- 正式发布和 Preflight 均上传真实 COS 对象，并通过 COS `stat` 校验字节数和 SHA256 元数据。
+- 正式发布通过公开域名验证 `release.json`、三个 updater YML 和公开二进制的 HEAD/GET/Range、MIME 与缓存头。
+- 正式发布解析 `latest*.yml` 的实际包 URL，核对文件大小、Range 能力和本地 `sha512`。
+- 渠道晋级执行版本顺序、同版本幂等、stable/prerelease 隔离和 `latest.json` 最后写入检查；失败恢复由单元测试覆盖。
+
+### 16.3 外部运维和人工发布验收
 
 - 修改客户端可执行代码、打包或发布配置后，提交前运行并通过 `pnpm run desktop:preflight:local`。
 - 正式发布在干净提交上运行 `pnpm run desktop:preflight:release`。
@@ -544,19 +633,27 @@ COSCLI 若必须使用配置文件，应由脚本在 `$RUNNER_TEMP` 中以 `0600
 - 正式发布后从 COS 公网域名实际下载并安装 macOS x64、macOS arm64、Windows x64 包。
 - 校验 Linux amd64/arm64 服务端包和 GHCR 多架构镜像 digest。
 - 从上一正式版本执行一次真实自动更新。
+- 在腾讯云侧确认 Bucket Versioning、Preflight 14 天生命周期、CORS、CDN 回源鉴权和可变目录缓存规则仍生效。
+- 在官网所属仓库验证 `latest.json`、`versions.json`、历史版本和预发布入口；本仓库不自动化官网 UI 验收。
 
-## 17. 完成标准
+## 17. 当前状态与外部边界
 
-满足以下条件才视为 COS 分发一期完成：
+仓库侧 COS 分发一期已经落地，当前代码具备：
 
 - GitHub Actions 中只有集中上传 Job 可以访问 COS Secret。
-- 正式版本按本文目录上传完整产物，Preflight 只上传包含完整产物摘要的清单，且生命周期策略生效。
-- 官网默认下载指向稳定版 `latest.json`，历史版本可按版本选择。
-- Desktop 使用官网/COS generic feed，并完成跨版本真实升级。
+- 正式版本按本文目录上传完整产物，Preflight 只上传包含完整产物摘要的清单。
+- Desktop 稳定正式包使用官网/COS generic feed；非正式包不会连接正式更新源。
 - stable、prerelease 不会互相覆盖，旧版本不能反向覆盖新版本。
 - 任一二进制上传失败时，客户端和官网仍看到上一完整版本。
 - COS、GitHub Release 和 GHCR 的版本、Commit、文件摘要和镜像 digest 可相互核对。
 - 仓库、日志、缓存、artifact 和发布包中不存在 COS Secret 或临时配置文件。
+
+以下事项不由仓库代码自动配置，仍属于外部部署或人工验收责任：
+
+- 官网读取稳定版/预发布版 catalog 并提供最新和历史版本下载入口。
+- COS Bucket Versioning、生命周期、CAM Policy、CORS、CDN 域名、回源鉴权和缓存规则。
+- macOS、Windows 安装包的真实安装验收，以及上一正式版本到当前版本的真实自动更新验收。
+- 旧 GitHub provider 客户端迁移覆盖率的观测，以及未来是否退役 GitHub updater 镜像的产品决策。
 
 ## 18. 参考资料
 
