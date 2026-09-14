@@ -276,6 +276,7 @@ CLAWEE_EXTERNAL_MODEL_CONFIG="$HOME/clawee-test-model.json" node scripts/contain
 - [功能验证与操作指南](docs/validation-and-operations.md)：启动、功能验收与部署步骤
 - [正式发布前待处理事项](docs/pre-release-checklist.md)：CI、仓库设置、签名与正式发行
 - [架构与数据边界](docs/architecture.md)：本地执行层与企业治理层的数据边界
+- [开发指南](docs/contributing/development-guide.md)：贡献者的环境初始化、快速启动、开发、测试与发布流程
 - [服务端开发](server/docs/getting-started/development.md)：Gateway 本地开发流程
 - [配置参考](server/docs/getting-started/configuration.md)：配置来源、覆盖规则与 Secret 管理
 - [生产部署与备份](server/docs/deployment/production.md)：迁移、反向代理、持久化、备份与恢复
