@@ -50,7 +50,7 @@ require_command() {
 server_value() {
   local target="$1"
   local key="$2"
-  yq -r ".servers.${target}.${key} // \"\"" "$SERVERS_CONFIG"
+  yq -r ".servers.${target} | select(has(\"${key}\")) | .[\"${key}\"]" "$SERVERS_CONFIG"
 }
 
 confirm_action() {
@@ -223,17 +223,22 @@ build_package() {
 
 deploy_target() {
   local target="$1"
-  local ssh_host deploy_dir arch service config_path config_source package package_checksum remote_package remote_config package_name release_id
+  local ssh_host deploy_dir arch service config_path requires_docker config_source package package_checksum remote_package remote_config package_name release_id
 
   ssh_host="$(server_value "$target" ssh)"
   deploy_dir="$(server_value "$target" deploy_dir)"
   arch="$(server_value "$target" arch)"
   service="$(server_value "$target" service)"
   config_path="$(server_value "$target" config)"
+  requires_docker="$(server_value "$target" requires_docker)"
 
-  if [[ -z "$ssh_host" || -z "$deploy_dir" || -z "$arch" || -z "$service" || -z "$config_path" ]]; then
+  if [[ -z "$ssh_host" || -z "$deploy_dir" || -z "$arch" || -z "$service" || -z "$config_path" || -z "$requires_docker" ]]; then
     fail "missing server config for target: $target"
   fi
+  case "$requires_docker" in
+    true|false) ;;
+    *) fail "requires_docker must be true or false for target: $target" ;;
+  esac
   if [[ ! "$config_path" =~ ^configs/[A-Za-z0-9._-]+\.ya?ml$ ]]; then
     fail "invalid config path for target $target: $config_path"
   fi
@@ -265,7 +270,7 @@ deploy_target() {
 
   printf '[%s] deploying on remote host\n' "$target"
   ssh "$ssh_host" \
-    "DEPLOY_DIR='$deploy_dir' SERVICE_NAME='$service' CONFIG_PATH='$config_path' REMOTE_PACKAGE='$remote_package' REMOTE_CONFIG='$remote_config' PACKAGE_SHA256='$package_checksum' RELEASE_ID='$release_id' bash -s" <<'REMOTE_SCRIPT'
+    "DEPLOY_DIR='$deploy_dir' SERVICE_NAME='$service' CONFIG_PATH='$config_path' REQUIRES_DOCKER='$requires_docker' REMOTE_PACKAGE='$remote_package' REMOTE_CONFIG='$remote_config' PACKAGE_SHA256='$package_checksum' RELEASE_ID='$release_id' bash -s" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 
 SERVICE_UNIT="$SERVICE_NAME"
@@ -274,6 +279,14 @@ SERVICE_STOPPED=0
 DOCKER_COMMAND=()
 RELEASE_PATHS=(claw-gateway public db deploy)
 trap 'rm -f "$REMOTE_PACKAGE" "$REMOTE_CONFIG"' EXIT
+
+case "$REQUIRES_DOCKER" in
+  true|false) ;;
+  *)
+    printf '[remote] requires_docker must be true or false: %s\n' "$REQUIRES_DOCKER" >&2
+    exit 1
+    ;;
+esac
 
 case "$SERVICE_UNIT" in
   *.service) ;;
@@ -449,8 +462,12 @@ printf '[remote] config path: %s\n' "$CONFIG_PATH"
 printf '[remote] release package: %s\n' "$REMOTE_PACKAGE"
 printf '[remote] release id: %s\n' "$RELEASE_ID"
 
-printf '[remote] checking Docker access\n'
-configure_docker_command
+if [[ "$REQUIRES_DOCKER" == "true" ]]; then
+  printf '[remote] checking Docker access\n'
+  configure_docker_command
+else
+  printf '[remote] Docker dependency disabled for this target\n'
+fi
 
 printf '[remote] verifying release package checksum\n'
 actual_package_sha256="$(sha256sum "$REMOTE_PACKAGE" | awk '{print $1}')"
@@ -511,9 +528,11 @@ chmod +x ./claw-gateway ./deploy/*.sh
 mkdir -p "$(dirname "$CONFIG_PATH")"
 install -m 0600 "$REMOTE_CONFIG" "$CONFIG_PATH"
 
-printf '[remote] starting postgres\n'
-docker_compose up -d postgres </dev/null
-wait_for_postgres
+if [[ "$REQUIRES_DOCKER" == "true" ]]; then
+  printf '[remote] starting postgres\n'
+  docker_compose up -d postgres </dev/null
+  wait_for_postgres
+fi
 
 printf '[remote] running migrations\n'
 ./claw-gateway migrate up --config "$DEPLOY_DIR/$CONFIG_PATH" </dev/null

@@ -56,6 +56,13 @@ if ! grep -Fq './claw-gateway migrate up --config "$DEPLOY_DIR/$CONFIG_PATH"' "$
   printf 'deployment script does not migrate with an absolute external config path\n' >&2
   exit 1
 fi
+if ! grep -Fq 'requires_docker' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'Docker dependency disabled for this target' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'if [[ "$REQUIRES_DOCKER" == "true" ]]; then' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'select(has(' "$DEPLOY_SCRIPT"; then
+  printf 'deployment script does not honor target Docker dependency configuration\n' >&2
+  exit 1
+fi
 if ! grep -Fq 'ExecStart=$DEPLOY_DIR/claw-gateway --config $DEPLOY_DIR/$CONFIG_PATH' "$DEPLOY_SCRIPT"; then
   printf 'deployment script does not install claw-gateway\n' >&2
   exit 1
