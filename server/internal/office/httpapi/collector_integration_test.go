@@ -563,7 +563,7 @@ func TestHTTPCollectorIntegrationDatabaseURLRequiresTestDatabase(t *testing.T) {
 		t.Cleanup(func() { _ = os.Unsetenv("CLAW_MCP_TEST_DATABASE_URL") })
 	}
 
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_mcp:pass@localhost:5932/claw_mcp?sslmode=disable"); err != nil {
+	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5932/claw_gateway?sslmode=disable"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := httpCollectorIntegrationDatabaseURL()
@@ -571,20 +571,20 @@ func TestHTTPCollectorIntegrationDatabaseURLRequiresTestDatabase(t *testing.T) {
 		t.Fatal("httpCollectorIntegrationDatabaseURL() err = nil, want error")
 	}
 	msg := err.Error()
-	for _, fragment := range []string{"CLAW_MCP_TEST_DATABASE_URL", "_test", "claw_mcp"} {
+	for _, fragment := range []string{"CLAW_MCP_TEST_DATABASE_URL", "_test", "claw_gateway"} {
 		if !strings.Contains(msg, fragment) {
 			t.Fatalf("error %q does not contain %q", msg, fragment)
 		}
 	}
 
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_mcp:pass@localhost:5933/claw_mcp_test?sslmode=disable"); err != nil {
+	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5933/claw_gateway_test?sslmode=disable"); err != nil {
 		t.Fatal(err)
 	}
 	dsn, err := httpCollectorIntegrationDatabaseURL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dsn, "claw_mcp_test") {
+	if !strings.Contains(dsn, "claw_gateway_test") {
 		t.Fatalf("dsn = %q, want test database", dsn)
 	}
 }

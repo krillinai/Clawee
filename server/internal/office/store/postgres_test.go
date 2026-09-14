@@ -805,7 +805,7 @@ func TestOfficeTestDatabaseURLRequiresExplicitEnv(t *testing.T) {
 		t.Fatalf("blank env => (%q, %v), want empty,nil", dsn, err)
 	}
 
-	wantDSN := "postgres://example/claw_mcp_test"
+	wantDSN := "postgres://example/claw_gateway_test"
 	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", wantDSN); err != nil {
 		t.Fatal(err)
 	}
@@ -845,8 +845,8 @@ func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
 		},
 		{
 			name: "non test database",
-			dsn:  "postgres://claw_mcp:pass@localhost:5932/claw_mcp?sslmode=disable",
-			want: "database name \"claw_mcp\" must end with _test",
+			dsn:  "postgres://claw_gateway:pass@localhost:5932/claw_gateway?sslmode=disable",
+			want: "database name \"claw_gateway\" must end with _test",
 		},
 	}
 

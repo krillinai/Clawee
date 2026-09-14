@@ -13,7 +13,7 @@ func TestBusinessCallFromMetadataNormalizesKnownFields(t *testing.T) {
 		"operation_label":   "采购订单查询",
 		"risk_level":        "low",
 		"external_event_id": "erp_evt_7f42",
-		"external_source":   "claw-mcp",
+		"external_source":   "claw-gateway",
 	}
 
 	call, ok := BusinessCallFromMetadata(input)
@@ -35,7 +35,7 @@ func TestBusinessCallFromMetadataNormalizesKnownFields(t *testing.T) {
 	if call.ExternalEventID != "erp_evt_7f42" {
 		t.Fatalf("ExternalEventID = %q", call.ExternalEventID)
 	}
-	if call.ExternalSource != "claw-mcp" {
+	if call.ExternalSource != "claw-gateway" {
 		t.Fatalf("ExternalSource = %q", call.ExternalSource)
 	}
 }

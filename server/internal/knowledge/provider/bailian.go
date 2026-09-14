@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const temporaryCategoryPrefix = "claw-mcp-"
+const temporaryCategoryPrefix = "claw-gateway-"
 
 type BailianConfig struct {
 	Endpoint        string

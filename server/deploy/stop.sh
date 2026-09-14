@@ -3,10 +3,6 @@ set -euo pipefail
 
 APP_NAME="${APP_NAME:-claw-gateway}"
 PID_FILE="${PID_FILE:-./run/${APP_NAME}.pid}"
-if [[ ! -f "$PID_FILE" && -f ./run/claw-mcp.pid ]]; then
-  APP_NAME="claw-mcp"
-  PID_FILE="./run/claw-mcp.pid"
-fi
 STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-20}"
 
 if [[ ! -f "$PID_FILE" ]]; then

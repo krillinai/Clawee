@@ -5,7 +5,7 @@ TEST_COMPOSE_FILE := deploy/docker-compose.test.yaml
 TEST_DATABASE_URL := postgres://claw_mcp@localhost:5933/claw_mcp_test?sslmode=disable
 
 run: db-migrate-up
-	go run ./cmd/claw-mcp serve
+	go run ./cmd/claw-gateway serve
 
 run-web:
 	cd web && pnpm dev --host 0.0.0.0

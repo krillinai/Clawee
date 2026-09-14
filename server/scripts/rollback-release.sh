@@ -21,17 +21,6 @@ fail() {
   exit 1
 }
 
-normalize_service_name() {
-  case "$1" in
-    claw-mcp|claw-mcp.service)
-      printf 'claw-gateway.service\n'
-      ;;
-    *)
-      printf '%s\n' "$1"
-      ;;
-  esac
-}
-
 configure_paths() {
   require_clawee_ops_dir || exit 1
   CONFIG_ROOT="$CLAWEE_OPS_DIR"
@@ -61,11 +50,7 @@ rollback_target() {
 
   ssh_host="$(server_value "$target" ssh)"
   deploy_dir="$(server_value "$target" deploy_dir)"
-  configured_service="$(server_value "$target" service)"
-  service="$(normalize_service_name "$configured_service")"
-  if [[ "$service" != "$configured_service" ]]; then
-    printf '[%s] legacy service name %s detected; using %s\n' "$target" "$configured_service" "$service"
-  fi
+  service="$(server_value "$target" service)"
 
   if [[ -z "$ssh_host" || -z "$deploy_dir" || -z "$service" ]]; then
     fail "missing server config for target: $target"
@@ -77,10 +62,9 @@ rollback_target() {
 set -Eeuo pipefail
 
 SERVICE_UNIT="$SERVICE_NAME"
-LEGACY_SERVICE_UNIT="claw-mcp.service"
 VERSION_URL="${VERSION_URL:-http://127.0.0.1:1904/version}"
 SERVICE_STOPPED=0
-RELEASE_PATHS=(claw-gateway claw-mcp public db deploy)
+RELEASE_PATHS=(claw-gateway public db deploy)
 
 case "$SERVICE_UNIT" in
   *.service) ;;
@@ -104,32 +88,6 @@ systemctl_show() {
     --property=InvocationID \
     --property=ExecStart \
     --no-pager
-}
-
-migrate_legacy_service() {
-  if [[ "$SERVICE_UNIT" != "claw-gateway.service" ]]; then
-    return 0
-  fi
-  if ! systemctl cat "$LEGACY_SERVICE_UNIT" >/dev/null 2>&1; then
-    return 0
-  fi
-  if systemctl is-active --quiet "$LEGACY_SERVICE_UNIT"; then
-    printf '[remote] stopping legacy systemd unit: %s\n' "$LEGACY_SERVICE_UNIT"
-    sudo systemctl stop "$LEGACY_SERVICE_UNIT"
-  fi
-  sudo systemctl disable "$LEGACY_SERVICE_UNIT" >/dev/null 2>&1 || true
-  printf '[remote] legacy systemd unit disabled: %s\n' "$LEGACY_SERVICE_UNIT"
-}
-
-cleanup_legacy_service_unit() {
-  if [[ "$SERVICE_UNIT" != "claw-gateway.service" ]]; then
-    return 0
-  fi
-  if [[ -e "/etc/systemd/system/$LEGACY_SERVICE_UNIT" ]]; then
-    sudo rm -f "/etc/systemd/system/$LEGACY_SERVICE_UNIT"
-    sudo systemctl daemon-reload
-    printf '[remote] legacy systemd unit removed: %s\n' "$LEGACY_SERVICE_UNIT"
-  fi
 }
 
 remove_release_paths() {
@@ -164,12 +122,7 @@ recover_service() {
     if [[ -n "${backup_path:-}" && -f "$backup_path" ]]; then
       remove_release_paths
       restore_release_paths "$backup_path"
-      if [[ -f ./claw-gateway ]]; then
-        chmod +x ./claw-gateway
-      elif [[ -f ./claw-mcp ]]; then
-        chmod +x ./claw-mcp
-        ln -s claw-mcp ./claw-gateway
-      fi
+      chmod +x ./claw-gateway
       if [[ -d ./deploy ]]; then
         chmod +x ./deploy/*.sh
       fi
@@ -245,7 +198,7 @@ if [[ -n "$BACKUP_ARG" ]]; then
     *) backup_path=".deploy-backups/$backup_path" ;;
   esac
 else
-  backup_path="$(find .deploy-backups -maxdepth 1 -type f \( -name 'claw-gateway-*.tar.gz' -o -name 'claw-mcp-*.tar.gz' \) -print | sort | tail -n 1)"
+  backup_path="$(find .deploy-backups -maxdepth 1 -type f -name 'claw-gateway-*.tar.gz' -print | sort | tail -n 1)"
 fi
 
 if [[ -z "$backup_path" || ! -f "$backup_path" ]]; then
@@ -264,18 +217,10 @@ printf '[remote] stopping %s\n' "$SERVICE_UNIT"
 sudo systemctl stop "$SERVICE_UNIT"
 SERVICE_STOPPED=1
 
-printf '[remote] migrating legacy systemd service if present\n'
-migrate_legacy_service
-
 remove_release_paths
 restore_release_paths "$backup_path"
 
-if [[ -f ./claw-gateway ]]; then
-  chmod +x ./claw-gateway
-elif [[ -f ./claw-mcp ]]; then
-  chmod +x ./claw-mcp
-  ln -s claw-mcp ./claw-gateway
-fi
+chmod +x ./claw-gateway
 if [[ -d ./deploy ]]; then
   chmod +x ./deploy/*.sh
 fi
@@ -286,7 +231,6 @@ SERVICE_STOPPED=0
 
 deploy/healthcheck.sh </dev/null
 print_version
-cleanup_legacy_service_unit
 printf '[remote] rollback completed\n'
 REMOTE_SCRIPT
 }

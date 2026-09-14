@@ -206,7 +206,7 @@ function tokenInfo() {
     token_status: "active",
     token_expires_at: null,
     token_last_used_at: null,
-    token_issuer: "claw-mcp-user",
+    token_issuer: "claw-gateway-user",
     token_scopes: ["mcp:call"]
   };
 }

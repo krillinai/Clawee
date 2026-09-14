@@ -14,7 +14,7 @@ describe('enterprise activity event projector', () => {
       threadId: 'thread_1',
       prompt: 'use Authorization: Bearer secret-token and sk-standalone-secret-value',
       createdBy: 'api',
-      workspaceName: 'claw-mcp',
+      workspaceName: 'claw-gateway',
       createdAt: '2026-08-28T10:00:00.000Z'
     });
 
@@ -23,7 +23,7 @@ describe('enterprise activity event projector', () => {
       session_id: 'thread_1',
       turn_id: 'run_1',
       sequence: 0,
-      payload: { workspace_name: 'claw-mcp' }
+      payload: { workspace_name: 'claw-gateway' }
     });
     expect(JSON.stringify(event)).not.toContain('secret-token');
     expect(JSON.stringify(event)).not.toContain('sk-standalone-secret-value');

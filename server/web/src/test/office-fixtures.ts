@@ -126,7 +126,7 @@ export const fixtureAgent: AgentListItem = {
     operation_label: "Purchase order lookup",
     risk_level: "low",
     external_event_id: "erp_evt_7f42",
-    external_source: "claw-mcp",
+    external_source: "claw-gateway",
   },
   sessions: [
     {

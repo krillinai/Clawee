@@ -186,11 +186,11 @@ describe('codex argv', () => {
 
   it('can disable an MCP server inherited from CODEX_HOME without redefining it', () => {
     expect(buildCodexMcpConfigArgs([{
-      name: 'claw-mcp',
+      name: 'claw-gateway',
       enabled: false
     }])).toEqual([
       '-c',
-      'mcp_servers.claw-mcp.enabled=false'
+      'mcp_servers.claw-gateway.enabled=false'
     ]);
   });
 });

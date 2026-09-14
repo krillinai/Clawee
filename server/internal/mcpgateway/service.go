@@ -260,7 +260,7 @@ func (s *Service) prepareAccountToken(req AccountTokenIssueRequest) (AccountToke
 	}
 	issuer := req.Issuer
 	if strings.TrimSpace(issuer) == "" {
-		issuer = "claw-mcp-admin"
+		issuer = "claw-gateway-admin"
 	}
 	token := AccountToken{
 		ID:              newTokenID(now, req.UserID, tokenHash),

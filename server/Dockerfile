@@ -20,7 +20,7 @@ COPY server/scripts ./scripts
 COPY --from=web-builder /src/internal/server/webdist/dist ./internal/server/webdist/dist
 ARG CLAW_MCP_VERSION=0.1.7
 ARG CLAW_MCP_COMMIT=unknown
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(./scripts/buildinfo-ldflags.sh)" -o /out/claw-gateway ./cmd/claw-mcp \
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(./scripts/buildinfo-ldflags.sh)" -o /out/claw-gateway ./cmd/claw-gateway \
     && mkdir -p /out/data/shared-files /out/data/skillhub/packages /out/data/skillhub/repositories
 
 FROM gcr.io/distroless/static-debian12:nonroot

@@ -118,7 +118,7 @@ func handleRotateAccountToken(proxyGateway *mcpgateway.Service) gin.HandlerFunc 
 			scopes = []string{"mcp:call"}
 		}
 		issued, err := proxyGateway.RotateAccountToken(c.Request.Context(), mcpgateway.AccountTokenIssueRequest{
-			UserID: account.UserID, ExpiresAt: req.ExpiresAt, Scopes: scopes, Issuer: "claw-mcp-user",
+			UserID: account.UserID, ExpiresAt: req.ExpiresAt, Scopes: scopes, Issuer: "claw-gateway-user",
 		})
 		if err != nil {
 			agentAPIError(c, err)

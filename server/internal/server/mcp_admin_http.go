@@ -688,7 +688,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 		if !validateAdminAccountTokenTarget(c, opts.AccountService, userID, true) {
 			return
 		}
-		issued, err := opts.ProxyGateway.RotateAccountToken(c.Request.Context(), mcpgateway.AccountTokenIssueRequest{UserID: userID, ExpiresAt: req.ExpiresAt, Scopes: req.Scopes, Issuer: "claw-mcp-admin"})
+		issued, err := opts.ProxyGateway.RotateAccountToken(c.Request.Context(), mcpgateway.AccountTokenIssueRequest{UserID: userID, ExpiresAt: req.ExpiresAt, Scopes: req.Scopes, Issuer: "claw-gateway-admin"})
 		if err != nil {
 			agentAPIError(c, err)
 			return

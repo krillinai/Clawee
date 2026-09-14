@@ -115,7 +115,7 @@ func verifyAccountToken(ctx context.Context, store mcpgateway.Store, accountSvc 
 		Extra: map[string]any{
 			"sub":       account.UserID,
 			"user_id":   account.UserID,
-			"client_id": "claw-mcp-account-token",
+			"client_id": "claw-gateway-account-token",
 			"agent_id":  agent.AgentID,
 			"iss":       entry.Issuer,
 			"jti":       entry.ID,
@@ -165,7 +165,7 @@ func ProtectedResourceMetadata(cfg Config) *oauthex.ProtectedResourceMetadata {
 		AuthorizationServers:   cfg.AuthorizationServers,
 		ScopesSupported:        cfg.RequiredScopes,
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "claw-mcp",
+		ResourceName:           "claw-gateway",
 	}
 }
 

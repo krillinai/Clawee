@@ -8,7 +8,7 @@ import (
 )
 
 func TestMapEventMaterializesRunContentWithStableDerivedIDs(t *testing.T) {
-	req := validRequest(`{"prompt":"检查测试","created_by":"api","workspace_name":"claw-mcp"}`)
+	req := validRequest(`{"prompt":"检查测试","created_by":"api","workspace_name":"claw-gateway"}`)
 	req.Events[0].EventType = "run_started"
 	if err := ValidateAndSanitize(&req); err != nil {
 		t.Fatal(err)

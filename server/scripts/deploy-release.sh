@@ -21,17 +21,6 @@ fail() {
   exit 1
 }
 
-normalize_service_name() {
-  case "$1" in
-    claw-mcp|claw-mcp.service)
-      printf 'claw-gateway.service\n'
-      ;;
-    *)
-      printf '%s\n' "$1"
-      ;;
-  esac
-}
-
 configure_paths() {
   require_clawee_ops_dir || exit 1
   CONFIG_ROOT="$CLAWEE_OPS_DIR"
@@ -234,16 +223,12 @@ build_package() {
 
 deploy_target() {
   local target="$1"
-  local ssh_host deploy_dir arch configured_service service config_path config_source package package_checksum remote_package remote_config package_name release_id
+  local ssh_host deploy_dir arch service config_path config_source package package_checksum remote_package remote_config package_name release_id
 
   ssh_host="$(server_value "$target" ssh)"
   deploy_dir="$(server_value "$target" deploy_dir)"
   arch="$(server_value "$target" arch)"
-  configured_service="$(server_value "$target" service)"
-  service="$(normalize_service_name "$configured_service")"
-  if [[ "$service" != "$configured_service" ]]; then
-    printf '[%s] legacy service name %s detected; using %s\n' "$target" "$configured_service" "$service"
-  fi
+  service="$(server_value "$target" service)"
   config_path="$(server_value "$target" config)"
 
   if [[ -z "$ssh_host" || -z "$deploy_dir" || -z "$arch" || -z "$service" || -z "$config_path" ]]; then
@@ -284,11 +269,10 @@ deploy_target() {
 set -Eeuo pipefail
 
 SERVICE_UNIT="$SERVICE_NAME"
-LEGACY_SERVICE_UNIT="claw-mcp.service"
 VERSION_URL="${VERSION_URL:-http://127.0.0.1:1904/version}"
 SERVICE_STOPPED=0
 DOCKER_COMMAND=()
-RELEASE_PATHS=(claw-gateway claw-mcp public db deploy)
+RELEASE_PATHS=(claw-gateway public db deploy)
 trap 'rm -f "$REMOTE_PACKAGE" "$REMOTE_CONFIG"' EXIT
 
 case "$SERVICE_UNIT" in
@@ -340,36 +324,6 @@ configure_docker_command() {
   return 1
 }
 
-migrate_legacy_service() {
-  if [[ "$SERVICE_UNIT" != "claw-gateway.service" ]]; then
-    return 0
-  fi
-  if ! systemctl cat "$LEGACY_SERVICE_UNIT" >/dev/null 2>&1; then
-    return 0
-  fi
-  if systemctl is-active --quiet "$LEGACY_SERVICE_UNIT"; then
-    printf '[remote] stopping legacy systemd unit: %s\n' "$LEGACY_SERVICE_UNIT"
-    sudo systemctl stop "$LEGACY_SERVICE_UNIT"
-  fi
-  sudo systemctl disable "$LEGACY_SERVICE_UNIT" >/dev/null 2>&1 || true
-  printf '[remote] legacy systemd unit disabled: %s\n' "$LEGACY_SERVICE_UNIT"
-}
-
-cleanup_legacy_service() {
-  if [[ "$SERVICE_UNIT" != "claw-gateway.service" ]]; then
-    return 0
-  fi
-  if [[ -e "/etc/systemd/system/$LEGACY_SERVICE_UNIT" ]]; then
-    sudo rm -f "/etc/systemd/system/$LEGACY_SERVICE_UNIT"
-    sudo systemctl daemon-reload
-    printf '[remote] legacy systemd unit removed: %s\n' "$LEGACY_SERVICE_UNIT"
-  fi
-  if [[ -e ./claw-mcp ]]; then
-    rm -f ./claw-mcp
-    printf '[remote] legacy binary removed: ./claw-mcp\n'
-  fi
-}
-
 docker_compose() {
   "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml "$@"
 }
@@ -408,9 +362,6 @@ recover_service() {
       restore_release_paths ".deploy-backups/$backup_name"
       if [[ -f ./claw-gateway ]]; then
         chmod +x ./claw-gateway
-      elif [[ -f ./claw-mcp ]]; then
-        chmod +x ./claw-mcp
-        ln -s claw-mcp ./claw-gateway
       else
         printf '[remote] recovery skipped: backup contains no gateway binary\n' >&2
         return 0
@@ -552,9 +503,6 @@ sudo systemctl stop "$SERVICE_UNIT"
 SERVICE_STOPPED=1
 systemctl_show "systemd state after stop"
 
-printf '[remote] migrating legacy systemd service if present\n'
-migrate_legacy_service
-
 remove_release_paths
 
 printf '[remote] extracting release package\n'
@@ -589,7 +537,6 @@ fi
 
 deploy/healthcheck.sh </dev/null
 print_version
-cleanup_legacy_service
 SERVICE_STOPPED=0
 printf '[remote] deployed %s\n' "$RELEASE_ID"
 REMOTE_SCRIPT

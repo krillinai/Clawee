@@ -110,7 +110,7 @@ func TestNotifierPublishesSessionAndTurnEventsForChangedAgent(t *testing.T) {
 				SessionID:     "session_1",
 				Status:        "coding",
 				StartedAt:     now.Add(-10 * time.Minute),
-				WorkspaceName: "claw-mcp",
+				WorkspaceName: "claw-gateway",
 			}},
 			Turns: []TurnItem{{
 				TurnID:      "turn_1",

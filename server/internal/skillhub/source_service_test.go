@@ -73,7 +73,7 @@ func TestGitHubSourceServiceListsCurrentDiscoveredCount(t *testing.T) {
 }
 
 func TestGitHubSourceServiceBuildsCompleteManualGitInstructions(t *testing.T) {
-	workspace := NewRepositoryWorkspace("/var/lib/claw-mcp/skill-sources", nil)
+	workspace := NewRepositoryWorkspace("/var/lib/claw-gateway/skill-sources", nil)
 	service := NewGitHubSourceService(GitHubSourceServiceConfig{Workspace: workspace})
 	source := GitHubSource{
 		SourceID: "source_123", RepositoryOwner: "acme", RepositoryName: "skills", Branch: "release/2026",
@@ -84,7 +84,7 @@ func TestGitHubSourceServiceBuildsCompleteManualGitInstructions(t *testing.T) {
 	if instructions == nil {
 		t.Fatal("ManualCloneInstructions() = nil")
 	}
-	if instructions.WorkingDirectory != "/var/lib/claw-mcp/skill-sources/source_123" || instructions.RepositoryDirectory != "/var/lib/claw-mcp/skill-sources/source_123/repository" {
+	if instructions.WorkingDirectory != "/var/lib/claw-gateway/skill-sources/source_123" || instructions.RepositoryDirectory != "/var/lib/claw-gateway/skill-sources/source_123/repository" {
 		t.Fatalf("manual clone paths = %#v", instructions)
 	}
 	wantCommand := "git clone --progress --depth=1 --single-branch --no-tags --branch 'release/2026' 'https://github.com/acme/skills.git' 'repository'"

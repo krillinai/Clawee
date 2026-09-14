@@ -5,4 +5,4 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 mkdir -p bin
-go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o bin/claw-gateway ./cmd/claw-mcp
+go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o bin/claw-gateway ./cmd/claw-gateway

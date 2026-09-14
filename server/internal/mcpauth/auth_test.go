@@ -85,7 +85,7 @@ func TestAccountTokenVerifierAcceptsOwnedActiveAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.UserID != "usr_owner" || identity.Subject != "usr_owner" || identity.AgentID != "agent_owned" || identity.ClientID != "claw-mcp-account-token" {
+	if identity.UserID != "usr_owner" || identity.Subject != "usr_owner" || identity.AgentID != "agent_owned" || identity.ClientID != "claw-gateway-account-token" {
 		t.Fatalf("identity = %#v", identity)
 	}
 	stored, err := store.GetAccountTokenByHash(ctx, mcpgateway.HashToken("account-token"))

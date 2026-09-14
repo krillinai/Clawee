@@ -185,7 +185,7 @@ type SDKUpstreamClient struct {
 
 func NewSDKUpstreamClient(clientName string) *SDKUpstreamClient {
 	if clientName == "" {
-		clientName = "claw-mcp-gateway"
+		clientName = "claw-gateway-gateway"
 	}
 	return &SDKUpstreamClient{clientName: clientName}
 }

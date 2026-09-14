@@ -27,7 +27,7 @@ cp -R "$ROOT_DIR/../third_party" "$BUILD_DIR/licenses/third_party"
 
 "$ROOT_DIR/scripts/build-web.sh" >&2
 
-CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$BUILD_DIR/claw-gateway" ./cmd/claw-mcp
+CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$BUILD_DIR/claw-gateway" ./cmd/claw-gateway
 
 cp "$EXAMPLE_CONFIG" "$BUILD_DIR/configs/config.example.yaml"
 cp "$ROOT_DIR/deploy/docker-compose.yaml" "$BUILD_DIR/deploy/docker-compose.yaml"

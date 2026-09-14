@@ -32,7 +32,7 @@ func TestApplyHeartbeatUpsertsDeviceAndAgents(t *testing.T) {
 			AgentType:        collectorapi.AgentTypeCodex,
 			DisplayName:      "Codex Main",
 			Status:           collectorapi.StatusThinking,
-			WorkspaceName:    "claw-mcp",
+			WorkspaceName:    "claw-gateway",
 			CurrentSessionID: "sess_1",
 			CurrentTurnID:    "turn_1",
 			Metadata: map[string]string{
@@ -625,7 +625,7 @@ func TestApplyEventsUpdatesSessionFromPayload(t *testing.T) {
 				Status:        collectorapi.StatusCoding,
 				Summary:       "实现 session 泳道",
 				StartedAt:     startedAt,
-				WorkspaceName: "claw-mcp",
+				WorkspaceName: "claw-gateway",
 			},
 		}},
 	}, reducerNow)
@@ -645,7 +645,7 @@ func TestApplyEventsUpdatesSessionFromPayload(t *testing.T) {
 	if session.Summary != "实现 session 泳道" {
 		t.Fatalf("Summary = %q", session.Summary)
 	}
-	if session.WorkspaceName != "claw-mcp" {
+	if session.WorkspaceName != "claw-gateway" {
 		t.Fatalf("WorkspaceName = %q", session.WorkspaceName)
 	}
 	if !session.StartedAt.Equal(startedAt) {

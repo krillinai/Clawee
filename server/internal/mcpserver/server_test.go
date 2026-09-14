@@ -112,7 +112,7 @@ func TestMCPServerExposesOnlyGrantedProxyTools(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -247,7 +247,7 @@ func TestMCPServerSyncConfirmationUsesClientElicitation(t *testing.T) {
 	defer httpServer.Close()
 
 	var elicitationMessages []string
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
 		Capabilities: &mcp.ClientCapabilities{
 			Elicitation: &mcp.ElicitationCapabilities{Form: &mcp.FormElicitationCapabilities{}},
 		},
@@ -330,7 +330,7 @@ func TestMCPServerMultiRoundTripConfirmation(t *testing.T) {
 				"user_id":   "sales_zhang",
 				"client_id": "hermes-sales-demo",
 				"agent_id":  "sales_zhang_agent",
-				"iss":       "claw-mcp-demo",
+				"iss":       "claw-gateway-demo",
 				"jti":       token,
 			},
 		}, nil
@@ -343,7 +343,7 @@ func TestMCPServerMultiRoundTripConfirmation(t *testing.T) {
 	defer httpServer.Close()
 
 	token := "demo-zhang-token"
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
 		MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
 	})
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
@@ -560,7 +560,7 @@ func TestMCPServerWithoutExplicitFormElicitationFallsBackToAsyncGate(t *testing.
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, &mcp.ClientOptions{
 		Capabilities: &mcp.ClientCapabilities{
 			Elicitation: &mcp.ElicitationCapabilities{URL: &mcp.URLElicitationCapabilities{}},
 		},
@@ -635,7 +635,7 @@ func TestMCPServerFallsBackToAsyncGateWithoutClientElicitation(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:   httpServer.URL,
 		HTTPClient: &http.Client{Transport: &bearerRoundTripper{token: "demo-zhang-token"}},
@@ -698,7 +698,7 @@ func TestMCPServerExposesGateStatusAndResultTools(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -799,7 +799,7 @@ func TestMCPGateToolsUseCurrentCallIdentity(t *testing.T) {
 				"sub":       "sales_zhang",
 				"client_id": "hermes-sales-demo",
 				"agent_id":  agentID,
-				"iss":       "claw-mcp-demo",
+				"iss":       "claw-gateway-demo",
 				"jti":       token,
 			},
 		}, nil
@@ -814,7 +814,7 @@ func TestMCPGateToolsUseCurrentCallIdentity(t *testing.T) {
 	defer httpServer.Close()
 
 	token := "demo-zhang-token"
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -875,7 +875,7 @@ func TestMCPGateToolsReturnAdminApprovalGateType(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -935,7 +935,7 @@ func TestMCPGateToolsRejectDisabledAgent(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -1005,7 +1005,7 @@ func TestMCPServerNormalizesMalformedProxyToolSchemas(t *testing.T) {
 	))
 	defer httpServer.Close()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claw-mcp-test-client", Version: "v0.1.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claw-gateway-test-client", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: httpServer.URL,
 		HTTPClient: &http.Client{
@@ -1259,7 +1259,7 @@ func testVerifier(ctx context.Context, token string, req *http.Request) (*auth.T
 			"user_id":   "sales_zhang",
 			"client_id": "hermes-sales-demo",
 			"agent_id":  "sales_zhang_agent",
-			"iss":       "claw-mcp-demo",
+			"iss":       "claw-gateway-demo",
 			"jti":       "token_zhang_001",
 		},
 	}, nil

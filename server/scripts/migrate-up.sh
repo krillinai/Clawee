@@ -14,6 +14,6 @@ if [[ ! -f internal/server/webdist/dist/index.html ]]; then
 fi
 
 mkdir -p "$(dirname "$APP_BIN")"
-go build -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$APP_BIN" ./cmd/claw-mcp
+go build -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$APP_BIN" ./cmd/claw-gateway
 
 exec "$APP_BIN" migrate up

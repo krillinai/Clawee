@@ -3380,21 +3380,21 @@ func TestRotateAccountTokenWithoutCipherDoesNotRevokeExistingToken(t *testing.T)
 func TestRotateAccountTokenUsesFixedPrefixAndMaskedPlaintext(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	if err := store.SaveAgent(ctx, AgentRegistration{AgentID: "claw_mcp", Status: StatusActive}); err != nil {
+	if err := store.SaveAgent(ctx, AgentRegistration{AgentID: "claw_gateway", Status: StatusActive}); err != nil {
 		t.Fatalf("save agent: %v", err)
 	}
 	svc := newTestService(Config{
 		Store:       store,
 		TokenCipher: NewStaticTokenCipherForTest([]byte("0123456789abcdef0123456789abcdef")),
 	})
-	issued, err := svc.RotateAccountToken(ctx, AccountTokenIssueRequest{UserID: "claw_mcp", Scopes: []string{"mcp:call"}})
+	issued, err := svc.RotateAccountToken(ctx, AccountTokenIssueRequest{UserID: "claw_gateway", Scopes: []string{"mcp:call"}})
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
 	if len(issued.Plaintext) != 32 || !strings.HasPrefix(issued.Plaintext, "agt_") {
 		t.Fatalf("plaintext = %q, want 32-character agt_ token", issued.Plaintext)
 	}
-	copied, err := svc.CopyActiveAccountToken(ctx, "claw_mcp")
+	copied, err := svc.CopyActiveAccountToken(ctx, "claw_gateway")
 	if err != nil {
 		t.Fatalf("copy token: %v", err)
 	}

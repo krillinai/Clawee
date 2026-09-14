@@ -158,7 +158,7 @@ FROM (
         'revoked',
         expires_at,
         NULL::TIMESTAMPTZ,
-        'claw-mcp-admin',
+        'claw-gateway-admin',
         '["mcp:call"]'::JSONB,
         created_at,
         created_at
@@ -172,7 +172,7 @@ FROM (
         'revoked',
         expires_at,
         created_at,
-        'claw-mcp-admin',
+        'claw-gateway-admin',
         '["mcp:call"]'::JSONB,
         created_at,
         created_at

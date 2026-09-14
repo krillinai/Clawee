@@ -112,7 +112,7 @@ func (s *Service) EnsureOwnedAgent(ctx context.Context, req EnsureRequest) (Ensu
 func sourcePolicy(source Source, requestedClientID string) (string, string, error) {
 	switch source {
 	case SourceClaweeLogin:
-		return accounts.ClientClaweeAgent, "claw-mcp-user", nil
+		return accounts.ClientClaweeAgent, "claw-gateway-user", nil
 	case SourceCollector:
 		return strings.TrimSpace(requestedClientID), "claw-collector", nil
 	default:

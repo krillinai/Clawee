@@ -128,7 +128,7 @@ type Options struct {
 
 func New(opts Options, r *http.Request) *mcp.Server {
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "claw-mcp", Version: buildinfo.FullVersion()},
+		&mcp.Implementation{Name: "claw-gateway", Version: buildinfo.FullVersion()},
 		nil,
 	)
 

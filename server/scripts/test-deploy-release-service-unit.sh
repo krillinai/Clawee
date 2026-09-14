@@ -33,12 +33,6 @@ run_case() {
       set -euo pipefail
       source "$DEPLOY_SCRIPT"
 
-      if [[ "$(normalize_service_name claw-mcp.service)" != "claw-gateway.service" ||
-            "$(normalize_service_name claw-gateway.service)" != "claw-gateway.service" ]]; then
-        printf "service name normalization is incorrect\n" >&2
-        exit 1
-      fi
-
       service_unit_action() {
         local config_path="$4"
         local action="$5"
@@ -64,7 +58,7 @@ run_case() {
         esac
       }
 
-      ensure_service_unit test deploy@example.com /srv/clawee claw-mcp.service configs/config.yaml
+      ensure_service_unit test deploy@example.com /srv/clawee claw-gateway.service configs/config.yaml
     ' >"$output_file" 2>&1
   actual_status="$?"
   set -e

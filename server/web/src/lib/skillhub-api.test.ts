@@ -263,8 +263,8 @@ describe("skillhub api", () => {
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce(jsonResponse({ items: [{ source, latest_run: run, discovered_count: 86 }] }))
 			.mockResolvedValueOnce(jsonResponse({ source, manual_clone: {
-					working_directory: "/var/lib/claw-mcp/skill-sources/source-1",
-					repository_directory: "/var/lib/claw-mcp/skill-sources/source-1/repository",
+					working_directory: "/var/lib/claw-gateway/skill-sources/source-1",
+					repository_directory: "/var/lib/claw-gateway/skill-sources/source-1/repository",
 					command: "git clone --branch 'main' 'https://github.com/acme/skills.git' 'repository'",
 					command_groups: [
 						{ title: "首次同步：Clone", commands: ["git clone --branch 'main'"] },
@@ -290,8 +290,8 @@ describe("skillhub api", () => {
 			source: { sourceId: "source-1" },
 			items: [{ sourceItemId: "item-1", skillId: "skill-1" }],
 				manualClone: {
-					workingDirectory: "/var/lib/claw-mcp/skill-sources/source-1",
-					repositoryDirectory: "/var/lib/claw-mcp/skill-sources/source-1/repository",
+					workingDirectory: "/var/lib/claw-gateway/skill-sources/source-1",
+					repositoryDirectory: "/var/lib/claw-gateway/skill-sources/source-1/repository",
 					commandGroups: expect.arrayContaining([
 						expect.objectContaining({ title: "首次同步：Clone" }),
 						expect.objectContaining({ title: "后续同步：Fetch" }),

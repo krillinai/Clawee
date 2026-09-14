@@ -9,8 +9,8 @@ import (
 func TestKeepMetadataKeepsAllowedKeysAndScrubsSensitiveValues(t *testing.T) {
 	input := map[string]any{
 		"agent":          "codex",
-		"cwd":            "/workspace/claw-mcp",
-		"workspace_path": "/workspace/claw-mcp",
+		"cwd":            "/workspace/claw-gateway",
+		"workspace_path": "/workspace/claw-gateway",
 		"status":         "coding",
 		"prompt":         "secret prompt",
 		"tool_input":     "secret input",
@@ -27,8 +27,8 @@ func TestKeepMetadataKeepsAllowedKeysAndScrubsSensitiveValues(t *testing.T) {
 
 	want := map[string]string{
 		"agent":          "codex",
-		"cwd":            "claw-mcp",
-		"workspace_path": "claw-mcp",
+		"cwd":            "claw-gateway",
+		"workspace_path": "claw-gateway",
 		"status":         "coding",
 	}
 
@@ -65,8 +65,8 @@ func TestLimitTextTruncatesChineseWithoutBreakingUTF8(t *testing.T) {
 }
 
 func TestWorkspaceNameFromPathReturnsBasename(t *testing.T) {
-	got := WorkspaceNameFromPath("/workspace/claw-mcp")
-	if got != "claw-mcp" {
-		t.Fatalf("WorkspaceNameFromPath() = %q, want %q", got, "claw-mcp")
+	got := WorkspaceNameFromPath("/workspace/claw-gateway")
+	if got != "claw-gateway" {
+		t.Fatalf("WorkspaceNameFromPath() = %q, want %q", got, "claw-gateway")
 	}
 }

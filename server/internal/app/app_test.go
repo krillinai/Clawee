@@ -68,7 +68,7 @@ func TestSelectSnapshotClientByModelAccessMode(t *testing.T) {
 }
 
 func TestOpenDatabasePoolsCreatesSeparateAdminAndCollectorPools(t *testing.T) {
-	adminPool, collectorPool, err := openDatabasePools(context.Background(), "postgres://test:test@127.0.0.1:1/claw_mcp?sslmode=disable")
+	adminPool, collectorPool, err := openDatabasePools(context.Background(), "postgres://test:test@127.0.0.1:1/claw_gateway?sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
 	}

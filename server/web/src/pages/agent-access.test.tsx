@@ -47,7 +47,7 @@ const accountToken = {
   tokenStatus: "active",
   tokenExpiresAt: null,
   tokenLastUsedAt: null,
-  tokenIssuer: "claw-mcp-user",
+  tokenIssuer: "claw-gateway-user",
   tokenScopes: ["mcp:call"],
   createdAt: "2026-08-28T08:00:00Z"
 };

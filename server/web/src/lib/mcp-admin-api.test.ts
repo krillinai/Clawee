@@ -368,7 +368,7 @@ describe("mcp-admin-api", () => {
             token_fingerprint: "def456",
             token_status: "active",
             token_expires_at: "2031-01-01T00:00:00Z",
-            token_issuer: "claw-mcp-admin",
+            token_issuer: "claw-gateway-admin",
             token_scopes: ["mcp:call"],
             created_at: "2026-05-27T00:00:00Z"
           }

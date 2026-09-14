@@ -140,7 +140,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	var credentialResolver func(string) (string, error)
 	pullBroker := collectorpull.NewBroker()
 	transportClient := mcpgateway.NewTransportRoutingUpstreamClient(
-		mcpgateway.NewSDKUpstreamClient("claw-mcp-gateway"),
+		mcpgateway.NewSDKUpstreamClient("claw-gateway-gateway"),
 		map[string]mcpgateway.UpstreamClient{
 			mcpgateway.TransportCollectorPull: collectorpull.NewClient(pullBroker),
 		},

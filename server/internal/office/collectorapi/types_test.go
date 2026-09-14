@@ -22,7 +22,7 @@ func TestRegistrationRequestJSON(t *testing.T) {
 			"agent_id":"codex-local-001",
 			"display_name":"Codex Local",
 			"version":"0.1.0",
-			"workspace_name":"claw-mcp",
+			"workspace_name":"claw-gateway",
 			"metadata":{"source":"local_discovery"}
 		}]
 	}`)
@@ -71,7 +71,7 @@ func TestRegistrationRequestJSON(t *testing.T) {
 	if agent.Version != "0.1.0" {
 		t.Fatalf("Version = %q", agent.Version)
 	}
-	if agent.WorkspaceName != "claw-mcp" {
+	if agent.WorkspaceName != "claw-gateway" {
 		t.Fatalf("WorkspaceName = %q", agent.WorkspaceName)
 	}
 	if agent.Metadata["source"] != "local_discovery" {

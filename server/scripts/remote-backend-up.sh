@@ -110,7 +110,7 @@ build_backend() {
 
   info "building backend binary: $APP_BIN"
   mkdir -p "$(dirname "$APP_BIN")"
-  go build -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$APP_BIN" ./cmd/claw-mcp
+  go build -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$APP_BIN" ./cmd/claw-gateway
 }
 
 run_migrations() {

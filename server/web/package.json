@@ -1,5 +1,5 @@
 {
-  "name": "@claw-mcp/web",
+  "name": "@claw-gateway/web",
   "private": true,
   "version": "0.1.7",
   "type": "module",

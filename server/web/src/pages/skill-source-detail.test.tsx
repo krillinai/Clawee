@@ -142,8 +142,8 @@ describe("SkillSourceDetailPage", () => {
       ...sourceDetail,
       source: { ...sourceDetail.source, lastErrorSummary: reason },
       manualClone: {
-        workingDirectory: "/var/lib/claw-mcp/skill-sources/source-1",
-        repositoryDirectory: "/var/lib/claw-mcp/skill-sources/source-1/repository",
+        workingDirectory: "/var/lib/claw-gateway/skill-sources/source-1",
+        repositoryDirectory: "/var/lib/claw-gateway/skill-sources/source-1/repository",
         command: "git clone --progress --depth=1 --single-branch --no-tags --branch 'main' 'https://github.com/acme/skills.git' 'repository'",
         commandGroups: [
           { title: "首次同步：Clone", commands: ["git check-ref-format --branch 'main'", "git clone --progress --depth=1 --single-branch --no-tags --branch 'main' 'https://github.com/acme/skills.git' 'repository'"] },
@@ -157,13 +157,13 @@ describe("SkillSourceDetailPage", () => {
 
     const commandButton = await screen.findByRole("button", { name: "手动操作命令" });
     expect(screen.getByRole("alert")).toHaveTextContent(reason);
-    expect(screen.queryByText("/var/lib/claw-mcp/skill-sources/source-1/repository")).not.toBeInTheDocument();
+    expect(screen.queryByText("/var/lib/claw-gateway/skill-sources/source-1/repository")).not.toBeInTheDocument();
 
     fireEvent.click(commandButton);
 
     const dialog = screen.getByRole("dialog", { name: "手动操作命令" });
-    expect(within(dialog).getByText("/var/lib/claw-mcp/skill-sources/source-1")).toBeVisible();
-    expect(within(dialog).getByText("/var/lib/claw-mcp/skill-sources/source-1/repository")).toBeVisible();
+    expect(within(dialog).getByText("/var/lib/claw-gateway/skill-sources/source-1")).toBeVisible();
+    expect(within(dialog).getByText("/var/lib/claw-gateway/skill-sources/source-1/repository")).toBeVisible();
     expect(within(dialog).getByRole("heading", { name: "首次同步：Clone" })).toBeVisible();
     expect(within(dialog).getByRole("heading", { name: "后续同步：Fetch" })).toBeVisible();
     expect(within(dialog).getByRole("heading", { name: "Skill 发现阶段" })).toBeVisible();

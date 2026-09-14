@@ -24,7 +24,7 @@ func TestDeviceInfoUsesRuntimeAndHostname(t *testing.T) {
 }
 
 func TestDiscoverAgentsReturnsCodexSummary(t *testing.T) {
-	agents := DiscoverAgents("claw-mcp")
+	agents := DiscoverAgents("claw-gateway")
 	if len(agents) != 1 {
 		t.Fatalf("len(agents) = %d", len(agents))
 	}

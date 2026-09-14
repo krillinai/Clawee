@@ -7,4 +7,4 @@ cd "$ROOT_DIR"
 if [[ ! -f internal/server/webdist/dist/index.html ]]; then
   ./scripts/build-web.sh
 fi
-exec go run ./cmd/claw-mcp "$@"
+exec go run ./cmd/claw-gateway "$@"

@@ -459,12 +459,12 @@ func TestLoadMCPAuthResourceDoesNotOverridePublicBaseURLFallback(t *testing.T) {
 }
 
 func TestLoadSharedFilesStorageRootFromEnvironment(t *testing.T) {
-	t.Setenv("CLAW_MCP_SHARED_FILES_STORAGE_ROOT", "/var/lib/claw-mcp/shared-files")
+	t.Setenv("CLAW_MCP_SHARED_FILES_STORAGE_ROOT", "/var/lib/claw-gateway/shared-files")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SharedFiles.StorageRoot != "/var/lib/claw-mcp/shared-files" {
+	if cfg.SharedFiles.StorageRoot != "/var/lib/claw-gateway/shared-files" {
 		t.Fatalf("storage root = %q", cfg.SharedFiles.StorageRoot)
 	}
 }
@@ -495,7 +495,7 @@ func TestLoadSkillHubGitHubSyncIgnoresEnvironment(t *testing.T) {
 
 func TestLoadSkillHubGitHubSyncFromYAML(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	contents := "skillhub:\n  enabled: true\n  github_sync_enabled: false\n  repository_root: /var/lib/claw-mcp/skill-sources\n"
+	contents := "skillhub:\n  enabled: true\n  github_sync_enabled: false\n  repository_root: /var/lib/claw-gateway/skill-sources\n"
 	if err := os.WriteFile(configPath, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestLoadSkillHubGitHubSyncFromYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.SkillHub.Enabled || cfg.SkillHub.GitHubSyncEnabled || cfg.SkillHub.RepositoryRoot != "/var/lib/claw-mcp/skill-sources" {
+	if !cfg.SkillHub.Enabled || cfg.SkillHub.GitHubSyncEnabled || cfg.SkillHub.RepositoryRoot != "/var/lib/claw-gateway/skill-sources" {
 		t.Fatalf("skillhub github sync config = %#v", cfg.SkillHub)
 	}
 }
