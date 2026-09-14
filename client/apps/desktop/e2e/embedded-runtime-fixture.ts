@@ -236,7 +236,7 @@ export async function createEmbeddedRuntimeFixture(input: {
         ));
       },
       targetRolloutPaths() {
-        return findFiles(targetHome, '.jsonl');
+        return findFiles(join(targetHome, 'sessions'), '.jsonl');
       },
       async dispose() {
         await Promise.all([
