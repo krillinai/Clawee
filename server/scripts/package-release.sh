@@ -36,7 +36,10 @@ cp "$ROOT_DIR/deploy/stop.sh" "$BUILD_DIR/deploy/stop.sh"
 cp "$ROOT_DIR/deploy/restart.sh" "$BUILD_DIR/deploy/restart.sh"
 cp "$ROOT_DIR/deploy/healthcheck.sh" "$BUILD_DIR/deploy/healthcheck.sh"
 cp -R "$ROOT_DIR/db/migrations" "$BUILD_DIR/db/"
-RELEASE_VERSION="${CLAW_GATEWAY_VERSION:-$(node -p "require('../package.json').version")}"
+RELEASE_VERSION="${CLAW_GATEWAY_VERSION:-$(node --input-type=module -e "import { resolveProductVersion } from '../scripts/version.mjs'; console.log(resolveProductVersion().version)" 2>/dev/null || true)}"
+if [[ -z "$RELEASE_VERSION" ]]; then
+  RELEASE_VERSION='0.0.0-dev'
+fi
 RELEASE_COMMIT="${CLAW_GATEWAY_COMMIT:-$(git rev-parse HEAD 2>/dev/null || printf unknown)}"
 RELEASE_BUILD_TIME="${CLAW_GATEWAY_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 node --input-type=module - \

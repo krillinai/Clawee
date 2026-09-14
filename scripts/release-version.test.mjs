@@ -14,14 +14,13 @@ import {
   assertReleaseSupportsBundledRuntime,
   inspectReleaseVersion,
   parseReleaseVersion,
-  releasePackagePaths,
   setReleaseVersion
 } from './release-version.mjs';
 
-test('统一发布版本与所有产品版本标记一致', () => {
+test('读取统一产品版本并校验内嵌 Runtime 下限', () => {
   assert.deepEqual(inspectReleaseVersion(), {
-    version: '0.1.2',
-    tag: 'v0.1.2',
+    version: '0.1.8',
+    tag: 'v0.1.8',
     prerelease: false,
     channel: 'stable'
   });
@@ -62,59 +61,37 @@ test('发布版本必须满足内嵌 Runtime 的最低 Clawee 版本', () => {
   );
 });
 
-test('发布检查拒绝与版本不一致的 Tag', () => {
+test('发布检查以 Tag 作为正式版本来源', () => {
   const result = spawnSync(process.execPath, [
     'scripts/release-version.mjs',
     'check',
     '--tag',
-    'v9.9.9'
+    'v0.2.0'
   ], {
     encoding: 'utf8'
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /does not match version 0\.1\.2/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"version":"0\.2\.0"/);
 });
 
-test('版本目标校验失败时不写入部分文件', () => {
+test('发布检查拒绝非 SemVer Tag', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/release-version.mjs', 'check', '--tag', 'main'
+  ], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Invalid release tag/);
+});
+
+test('设置发布版本只写入 VERSION 文件', () => {
   const root = mkdtempSync(join(tmpdir(), 'clawee-release-version-'));
   try {
-    for (const path of releasePackagePaths) {
-      writeFixture(root, path, '{"version":"0.1.0"}\n');
-    }
     writeFixture(
       root,
       'client/config/codex-runtime.json',
       '{"minimumClaweeVersion":"0.1.0"}\n'
     );
-    writeFixture(
-      root,
-      'deploy/docker-compose.yml',
-      'image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-0.1.0}\n'
-    );
-    writeFixture(
-      root,
-      'server/Dockerfile',
-      'ARG CLAW_GATEWAY_VERSION=0.1.0\n'
-    );
-    writeFixture(
-      root,
-      'server/internal/buildinfo/buildinfo.go',
-      'var Version = "0.1.0"\n'
-    );
-    writeFixture(
-      root,
-      'server/scripts/buildinfo-ldflags.sh',
-      'missing version marker\n'
-    );
-
-    assert.throws(
-      () => setReleaseVersion('0.2.0', root),
-      /Unable to update version marker/
-    );
-    assert.equal(
-      JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version,
-      '0.1.0'
-    );
+    assert.deepEqual(setReleaseVersion('0.2.0', root), ['VERSION']);
+    assert.equal(readFileSync(join(root, 'VERSION'), 'utf8'), '0.2.0\n');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

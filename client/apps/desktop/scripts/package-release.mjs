@@ -42,10 +42,12 @@ import {
   readCodexRuntimeManifest,
   resolveCodexRuntimeTarget
 } from '../../../scripts/codex-runtime/manifest.mjs';
+import { resolveProductVersion } from '../../../../scripts/version.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, '..');
 const rootDir = resolve(desktopDir, '../..');
+const repositoryRoot = resolve(rootDir, '..');
 const releaseDir = resolve(desktopDir, 'release');
 const enterpriseGatewayConfigFilename = 'config.toml';
 const enterpriseGatewayConfigSource = resolve(
@@ -114,6 +116,10 @@ const cacheDir = resolve(
 );
 const env = {
   ...process.env,
+  CLAWEE_VERSION: resolveProductVersion({
+    root: repositoryRoot,
+    env: process.env
+  }).version,
   CLAWEE_DESKTOP_TARGET_PLATFORM: platform,
   CLAWEE_DESKTOP_TARGET_ARCH: arch,
   CLAWEE_DESKTOP_CACHE_DIR: cacheDir,
@@ -151,9 +157,7 @@ writeFileSync(
   enterpriseGatewayConfigStage,
   serializeEnterpriseGatewayPackageConfig(enterpriseRelease.gateway)
 );
-const desktopVersion = JSON.parse(
-  readFileSync(join(desktopDir, 'package.json'), 'utf8')
-).version;
+const desktopVersion = env.CLAWEE_VERSION;
 const officialRelease = isStableReleaseVersion(desktopVersion)
   && process.env.CLAWEE_OFFICIAL_RELEASE === '1'
   && process.env.GITHUB_REPOSITORY === 'krillinai/Clawee'
@@ -374,6 +378,9 @@ function parseMode(args) {
 function electronBuilderArguments(packageMode, targetPlatform, targetArch, baseEnv) {
   const args = ['--publish', 'never'];
   const nextEnv = { ...baseEnv };
+  if (hasValue(baseEnv.CLAWEE_VERSION)) {
+    args.push(`--config.extraMetadata.version=${baseEnv.CLAWEE_VERSION}`);
+  }
   if (packageMode === 'dir') {
     args.push('--dir', platformFlag(targetPlatform), `--${targetArch}`);
     disableImplicitMacSigning(targetPlatform, nextEnv, args);
@@ -605,14 +612,11 @@ function prepareReleaseContext(input) {
 function assertReleaseTagMatchesVersion() {
   const refName = process.env.GITHUB_REF_NAME?.trim();
   if (!refName || !refName.startsWith('v')) return;
-  const desktopPackage = JSON.parse(
-    readFileSync(join(desktopDir, 'package.json'), 'utf8')
-  );
-  const expectedTag = desktopReleaseTag(desktopPackage.version);
+  const expectedTag = desktopReleaseTag(env.CLAWEE_VERSION);
   if (refName !== expectedTag) {
     throw new Error(
       `Desktop release tag ${refName} does not match package version `
-      + `${desktopPackage.version}; expected ${expectedTag}`
+      + `${env.CLAWEE_VERSION}; expected ${expectedTag}`
     );
   }
 }

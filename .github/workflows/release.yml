@@ -20,6 +20,7 @@ jobs:
     uses: ./.github/workflows/release-preflight.yml
     with:
       ref: ${{ github.sha }}
+      version: ${{ github.ref_name }}
     secrets:
       TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
       TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
@@ -116,6 +117,7 @@ jobs:
       CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
       CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
       CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
+      CLAWEE_VERSION: ${{ needs.gate.outputs.version }}
       CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MACOS_CERTIFICATE || '' }}
       CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
       APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}

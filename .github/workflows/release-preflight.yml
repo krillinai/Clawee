@@ -9,6 +9,10 @@ on:
         description: 要验证的分支、Tag 或 Commit SHA
         required: false
         type: string
+      version:
+        description: 构建使用的 Clawee 产品版本；正式发布传入 v<version> Tag
+        required: false
+        type: string
     secrets:
       TENCENT_CLOUD_SECRET_ID:
         required: true
@@ -18,6 +22,10 @@ on:
     inputs:
       ref:
         description: 要验证的分支、Tag 或 Commit SHA
+        required: false
+        type: string
+      version:
+        description: 构建使用的 Clawee 产品版本
         required: false
         type: string
 
@@ -35,6 +43,8 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      CLAWEE_VERSION: ${{ inputs.version }}
     outputs:
       target-sha: ${{ steps.target.outputs.sha }}
     steps:
@@ -66,7 +76,14 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
+      - name: 解析产品版本
+        if: inputs.version != ''
+        env:
+          CLAWEE_VERSION: ${{ inputs.version }}
+        run: node scripts/release-version.mjs check
+        working-directory: ${{ github.workspace }}
       - run: node scripts/release-version.mjs check
+        if: inputs.version == ''
         working-directory: ${{ github.workspace }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm codex:runtime:verify
@@ -144,6 +161,7 @@ jobs:
             arch: x64
     runs-on: ${{ matrix.os }}
     env:
+      CLAWEE_VERSION: ${{ inputs.version }}
       CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
       CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
       CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}

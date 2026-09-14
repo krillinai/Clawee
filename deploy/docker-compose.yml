@@ -15,10 +15,12 @@ services:
       timeout: 3s
       retries: 20
   gateway:
-    image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-0.1.8}
+    image: ghcr.io/krillinai/clawee-server:${CLAWEE_VERSION:-0.0.0-dev}
     build:
       context: ..
       dockerfile: server/Dockerfile
+      args:
+        CLAW_GATEWAY_VERSION: ${CLAWEE_VERSION:-0.0.0-dev}
     restart: unless-stopped
     depends_on:
       postgres:

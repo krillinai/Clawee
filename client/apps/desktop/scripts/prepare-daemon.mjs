@@ -5,7 +5,8 @@ import {
   realpathSync,
   readdirSync,
   rmSync,
-  statSync
+  statSync,
+  writeFileSync
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -96,6 +97,7 @@ await runStage('重建 Electron 原生 SQLite', process.execPath, [
   }
 });
 pruneDevelopmentArtifacts(targetDir);
+applyProductVersion();
 
 assertExists(resolve(targetDir, 'dist/main.js'));
 assertExists(resolve(targetDir, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node'));
@@ -108,6 +110,15 @@ function assertExists(path) {
   if (!existsSync(path)) {
     throw new Error(`Desktop Daemon deployment is missing required artifact: ${path}`);
   }
+}
+
+function applyProductVersion() {
+  const version = process.env.CLAWEE_VERSION?.trim();
+  if (!version) return;
+  const packagePath = resolve(targetDir, 'package.json');
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
+  packageJson.version = version;
+  writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
 }
 
 function pruneDeploymentRoot() {

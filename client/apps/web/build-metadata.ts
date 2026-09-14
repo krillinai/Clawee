@@ -7,6 +7,13 @@ type PackageManifest = {
 export const claweeAppVersion = readClaweeAppVersion();
 
 function readClaweeAppVersion(): string {
+  const configuredVersion = process.env.CLAWEE_VERSION?.trim();
+  if (configuredVersion) {
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(configuredVersion.replace(/^v/, ''))) {
+      throw new Error('CLAWEE_VERSION is invalid');
+    }
+    return configuredVersion.replace(/^v/, '');
+  }
   const manifest = JSON.parse(
     readFileSync(new URL('../desktop/package.json', import.meta.url), 'utf8')
   ) as PackageManifest;

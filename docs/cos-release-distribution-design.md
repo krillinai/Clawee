@@ -120,7 +120,7 @@ COS 发布脚本启动时必须拒绝以下情况：
 - `COS_BUCKET` 不是包含 APPID 后缀的完整桶名。
 - `COS_REGION` 不符合腾讯云 Region 标识格式。
 - `COS_UPLOAD_ENDPOINT` 不是当前 Region 默认端点或 `cos.accelerate.myqcloud.com`。
-- Tag、根 `package.json` 版本和统一发布清单版本不一致。
+- Tag、构建时解析出的产品版本和统一发布清单版本不一致。
 
 日志只输出 Bucket、Region、对象 Key、文件大小和非敏感校验值。不得输出 Secret、授权头、COSCLI 配置文件内容或预签名 URL。
 
@@ -577,7 +577,8 @@ COS multipart ETag 不能作为文件 SHA256 使用。官网展示和用户校�
 - `scripts/cos-release-layout.mjs`：对象 Key、公开 URL、artifact 分类、catalog、`release.json` 和 updater 元数据生成。
 - `scripts/cos-publish.mjs`：固定 COSCLI 安装、配置校验、上传、COS/公网验证、bootstrap、晋级和失败恢复。
 - `scripts/build-release-manifest.mjs`：生成 Desktop、Server 和 GHCR digest 的统一发布清单。
-- `scripts/release-version.mjs`：稳定版/预发布版 SemVer、Tag 和渠道解析。
+- `scripts/version.mjs`：产品版本的单一解析入口，按 `CLAWEE_VERSION`、Git Tag、`VERSION` 文件和旧工作区的 `package.json` 回退值取值。
+- `scripts/release-version.mjs`：稳定版/预发布版 SemVer、Tag 和渠道校验；`set` 只更新根 `VERSION` 文件。
 - `client/apps/desktop/electron-builder.yml`：正式包的 generic provider 模板和三种平台/架构 feed 约定。
 - `client/apps/desktop/scripts/package-release.mjs`：判断正式发布上下文、注入 COS URL，并只为稳定正式包生成 `official-release.json`。
 - `client/apps/desktop/src/main/updater.ts`：根据正式发布标记启用自动更新，并处理 macOS arm64 独立 channel。

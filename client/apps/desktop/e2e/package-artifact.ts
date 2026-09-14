@@ -45,6 +45,8 @@ export function packagedExecutable(desktopDir: string): string {
 }
 
 export function readDesktopPackageVersion(desktopDir: string): string {
+  const configuredVersion = process.env.CLAWEE_VERSION?.trim();
+  if (configuredVersion) return configuredVersion;
   const manifest = JSON.parse(
     readFileSync(join(desktopDir, 'package.json'), 'utf8')
   ) as { version?: unknown };
