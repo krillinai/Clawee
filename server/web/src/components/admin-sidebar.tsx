@@ -94,7 +94,7 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
       { label: "权限目录", href: "/admin/rbac/permissions", icon: ListChecks, permission: permissions.rbacRead },
       { label: "数据权限", href: "/admin/data-permissions", icon: Database, permission: permissions.dataResourceGrantRead },
       { label: "平台外观", href: "/admin/platform-branding", icon: Palette, permission: permissions.platformBrandingRead },
-      { label: "客户端发布", href: "/admin/client-downloads", icon: Download, permission: permissions.clientDownloadsRead }
+      { label: "客户端下载", href: "/admin/client-downloads", icon: Download, permission: permissions.clientDownloadsRead }
     ]
   }
 ];

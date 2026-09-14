@@ -30,7 +30,8 @@ export default defineConfig({
     proxy: {
       "/api/v1/auth": backendURL,
       "/api/v1/app": backendURL,
-      "/api/v1/admin": backendURL
+      "/api/v1/admin": backendURL,
+      "/api/v1/public": backendURL
     }
   },
   preview: {
