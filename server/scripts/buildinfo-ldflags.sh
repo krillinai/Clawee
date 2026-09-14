@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-claw_gateway_version="${CLAW_GATEWAY_VERSION:-0.1.7}"
+claw_gateway_version="${CLAW_GATEWAY_VERSION:-0.1.8}"
 claw_gateway_build_time="${CLAW_GATEWAY_BUILD_TIME:-$(TZ=Asia/Shanghai date +%Y%m%dT%H%M%S)BJT}"
 claw_gateway_commit="${CLAW_GATEWAY_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 
