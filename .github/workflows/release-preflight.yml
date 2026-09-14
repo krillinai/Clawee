@@ -3,6 +3,9 @@ name: Release Preflight
 run-name: Release Preflight · ${{ inputs.ref || github.ref_name }}
 
 on:
+  push:
+    branches:
+      - customer-packaging
   workflow_call:
     inputs:
       ref:
