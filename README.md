@@ -2,18 +2,18 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./client/resources/logo-v2-white.svg" />
-  <img src="./client/resources/logo-v2-black.svg" alt="Clawee" width="360" />
+  <img src="./client/resources/logo-v2-black.svg" alt="Clawee" width="260" />
 </picture>
 
-<h1>可自托管的企业级 Agent</h1>
+<h1 style="margin: 8px 0 4px;">可自托管的企业级 Agent</h1>
 
-<p>让 Agent 本地执行、企业能力接入与统一治理在一个平台中协同运行。</p>
+<p style="margin: 0 0 8px;">让 Agent 本地执行、企业能力接入与统一治理在一个平台中协同运行，构建以增长为核心的智能工作台。</p>
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/Clawee?style=flat&logo=github&label=Stars&color=gold)](https://github.com/krillinai/Clawee/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Version](https://img.shields.io/badge/version-0.1.0-2e2e2e.svg)](https://github.com/krillinai/Clawee/releases)
 
-[项目特色](#项目特色) · [核心工作流](#核心工作流) · [系统架构](#系统架构) · [快速开始](#快速开始) · [桌面与-web](#桌面与-web) · [配置与安全](#配置与安全) · [开发与验证](#开发与验证) · [文档](#文档)
+[项目特色](#项目特色) · [核心功能](#核心功能) · [核心工作流](#核心工作流) · [系统架构](#系统架构) · [快速开始](#快速开始) · [桌面与-web](#桌面与-web) · [配置与安全](#配置与安全) · [开发与验证](#开发与验证) · [文档](#文档)
 
 </div>
 
@@ -45,6 +45,20 @@ Clawee 采用 Apache-2.0，通用能力全部开放。模型托管、计费、�
 - **团队资源共享**：集中管理 Skill Hub、知识库、共享文件与 Collector，在明确授权后向 Agent 提供能力。
 
 - **可自托管、可选集成**：核心服务由部署者自行运行；钉钉、百炼和其他外部服务仅在显式配置后启用。
+
+## 核心功能
+
+### 数据洞察案例
+
+数据洞察是 Clawee 可承载的一类业务场景。以下以哔哩哔哩运营看板为例，展示将业务数据接入工作台后形成的分析视图；具体指标、筛选项和数据结构由接入的数据源与业务需求决定。
+
+![哔哩哔哩数据洞察看板](docs/delivery/user-guides/assets/bilibili-data-insight.jpg)
+
+### Agent 动态案例
+
+Agent 动态是 Clawee 可承载的运行观测与使用分析场景。以下以 Agent 工作台为例，展示任务运行、Token 使用和 Agent 活跃情况等信息的统一视图；具体展示内容由接入的运行数据与治理需求决定。
+
+![Agent 动态](docs/delivery/user-guides/assets/agent-activity.jpg)
 
 ## 核心工作流
 
