@@ -11,7 +11,8 @@ describe("vite dev proxy", () => {
     expect(Object.keys(config.server?.proxy ?? {})).toEqual([
       "/api/v1/auth",
       "/api/v1/app",
-      "/api/v1/admin"
+      "/api/v1/admin",
+      "/api/v1/public"
     ]);
   });
 });
