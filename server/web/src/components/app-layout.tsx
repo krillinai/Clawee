@@ -25,23 +25,23 @@ export function AppLayout({ account }: { account: Account }) {
         </div>
         <AppNavigation />
         <div className="mt-6 grid shrink-0 gap-2">
-          <div className="flex items-center gap-2">
-            <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
-              <Link to="/downloads">
-                <Download aria-hidden="true" data-icon="inline-start" />
-                下载客户端
-              </Link>
-            </Button>
+          <div className="flex items-center justify-end gap-2">
             {canEnterAdmin ? (
-              <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
+              <Button asChild className="min-w-0 flex-1 justify-start overflow-hidden" size="sm" variant="ghost">
                 <Link to="/admin">
                   <LayoutDashboard aria-hidden="true" data-icon="inline-start" />
-                  进入管理后台
+                  <span className="truncate">进入管理后台</span>
                 </Link>
               </Button>
             ) : null}
             <ThemeSwitcher compact />
           </div>
+          <Button asChild className="w-full justify-start" size="sm" variant="ghost">
+            <Link to="/downloads">
+              <Download aria-hidden="true" data-icon="inline-start" />
+              下载客户端
+            </Link>
+          </Button>
           <AccountPane account={account} collapseLogout showThemeSwitcher={false} />
         </div>
       </aside>

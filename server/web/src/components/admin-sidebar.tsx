@@ -93,7 +93,8 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
       { label: "角色管理", href: "/admin/rbac/roles", icon: Shield, permission: permissions.rbacRead },
       { label: "权限目录", href: "/admin/rbac/permissions", icon: ListChecks, permission: permissions.rbacRead },
       { label: "数据权限", href: "/admin/data-permissions", icon: Database, permission: permissions.dataResourceGrantRead },
-      { label: "平台外观", href: "/admin/platform-branding", icon: Palette, permission: permissions.platformBrandingRead }
+      { label: "平台外观", href: "/admin/platform-branding", icon: Palette, permission: permissions.platformBrandingRead },
+      { label: "客户端发布", href: "/admin/client-downloads", icon: Download, permission: permissions.clientDownloadsRead }
     ]
   }
 ];
@@ -213,22 +214,22 @@ export function AdminSidebar({ account }: { account?: Account }) {
 
       <SidebarFooter className="p-3 pb-2">
         <div className="flex items-center gap-2">
-          <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
-            <NavLink to="/downloads">
-              <Download aria-hidden="true" data-icon="inline-start" />
-              下载客户端
-            </NavLink>
-          </Button>
-          <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
+          <Button asChild className="min-w-0 flex-1 justify-start overflow-hidden" size="sm" variant="ghost">
             <NavLink to="/app/agents">
               <UserRound aria-hidden="true" data-icon="inline-start" />
-              进入用户中心
+              <span className="truncate">进入用户中心</span>
             </NavLink>
           </Button>
           <ThemeSwitcher compact />
         </div>
       </SidebarFooter>
       <SidebarFooter className="p-4 pt-2">
+        <Button asChild className="w-full justify-start" size="sm" variant="ghost">
+          <NavLink to="/downloads">
+            <Download aria-hidden="true" data-icon="inline-start" />
+            下载客户端
+          </NavLink>
+        </Button>
         <AccountPane account={account} collapseLogout showThemeSwitcher={false} />
       </SidebarFooter>
     </Sidebar>

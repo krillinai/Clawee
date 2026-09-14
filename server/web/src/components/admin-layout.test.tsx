@@ -117,6 +117,10 @@ describe("AdminLayout", () => {
     expect(container.querySelectorAll('[data-sidebar="footer"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toHaveClass("p-4", "pt-2");
     expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toHaveTextContent("admin@example.com");
+    expect(screen.getByRole("link", { name: "下载客户端" })).toHaveAttribute("href", "/downloads");
+    expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toContainElement(
+      screen.getByRole("link", { name: "下载客户端" })
+    );
   });
 
   it("只展示当前账号拥有权限的后台菜单", async () => {
