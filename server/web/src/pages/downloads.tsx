@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Apple, Check, Copy, Download, Laptop, Monitor, ShieldCheck } from "lucide-react";
+import { Apple, ArrowLeft, Check, Copy, Download, Laptop, Monitor, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ErrorAlert, LoadingState, PageHeader, PageShell } from "@/components/governance-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,11 +19,22 @@ function DownloadsFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+function AdminReturnButton() {
+  return (
+    <Button asChild className="shrink-0" size="sm" variant="outline">
+      <Link to="/admin">
+        <ArrowLeft aria-hidden="true" data-icon="inline-start" />
+        返回管理后台
+      </Link>
+    </Button>
+  );
+}
+
 export function DownloadsPage() {
   const query = useQuery({ queryKey: ["public", "client-downloads"], queryFn: clientDownloads, retry: false });
   const [copied, setCopied] = useState(false);
   if (query.isLoading) return <DownloadsFrame><PageShell><LoadingState label="正在读取下载配置" /></PageShell></DownloadsFrame>;
-  if (query.isError || !query.data) return <DownloadsFrame><PageShell><PageHeader title="下载客户端" /><ErrorAlert>客户端下载清单暂时不可用，请稍后重试。</ErrorAlert></PageShell></DownloadsFrame>;
+  if (query.isError || !query.data) return <DownloadsFrame><PageShell><PageHeader actions={<AdminReturnButton />} title="下载客户端" /><ErrorAlert>客户端下载清单暂时不可用，请稍后重试。</ErrorAlert></PageShell></DownloadsFrame>;
 
   const data = query.data;
   const gateway = data.gateway_url || window.location.origin;
@@ -39,12 +51,17 @@ export function DownloadsPage() {
     <DownloadsFrame>
       <PageShell>
         <header className="border-b border-border/70 pb-8">
-          <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase text-primary">
-            <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
-            Clawee Desktop
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase text-primary">
+                <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
+                Clawee Desktop
+              </div>
+              <h1 className="text-3xl font-semibold leading-tight sm:text-4xl">下载客户端</h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">获取企业客户端安装包，在本地连接你的 Clawee Gateway。</p>
+            </div>
+            <AdminReturnButton />
           </div>
-          <h1 className="text-3xl font-semibold leading-tight sm:text-4xl">下载客户端</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">获取企业客户端安装包，在本地连接你的 Clawee Gateway。</p>
         </header>
 
         <section className="rounded-xl border border-border/80 bg-card p-5 shadow-sm sm:p-6" aria-labelledby="gateway-title">
