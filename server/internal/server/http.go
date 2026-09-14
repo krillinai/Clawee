@@ -19,7 +19,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/buildinfo"
 	"github.com/krillinai/Clawee/server/internal/businessdata"
 	"github.com/krillinai/Clawee/server/internal/clawadmin"
-	"github.com/krillinai/Clawee/server/internal/config"
+	"github.com/krillinai/Clawee/server/internal/clientdownloads"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/dingtalk"
 	"github.com/krillinai/Clawee/server/internal/knowledge"
@@ -34,7 +34,7 @@ import (
 )
 
 type Options struct {
-	ClientDownloads            config.ClientDownloadsConfig
+	ClientDownloadsService     *clientdownloads.Service
 	ProxyGateway               *mcpgateway.Service
 	AgentProvisioningService   *agentprovisioning.Service
 	AccountService             *accounts.Service
@@ -188,7 +188,6 @@ func NewRouter(opts Options) http.Handler {
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	api := router.Group("/api/v1")
-	mountClientDownloadsRoute(api, opts.ClientDownloads)
 	authAPI := api.Group("/auth")
 	appAPI := api.Group("/app")
 	adminAPI := api.Group("/admin")
@@ -214,6 +213,7 @@ func NewRouter(opts Options) http.Handler {
 		appAPI.Use(requireClaweeAgentBinding(opts.AccountService, opts.ProxyGateway))
 		adminAPI.Use(requireJWT(opts.AccountService, accounts.AudienceAdmin, adminCookieName))
 	}
+	mountClientDownloadsRoutes(api, adminAPI, opts)
 	mountSkillHubRoutes(appAPI, adminAPI, opts)
 	status := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

@@ -1,74 +1,56 @@
 package server_test
 
 import (
-	"encoding/json"
+	"bytes"
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/krillinai/Clawee/server/internal/config"
+	"github.com/krillinai/Clawee/server/internal/clientdownloads"
+	"github.com/krillinai/Clawee/server/internal/settings"
 	"github.com/krillinai/Clawee/server/internal/server"
 )
 
-func TestPublicClientDownloads(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		downloads := config.ClientDownloadsConfig{}
-		if configured {
-			downloads.Gateway = "https://gateway.example.com/"
-			for _, pair := range [][2]string{{"macos", "arm64"}, {"macos", "x64"}, {"windows", "x64"}} {
-				downloads.Packages = append(downloads.Packages, config.ClientDownload{Platform: pair[0], Arch: pair[1], URL: "https://downloads.example.com/client", Version: "0.1.7", SHA256: strings.Repeat("a", 64), Signature: "unsigned"})
-			}
-		}
-		router := server.NewRouter(server.Options{ClientDownloads: downloads, BilibiliWebhookSecret: "private-sentinel"})
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/public/client-downloads", nil)
-		request.Host = "attacker.example"
-		request.Header.Set("X-Forwarded-Host", "attacker.example")
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
-		}
-		var response config.ClientDownloadsConfig
-		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		if response.Standard.URL != config.StandardClientDownloadURL || response.Packages == nil {
-			t.Fatalf("invalid fallback %+v", response)
-		}
-		if configured && (response.Gateway != "https://gateway.example.com" || len(response.Packages) != 3) {
-			t.Fatalf("invalid packages %+v", response)
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(recorder.Body.Bytes(), &fields); err != nil {
-			t.Fatal(err)
-		}
-		if len(fields) != 3 || strings.Contains(recorder.Body.String(), "private-sentinel") || strings.Contains(recorder.Body.String(), "attacker.example") {
-			t.Fatal("unexpected public fields")
-		}
+const catalogJSON = `{"schemaVersion":1,"product":"Clawee","version":"0.2.0","artifacts":[{"component":"desktop","platform":"macos","arch":"arm64","format":"dmg","downloadUrl":"https://cdn.example.com/a.dmg","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"desktop":{"macosSigning":"developer-id-notarized","windowsSigning":"unsigned"}}`
+
+func TestPublicClientDownloadsUsesCatalog(t *testing.T) {
+	service := clientDownloadsService(catalogJSON)
+	router := server.NewRouter(server.Options{ClientDownloadsService: service})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/client-downloads", nil)
+	request.Host = "gateway.example.com"
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "https://cdn.example.com/a.dmg") || strings.Contains(recorder.Body.String(), "standard") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestDownloadsStaticRouteIsAnonymous(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>downloads-app</html>"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	router := server.NewRouter(server.Options{StaticDir: dir})
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, httptest.NewRequest(method, "/downloads", nil))
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("%s /downloads: %d", method, recorder.Code)
-		}
-	}
-	for _, path := range []string{"/downloads/private", "/api/v1/public/unknown"} {
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("%s: %d", path, recorder.Code)
-		}
-	}
+func TestClientDownloadsAdminRequiresPermissionAndUpdates(t *testing.T) {
+	service := clientDownloadsService(catalogJSON)
+	router := newTestRouter(t, server.Options{ClientDownloadsService: service})
+	get := doRequest(t, router, http.MethodGet, "/api/v1/admin/client-downloads", nil, "", nil, http.StatusOK)
+	if !strings.Contains(get.Body.String(), clientdownloads.DefaultCatalogURL) { t.Fatalf("default config=%s", get.Body.String()) }
+	body := bytes.NewBufferString(`{"gateway_url":"https://gateway.example.com","catalog_url":"https://cdn.example.com/latest.json","version":0}`)
+	doRequest(t, router, http.MethodPut, "/api/v1/admin/client-downloads", body, "application/json", nil, http.StatusOK)
 }
+
+func TestClientDownloadsWithoutServiceIsUnavailable(t *testing.T) {
+	router := server.NewRouter(server.Options{})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/public/client-downloads", nil))
+	if recorder.Code != http.StatusServiceUnavailable { t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String()) }
+}
+
+func clientDownloadsService(body string) *clientdownloads.Service {
+	client := &http.Client{Transport: catalogRoundTripper{body: body}}
+	service := clientdownloads.NewServiceWithHTTPClient(settings.NewMemoryStore(), client, time.Minute)
+	_, _ = service.Update(context.Background(), clientdownloads.Config{GatewayURL: "https://gateway.example.com", CatalogURL: clientdownloads.DefaultCatalogURL}, "test", 0)
+	return service
+}
+
+type catalogRoundTripper struct{ body string }
+func (t catalogRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(t.body)), Header: make(http.Header)}, nil }

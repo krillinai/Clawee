@@ -19,7 +19,6 @@ const (
 )
 
 type Config struct {
-	ClientDownloads ClientDownloadsConfig `mapstructure:"client_downloads"`
 	Server          ServerConfig          `mapstructure:"server"`
 	Database        DatabaseConfig        `mapstructure:"database"`
 	Security        SecurityConfig        `mapstructure:"security"`
@@ -306,9 +305,6 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.Bilibili.Validate(); err != nil {
-		return Config{}, err
-	}
-	if err := cfg.ClientDownloads.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

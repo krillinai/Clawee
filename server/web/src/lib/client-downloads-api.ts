@@ -1,19 +1,19 @@
 import { publicApi } from "./api";
 
-export const standardClientDownloadURL = "https://github.com/krillinai/Clawee/releases/latest";
-
 export type ClientDownload = {
   platform: "macos" | "windows";
   arch: "arm64" | "x64";
   version: string;
-  url: string;
+  download_url: string;
   sha256: string;
   signature: "unsigned" | "signed" | "signed_notarized";
 };
 
 export type ClientDownloads = {
-  gateway: string;
-  standard: { url: string; version?: string; sha256?: string };
+  gateway_url: string;
+  catalog_url?: string;
+  version?: string;
+  manifest_status: string;
   packages: ClientDownload[];
 };
 

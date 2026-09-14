@@ -91,6 +91,7 @@ const RBACRolesPage = lazy(() => import("./pages/rbac-roles").then((module) => (
 const RBACPermissionsPage = lazy(() => import("./pages/rbac-permissions").then((module) => ({ default: module.RBACPermissionsPage })));
 const DataResourceGrantsPage = lazy(() => import("./pages/data-resource-grants").then((module) => ({ default: module.DataResourceGrantsPage })));
 const PlatformBrandingPage = lazy(() => import("./pages/platform-branding").then((module) => ({ default: module.PlatformBrandingPage })));
+const ClientDownloadsPage = lazy(() => import("./pages/client-downloads").then((module) => ({ default: module.ClientDownloadsPage })));
 const DownloadsPage = lazy(() => import("./pages/downloads").then((module) => ({ default: module.DownloadsPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
@@ -166,6 +167,7 @@ export function App() {
               <Route path="/admin/rbac/permissions" element={adminPage(permissions.rbacRead, <RBACPermissionsPage />)} />
               <Route path="/admin/data-permissions" element={adminPage(permissions.dataResourceGrantRead, <DataResourceGrantsPage />)} />
               <Route path="/admin/platform-branding" element={adminPage(permissions.platformBrandingRead, <PlatformBrandingPage />)} />
+              <Route path="/admin/client-downloads" element={adminPage(permissions.clientDownloadsRead, <ClientDownloadsPage />)} />
               <Route path="/admin/mcp/upstream-servers" element={adminPage(permissions.mcpUpstreamRead, <MCPUpstreamServersPage />)} />
               <Route path="/admin/mcp/upstream-servers/detail" element={adminPage(permissions.mcpUpstreamRead, <MCPUpstreamServersPage />)} />
               <Route path="/admin/mcp/capabilities" element={adminPage(permissions.mcpCapabilityRead, <MCPCapabilitiesPage />)} />

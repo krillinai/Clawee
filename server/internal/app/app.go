@@ -23,6 +23,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/businessdata"
 	"github.com/krillinai/Clawee/server/internal/businessdatamcp"
 	"github.com/krillinai/Clawee/server/internal/clawadmin"
+	"github.com/krillinai/Clawee/server/internal/clientdownloads"
 	"github.com/krillinai/Clawee/server/internal/collectorpull"
 	"github.com/krillinai/Clawee/server/internal/config"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
@@ -41,6 +42,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/platformbranding"
 	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/server"
+	"github.com/krillinai/Clawee/server/internal/settings"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
 	"github.com/krillinai/Clawee/server/internal/store"
@@ -234,6 +236,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		platformBrandingStore = platformbranding.NewPostgresStore(pool)
 	}
 	platformBrandingSvc := platformbranding.NewService(platformBrandingStore)
+	clientDownloadsStore := settings.Store(settings.NewMemoryStore())
+	if pool != nil {
+		clientDownloadsStore = settings.NewPostgresStore(pool)
+	}
+	clientDownloadsSvc := clientdownloads.NewService(clientDownloadsStore)
 	var dingtalkClient *dingtalk.Client
 	if cfg.DingTalk.Enabled {
 		dingtalkClient = dingtalk.NewClient(cfg.DingTalk.ClientID, cfg.DingTalk.ClientSecret, dingtalkTimeout)
@@ -361,7 +368,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			BilibiliWebhookSecret:      cfg.Bilibili.ClientSecret,
 			Logger:                     log,
 			StaticDir:                  cfg.Static.Dir,
-			ClientDownloads:            cfg.ClientDownloads,
+			ClientDownloadsService:     clientDownloadsSvc,
 			SessionCookieName:          cfg.Security.SessionCookieName,
 			AdminSessionCookieName:     cfg.Security.AdminSessionCookieName,
 			SessionCookieSecure:        cfg.Security.SessionCookieSecure,

@@ -103,7 +103,9 @@ export const permissions = {
   dataResourceGrantDelete: "console:data_resource_grant:delete",
   platformBrandingRead: "console:platform_branding:read",
   platformBrandingManage: "console:platform_branding:manage",
-  platformBrandingUpdate: "console:platform_branding:update"
+  platformBrandingUpdate: "console:platform_branding:update",
+  clientDownloadsRead: "console:client_downloads:read",
+  clientDownloadsUpdate: "console:client_downloads:update"
 } as const;
 
 export type Permission = {

@@ -109,6 +109,8 @@ const (
 	PermissionPlatformBrandingRead            = "console:platform_branding:read"
 	PermissionPlatformBrandingManage          = "console:platform_branding:manage"
 	PermissionPlatformBrandingUpdate          = "console:platform_branding:update"
+	PermissionClientDownloadsRead             = "console:client_downloads:read"
+	PermissionClientDownloadsUpdate           = "console:client_downloads:update"
 )
 
 type Permission struct {
@@ -223,6 +225,8 @@ var permissionCatalog = []Permission{
 	{PermissionPlatformBrandingRead, "platform_branding", "read", "平台外观查看", "查看客户端平台外观配置"},
 	{PermissionPlatformBrandingManage, "platform_branding", "manage", "平台外观管理", "查看并管理客户端平台外观"},
 	{PermissionPlatformBrandingUpdate, "platform_branding", "update", "更新平台外观", "修改客户端平台外观"},
+	{PermissionClientDownloadsRead, "client_downloads", "read", "客户端发布查看", "查看客户端发布配置"},
+	{PermissionClientDownloadsUpdate, "client_downloads", "update", "更新客户端发布", "修改客户端发布配置"},
 }
 
 func PermissionCatalog() []Permission {
