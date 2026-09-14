@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveProductVersion } from '../../scripts/version.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, '..');
-const desktopPackagePath = resolve(rootDir, 'apps/desktop/package.json');
 const buildManifestPath = resolve(
   rootDir,
   'apps/desktop/release/clawee-desktop-build-manifest.json'
@@ -29,13 +29,12 @@ if (args.length > 1) {
   throw new Error('Desktop tag check accepts at most one version tag');
 }
 
-const desktopPackage = readJson(desktopPackagePath, 'Desktop package');
-const expectedTag = `v${desktopPackage.version}`;
+const expectedTag = resolveProductVersion().tag;
 const requestedTag = args[0] ?? expectedTag;
 if (requestedTag !== expectedTag) {
   throw new Error(
-    `Desktop tag ${requestedTag} does not match package version `
-    + `${desktopPackage.version}; expected ${expectedTag}`
+    `Desktop tag ${requestedTag} does not match product version `
+    + `${expectedTag.slice(1)}; expected ${expectedTag}`
   );
 }
 

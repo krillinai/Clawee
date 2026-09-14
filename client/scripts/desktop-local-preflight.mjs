@@ -9,10 +9,10 @@ import { spawnSync } from 'node:child_process';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runStage } from '../apps/desktop/scripts/script-utils.mjs';
+import { resolveProductVersion } from '../../scripts/version.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, '..');
-const desktopPackagePath = resolve(rootDir, 'apps/desktop/package.json');
 const buildManifestPath = resolve(
   rootDir,
   'apps/desktop/release/clawee-desktop-build-manifest.json'
@@ -136,14 +136,13 @@ if (
   throw new Error('Desktop build manifest package root is missing');
 }
 
-const desktopPackage = JSON.parse(readFileSync(desktopPackagePath, 'utf8'));
 const receipt = {
   schemaVersion: 1,
   commit: finishedCommit,
   dirty: expectedDirty,
   worktreeStatusSha256: hashText(finishedStatus),
   releaseReady,
-  expectedTag: `v${desktopPackage.version}`,
+  expectedTag: resolveProductVersion().tag,
   generatedAt: new Date().toISOString(),
   platform: process.platform,
   arch: process.arch,
