@@ -6,6 +6,7 @@ import {
   CheckSquare,
   ChevronRight,
   Database,
+  Download,
   FileSearch,
   FolderOpen,
   KeyRound,
@@ -212,6 +213,12 @@ export function AdminSidebar({ account }: { account?: Account }) {
 
       <SidebarFooter className="p-3 pb-2">
         <div className="flex items-center gap-2">
+          <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
+            <NavLink to="/downloads">
+              <Download aria-hidden="true" data-icon="inline-start" />
+              下载客户端
+            </NavLink>
+          </Button>
           <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
             <NavLink to="/app/agents">
               <UserRound aria-hidden="true" data-icon="inline-start" />

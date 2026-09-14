@@ -1,4 +1,4 @@
-import { LayoutDashboard } from "lucide-react";
+import { Download, LayoutDashboard } from "lucide-react";
 import { Link, Outlet } from "react-router-dom";
 
 import { AccountPane } from "@/components/account-pane";
@@ -26,6 +26,12 @@ export function AppLayout({ account }: { account: Account }) {
         <AppNavigation />
         <div className="mt-6 grid shrink-0 gap-2">
           <div className="flex items-center gap-2">
+            <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
+              <Link to="/downloads">
+                <Download aria-hidden="true" data-icon="inline-start" />
+                下载客户端
+              </Link>
+            </Button>
             {canEnterAdmin ? (
               <Button asChild className="min-w-0 flex-1 justify-start" size="sm" variant="ghost">
                 <Link to="/admin">

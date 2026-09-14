@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, ExternalLink } from "lucide-react";
+import { Copy, Download } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { clientDownloads, standardClientDownloadURL } from "@/lib/client-downloads-api";
+import { clientDownloads } from "@/lib/client-downloads-api";
 
 const signatures = { unsigned: "未签名", signed: "已签名", signed_notarized: "已签名并公证" };
 
@@ -13,7 +13,6 @@ export function DownloadsPage() {
   const query = useQuery({ queryKey: ["public", "client-downloads"], queryFn: clientDownloads, retry: false });
   const [copyStatus, setCopyStatus] = useState("");
   const gateway = query.data?.gateway || window.location.origin;
-  const standard = query.data?.standard ?? { url: standardClientDownloadURL };
 
   async function copyGateway() {
     try {
@@ -49,7 +48,7 @@ export function DownloadsPage() {
         <section className="border-b border-border py-6" aria-labelledby="packages-heading">
           <h2 id="packages-heading" className="text-base font-medium">企业客户端</h2>
           {query.isPending ? <p className="mt-3 text-sm text-muted-foreground">正在读取下载信息...</p> : null}
-          {!query.isPending && !query.data?.packages.length ? <p className="mt-3 text-sm text-muted-foreground">暂未提供企业安装包，请使用下方开源标准包。</p> : null}
+          {!query.isPending && !query.data?.packages.length ? <p className="mt-3 text-sm text-muted-foreground">暂未提供企业安装包，请联系管理员。</p> : null}
           <div className="divide-y divide-border">
             {query.data?.packages.map((item) => (
               <div className="py-4" key={`${item.platform}-${item.arch}`}>
@@ -64,15 +63,6 @@ export function DownloadsPage() {
               </div>
             ))}
           </div>
-        </section>
-        <section className="border-b border-border py-6" aria-labelledby="standard-heading">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 id="standard-heading" className="text-base font-medium">开源标准包</h2>
-            <Button asChild variant="outline"><a href={standard.url} target="_blank" rel="noreferrer"><ExternalLink />下载开源标准包</a></Button>
-          </div>
-          {standard.version ? <p className="mt-3 text-sm">版本 {standard.version}</p> : null}
-          {standard.sha256 ? <p className="mt-2 break-all font-mono text-xs text-muted-foreground">SHA256: {standard.sha256}</p> : null}
-          <p className="mt-3 text-sm text-muted-foreground">企业安装包下载失败时，也可安装标准包后手动配置服务端地址。</p>
         </section>
         <section className="py-6" aria-labelledby="setup-heading">
           <h2 id="setup-heading" className="text-base font-medium">连接企业 Gateway</h2>
