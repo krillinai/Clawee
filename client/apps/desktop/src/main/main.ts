@@ -320,7 +320,9 @@ async function launchDesktop(): Promise<void> {
   registerApplicationProtocol(development, appRoot, logger);
   const updater = startUpdater({
     logger,
-    enabled: !development && existsSync(join(process.resourcesPath, 'deployment', 'official-release.json')),
+    enabled: process.env.CLAWEE_E2E_DISABLE_UPDATER !== '1'
+      && !development
+      && existsSync(join(process.resourcesPath, 'deployment', 'official-release.json')),
     async prepareInstall() {
       notifications.stop();
       windowManager?.flushState();

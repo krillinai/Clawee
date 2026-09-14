@@ -766,6 +766,7 @@ function packagedRuntimeEnvironment(input: {
       ? process.env.ComSpec
       : '/bin/false',
     CLAWEE_DEFAULT_PROJECT_ROOT: join(input.home, 'Documents'),
+    CLAWEE_E2E_DISABLE_UPDATER: '1',
     CLAWEE_ENTERPRISE_E2E_RUN_ID: input.enterpriseRunId,
     CLAWEE_ENTERPRISE_E2E_HOME: input.home,
     CLAWEE_MODEL_API_KEY: 'hostile-inherited-model-key',
