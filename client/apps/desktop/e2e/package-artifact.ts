@@ -46,7 +46,7 @@ export function packagedExecutable(desktopDir: string): string {
 
 export function readDesktopPackageVersion(desktopDir: string): string {
   const configuredVersion = process.env.CLAWEE_VERSION?.trim();
-  if (configuredVersion) return configuredVersion;
+  if (configuredVersion) return configuredVersion.replace(/^v/, '');
   const productVersionPath = resolve(desktopDir, '../../../VERSION');
   if (existsSync(productVersionPath)) {
     const productVersion = readFileSync(productVersionPath, 'utf8').trim();
