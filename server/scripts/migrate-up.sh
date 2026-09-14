@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-APP_BIN="${APP_BIN:-$ROOT_DIR/bin/claw-mcp}"
+APP_BIN="${APP_BIN:-$ROOT_DIR/bin/claw-gateway}"
 
 source "$ROOT_DIR/scripts/require-ops-dir.sh"
 require_clawee_ops_dir

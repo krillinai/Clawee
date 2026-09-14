@@ -42,8 +42,8 @@ if grep -Eq '^[[:space:]]*(token|user_jwt_signing_key|agent_token_encryption_key
   exit 1
 fi
 
-if ! grep -Fq 'RELEASE_PATHS=(claw-mcp public db deploy)' "$DEPLOY_SCRIPT" ||
-   ! grep -Fq 'RELEASE_PATHS=(claw-mcp public db deploy)' "$ROLLBACK_SCRIPT"; then
+if ! grep -Fq 'RELEASE_PATHS=(claw-gateway claw-mcp public db deploy)' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'RELEASE_PATHS=(claw-gateway claw-mcp public db deploy)' "$ROLLBACK_SCRIPT"; then
   printf 'deployment scripts still treat configs as release-owned files\n' >&2
   exit 1
 fi
@@ -52,15 +52,25 @@ if ! grep -Fq 'scp "$config_source" "$ssh_host:$remote_config"' "$DEPLOY_SCRIPT"
   printf 'deployment script does not transfer private config separately\n' >&2
   exit 1
 fi
-if ! grep -Fq './claw-mcp migrate up --config "$DEPLOY_DIR/$CONFIG_PATH"' "$DEPLOY_SCRIPT"; then
+if ! grep -Fq './claw-gateway migrate up --config "$DEPLOY_DIR/$CONFIG_PATH"' "$DEPLOY_SCRIPT"; then
   printf 'deployment script does not migrate with an absolute external config path\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'ExecStart=$DEPLOY_DIR/claw-gateway --config $DEPLOY_DIR/$CONFIG_PATH' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'sudo rm -f "/etc/systemd/system/$LEGACY_SERVICE_UNIT"' "$DEPLOY_SCRIPT"; then
+  printf 'deployment script does not install claw-gateway or remove the legacy unit\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'legacy systemd unit disabled: %s' "$DEPLOY_SCRIPT" ||
+   ! grep -Fq 'migrate_legacy_service' "$DEPLOY_SCRIPT"; then
+  printf 'deployment script does not include claw-mcp to claw-gateway migration\n' >&2
   exit 1
 fi
 
 PACKAGE_PATH="$(
   CLAWEE_OPS_DIR="$TEST_OPS_DIR" \
   RELEASE_DIR="$RELEASE_DIR" \
-  PACKAGE_NAME="claw-mcp-open-source-test.tar.gz" \
+  PACKAGE_NAME="claw-gateway-open-source-test.tar.gz" \
     "$PACKAGE_SCRIPT"
 )"
 
@@ -68,9 +78,16 @@ if [[ ! -f "$PACKAGE_PATH" ]]; then
   printf 'release package was not created\n' >&2
   exit 1
 fi
-
 PACKAGE_LIST="$TEST_DIR/package.list"
 tar -tzf "$PACKAGE_PATH" >"$PACKAGE_LIST"
+if ! grep -Fxq './claw-gateway' "$PACKAGE_LIST"; then
+  printf 'release package is missing claw-gateway binary\n' >&2
+  exit 1
+fi
+if grep -Fxq './claw-mcp' "$PACKAGE_LIST"; then
+  printf 'release package still contains legacy claw-mcp binary\n' >&2
+  exit 1
+fi
 if ! grep -Fxq './configs/config.example.yaml' "$PACKAGE_LIST"; then
   printf 'release package is missing configs/config.example.yaml\n' >&2
   exit 1

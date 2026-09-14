@@ -271,7 +271,7 @@ make release-linux-amd64
 # arm64 机器对应 make release-linux-arm64
 ```
 
-产物位于 `server/release/claw-mcp-release-linux-<架构>-<日期>.tar.gz`。检查包含二进制、管理台、Collector、迁移与示例配置，不含真实配置。包名目前按日期命名，不要把包名当作版本证据，应核对 `/version` 和构建提交。
+产物位于 `server/release/claw-gateway-release-linux-<架构>-<日期>.tar.gz`。检查包含二进制、管理台、Collector、迁移与示例配置，不含真实配置。包名目前按日期命名，不要把包名当作版本证据，应核对 `/version` 和构建提交。
 
 远端部署前，单独准备测试主机、数据库、SSH、systemd 权限、`yq`，以及仓库外运维文件。`$CLAWEE_OPS_DIR/deploy/servers.yaml` 示例结构如下，仅将占位主机替换为测试主机：
 
@@ -281,7 +281,7 @@ servers:
     ssh: deploy@staging.example.com
     deploy_dir: /opt/clawee-validation
     arch: linux-amd64
-    service: clawee-validation.service
+    service: claw-gateway.service
     config: configs/staging.yaml
 ```
 
@@ -294,6 +294,16 @@ servers:
 ```
 
 脚本会构建、传输、迁移数据库并重启服务，systemd 单元缺失或不匹配时会要求确认。这里使用明确的 `staging` 目标；`all` 仍引用原脚本的固定目标名，不用于新环境验收。
+
+生产环境原先若使用 `claw-mcp.service` 和 `claw-mcp` 二进制，无需先手工停机。将运维配置中的 `service` 改为 `claw-gateway.service` 后首次部署时，脚本会先确保新单元配置就绪，待发布包校验和备份完成后在远端停止并禁用旧单元，最后重启新单元；新版本使用 `claw-gateway` 二进制。新服务健康检查通过后，脚本会删除 `/etc/systemd/system/claw-mcp.service` 和部署目录中的旧二进制。为降低配置遗漏风险，配置仍写成 `claw-mcp` 或 `claw-mcp.service` 时脚本会自动按 `claw-gateway.service` 执行并打印迁移提示。迁移完成后可用以下命令确认旧单元未再开机启用：
+
+```bash
+sudo systemctl is-enabled claw-mcp.service   # 应返回 disabled 或 not-found
+sudo systemctl is-enabled claw-gateway.service
+sudo systemctl status claw-gateway.service --no-pager
+```
+
+迁移失败时不要手工删除任何文件；先检查 `journalctl -u claw-mcp.service -u claw-gateway.service`，确认端口和权限后重新执行部署。回滚脚本同样识别旧备份中的 `claw-mcp` 二进制，并临时通过 `claw-gateway.service` 启动，不会重新创建旧 unit。
 
 - [ ] 从空部署目录完成首次启动，校验健康、版本、登录、模型任务和 MCP。
 - [ ] 在本次测试实例再次部署，检查重启、文件和权限持久化。

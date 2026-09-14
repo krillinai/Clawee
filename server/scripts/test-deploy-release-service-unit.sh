@@ -33,6 +33,12 @@ run_case() {
       set -euo pipefail
       source "$DEPLOY_SCRIPT"
 
+      if [[ "$(normalize_service_name claw-mcp.service)" != "claw-gateway.service" ||
+            "$(normalize_service_name claw-gateway.service)" != "claw-gateway.service" ]]; then
+        printf "service name normalization is incorrect\n" >&2
+        exit 1
+      fi
+
       service_unit_action() {
         local config_path="$4"
         local action="$5"

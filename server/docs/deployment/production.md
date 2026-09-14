@@ -73,7 +73,7 @@ Gateway 映射宿主机 `0.0.0.0:1904`，数据库不映射宿主机端口。镜
 每次部署新版本前，使用与服务相同的配置执行：
 
 ```bash
-CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-mcp migrate up
+CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-gateway migrate up
 ```
 
 迁移应由单独的受控任务运行。备份数据库后再执行，不要让多个副本并发执行迁移。
@@ -81,7 +81,7 @@ CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-mcp migrate up
 ## 启动服务
 
 ```bash
-CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-mcp serve
+CLAWEE_OPS_DIR=/etc/clawee/ops ./claw-gateway serve
 ```
 
 容器部署时，将配置以只读文件或 Secret 挂载到容器，并为 Skill 包、共享文件等本地数据目录挂载持久卷。不要把宿主机 Secret 烘焙进镜像。

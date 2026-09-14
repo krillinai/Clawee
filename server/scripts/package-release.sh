@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 TARGET_GOOS="${TARGET_GOOS:-linux}"
 TARGET_GOARCH="${TARGET_GOARCH:-amd64}"
 DATE_TAG="${DATE_TAG:-$(date +%Y%m%d)}"
-PACKAGE_NAME="${PACKAGE_NAME:-claw-mcp-release-${TARGET_GOOS}-${TARGET_GOARCH}-${DATE_TAG}.tar.gz}"
+PACKAGE_NAME="${PACKAGE_NAME:-claw-gateway-release-${TARGET_GOOS}-${TARGET_GOARCH}-${DATE_TAG}.tar.gz}"
 RELEASE_DIR="${RELEASE_DIR:-$ROOT_DIR/release}"
 BUILD_DIR="$RELEASE_DIR/build-${TARGET_GOOS}-${TARGET_GOARCH}"
 PACKAGE_PATH="$RELEASE_DIR/$PACKAGE_NAME"
@@ -27,7 +27,7 @@ cp -R "$ROOT_DIR/../third_party" "$BUILD_DIR/licenses/third_party"
 
 "$ROOT_DIR/scripts/build-web.sh" >&2
 
-CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$BUILD_DIR/claw-mcp" ./cmd/claw-mcp
+CGO_ENABLED=0 GOOS="$TARGET_GOOS" GOARCH="$TARGET_GOARCH" go build -trimpath -ldflags "$("$ROOT_DIR/scripts/buildinfo-ldflags.sh")" -o "$BUILD_DIR/claw-gateway" ./cmd/claw-mcp
 
 cp "$EXAMPLE_CONFIG" "$BUILD_DIR/configs/config.example.yaml"
 cp "$ROOT_DIR/deploy/docker-compose.yaml" "$BUILD_DIR/deploy/docker-compose.yaml"

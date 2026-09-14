@@ -209,7 +209,7 @@ mcp:
 
 ```bash
 export CLAWEE_OPS_DIR=/etc/clawee/ops
-./claw-mcp migrate up
+./claw-gateway migrate up
 ```
 
 从源码验证时可以在仓库根目录执行：

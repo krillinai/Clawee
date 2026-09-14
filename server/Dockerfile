@@ -20,12 +20,12 @@ COPY server/scripts ./scripts
 COPY --from=web-builder /src/internal/server/webdist/dist ./internal/server/webdist/dist
 ARG CLAW_MCP_VERSION=0.1.7
 ARG CLAW_MCP_COMMIT=unknown
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(./scripts/buildinfo-ldflags.sh)" -o /out/claw-mcp ./cmd/claw-mcp \
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(./scripts/buildinfo-ldflags.sh)" -o /out/claw-gateway ./cmd/claw-mcp \
     && mkdir -p /out/data/shared-files /out/data/skillhub/packages /out/data/skillhub/repositories
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
-COPY --from=backend-builder /out/claw-mcp /app/claw-mcp
+COPY --from=backend-builder /out/claw-gateway /app/claw-gateway
 COPY --from=web-builder /src/internal/server/webdist/dist /app/static
 COPY --from=backend-builder --chown=nonroot:nonroot /out/data /app/data
 COPY LICENSE NOTICE /app/licenses/clawee/
@@ -35,5 +35,5 @@ ENV CLAWEE_OPS_DIR=/run/clawee-ops
 VOLUME ["/app/data"]
 EXPOSE 1904
 USER nonroot:nonroot
-ENTRYPOINT ["/app/claw-mcp"]
+ENTRYPOINT ["/app/claw-gateway"]
 CMD ["serve"]

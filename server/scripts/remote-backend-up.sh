@@ -7,13 +7,13 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/require-ops-dir.sh"
 require_clawee_ops_dir
 
-APP_NAME="${CLAW_MCP_APP_NAME:-claw-mcp}"
-APP_BIN="${CLAW_MCP_APP_BIN:-$ROOT_DIR/bin/claw-mcp}"
+APP_NAME="${CLAW_GATEWAY_APP_NAME:-${CLAW_MCP_APP_NAME:-claw-gateway}}"
+APP_BIN="${CLAW_GATEWAY_APP_BIN:-${CLAW_MCP_APP_BIN:-$ROOT_DIR/bin/claw-gateway}}"
 APP_ADDR="${CLAW_MCP_SERVER_ADDR:-:1904}"
 APP_HOST="${CLAW_MCP_HEALTH_HOST:-127.0.0.1}"
 APP_PORT="${CLAW_MCP_PORT:-${APP_ADDR##*:}}"
-APP_PID_FILE="${CLAW_MCP_PID_FILE:-$ROOT_DIR/tmp/claw-mcp.pid}"
-APP_LOG_FILE="${CLAW_MCP_LOG_FILE:-$ROOT_DIR/tmp/claw-mcp.log}"
+APP_PID_FILE="${CLAW_GATEWAY_PID_FILE:-${CLAW_MCP_PID_FILE:-$ROOT_DIR/tmp/claw-gateway.pid}}"
+APP_LOG_FILE="${CLAW_GATEWAY_LOG_FILE:-${CLAW_MCP_LOG_FILE:-$ROOT_DIR/tmp/claw-gateway.log}}"
 
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-clawee-postgres}"
