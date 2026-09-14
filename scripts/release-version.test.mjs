@@ -19,8 +19,8 @@ import {
 
 test('读取统一产品版本并校验内嵌 Runtime 下限', () => {
   assert.deepEqual(inspectReleaseVersion(), {
-    version: '0.1.9',
-    tag: 'v0.1.9',
+    version: '0.1.10',
+    tag: 'v0.1.10',
     prerelease: false,
     channel: 'stable'
   });

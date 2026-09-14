@@ -439,8 +439,8 @@ func (s *PostgresStore) FailStorageMigrationItem(ctx context.Context, item Stora
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE shared_file_storage_migration_items SET status=$4,heartbeat_at=$5,
-finished_at=CASE WHEN $4='failed' THEN $5 ELSE NULL END,error_code=$6,error_message=$7
+	tag, err := tx.Exec(ctx, `UPDATE shared_file_storage_migration_items SET status=$4::text,heartbeat_at=$5::timestamptz,
+finished_at=CASE WHEN $4::text='failed' THEN $5::timestamptz ELSE NULL END,error_code=$6,error_message=$7
 WHERE migration_id=$1 AND file_id=$2 AND status='running' AND attempt_count=$3`,
 		item.MigrationID, item.FileID, item.AttemptCount, status, heartbeatAt, code, sanitizeStorageError(code))
 	if err != nil {
