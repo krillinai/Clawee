@@ -17,7 +17,6 @@
 | `/healthz`、`/readyz`、`/version` | 健康与版本信息 |
 | `/api/v1/auth/*` | 注册、登录、注销、当前账户和外部身份认证 |
 | `/api/v1/integrations/*` | 受控 OAuth 回调和 Webhook |
-| `/api/v1/collector/*` | Collector 专用认证接口 |
 
 ## 应用 API
 
@@ -27,7 +26,7 @@
 - `skills`、`skill-spaces`；
 - `knowledge-bases` 及其文档；
 - `shared-spaces`、`shared-files`；
-- `activity`、`collectors`；
+- `activity`；
 - `business-data-sources`、`business-dashboards`；
 - `billing`、`model-configuration`。
 
@@ -51,7 +50,7 @@
 | `skills`、`skill-sources`、`skill-spaces` | Skill 及来源管理 |
 | `shared-spaces`、`shared-files` | 共享文件管理 |
 | `data-resource-grants` | 账户数据资源权限 |
-| `activity`、`collectors` | Agent 活动和 Collector 管理 |
+| `activity` | Agent 活动管理 |
 
 具体权限代码定义在 `internal/rbac/catalog.go`。
 

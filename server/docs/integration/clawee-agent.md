@@ -2,7 +2,7 @@
 
 ## 调用边界
 
-Clawee Web 或 Desktop 负责用户交互，本地 Daemon 负责持有认证状态、调用 Gateway、下载 Skill 和执行安装。浏览器渲染进程不应保存 Bearer Token、模型密钥或 Collector 注册码。
+Clawee Web 或 Desktop 负责用户交互，本地 Daemon 负责持有认证状态、调用 Gateway、下载 Skill 和执行安装。浏览器渲染进程不应保存 Bearer Token 或模型密钥。
 
 所有示例路径均相对于 Gateway Origin，例如 `https://gateway.example.com`。
 

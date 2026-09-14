@@ -5,7 +5,7 @@
   <img src="./client/resources/logo-v2-black.svg" alt="Clawee" width="260" />
 </picture>
 
-<h1 style="margin: 8px 0 4px;">可自托管的企业级 Agent</h1>
+<h1 style="margin: -18px 0 4px;">可自托管的企业级 Agent</h1>
 
 <p style="margin: 0 0 8px;">让 Agent 本地执行、企业能力接入与统一治理在一个平台中协同运行，构建以增长为核心的智能工作台。</p>
 
@@ -24,7 +24,7 @@ Clawee 是面向企业部署与治理的开源 Agent 平台。它将本地 Agent
 Clawee 由两个边界清晰、彼此协作的部分组成：
 
 - **本地执行层**：共享 Web、本地 daemon、Electron 桌面端与内嵌 Codex Runtime，负责任务、会话、工作区文件、模型、Skill、定时任务和系统原生能力。
-- **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Collector、Skill Hub、知识库和共享文件。
+- **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Skill Hub、知识库和共享文件。
 
 桌面端和浏览器端使用同一套任务界面。桌面端额外提供内嵌 Runtime、文件系统、通知和更新等原生能力。Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一入口。
 
@@ -42,23 +42,23 @@ Clawee 采用 Apache-2.0，通用能力全部开放。模型托管、计费、�
 
 - **企业级 MCP 治理**：通过 Gateway 统一管理 MCP 上游、能力目录、Agent 身份、账号授权、调用门禁与审计记录。
 
-- **团队资源共享**：集中管理 Skill Hub、知识库、共享文件与 Collector，在明确授权后向 Agent 提供能力。
+- **团队资源共享**：集中管理 Skill Hub、知识库和共享文件，在明确授权后向 Agent 提供能力。
 
 - **可自托管、可选集成**：核心服务由部署者自行运行；钉钉、百炼和其他外部服务仅在显式配置后启用。
 
 ## 核心功能
 
-### 数据洞察案例
-
-数据洞察是 Clawee 可承载的一类业务场景。以下以哔哩哔哩运营看板为例，展示将业务数据接入工作台后形成的分析视图；具体指标、筛选项和数据结构由接入的数据源与业务需求决定。
-
-![哔哩哔哩数据洞察看板](docs/delivery/user-guides/assets/bilibili-data-insight.jpg)
-
-### Agent 动态案例
+### Agent 动态
 
 Agent 动态是 Clawee 可承载的运行观测与使用分析场景。以下以 Agent 工作台为例，展示任务运行、Token 使用和 Agent 活跃情况等信息的统一视图；具体展示内容由接入的运行数据与治理需求决定。
 
 ![Agent 动态](docs/delivery/user-guides/assets/agent-activity.jpg)
+
+### 数据洞察
+
+数据洞察是 Clawee 可承载的一类业务场景。以下以哔哩哔哩运营看板为例，展示将业务数据接入工作台后形成的分析视图；具体指标、筛选项和数据结构由接入的数据源与业务需求决定。
+
+![哔哩哔哩数据洞察看板](docs/delivery/user-guides/assets/bilibili-data-insight.jpg)
 
 ## 核心工作流
 
@@ -240,7 +240,7 @@ export CLAW_GATEWAY_SERVER_ADDR="0.0.0.0:1904"
 | `client/apps/daemon` | 本地任务、模型、文件、Skill 与会话执行 |
 | `client/apps/desktop` | Electron 外壳、内嵌 Runtime、原生能力与更新 |
 | `client/packages` | 客户端共享协议与 Skill 市场能力 |
-| `server` | Go Gateway、MCP 权限审计、Collector、Skill Hub、知识库与共享文件 |
+| `server` | Go Gateway、MCP 权限审计、Skill Hub、知识库与共享文件 |
 | `server/web` | Gateway 管理台与用户端管理界面 |
 | `server/db` | 数据库迁移与种子数据 |
 | `scripts` | 整合项目的安装、初始化、构建、测试与验收入口 |
@@ -259,7 +259,7 @@ export CLAW_GATEWAY_SERVER_ADDR="0.0.0.0:1904"
 | `pnpm run client:test` | 客户端测试 |
 | `pnpm run server:test` | 服务端测试 |
 | `pnpm run client:build` | 客户端全量构建 |
-| `pnpm run server:build` | 服务端与 Collector 构建 |
+| `pnpm run server:build` | 服务端构建 |
 | `pnpm run desktop:preflight:local` | 提交前完整桌面预检 |
 | `pnpm run desktop:preflight:release` | 正式桌面发布预检 |
 | `pnpm run desktop:tag:check` | 正式发布 Tag 检查 |

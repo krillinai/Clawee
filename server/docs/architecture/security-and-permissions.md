@@ -15,7 +15,7 @@
 管理 API 位于 `/api/v1/admin/*`。权限按模块区分 `read` 与 `manage`，目前覆盖：
 
 - 账号、角色与权限；
-- Agent 与 Collector；
+- Agent；
 - MCP 上游、能力、授权、门禁和审计；
 - Agent 活动、知识库、Skill、共享文件和数据资源授权。
 

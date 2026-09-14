@@ -162,12 +162,11 @@ pnpm run web:dev
 | F14 | 用两个账号测试 Agent、MCP Token 和数据权限 | 账号 B 不能使用账号 A 的 Agent 身份或访问其受限资源；停用后失效 |
 | F15 | 共享文件上传、下载、删除，另一个无授权账号访问 | 内容正确、权限生效，删除后的资源不继续可用 |
 | F16 | Skill Hub 导入测试包或公共测试 Git 源，同步并在客户端使用 | 列表、版本、内容和权限一致；错误来源有明确提示 |
-| F17 | 在测试设备按安装页接入 Collector，检查心跳，再吊销 | 设备可见、身份稳定，吊销后旧身份不能继续上报 |
-| F18 | 配置知识库测试资源，授权查询，再撤销 | 配置齐备时查询可用、撤销生效；所需外部服务未配置则记录待验证 |
-| F19 | 不配置计费、钉钉、百炼及平台托管模型等外部服务 | 核心启动、登录、自带模型任务和 MCP 不被阻塞；入口显示合理状态 |
-| F20 | 桌面原生文件选择、窗口重开、托盘退出；重启 Gateway | 桌面行为正确，连接恢复后可继续任务，无多余后台实例或丢失配置 |
+| F17 | 配置知识库测试资源，授权查询，再撤销 | 配置齐备时查询可用、撤销生效；所需外部服务未配置则记录待验证 |
+| F18 | 不配置计费、钉钉、百炼及平台托管模型等外部服务 | 核心启动、登录、自带模型任务和 MCP 不被阻塞；入口显示合理状态 |
+| F19 | 桌面原生文件选择、窗口重开、托盘退出；重启 Gateway | 桌面行为正确，连接恢复后可继续任务，无多余后台实例或丢失配置 |
 
-MCP 配置详见[上游接入](../server/docs/integration/upstream-mcp.md)，Collector 在测试设备上按[接入说明](../server/docs/integration/collector.md)验收。F17 涉及安装常驻组件，仅在专用测试设备执行，并在完成后验证卸载。
+MCP 配置详见[上游接入](../server/docs/integration/upstream-mcp.md)。
 
 ## 5. 自动检查与实际打包验证
 
@@ -183,7 +182,7 @@ export CLAW_GATEWAY_TEST_DATABASE_URL='postgres://claw_gateway@127.0.0.1:5933/cl
 pnpm run server:test
 ```
 
-`make test` 会构建管理台、检查服务端包、运行 Go、PostgreSQL 定向集成测试和管理台测试，并构建 Collector。显式导出测试 URL 后，首次 `go test ./...` 也能运行依赖 PostgreSQL 的测试。另在 `server/` 执行 `go vet ./...`。
+`make test` 会构建管理台、检查服务端包、运行 Go、PostgreSQL 定向集成测试和管理台测试。显式导出测试 URL 后，首次 `go test ./...` 也能运行依赖 PostgreSQL 的测试。另在 `server/` 执行 `go vet ./...`。
 
 完成后在相同终端停止本次测试容器，保留卷用于排查：
 
@@ -271,7 +270,7 @@ make release-linux-amd64
 # arm64 机器对应 make release-linux-arm64
 ```
 
-产物位于 `server/release/claw-gateway-release-linux-<架构>-<日期>.tar.gz`。检查包含二进制、管理台、Collector、迁移与示例配置，不含真实配置。包名目前按日期命名，不要把包名当作版本证据，应核对 `/version` 和构建提交。
+产物位于 `server/release/claw-gateway-release-linux-<架构>-<日期>.tar.gz`。检查包含二进制、管理台、迁移与示例配置，不含真实配置。包名目前按日期命名，不要把包名当作版本证据，应核对 `/version` 和构建提交。
 
 远端部署前，单独准备测试主机、数据库、SSH、systemd 权限、`yq`，以及仓库外运维文件。`$CLAWEE_OPS_DIR/deploy/servers.yaml` 示例结构如下，仅将占位主机替换为测试主机：
 

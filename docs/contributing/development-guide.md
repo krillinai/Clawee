@@ -225,7 +225,7 @@ Go 服务位于 `server`。路由、中间件、Service、Store、MCP Gateway、
 
 ### 8.3 可选能力
 
-知识库、Skill Hub、Collector、共享文件、钉钉、Bilibili、模型和计费属于可选能力。未配置外部服务时，核心 Gateway、账号、RBAC、MCP 纳管和审计仍应能够启动和测试。
+知识库、Skill Hub、共享文件、钉钉、Bilibili、模型和计费属于可选能力。未配置外部服务时，核心 Gateway、账号、RBAC、MCP 纳管和审计仍应能够启动和测试。
 
 ## 9. 跨组件接口与兼容性
 
@@ -309,7 +309,7 @@ pnpm run desktop:preflight:local
 pnpm run desktop:preflight:release
 ```
 
-正式发布还需要在目标干净提交上完成远端 Release Preflight、签名/公证和 Tag 检查，顺序见[正式发布前待处理事项](../pre-release-checklist.md)。发布镜像、安装包和压缩包不得包含生产配置、`.env`、数据库数据、私有凭据、模型 Key 或 Collector 注册码。
+正式发布还需要在目标干净提交上完成远端 Release Preflight、签名/公证和 Tag 检查，顺序见[正式发布前待处理事项](../pre-release-checklist.md)。发布镜像、安装包和压缩包不得包含生产配置、`.env`、数据库数据、私有凭据或模型 Key。
 
 ## 16. 附录
 

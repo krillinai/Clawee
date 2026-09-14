@@ -7,7 +7,7 @@
 Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企业治理能力共同组成。
 
 - 本地执行层由共享 Web、本地 daemon、Electron 桌面端和内嵌 Codex Runtime 组成，负责模型配置、任务与会话执行、工作区文件、Skill、定时任务和系统原生能力。
-- 企业治理层由 Go Gateway 和管理台组成，负责账号与会话、Agent 身份、MCP 上游与能力目录、授权与门禁、审计、Collector、Skill Hub、知识库和共享文件等能力。
+- 企业治理层由 Go Gateway 和管理台组成，负责账号与会话、Agent 身份、MCP 上游与能力目录、授权与门禁、审计、Skill Hub、知识库和共享文件等能力。
 - 桌面端和浏览器端是同一工作台的不同运行入口；桌面端额外提供内嵌 Runtime、文件系统、通知、更新等原生能力。
 - Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一治理入口。
 - 模型服务、钉钉、百炼及其他外部集成均按需配置；未配置时不应影响本地工作台和 Gateway 核心能力。
@@ -21,7 +21,7 @@ Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企�
 - `client/apps/desktop`：Electron 外壳，负责启动并嵌入 daemon、Web 和 Codex Runtime，以及系统菜单、文件选择、通知、更新等原生能力。Desktop Bridge 只承载必须由桌面环境提供的能力。
 - `client/apps/harness`：客户端开发与受控验证使用的运行环境，不承载生产业务实现。
 - `client/packages/protocol`、`client/packages/skill-market`：客户端工作区内的共享协议与 Skill 市场能力；跨应用契约优先在这些包中维护。
-- `server`：Go Gateway、HTTP/MCP API、账号与 RBAC、权限审计、Collector、知识库、Skill Hub、共享文件及可选企业集成。
+- `server`：Go Gateway、HTTP/MCP API、账号与 RBAC、权限审计、知识库、Skill Hub、共享文件及可选企业集成。
 - `server/web`：Gateway 的 React 管理台和用户端管理界面，构建产物可嵌入 Go 服务端。
 - `server/db`：数据库迁移与种子数据。数据库结构变更必须通过迁移表达，不得依赖手工修改运行库。
 - `scripts`：根目录安装、初始化、构建、测试和验收入口；优先使用根 `package.json` 已提供的命令。

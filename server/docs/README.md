@@ -16,7 +16,6 @@
 
 - [Clawee Agent 接入](integration/clawee-agent.md)
 - [上游 MCP Server 接入](integration/upstream-mcp.md)
-- [Collector 接入](integration/collector.md)
 - [HTTP API 概览](reference/http-api.md)
 
 ## 文档约定

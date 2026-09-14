@@ -46,7 +46,6 @@ mcp.public_base_url             -> CLAW_GATEWAY_MCP_PUBLIC_BASE_URL
 | `logging` | 日志级别、格式、输出和访问日志 |
 | `static` | 管理控制台静态文件 |
 | `mcp` | 公共 MCP 地址、OAuth 元数据和作用域 |
-| `office.install` | Collector 下载地址和二进制目录 |
 | `knowledge` | 知识库开关及 Provider 配置 |
 | `skillhub` | Skill 包、Git 来源和工作目录 |
 | `shared_files` | 共享文件本地目录与 OSS CNAME 允许列表 |
