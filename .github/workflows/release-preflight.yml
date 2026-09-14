@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - customer-packaging
+      - codex-native-runtime-kernel
   workflow_call:
     inputs:
       ref:
