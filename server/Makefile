@@ -2,7 +2,7 @@
 
 COMPOSE_FILE := deploy/docker-compose.yaml
 TEST_COMPOSE_FILE := deploy/docker-compose.test.yaml
-TEST_DATABASE_URL := postgres://claw_mcp@localhost:5933/claw_mcp_test?sslmode=disable
+TEST_DATABASE_URL := postgres://claw_gateway@localhost:5933/claw_gateway_test?sslmode=disable
 
 run: db-migrate-up
 	go run ./cmd/claw-gateway serve
@@ -61,7 +61,7 @@ test:
 
 deps-up:
 	docker compose -f $(COMPOSE_FILE) up -d
-	until docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U claw_mcp -d claw_mcp; do sleep 1; done
+	until docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U claw_gateway -d claw_gateway; do sleep 1; done
 
 deps-down:
 	docker compose -f $(COMPOSE_FILE) down
@@ -73,5 +73,5 @@ test-deps-down:
 	docker compose -f $(TEST_COMPOSE_FILE) down
 
 test-office-postgres:
-	CLAW_MCP_TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test ./internal/office/store -count=1
-	CLAW_MCP_TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test ./internal/office/httpapi -count=1
+	CLAW_GATEWAY_TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test ./internal/office/store -count=1
+	CLAW_GATEWAY_TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test ./internal/office/httpapi -count=1

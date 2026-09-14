@@ -86,12 +86,12 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: claw_mcp_test
-          POSTGRES_USER: claw_mcp
+          POSTGRES_DB: claw_gateway_test
+          POSTGRES_USER: claw_gateway
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
-        options: --health-cmd "pg_isready -U claw_mcp -d claw_mcp_test" --health-interval 5s --health-timeout 3s --health-retries 10
+        options: --health-cmd "pg_isready -U claw_gateway -d claw_gateway_test" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v5
         with:
@@ -114,7 +114,7 @@ jobs:
       - run: pnpm --dir web build
       - run: go test -p 1 ./...
         env:
-          CLAW_MCP_TEST_DATABASE_URL: postgres://claw_mcp@127.0.0.1:5432/claw_mcp_test?sslmode=disable
+          CLAW_GATEWAY_TEST_DATABASE_URL: postgres://claw_gateway@127.0.0.1:5432/claw_gateway_test?sslmode=disable
       - run: go vet ./...
       - run: pnpm --dir web audit --audit-level high
     defaults:
@@ -242,7 +242,7 @@ jobs:
         working-directory: server
         env:
           TARGET_GOARCH: ${{ matrix.arch }}
-          CLAW_MCP_COMMIT: ${{ needs.client.outputs.target-sha }}
+          CLAW_GATEWAY_COMMIT: ${{ needs.client.outputs.target-sha }}
           PACKAGE_NAME: clawee-server-preflight-linux-${{ matrix.arch }}.tar.gz
         run: ./scripts/package-release.sh
       - uses: actions/upload-artifact@v4

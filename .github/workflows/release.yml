@@ -229,8 +229,8 @@ jobs:
           provenance: true
           sbom: true
           build-args: |
-            CLAW_MCP_VERSION=${{ needs.gate.outputs.version }}
-            CLAW_MCP_COMMIT=${{ github.sha }}
+            CLAW_GATEWAY_VERSION=${{ needs.gate.outputs.version }}
+            CLAW_GATEWAY_COMMIT=${{ github.sha }}
           tags: ghcr.io/krillinai/clawee-server:sha-${{ github.sha }}
 
   publish:

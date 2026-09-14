@@ -2,7 +2,7 @@ server:
   addr: "0.0.0.0:1904"
 
 database:
-  url: "postgres://claw_mcp@localhost:15932/claw_mcp?sslmode=disable"
+  url: "postgres://claw_gateway@localhost:15932/claw_gateway?sslmode=disable"
 
 security:
   session_cookie_name: "claw_front_token"

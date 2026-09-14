@@ -24,7 +24,7 @@ const releaseTextTargets = [
   },
   {
     path: 'server/Dockerfile',
-    pattern: /(ARG CLAW_MCP_VERSION=)[^\s]+/,
+    pattern: /(ARG CLAW_GATEWAY_VERSION=)[^\s]+/,
     replacement: version => (_match, prefix) => `${prefix}${version}`
   },
   {
@@ -34,7 +34,7 @@ const releaseTextTargets = [
   },
   {
     path: 'server/scripts/buildinfo-ldflags.sh',
-    pattern: /(CLAW_MCP_VERSION:-)[^}]+/,
+    pattern: /(CLAW_GATEWAY_VERSION:-)[^}]+/,
     replacement: version => (_match, prefix) => `${prefix}${version}`
   }
 ];

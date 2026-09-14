@@ -95,7 +95,7 @@ docker compose -f server/deploy/docker-compose.yaml up -d --wait postgres
 pnpm run db:migrate
 ```
 
-开发数据库默认使用 `127.0.0.1:15932`，名称为 `claw_mcp`。不要将测试库或生产库作为开发库。
+开发数据库默认使用 `127.0.0.1:15932`，名称为 `claw_gateway`。不要将测试库或生产库作为开发库。
 
 ### 3.3 启动 Gateway、管理台和客户端
 
@@ -187,9 +187,9 @@ docker compose -f server/deploy/docker-compose.yaml down
 
 ## 6. 本地配置与开发数据
 
-Gateway 从 `CLAWEE_OPS_DIR/configs/config.yaml` 读取配置，已绑定的 `CLAW_MCP_*` 环境变量可以覆盖字段。加载顺序和字段映射见[配置参考](../../server/docs/getting-started/configuration.md)。
+Gateway 从 `CLAWEE_OPS_DIR/configs/config.yaml` 读取配置，已绑定的 `CLAW_GATEWAY_*` 环境变量可以覆盖字段。加载顺序和字段映射见[配置参考](../../server/docs/getting-started/configuration.md)。
 
-开发、测试和生产必须使用不同的运维目录、数据库和文件目录。PostgreSQL 集成测试使用名称以 `_test` 结尾的独立数据库，并设置 `CLAW_MCP_TEST_DATABASE_URL`。测试 Seed、模拟上游和夹具只能用于测试环境。
+开发、测试和生产必须使用不同的运维目录、数据库和文件目录。PostgreSQL 集成测试使用名称以 `_test` 结尾的独立数据库，并设置 `CLAW_GATEWAY_TEST_DATABASE_URL`。测试 Seed、模拟上游和夹具只能用于测试环境。
 
 API Key、JWT 密钥、Agent Token 密钥、OAuth Secret、数据库密码和上游凭据必须保存在仓库外；命令历史、日志、截图、trace 和诊断包也不得包含明文 Secret。
 
@@ -257,7 +257,7 @@ pnpm run server:test
 
 ```bash
 docker compose -f server/deploy/docker-compose.test.yaml up -d --wait
-export CLAW_MCP_TEST_DATABASE_URL='postgres://claw_mcp@127.0.0.1:5933/claw_mcp_test?sslmode=disable'
+export CLAW_GATEWAY_TEST_DATABASE_URL='postgres://claw_gateway@127.0.0.1:5933/claw_gateway_test?sslmode=disable'
 pnpm run server:test
 docker compose -f server/deploy/docker-compose.test.yaml down
 ```

@@ -132,7 +132,7 @@ func TestLoadFromOpsDirPreservesConfigEnvironmentOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(opsDirEnv, opsDir)
-	t.Setenv("CLAW_MCP_SERVER_ADDR", ":3904")
+	t.Setenv("CLAW_GATEWAY_SERVER_ADDR", ":3904")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -312,7 +312,7 @@ func TestLoadDefaultsIncludeMCPAuth(t *testing.T) {
 }
 
 func TestLoadAgentActivityReportingFromEnv(t *testing.T) {
-	t.Setenv("CLAW_MCP_AGENT_ACTIVITY_REPORTING_ENABLED", "true")
+	t.Setenv("CLAW_GATEWAY_AGENT_ACTIVITY_REPORTING_ENABLED", "true")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -325,7 +325,7 @@ func TestLoadAgentActivityReportingFromEnv(t *testing.T) {
 func TestLoadModelAccessMode(t *testing.T) {
 	for _, mode := range []string{"platform_managed", "enterprise_managed"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("CLAW_MCP_MODEL_ACCESS_MODE", mode)
+			t.Setenv("CLAW_GATEWAY_MODEL_ACCESS_MODE", mode)
 			cfg, err := Load("")
 			if err != nil {
 				t.Fatal(err)
@@ -359,9 +359,9 @@ sub2api:
 }
 
 func TestLoadSub2APIConfigIgnoresEnvironment(t *testing.T) {
-	t.Setenv("CLAW_MCP_SUB2API_BASE_URL", "https://environment.example.com")
-	t.Setenv("CLAW_MCP_SUB2API_ADMIN_API_KEY", "environment-key")
-	t.Setenv("CLAW_MCP_SUB2API_ORGANIZATION_USER_ID", "99")
+	t.Setenv("CLAW_GATEWAY_SUB2API_BASE_URL", "https://environment.example.com")
+	t.Setenv("CLAW_GATEWAY_SUB2API_ADMIN_API_KEY", "environment-key")
+	t.Setenv("CLAW_GATEWAY_SUB2API_ORGANIZATION_USER_ID", "99")
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(`
 model_access:
@@ -385,7 +385,7 @@ sub2api:
 func TestLoadRejectsInvalidModelAccessMode(t *testing.T) {
 	for _, mode := range []string{"", " ", "PLATFORM_MANAGED", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
-			t.Setenv("CLAW_MCP_MODEL_ACCESS_MODE", mode)
+			t.Setenv("CLAW_GATEWAY_MODEL_ACCESS_MODE", mode)
 			if _, err := Load(""); err == nil {
 				t.Fatal("Load() error = nil, want invalid model access mode")
 			}
@@ -394,8 +394,8 @@ func TestLoadRejectsInvalidModelAccessMode(t *testing.T) {
 }
 
 func TestModelAccessEnvironmentDoesNotChangeEmptyEnvironmentHandling(t *testing.T) {
-	t.Setenv("CLAW_MCP_CLAW_ADMIN_BASE_URL", "")
-	t.Setenv("CLAW_MCP_MODEL_ACCESS_MODE", "enterprise_managed")
+	t.Setenv("CLAW_GATEWAY_CLAW_ADMIN_BASE_URL", "")
+	t.Setenv("CLAW_GATEWAY_MODEL_ACCESS_MODE", "enterprise_managed")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -406,9 +406,9 @@ func TestModelAccessEnvironmentDoesNotChangeEmptyEnvironmentHandling(t *testing.
 }
 
 func TestLoadClawAdminConfigFromEnvironment(t *testing.T) {
-	t.Setenv("CLAW_MCP_CLAW_ADMIN_BASE_URL", "https://admin.example.com")
-	t.Setenv("CLAW_MCP_CLAW_ADMIN_DEPLOYMENT_CREDENTIAL", "deployment-secret")
-	t.Setenv("CLAW_MCP_CLAW_ADMIN_TIMEOUT", "4s")
+	t.Setenv("CLAW_GATEWAY_CLAW_ADMIN_BASE_URL", "https://admin.example.com")
+	t.Setenv("CLAW_GATEWAY_CLAW_ADMIN_DEPLOYMENT_CREDENTIAL", "deployment-secret")
+	t.Setenv("CLAW_GATEWAY_CLAW_ADMIN_TIMEOUT", "4s")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +434,7 @@ func TestClawAdminConfigRejectsInvalidConfiguredEndpoint(t *testing.T) {
 }
 
 func TestLoadMCPPublicBaseURLFromEnv(t *testing.T) {
-	t.Setenv("CLAW_MCP_MCP_PUBLIC_BASE_URL", "https://gateway.example.com")
+	t.Setenv("CLAW_GATEWAY_MCP_PUBLIC_BASE_URL", "https://gateway.example.com")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +445,7 @@ func TestLoadMCPPublicBaseURLFromEnv(t *testing.T) {
 }
 
 func TestLoadMCPAuthResourceDoesNotOverridePublicBaseURLFallback(t *testing.T) {
-	t.Setenv("CLAW_MCP_MCP_AUTH_RESOURCE", "https://gateway.example.com/mcp")
+	t.Setenv("CLAW_GATEWAY_MCP_AUTH_RESOURCE", "https://gateway.example.com/mcp")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +459,7 @@ func TestLoadMCPAuthResourceDoesNotOverridePublicBaseURLFallback(t *testing.T) {
 }
 
 func TestLoadSharedFilesStorageRootFromEnvironment(t *testing.T) {
-	t.Setenv("CLAW_MCP_SHARED_FILES_STORAGE_ROOT", "/var/lib/claw-gateway/shared-files")
+	t.Setenv("CLAW_GATEWAY_SHARED_FILES_STORAGE_ROOT", "/var/lib/claw-gateway/shared-files")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -470,8 +470,8 @@ func TestLoadSharedFilesStorageRootFromEnvironment(t *testing.T) {
 }
 
 func TestLoadSkillHubConfigFromEnv(t *testing.T) {
-	t.Setenv("CLAW_MCP_SKILLHUB_ENABLED", "true")
-	t.Setenv("CLAW_MCP_SKILLHUB_PACKAGE_ROOT", "/tmp/claw-skillhub")
+	t.Setenv("CLAW_GATEWAY_SKILLHUB_ENABLED", "true")
+	t.Setenv("CLAW_GATEWAY_SKILLHUB_PACKAGE_ROOT", "/tmp/claw-skillhub")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -482,8 +482,8 @@ func TestLoadSkillHubConfigFromEnv(t *testing.T) {
 }
 
 func TestLoadSkillHubGitHubSyncIgnoresEnvironment(t *testing.T) {
-	t.Setenv("CLAW_MCP_SKILLHUB_GITHUB_SYNC_ENABLED", "false")
-	t.Setenv("CLAW_MCP_SKILLHUB_REPOSITORY_ROOT", "/tmp/env-skillhub-repositories")
+	t.Setenv("CLAW_GATEWAY_SKILLHUB_GITHUB_SYNC_ENABLED", "false")
+	t.Setenv("CLAW_GATEWAY_SKILLHUB_REPOSITORY_ROOT", "/tmp/env-skillhub-repositories")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -531,11 +531,11 @@ func TestLoadKnowledgeSecretsDirectlyFromYAML(t *testing.T) {
 }
 
 func TestLoadLoggingConfigFromEnv(t *testing.T) {
-	t.Setenv("CLAW_MCP_LOGGING_LEVEL", "debug")
-	t.Setenv("CLAW_MCP_LOGGING_FORMAT", "console")
-	t.Setenv("CLAW_MCP_LOGGING_OUTPUT", "stderr")
-	t.Setenv("CLAW_MCP_LOGGING_ACCESS_ENABLED", "false")
-	t.Setenv("CLAW_MCP_LOGGING_ERROR_RESPONSE_BODY", "false")
+	t.Setenv("CLAW_GATEWAY_LOGGING_LEVEL", "debug")
+	t.Setenv("CLAW_GATEWAY_LOGGING_FORMAT", "console")
+	t.Setenv("CLAW_GATEWAY_LOGGING_OUTPUT", "stderr")
+	t.Setenv("CLAW_GATEWAY_LOGGING_ACCESS_ENABLED", "false")
+	t.Setenv("CLAW_GATEWAY_LOGGING_ERROR_RESPONSE_BODY", "false")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -560,8 +560,8 @@ func TestLoadLoggingConfigFromEnv(t *testing.T) {
 }
 
 func TestLoadOfficeInstallConfigFromEnv(t *testing.T) {
-	t.Setenv("CLAW_MCP_OFFICE_INSTALL_COLLECTOR_BINARY_ROOT", "/tmp/collectors")
-	t.Setenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL", "https://env.example.com")
+	t.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_COLLECTOR_BINARY_ROOT", "/tmp/collectors")
+	t.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL", "https://env.example.com")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -584,21 +584,21 @@ func TestLoadOfficeInstallPublicBaseURLFromDotEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, defaultConfigRelativePath), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(opsDirEnv, tmp)
-	oldEnv, hadEnv := os.LookupEnv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL")
+	oldEnv, hadEnv := os.LookupEnv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL")
 	t.Cleanup(func() {
 		if hadEnv {
-			if err := os.Setenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
+			if err := os.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
 				t.Fatalf("restore env: %v", err)
 			}
-		} else if err := os.Unsetenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
+		} else if err := os.Unsetenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
 			t.Fatalf("restore env: %v", err)
 		}
 	})
-	if err := os.Unsetenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
+	if err := os.Unsetenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -617,7 +617,7 @@ func TestLoadOfficeInstallPublicBaseURLPrefersDotEnvOverConfigFile(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(tmp, "configs"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(tmp, defaultConfigRelativePath)
@@ -625,17 +625,17 @@ func TestLoadOfficeInstallPublicBaseURLPrefersDotEnvOverConfigFile(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Setenv(opsDirEnv, tmp)
-	oldEnv, hadEnv := os.LookupEnv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL")
+	oldEnv, hadEnv := os.LookupEnv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL")
 	t.Cleanup(func() {
 		if hadEnv {
-			if err := os.Setenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
+			if err := os.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
 				t.Fatalf("restore env: %v", err)
 			}
-		} else if err := os.Unsetenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
+		} else if err := os.Unsetenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
 			t.Fatalf("restore env: %v", err)
 		}
 	})
-	if err := os.Unsetenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
+	if err := os.Unsetenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -657,21 +657,21 @@ func TestLoadOfficeInstallPublicBaseURLPrefersEnvOverDotEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, defaultConfigRelativePath), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL=https://dotenv.example.com\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(opsDirEnv, tmp)
-	oldEnv, hadEnv := os.LookupEnv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL")
+	oldEnv, hadEnv := os.LookupEnv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL")
 	t.Cleanup(func() {
 		if hadEnv {
-			if err := os.Setenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
+			if err := os.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL", oldEnv); err != nil {
 				t.Fatalf("restore env: %v", err)
 			}
-		} else if err := os.Unsetenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
+		} else if err := os.Unsetenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL"); err != nil {
 			t.Fatalf("restore env: %v", err)
 		}
 	})
-	if err := os.Setenv("CLAW_MCP_OFFICE_INSTALL_PUBLIC_BASE_URL", "https://env.example.com"); err != nil {
+	if err := os.Setenv("CLAW_GATEWAY_OFFICE_INSTALL_PUBLIC_BASE_URL", "https://env.example.com"); err != nil {
 		t.Fatal(err)
 	}
 

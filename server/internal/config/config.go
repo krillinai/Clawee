@@ -281,7 +281,7 @@ func Load(path string) (Config, error) {
 
 	v := viper.New()
 	v.SetConfigType("yaml")
-	v.SetEnvPrefix("CLAW_MCP")
+	v.SetEnvPrefix("CLAW_GATEWAY")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	bindEnv(v)
 
@@ -293,7 +293,7 @@ func Load(path string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	if mode, ok := os.LookupEnv("CLAW_MCP_MODEL_ACCESS_MODE"); ok {
+	if mode, ok := os.LookupEnv("CLAW_GATEWAY_MODEL_ACCESS_MODE"); ok {
 		v.Set("model_access.mode", mode)
 	}
 

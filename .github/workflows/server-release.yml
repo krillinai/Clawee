@@ -32,10 +32,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           TARGET_GOARCH: ${{ matrix.arch }}
-          CLAW_MCP_COMMIT: ${{ github.sha }}
+          CLAW_GATEWAY_COMMIT: ${{ github.sha }}
         run: |
           node ../scripts/release-version.mjs check --tag "$RELEASE_TAG"
-          export CLAW_MCP_VERSION="${RELEASE_TAG#v}"
+          export CLAW_GATEWAY_VERSION="${RELEASE_TAG#v}"
           export PACKAGE_NAME="clawee-server-${RELEASE_TAG}-linux-${TARGET_GOARCH}.tar.gz"
           ./scripts/package-release.sh
           cd release

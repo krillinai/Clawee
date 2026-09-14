@@ -525,10 +525,10 @@ func openHTTPCollectorIntegrationDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	if dsn == "" {
-		t.Skip("CLAW_MCP_TEST_DATABASE_URL 未设置，跳过破坏性 Postgres 集成测试")
+		t.Skip("CLAW_GATEWAY_TEST_DATABASE_URL 未设置，跳过破坏性 Postgres 集成测试")
 	}
 	dsn = testpostgres.New(t)
-	t.Setenv("CLAW_MCP_TEST_DATABASE_URL", dsn)
+	t.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", dsn)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -556,14 +556,14 @@ func openHTTPCollectorIntegrationPool(t *testing.T, ctx context.Context) *pgxpoo
 }
 
 func TestHTTPCollectorIntegrationDatabaseURLRequiresTestDatabase(t *testing.T) {
-	originalValue, hadOriginal := os.LookupEnv("CLAW_MCP_TEST_DATABASE_URL")
+	originalValue, hadOriginal := os.LookupEnv("CLAW_GATEWAY_TEST_DATABASE_URL")
 	if hadOriginal {
-		t.Cleanup(func() { _ = os.Setenv("CLAW_MCP_TEST_DATABASE_URL", originalValue) })
+		t.Cleanup(func() { _ = os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", originalValue) })
 	} else {
-		t.Cleanup(func() { _ = os.Unsetenv("CLAW_MCP_TEST_DATABASE_URL") })
+		t.Cleanup(func() { _ = os.Unsetenv("CLAW_GATEWAY_TEST_DATABASE_URL") })
 	}
 
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5932/claw_gateway?sslmode=disable"); err != nil {
+	if err := os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5932/claw_gateway?sslmode=disable"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := httpCollectorIntegrationDatabaseURL()
@@ -571,13 +571,13 @@ func TestHTTPCollectorIntegrationDatabaseURLRequiresTestDatabase(t *testing.T) {
 		t.Fatal("httpCollectorIntegrationDatabaseURL() err = nil, want error")
 	}
 	msg := err.Error()
-	for _, fragment := range []string{"CLAW_MCP_TEST_DATABASE_URL", "_test", "claw_gateway"} {
+	for _, fragment := range []string{"CLAW_GATEWAY_TEST_DATABASE_URL", "_test", "claw_gateway"} {
 		if !strings.Contains(msg, fragment) {
 			t.Fatalf("error %q does not contain %q", msg, fragment)
 		}
 	}
 
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5933/claw_gateway_test?sslmode=disable"); err != nil {
+	if err := os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", "postgres://claw_gateway:pass@localhost:5933/claw_gateway_test?sslmode=disable"); err != nil {
 		t.Fatal(err)
 	}
 	dsn, err := httpCollectorIntegrationDatabaseURL()
@@ -590,7 +590,7 @@ func TestHTTPCollectorIntegrationDatabaseURLRequiresTestDatabase(t *testing.T) {
 }
 
 func httpCollectorIntegrationDatabaseURL() (string, error) {
-	dsn, ok := os.LookupEnv("CLAW_MCP_TEST_DATABASE_URL")
+	dsn, ok := os.LookupEnv("CLAW_GATEWAY_TEST_DATABASE_URL")
 	if !ok {
 		return "", nil
 	}
@@ -603,7 +603,7 @@ func httpCollectorIntegrationDatabaseURL() (string, error) {
 		return "", err
 	}
 	if !strings.HasSuffix(dbName, "_test") {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL database name %q must end with _test", dbName)
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL database name %q must end with _test", dbName)
 	}
 	return dsn, nil
 }
@@ -611,11 +611,11 @@ func httpCollectorIntegrationDatabaseURL() (string, error) {
 func httpCollectorIntegrationDatabaseNameFromDSN(dsn string) (string, error) {
 	parsed, err := url.Parse(dsn)
 	if err != nil || parsed.Scheme == "" {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL is invalid and database name must end with _test")
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL is invalid and database name must end with _test")
 	}
 	dbName := strings.TrimPrefix(parsed.Path, "/")
 	if dbName == "" {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL database name %q must end with _test", dbName)
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL database name %q must end with _test", dbName)
 	}
 	return dbName, nil
 }

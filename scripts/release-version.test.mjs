@@ -94,7 +94,7 @@ test('版本目标校验失败时不写入部分文件', () => {
     writeFixture(
       root,
       'server/Dockerfile',
-      'ARG CLAW_MCP_VERSION=0.1.0\n'
+      'ARG CLAW_GATEWAY_VERSION=0.1.0\n'
     );
     writeFixture(
       root,

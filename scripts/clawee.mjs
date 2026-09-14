@@ -70,7 +70,7 @@ if (command === 'setup') {
     config.server.addr = '0.0.0.0:1904';
     if (container) {
       const password = randomBytes(32).toString('hex');
-      config.database.url = `postgres://claw_mcp:${password}@postgres:5432/claw_mcp?sslmode=disable`;
+      config.database.url = `postgres://claw_gateway:${password}@postgres:5432/claw_gateway?sslmode=disable`;
       writeFileSync(resolve(opsDir, '.env'), `POSTGRES_PASSWORD=${password}\n`, { mode: 0o600, flag: 'wx' });
     }
     config.security.user_jwt_signing_key = randomBytes(32).toString('hex');

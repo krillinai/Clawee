@@ -137,7 +137,7 @@ docker compose -f server/deploy/docker-compose.yaml up -d --wait postgres
 
 ```bash
 docker compose -f server/deploy/docker-compose.yaml exec postgres \
-  pg_isready -U claw_mcp -d claw_mcp
+  pg_isready -U claw_gateway -d claw_gateway
 ```
 
 该 Compose 默认将数据库映射到本机 `127.0.0.1:15932`，仅适用于 Gateway 与数据库位于同一主机的场景。跨主机部署时应改用企业专用数据库或按企业规范调整数据库网络配置。
@@ -226,7 +226,7 @@ CLAWEE_OPS_DIR="$CLAWEE_OPS_DIR" pnpm run db:migrate
 
 二进制部署的目录至少应包含：
 
-- `claw-mcp` 可执行文件；
+- `claw-gateway` 可执行文件；
 - `deploy/start.sh`、`deploy/stop.sh`、`deploy/restart.sh` 和 `deploy/healthcheck.sh`；
 - 可写的运行状态和日志目录。
 

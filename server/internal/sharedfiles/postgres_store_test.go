@@ -457,13 +457,13 @@ func (s *blockingStorage) Put(ctx context.Context, key string, src io.Reader, op
 
 func openSharedFilesTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("CLAW_MCP_TEST_DATABASE_URL"))
+	dsn := strings.TrimSpace(os.Getenv("CLAW_GATEWAY_TEST_DATABASE_URL"))
 	if dsn == "" {
-		t.Skip("CLAW_MCP_TEST_DATABASE_URL 未设置，跳过 PostgreSQL 共享文件集成测试")
+		t.Skip("CLAW_GATEWAY_TEST_DATABASE_URL 未设置，跳过 PostgreSQL 共享文件集成测试")
 	}
 	parsed, err := url.Parse(dsn)
 	if err != nil || parsed.Scheme == "" || !strings.HasSuffix(strings.TrimPrefix(parsed.Path, "/"), "_test") {
-		t.Fatal("CLAW_MCP_TEST_DATABASE_URL 必须指向名称以 _test 结尾的数据库")
+		t.Fatal("CLAW_GATEWAY_TEST_DATABASE_URL 必须指向名称以 _test 结尾的数据库")
 	}
 	base, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

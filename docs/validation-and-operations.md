@@ -36,7 +36,7 @@
 - Gateway 默认 `http://127.0.0.1:1904`，模型使用自带服务模式，模型凭据由验收者在界面填写。
 - 不回退整合阶段已提交的依赖调整；从当前锁文件继续验证，不执行依赖升级。
 
-Gateway、管理台和客户端 Web 的默认监听地址为 `0.0.0.0`，端口分别为 `1904`、`5904`、`19860`；本文的 `127.0.0.1` URL 是本机访问地址，其他设备应换为实际 IP 或域名。Gateway 的旧配置不会被重新初始化覆盖，需要时设置 `CLAW_MCP_SERVER_ADDR=0.0.0.0:1904`。数据库和内部 daemon 保持回环监听；Web 开发页面会代理本机 daemon，限定在受信开发网络内使用。
+Gateway、管理台和客户端 Web 的默认监听地址为 `0.0.0.0`，端口分别为 `1904`、`5904`、`19860`；本文的 `127.0.0.1` URL 是本机访问地址，其他设备应换为实际 IP 或域名。Gateway 的旧配置不会被重新初始化覆盖，需要时设置 `CLAW_GATEWAY_SERVER_ADDR=0.0.0.0:1904`。数据库和内部 daemon 保持回环监听；Web 开发页面会代理本机 daemon，限定在受信开发网络内使用。
 
 ## 2. 验收准备
 
@@ -79,7 +79,7 @@ node scripts/clawee.mjs server deps-up
 pnpm run db:migrate
 ```
 
-原命令等价为在 `server/` 执行 `make deps-up`、`make db-migrate-up`。本地开发数据库监听 `127.0.0.1:15932`，库名 `claw_mcp`。本节的 Compose project 名隔离命名卷，但不会改变固定端口。
+原命令等价为在 `server/` 执行 `make deps-up`、`make db-migrate-up`。本地开发数据库监听 `127.0.0.1:15932`，库名 `claw_gateway`。本节的 Compose project 名隔离命名卷，但不会改变固定端口。
 
 - [ ] 首次初始化生成外部 `configs/config.yaml`，其中的密钥非示例常量，文件权限为 `0600`。
 - [ ] 再次执行相同 `init` 显示“已有配置，未覆盖”，现有配置不变。
@@ -179,7 +179,7 @@ MCP 配置详见[上游接入](../server/docs/integration/upstream-mcp.md)，Col
 pnpm run test
 export COMPOSE_PROJECT_NAME=clawee-validation-test
 docker compose -f server/deploy/docker-compose.test.yaml up -d --wait
-export CLAW_MCP_TEST_DATABASE_URL='postgres://claw_mcp@127.0.0.1:5933/claw_mcp_test?sslmode=disable'
+export CLAW_GATEWAY_TEST_DATABASE_URL='postgres://claw_gateway@127.0.0.1:5933/claw_gateway_test?sslmode=disable'
 pnpm run server:test
 ```
 
@@ -189,7 +189,7 @@ pnpm run server:test
 
 ```bash
 docker compose -f server/deploy/docker-compose.test.yaml down
-unset CLAW_MCP_TEST_DATABASE_URL
+unset CLAW_GATEWAY_TEST_DATABASE_URL
 unset COMPOSE_PROJECT_NAME
 ```
 
@@ -295,15 +295,14 @@ servers:
 
 脚本会构建、传输、迁移数据库并重启服务，systemd 单元缺失或不匹配时会要求确认。这里使用明确的 `staging` 目标；`all` 仍引用原脚本的固定目标名，不用于新环境验收。
 
-生产环境原先若使用 `claw-mcp.service` 和 `claw-mcp` 二进制，无需先手工停机。将运维配置中的 `service` 改为 `claw-gateway.service` 后首次部署时，脚本会先确保新单元配置就绪，待发布包校验和备份完成后在远端停止并禁用旧单元，最后重启新单元；新版本使用 `claw-gateway` 二进制。新服务健康检查通过后，脚本会删除 `/etc/systemd/system/claw-mcp.service` 和部署目录中的旧二进制。为降低配置遗漏风险，配置仍写成 `claw-mcp` 或 `claw-mcp.service` 时脚本会自动按 `claw-gateway.service` 执行并打印迁移提示。迁移完成后可用以下命令确认旧单元未再开机启用：
+生产部署统一使用 `claw-gateway.service` 和 `claw-gateway` 二进制。首次部署前应确认运维配置中的 `service` 已设置为 `claw-gateway.service`；部署脚本会校验单元、传输发布包、执行数据库迁移并重启服务。部署完成后可用以下命令确认服务已启用并正常运行：
 
 ```bash
-sudo systemctl is-enabled claw-mcp.service   # 应返回 disabled 或 not-found
 sudo systemctl is-enabled claw-gateway.service
 sudo systemctl status claw-gateway.service --no-pager
 ```
 
-迁移失败时不要手工删除任何文件；先检查 `journalctl -u claw-mcp.service -u claw-gateway.service`，确认端口和权限后重新执行部署。回滚脚本同样识别旧备份中的 `claw-mcp` 二进制，并临时通过 `claw-gateway.service` 启动，不会重新创建旧 unit。
+部署或回滚失败时不要手工删除文件；先检查 `journalctl -u claw-gateway.service`，确认端口、权限和配置后重新执行部署或回滚。回滚脚本只恢复包含 `claw-gateway` 二进制的发布备份，不会撤销数据库迁移。
 
 - [ ] 从空部署目录完成首次启动，校验健康、版本、登录、模型任务和 MCP。
 - [ ] 在本次测试实例再次部署，检查重启、文件和权限持久化。

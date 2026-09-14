@@ -6,15 +6,15 @@ services:
     container_name: clawee-postgres
     restart: always
     environment:
-      POSTGRES_DB: claw_mcp
-      POSTGRES_USER: claw_mcp
+      POSTGRES_DB: claw_gateway
+      POSTGRES_USER: claw_gateway
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "127.0.0.1:15932:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U claw_mcp -d claw_mcp"]
+      test: ["CMD-SHELL", "pg_isready -U claw_gateway -d claw_gateway"]
       interval: 5s
       timeout: 3s
       retries: 10

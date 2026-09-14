@@ -784,21 +784,21 @@ WHERE collector_id = $1 AND agent_id = $2 AND turn_id = $3
 }
 
 func TestOfficeTestDatabaseURLRequiresExplicitEnv(t *testing.T) {
-	originalValue, hadOriginal := os.LookupEnv("CLAW_MCP_TEST_DATABASE_URL")
+	originalValue, hadOriginal := os.LookupEnv("CLAW_GATEWAY_TEST_DATABASE_URL")
 	if hadOriginal {
-		t.Cleanup(func() { _ = os.Setenv("CLAW_MCP_TEST_DATABASE_URL", originalValue) })
+		t.Cleanup(func() { _ = os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", originalValue) })
 	} else {
-		t.Cleanup(func() { _ = os.Unsetenv("CLAW_MCP_TEST_DATABASE_URL") })
+		t.Cleanup(func() { _ = os.Unsetenv("CLAW_GATEWAY_TEST_DATABASE_URL") })
 	}
 
-	if err := os.Unsetenv("CLAW_MCP_TEST_DATABASE_URL"); err != nil {
+	if err := os.Unsetenv("CLAW_GATEWAY_TEST_DATABASE_URL"); err != nil {
 		t.Fatal(err)
 	}
 	if dsn, err := officeTestDatabaseURL(); err != nil || dsn != "" {
 		t.Fatalf("unset env => (%q, %v), want empty,nil", dsn, err)
 	}
 
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", "   "); err != nil {
+	if err := os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", "   "); err != nil {
 		t.Fatal(err)
 	}
 	if dsn, err := officeTestDatabaseURL(); err != nil || dsn != "" {
@@ -806,7 +806,7 @@ func TestOfficeTestDatabaseURLRequiresExplicitEnv(t *testing.T) {
 	}
 
 	wantDSN := "postgres://example/claw_gateway_test"
-	if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", wantDSN); err != nil {
+	if err := os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", wantDSN); err != nil {
 		t.Fatal(err)
 	}
 	if dsn, err := officeTestDatabaseURL(); err != nil || dsn != wantDSN {
@@ -826,11 +826,11 @@ func TestRegisterCollectorLocksOnlyRegistrationCodeRow(t *testing.T) {
 }
 
 func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
-	originalValue, hadOriginal := os.LookupEnv("CLAW_MCP_TEST_DATABASE_URL")
+	originalValue, hadOriginal := os.LookupEnv("CLAW_GATEWAY_TEST_DATABASE_URL")
 	if hadOriginal {
-		t.Cleanup(func() { _ = os.Setenv("CLAW_MCP_TEST_DATABASE_URL", originalValue) })
+		t.Cleanup(func() { _ = os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", originalValue) })
 	} else {
-		t.Cleanup(func() { _ = os.Unsetenv("CLAW_MCP_TEST_DATABASE_URL") })
+		t.Cleanup(func() { _ = os.Unsetenv("CLAW_GATEWAY_TEST_DATABASE_URL") })
 	}
 
 	tests := []struct {
@@ -841,7 +841,7 @@ func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
 		{
 			name: "invalid dsn",
 			dsn:  "://bad",
-			want: "CLAW_MCP_TEST_DATABASE_URL",
+			want: "CLAW_GATEWAY_TEST_DATABASE_URL",
 		},
 		{
 			name: "non test database",
@@ -852,7 +852,7 @@ func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := os.Setenv("CLAW_MCP_TEST_DATABASE_URL", tt.dsn); err != nil {
+			if err := os.Setenv("CLAW_GATEWAY_TEST_DATABASE_URL", tt.dsn); err != nil {
 				t.Fatal(err)
 			}
 			_, err := officeTestDatabaseURL()
@@ -860,7 +860,7 @@ func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
 				t.Fatalf("officeTestDatabaseURL() err = nil, want error")
 			}
 			msg := err.Error()
-			for _, fragment := range []string{"CLAW_MCP_TEST_DATABASE_URL", "_test", tt.want} {
+			for _, fragment := range []string{"CLAW_GATEWAY_TEST_DATABASE_URL", "_test", tt.want} {
 				if !strings.Contains(msg, fragment) {
 					t.Fatalf("error %q does not contain %q", msg, fragment)
 				}
@@ -870,7 +870,7 @@ func TestOfficeTestDatabaseURLRejectsUnsafeDatabaseNames(t *testing.T) {
 }
 
 func officeTestDatabaseURL() (string, error) {
-	dsn, ok := os.LookupEnv("CLAW_MCP_TEST_DATABASE_URL")
+	dsn, ok := os.LookupEnv("CLAW_GATEWAY_TEST_DATABASE_URL")
 	if !ok {
 		return "", nil
 	}
@@ -883,7 +883,7 @@ func officeTestDatabaseURL() (string, error) {
 		return "", err
 	}
 	if !strings.HasSuffix(dbName, "_test") {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL database name %q must end with _test", dbName)
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL database name %q must end with _test", dbName)
 	}
 	return dsn, nil
 }
@@ -891,11 +891,11 @@ func officeTestDatabaseURL() (string, error) {
 func databaseNameFromDSN(dsn string) (string, error) {
 	parsed, err := url.Parse(dsn)
 	if err != nil || parsed.Scheme == "" {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL is invalid and database name must end with _test")
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL is invalid and database name must end with _test")
 	}
 	dbName := strings.TrimPrefix(parsed.Path, "/")
 	if dbName == "" {
-		return "", fmt.Errorf("CLAW_MCP_TEST_DATABASE_URL database name %q must end with _test", dbName)
+		return "", fmt.Errorf("CLAW_GATEWAY_TEST_DATABASE_URL database name %q must end with _test", dbName)
 	}
 	return dbName, nil
 }
@@ -907,7 +907,7 @@ func openOfficeTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	if dsn == "" {
-		t.Skip("CLAW_MCP_TEST_DATABASE_URL 未设置，跳过破坏性 Postgres 集成测试")
+		t.Skip("CLAW_GATEWAY_TEST_DATABASE_URL 未设置，跳过破坏性 Postgres 集成测试")
 	}
 	db, err := sql.Open("pgx", testpostgres.New(t))
 	if err != nil {

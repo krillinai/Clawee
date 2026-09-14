@@ -2,7 +2,7 @@
 
 ## 配置来源
 
-服务读取 YAML，并允许已绑定的 `CLAW_MCP_*` 环境变量覆盖对应字段。配置路径规则如下：
+服务读取 YAML，并允许已绑定的 `CLAW_GATEWAY_*` 环境变量覆盖对应字段。配置路径规则如下：
 
 1. `--config` 为绝对路径时直接读取该文件。
 2. 设置 `CLAWEE_OPS_DIR` 且传入相对路径时，从该目录下解析相对路径。
@@ -24,13 +24,13 @@ pnpm run init --ops-dir "$CLAWEE_OPS_DIR"
 
 ## 环境变量命名
 
-已绑定字段使用 `CLAW_MCP_` 前缀，并将 YAML 层级中的点替换为下划线。例如：
+已绑定字段使用 `CLAW_GATEWAY_` 前缀，并将 YAML 层级中的点替换为下划线。例如：
 
 ```text
-database.url                    -> CLAW_MCP_DATABASE_URL
-server.addr                     -> CLAW_MCP_SERVER_ADDR
-security.user_jwt_signing_key   -> CLAW_MCP_SECURITY_USER_JWT_SIGNING_KEY
-mcp.public_base_url             -> CLAW_MCP_MCP_PUBLIC_BASE_URL
+database.url                    -> CLAW_GATEWAY_DATABASE_URL
+server.addr                     -> CLAW_GATEWAY_SERVER_ADDR
+security.user_jwt_signing_key   -> CLAW_GATEWAY_SECURITY_USER_JWT_SIGNING_KEY
+mcp.public_base_url             -> CLAW_GATEWAY_MCP_PUBLIC_BASE_URL
 ```
 
 并非所有可选集成字段都支持环境变量覆盖。部署前应以 `internal/config/config.go` 中的 `bindEnv` 列表为准。

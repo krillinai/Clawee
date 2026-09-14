@@ -199,10 +199,10 @@ export CLAWEE_OPS_DIR="$HOME/clawee-ops"
 pnpm run init --ops-dir "$CLAWEE_OPS_DIR"
 ```
 
-已有运维配置保持不变。如需明确覆盖 Gateway 监听地址，启动前设置 `CLAW_MCP_SERVER_ADDR=0.0.0.0:1904`：
+已有运维配置保持不变。如需明确覆盖 Gateway 监听地址，启动前设置 `CLAW_GATEWAY_SERVER_ADDR=0.0.0.0:1904`：
 
 ```bash
-export CLAW_MCP_SERVER_ADDR="0.0.0.0:1904"
+export CLAW_GATEWAY_SERVER_ADDR="0.0.0.0:1904"
 ```
 
 也可以在外部配置中将 `server.addr` 设置为相同值。完整配置来源、环境变量映射和 Secret 要求见 [配置参考](server/docs/getting-started/configuration.md)。
@@ -250,7 +250,7 @@ export CLAW_MCP_SERVER_ADDR="0.0.0.0:1904"
 | `pnpm run desktop:preflight:release` | 正式桌面发布预检 |
 | `pnpm run desktop:tag:check` | 正式发布 Tag 检查 |
 
-服务端 PostgreSQL 集成测试必须使用独立、名称以 `_test` 结尾的数据库，并设置 `CLAW_MCP_TEST_DATABASE_URL`。测试会修改数据，不能指向日常开发或生产数据库。
+服务端 PostgreSQL 集成测试必须使用独立、名称以 `_test` 结尾的数据库，并设置 `CLAW_GATEWAY_TEST_DATABASE_URL`。测试会修改数据，不能指向日常开发或生产数据库。
 
 ### 容器端到端验收
 

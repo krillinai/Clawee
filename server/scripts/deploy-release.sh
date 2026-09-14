@@ -430,7 +430,7 @@ wait_for_postgres() {
   for attempt in $(seq 1 60); do
     printf '[remote] postgres readiness attempt %s/60\n' "$attempt"
     if timeout 10 "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml \
-      exec -T postgres pg_isready -U claw_mcp -d claw_mcp </dev/null; then
+      exec -T postgres pg_isready -U claw_gateway -d claw_gateway </dev/null; then
       return 0
     fi
     sleep 1

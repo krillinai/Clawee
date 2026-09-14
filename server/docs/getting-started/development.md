@@ -28,7 +28,7 @@ docker compose -f deploy/docker-compose.yaml up -d postgres
 
 ```bash
 docker compose -f deploy/docker-compose.yaml exec postgres \
-  pg_isready -U claw_mcp -d claw_mcp
+  pg_isready -U claw_gateway -d claw_gateway
 ```
 
 ## 初始化数据库
@@ -52,7 +52,7 @@ make db-migrate-up
 - 后端：`http://127.0.0.1:1904`
 - Web 开发服务器：`http://127.0.0.1:5904`
 
-Gateway 和管理台开发服务器默认监听 `0.0.0.0`，其他设备用开发机实际 IP 或域名访问。上面的回环地址用于本机访问。已有外部配置不会被初始化命令覆盖；可通过 `CLAW_MCP_SERVER_ADDR=0.0.0.0:1904` 显式覆盖 Gateway 监听，`WEB_DEV_HOST` 可覆盖联合开发脚本的页面监听。
+Gateway 和管理台开发服务器默认监听 `0.0.0.0`，其他设备用开发机实际 IP 或域名访问。上面的回环地址用于本机访问。已有外部配置不会被初始化命令覆盖；可通过 `CLAW_GATEWAY_SERVER_ADDR=0.0.0.0:1904` 显式覆盖 Gateway 监听，`WEB_DEV_HOST` 可覆盖联合开发脚本的页面监听。
 
 也可以分别启动：
 

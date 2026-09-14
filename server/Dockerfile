@@ -18,8 +18,8 @@ COPY server/db ./db
 COPY server/internal ./internal
 COPY server/scripts ./scripts
 COPY --from=web-builder /src/internal/server/webdist/dist ./internal/server/webdist/dist
-ARG CLAW_MCP_VERSION=0.1.7
-ARG CLAW_MCP_COMMIT=unknown
+ARG CLAW_GATEWAY_VERSION=0.1.7
+ARG CLAW_GATEWAY_COMMIT=unknown
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(./scripts/buildinfo-ldflags.sh)" -o /out/claw-gateway ./cmd/claw-gateway \
     && mkdir -p /out/data/shared-files /out/data/skillhub/packages /out/data/skillhub/repositories
 
@@ -30,7 +30,7 @@ COPY --from=web-builder /src/internal/server/webdist/dist /app/static
 COPY --from=backend-builder --chown=nonroot:nonroot /out/data /app/data
 COPY LICENSE NOTICE /app/licenses/clawee/
 COPY third_party /app/licenses/third_party
-ENV CLAW_MCP_SHARED_FILES_STORAGE_ROOT=/app/data/shared-files
+ENV CLAW_GATEWAY_SHARED_FILES_STORAGE_ROOT=/app/data/shared-files
 ENV CLAWEE_OPS_DIR=/run/clawee-ops
 VOLUME ["/app/data"]
 EXPOSE 1904

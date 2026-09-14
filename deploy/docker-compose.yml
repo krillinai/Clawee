@@ -4,13 +4,13 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: claw_mcp
-      POSTGRES_USER: claw_mcp
+      POSTGRES_DB: claw_gateway
+      POSTGRES_USER: claw_gateway
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请使用初始化生成的外部 .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U claw_mcp -d claw_mcp]
+      test: [CMD-SHELL, pg_isready -U claw_gateway -d claw_gateway]
       interval: 5s
       timeout: 3s
       retries: 20

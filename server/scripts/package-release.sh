@@ -36,9 +36,9 @@ cp "$ROOT_DIR/deploy/stop.sh" "$BUILD_DIR/deploy/stop.sh"
 cp "$ROOT_DIR/deploy/restart.sh" "$BUILD_DIR/deploy/restart.sh"
 cp "$ROOT_DIR/deploy/healthcheck.sh" "$BUILD_DIR/deploy/healthcheck.sh"
 cp -R "$ROOT_DIR/db/migrations" "$BUILD_DIR/db/"
-RELEASE_VERSION="${CLAW_MCP_VERSION:-$(node -p "require('../package.json').version")}"
-RELEASE_COMMIT="${CLAW_MCP_COMMIT:-$(git rev-parse HEAD 2>/dev/null || printf unknown)}"
-RELEASE_BUILD_TIME="${CLAW_MCP_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+RELEASE_VERSION="${CLAW_GATEWAY_VERSION:-$(node -p "require('../package.json').version")}"
+RELEASE_COMMIT="${CLAW_GATEWAY_COMMIT:-$(git rev-parse HEAD 2>/dev/null || printf unknown)}"
+RELEASE_BUILD_TIME="${CLAW_GATEWAY_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 node --input-type=module - \
   "$BUILD_DIR/release-manifest.json" \
   "$RELEASE_VERSION" \

@@ -20,9 +20,9 @@ import (
 
 func New(t *testing.T) string {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("CLAW_MCP_TEST_DATABASE_URL"))
+	dsn := strings.TrimSpace(os.Getenv("CLAW_GATEWAY_TEST_DATABASE_URL"))
 	if dsn == "" {
-		t.Skip("CLAW_MCP_TEST_DATABASE_URL 未设置")
+		t.Skip("CLAW_GATEWAY_TEST_DATABASE_URL 未设置")
 	}
 	u, err := url.Parse(dsn)
 	if err != nil || !strings.HasSuffix(u.Path, "_test") {

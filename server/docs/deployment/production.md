@@ -28,7 +28,7 @@ docker run --rm --name mcp-gateway \
   -p 0.0.0.0:1904:1904 \
   -e CLAWEE_OPS_DIR=/run/clawee-ops \
   -v /etc/clawee/ops:/run/clawee-ops:ro \
-  -v claw-mcp-data:/app/data \
+  -v claw-gateway-data:/app/data \
   clawee-server:local
 ```
 
