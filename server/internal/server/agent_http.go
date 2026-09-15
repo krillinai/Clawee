@@ -179,9 +179,35 @@ func handleAgentMCPCatalog(accountSvc *accounts.Service, proxyGateway *mcpgatewa
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		account, agent, ok := currentAccountAgentByID(c, accountSvc, proxyGateway, "")
+		account, ok := currentAccount(c)
 		if !ok {
 			return
+		}
+		if proxyGateway == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": errMCPGatewayProxyDisabled.Error()})
+			return
+		}
+		var agent mcpgateway.AgentRegistration
+		if principal, principalOK := currentPrincipal(c); principalOK && principal.ClientID == accounts.ClientClaweeAgent {
+			if boundAgent, boundAgentOK := currentClaweeAgent(c); boundAgentOK {
+				agent = boundAgent
+			}
+		}
+		if agent.AgentID == "" {
+			agentID, err := accountSvc.PrimaryAgentID(c.Request.Context(), account.UserID)
+			if errors.Is(err, accounts.ErrAccountAgentNotFound) {
+				c.JSON(http.StatusOK, appMCPCatalogResponse{Upstreams: []appMCPUpstreamResponse{}})
+				return
+			}
+			if err != nil {
+				agentAPIError(c, err)
+				return
+			}
+			agent, err = proxyGateway.Store().GetAgent(c.Request.Context(), agentID)
+			if err != nil {
+				agentAPIError(c, err)
+				return
+			}
 		}
 		upstreams, err := proxyGateway.AuthorizedToolCatalog(c.Request.Context(), mcpgateway.AgentIdentity{
 			UserID:  account.UserID,

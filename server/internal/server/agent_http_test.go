@@ -176,6 +176,30 @@ func TestAgentMCPCatalogReturnsAuthorizedCapabilitiesForCurrentAccount(t *testin
 	}
 }
 
+func TestAgentMCPCatalogReturnsEmptyForAccountWithoutAgents(t *testing.T) {
+	ctx := context.Background()
+	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	account, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: "catalog-empty@example.com", Name: "Catalog Empty", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := accountSvc.IssueTokens(ctx, account.Account, []accounts.TokenRequest{{Audience: accounts.AudienceFrontend, ClientID: accounts.ClientWeb}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := server.NewRouter(server.Options{
+		AccountService: accountSvc,
+		ProxyGateway:   testProxyGateway(mcpgateway.NewMemoryStore()),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/mcp/catalog", nil)
+	req.AddCookie(&http.Cookie{Name: "claw_front_token", Value: tokens.Token(accounts.AudienceFrontend).Token})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"upstreams":[]`) {
+		t.Fatalf("empty catalog status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestUpdateAgentNameOnlyUpdatesOwnedAgentName(t *testing.T) {
 	ctx := context.Background()
 	accountSvc := newTestAccountService(accounts.NewMemoryStore())

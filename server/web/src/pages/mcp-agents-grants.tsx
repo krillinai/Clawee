@@ -561,9 +561,9 @@ export function MCPAgentsGrantsPage() {
         canRotate={canRotateToken}
         mode="admin"
         onClose={closeTokenDrawer}
-        onRevealToken={(agent) => copyTokenMutation.mutate(agent)}
-        onRevokeToken={(agent) => openConfirm({ kind: "revoke", agent })}
-        onRotateToken={(agent) => openConfirm({ kind: "rotate", agent })}
+        onRevealToken={(agent) => { if (agent) copyTokenMutation.mutate(agent); }}
+        onRevokeToken={(agent) => { if (agent) openConfirm({ kind: "revoke", agent }); }}
+        onRotateToken={(agent) => { if (agent) openConfirm({ kind: "rotate", agent }); }}
         open={Boolean(tokenDrawerAgent)}
         tokenError={
           copyTokenMutation.isError

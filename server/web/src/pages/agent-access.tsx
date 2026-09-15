@@ -104,8 +104,8 @@ export function AgentAccessPage() {
         ? revokeMutation.error.message
         : null;
 
-  function openToken(agent: MCPAgent) {
-    setSelectedAgentId(agent.agentId);
+  function openToken(agent?: MCPAgent | null) {
+    if (agent) setSelectedAgentId(agent.agentId);
     setDrawer("token");
     revealMutation.reset();
     if (!secretResult && tokenInfo?.tokenStatus === "active") revealMutation.mutate();
@@ -134,7 +134,7 @@ export function AgentAccessPage() {
             <TokenMetadata label="last_used_at" value={formatDateTime(tokenInfo?.tokenLastUsedAt)} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button disabled={!tokenInfo || tokenInfo.tokenStatus !== "active" || tokenPending || !agents.length} onClick={() => selectedAgent && openToken(selectedAgent)} variant="secondary"><Eye aria-hidden="true" />查看 Token</Button>
+            <Button disabled={!tokenInfo || tokenInfo.tokenStatus !== "active" || tokenPending} onClick={() => openToken(selectedAgent)} variant="secondary"><Eye aria-hidden="true" />查看 Token</Button>
             <Button disabled={tokenPending} onClick={() => rotateMutation.mutate()} variant="primary"><RotateCw aria-hidden="true" />{tokenInfo?.tokenStatus === "active" ? "轮换 Token" : "生成 Token"}</Button>
             <Button disabled={!tokenInfo || tokenInfo.tokenStatus !== "active" || tokenPending} onClick={() => revokeMutation.mutate()} variant="destructive"><ShieldOff aria-hidden="true" />吊销 Token</Button>
           </div>

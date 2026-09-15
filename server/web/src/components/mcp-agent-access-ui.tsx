@@ -227,11 +227,11 @@ export function MCPAgentTokenDrawer({
   tokenError?: string | null;
   tokenPending?: boolean;
   onClose: () => void;
-  onRevealToken?: (agent: MCPAgent) => void;
-  onRotateToken: (agent: MCPAgent) => void;
-  onRevokeToken: (agent: MCPAgent) => void;
+  onRevealToken?: (agent: MCPAgent | null) => void;
+  onRotateToken: (agent: MCPAgent | null) => void;
+  onRevokeToken: (agent: MCPAgent | null) => void;
 }) {
-  if (!open || !agent) return null;
+  if (!open) return null;
   const allowReveal = canReveal ?? mode === "user";
   const allowRotate = canRotate ?? mode === "user";
   const allowRevoke = canRevoke ?? mode === "user";
@@ -239,17 +239,19 @@ export function MCPAgentTokenDrawer({
   const allowTokenSecrets = allowReveal || allowRotate;
   const isActive = tokenInfo?.tokenStatus === "active";
   const isCopyDisabled = !isActive || tokenPending || !tokenResult;
-  const mcpConfig = tokenResult ? accountMCPConfig(tokenResult.token, agent.agentId) : undefined;
+  const mcpConfig = tokenResult && agent ? accountMCPConfig(tokenResult.token, agent.agentId) : undefined;
 
   return (
-    <DetailDrawer contextLabel="账户级 Token" onClose={onClose} open={open} subtitle={agent.agentId} title="账户级 Token 与 MCP 配置">
+    <DetailDrawer contextLabel="账户级 Token" onClose={onClose} open={open} subtitle={agent?.agentId ?? "当前账户"} title="账户级 Token 与 MCP 配置">
       <KeyValueList
         items={[
-          { label: "agent_id", value: agent.agentId },
-          { label: "user_id", value: agent.boundUserId || tokenInfo?.userId || "-" },
-          { label: "bound_user", value: [agent.boundUserName, agent.boundUserEmail].filter(Boolean).join(" · ") || "-" },
-          { label: "创建来源", value: <Badge className="whitespace-nowrap" variant="outline">{agentCreationSourceLabel(agent.creationSource)}</Badge> },
-          ...(agent.collector ? [
+          ...(agent ? [
+            { label: "agent_id", value: agent.agentId },
+            { label: "bound_user", value: [agent.boundUserName, agent.boundUserEmail].filter(Boolean).join(" · ") || "-" },
+            { label: "创建来源", value: <Badge className="whitespace-nowrap" variant="outline">{agentCreationSourceLabel(agent.creationSource)}</Badge> },
+          ] : []),
+          { label: "user_id", value: agent?.boundUserId || tokenInfo?.userId || "-" },
+          ...(agent?.collector ? [
             { label: "collector_id", value: agent.collector.collectorId },
             { label: "运行实例", value: agent.collector.officeAgentId },
             { label: "设备", value: agent.collector.deviceName || agent.collector.hostname || "-" },

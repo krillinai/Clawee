@@ -112,6 +112,20 @@ describe("AgentAccessPage", () => {
     expect(listMyMCPCatalogMock).toHaveBeenCalledTimes(1);
   });
 
+  it("没有 Agent 时仍可查看账户 Token，并显示正常空列表", async () => {
+    listMyAgentsMock.mockResolvedValueOnce([]);
+    listMyMCPCatalogMock.mockResolvedValueOnce({ upstreams: [] });
+    renderPage();
+
+    expect(await screen.findByText("暂无匹配的智能体。")).toBeInTheDocument();
+    expect(screen.queryByText("加载智能体接入信息失败")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看 Token" }));
+    expect(await screen.findByRole("heading", { name: "账户级 Token 与 MCP 配置" })).toBeInTheDocument();
+    await waitFor(() => expect(revealMyAccountTokenMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("region", { name: "Token" })).toHaveTextContent("agt_account_secret");
+    expect(screen.queryByRole("region", { name: "MCP 配置" })).not.toBeInTheDocument();
+  });
+
   it("使用账户 Token 和所选 Agent ID 生成双 Header MCP 配置", async () => {
     renderPage();
     const row = await findRowByText("agent_two");
