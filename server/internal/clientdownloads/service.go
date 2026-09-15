@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -123,7 +122,7 @@ func (s *Service) Update(ctx context.Context, cfg Config, updatedBy string, expe
 }
 func Validate(cfg Config) error {
 	if !validGatewayURL(cfg.GatewayURL) {
-		return errors.New("gateway_url must be a valid HTTPS origin (loopback HTTP is allowed)")
+		return errors.New("gateway_url must be a valid HTTP or HTTPS origin")
 	}
 	if !validCatalogURL(cfg.CatalogURL) {
 		return errors.New("catalog_url must be a valid HTTPS URL without user info, fragment, or query")
@@ -135,9 +134,7 @@ func validGatewayURL(value string) bool {
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
-	ip := net.ParseIP(u.Hostname())
-	loop := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
-	return u.Scheme == "https" || u.Scheme == "http" && loop
+	return u.Scheme == "https" || u.Scheme == "http"
 }
 func validCatalogURL(value string) bool {
 	u, err := url.Parse(strings.TrimSpace(value))

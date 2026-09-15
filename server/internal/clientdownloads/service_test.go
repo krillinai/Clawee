@@ -16,9 +16,12 @@ func TestValidateURLs(t *testing.T) {
 	if err := Validate(valid); err != nil {
 		t.Fatal(err)
 	}
+	if err := Validate(Config{GatewayURL: "http://gateway.example.com", CatalogURL: valid.CatalogURL}); err != nil {
+		t.Fatalf("expected non-loopback HTTP gateway URL to be valid: %v", err)
+	}
 	for _, cfg := range []Config{
 		{GatewayURL: "https://gateway.example.com/api", CatalogURL: valid.CatalogURL},
-		{GatewayURL: "http://gateway.example.com", CatalogURL: valid.CatalogURL},
+		{GatewayURL: "ftp://gateway.example.com", CatalogURL: valid.CatalogURL},
 		{GatewayURL: valid.GatewayURL, CatalogURL: "https://user:secret@example.com/latest.json"},
 		{GatewayURL: valid.GatewayURL, CatalogURL: "https://example.com/latest.json?x=1"},
 	} {
