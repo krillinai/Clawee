@@ -25,7 +25,16 @@ Clawee 是面向企业部署与治理的开源 Agent 平台。它将本地 Agent
 Clawee 由两个边界清晰、彼此协作的部分组成：
 
 - **本地执行层**：共享 Web、本地 daemon、Electron 桌面端与内嵌 Codex Runtime，负责任务、会话、工作区文件、模型、Skill、定时任务和系统原生能力。
+
+<p align="center">
+  <img src="./docs/assets/clawee-homepage.png" alt="Clawee 首页" width="960" />
+</p>
+
 - **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Skill Hub、知识库和共享文件。
+
+<p align="center">
+  <img src="./docs/assets/gateway.png" alt="Gateway 接入治理链路" width="960" />
+</p>
 
 桌面端和浏览器端使用同一套任务界面。桌面端额外提供内嵌 Runtime、文件系统、通知和更新等原生能力。Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一入口。
 
