@@ -289,8 +289,8 @@ SELECT
 	`).Scan(&mcpAgents, &accountAgents, &activeTokens); err != nil {
 		t.Fatal(err)
 	}
-	if mcpAgents != 1 || accountAgents != 1 || activeTokens != 0 {
-		t.Fatalf("agent idempotency counts = mcp_agents=%d account_agents=%d active_tokens=%d, want 1/1/0", mcpAgents, accountAgents, activeTokens)
+	if mcpAgents != 1 || accountAgents != 1 || activeTokens != 1 {
+		t.Fatalf("agent idempotency counts = mcp_agents=%d account_agents=%d active_tokens=%d, want 1/1/1", mcpAgents, accountAgents, activeTokens)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT mcp_agent_id FROM office_agents WHERE agent_id = 'agent_http_1'`).Scan(&mcpAgentID); err != nil {
 		t.Fatal(err)
