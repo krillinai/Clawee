@@ -257,8 +257,8 @@ func TestTargetAppAgentRoutesSupportOwnedAgentCollection(t *testing.T) {
 		t.Fatalf("token status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	rec = request(http.MethodGet, "/api/v1/app/mcp/token", "")
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "account_token_not_found") {
-		t.Fatalf("missing account token status = %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"token_status":"active"`) {
+		t.Fatalf("auto-created account token status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

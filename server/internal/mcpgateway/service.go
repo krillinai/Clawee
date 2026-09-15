@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,6 +56,7 @@ type Service struct {
 	knowledgeMCPAccessResolver KnowledgeMCPAccessResolver
 	agentOwnerResolver         func(context.Context, string) (string, error)
 	accountActiveValidator     func(context.Context, string) error
+	ensureAccountTokenMu       sync.Mutex
 }
 
 type TokenCipher interface {
@@ -156,6 +158,25 @@ func (s *Service) CreateOwnedAgent(ctx context.Context, userID string, agent Age
 	}
 	agent.Status = StatusActive
 	return s.store.CreateOwnedAgent(ctx, userID, agent)
+}
+
+// EnsureAccountToken creates the first account-level MCP token without rotating
+// an existing token, including one that was revoked or expired.
+func (s *Service) EnsureAccountToken(ctx context.Context, userID string) error {
+	s.ensureAccountTokenMu.Lock()
+	defer s.ensureAccountTokenMu.Unlock()
+
+	if _, err := s.store.GetLatestAccountToken(ctx, userID); err == nil {
+		return nil
+	} else if !errors.Is(err, ErrAccountTokenNotFound) {
+		return err
+	}
+	_, err := s.RotateAccountToken(ctx, AccountTokenIssueRequest{
+		UserID: userID,
+		Scopes: []string{"mcp:call"},
+		Issuer: "claw-gateway-user",
+	})
+	return err
 }
 
 func NewService(cfg Config) *Service {

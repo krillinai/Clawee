@@ -83,6 +83,9 @@ func (s *Service) EnsureOwnedAgent(ctx context.Context, req EnsureRequest) (Ensu
 		}
 		err = s.proxyGateway.CreateOwnedAgent(ctx, req.UserID, agent)
 		if err == nil {
+			if err := s.proxyGateway.EnsureAccountToken(ctx, req.UserID); err != nil {
+				return EnsureResult{}, err
+			}
 			return EnsureResult{Agent: agent, Created: true}, nil
 		}
 		if !errors.Is(err, mcpgateway.ErrAgentAlreadyExists) {
@@ -105,6 +108,11 @@ func (s *Service) EnsureOwnedAgent(ctx context.Context, req EnsureRequest) (Ensu
 	}
 	if req.Source == SourceClaweeLogin && agent.Status != mcpgateway.StatusActive {
 		return EnsureResult{}, ErrAgentForbidden
+	}
+	if req.Source == SourceClaweeLogin {
+		if err := s.proxyGateway.EnsureAccountToken(ctx, req.UserID); err != nil {
+			return EnsureResult{}, err
+		}
 	}
 	return EnsureResult{Agent: agent}, nil
 }

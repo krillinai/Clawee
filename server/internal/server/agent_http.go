@@ -78,6 +78,10 @@ func handleAccountToken(proxyGateway *mcpgateway.Service) gin.HandlerFunc {
 		}
 		token, err := proxyGateway.Store().GetLatestAccountToken(c.Request.Context(), account.UserID)
 		if err != nil {
+			if errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
+				c.JSON(http.StatusOK, gin.H{"token": accountTokenMissingMetadataResponse(account.UserID)})
+				return
+			}
 			agentAPIError(c, err)
 			return
 		}
@@ -404,6 +408,10 @@ func handleCreateAgent(accountSvc *accounts.Service, proxyGateway *mcpgateway.Se
 			agentAPIError(c, err)
 			return
 		}
+		if err := proxyGateway.EnsureAccountToken(c.Request.Context(), account.UserID); err != nil {
+			agentAPIError(c, err)
+			return
+		}
 		c.JSON(http.StatusCreated, gin.H{"agent": agentAccessResponse(agent), "account": accountResponse(account, false)})
 	}
 }
@@ -568,6 +576,14 @@ func accountTokenMetadataResponse(token mcpgateway.AccountToken) gin.H {
 		"token_issuer":       token.Issuer,
 		"token_scopes":       token.Scopes,
 		"created_at":         token.CreatedAt,
+	}
+}
+
+func accountTokenMissingMetadataResponse(userID string) gin.H {
+	return gin.H{
+		"user_id":      strings.TrimSpace(userID),
+		"token_status": mcpgateway.StatusMissing,
+		"token_scopes": []string{},
 	}
 }
 

@@ -575,6 +575,10 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if err := opts.ProxyGateway.EnsureAccountToken(c.Request.Context(), req.UserID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusCreated, gin.H{"agent": agent})
 	}
 	listAgents := func(c *gin.Context) {

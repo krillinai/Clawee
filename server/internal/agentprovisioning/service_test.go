@@ -73,8 +73,8 @@ func TestEnsureOwnedAgentCreatesUsingSourcePolicy(t *testing.T) {
 			if err != nil || owner.UserID != test.req.UserID {
 				t.Fatalf("owner = %#v, %v", owner, err)
 			}
-			if _, err := gatewayStore.GetActiveAccountToken(context.Background(), test.req.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-				t.Fatalf("agent creation changed account token: %v", err)
+			if token, err := gatewayStore.GetActiveAccountToken(context.Background(), test.req.UserID); err != nil || token.UserID != test.req.UserID {
+				t.Fatalf("agent creation did not create account token: token=%#v err=%v", token, err)
 			}
 		})
 	}
@@ -97,8 +97,49 @@ func TestEnsureOwnedAgentReusesOwnedAgentWithoutMutationOrTokenRotation(t *testi
 	if second.Agent.Name != first.Agent.Name || second.Agent.ClientID != first.Agent.ClientID {
 		t.Fatalf("agent mutated: %#v", second)
 	}
+	firstToken, err := store.GetActiveAccountToken(context.Background(), "usr_1")
+	if err != nil {
+		t.Fatalf("first account token: %v", err)
+	}
+	secondToken, err := store.GetActiveAccountToken(context.Background(), "usr_1")
+	if err != nil || secondToken.ID != firstToken.ID {
+		t.Fatalf("agent reuse rotated account token: first=%#v second=%#v err=%v", firstToken, secondToken, err)
+	}
+	if _, err := svc.proxyGateway.RevokeAccountToken(context.Background(), "usr_1"); err != nil {
+		t.Fatalf("revoke account token: %v", err)
+	}
+	if _, err := svc.EnsureOwnedAgent(context.Background(), EnsureRequest{
+		UserID: "usr_1", AgentID: "stable_1", Source: SourceCollector,
+	}); err != nil {
+		t.Fatalf("reuse revoked-token agent: %v", err)
+	}
 	if _, err := store.GetActiveAccountToken(context.Background(), "usr_1"); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("agent reuse changed account token: %v", err)
+		t.Fatalf("agent reuse reissued revoked account token: %v", err)
+	}
+	if err := svc.proxyGateway.EnsureAccountToken(context.Background(), "usr_1"); err != nil {
+		t.Fatalf("ensure account token after revoke: %v", err)
+	}
+	latest, err := store.GetLatestAccountToken(context.Background(), "usr_1")
+	if err != nil || latest.Status != mcpgateway.StatusRevoked {
+		t.Fatalf("ensure account token resurrected revoked token: token=%#v err=%v", latest, err)
+	}
+}
+
+func TestEnsureOwnedAgentClaweeLoginBackfillsMissingAccountToken(t *testing.T) {
+	svc, _, store := newProvisioningTestService(t)
+	ctx := context.Background()
+	if err := store.CreateOwnedAgent(ctx, "usr_1", mcpgateway.AgentRegistration{
+		AgentID: "legacy-agent", ClientID: accounts.ClientClaweeAgent, ActorID: "usr_1", Status: mcpgateway.StatusActive,
+	}); err != nil {
+		t.Fatalf("create legacy agent: %v", err)
+	}
+	if _, err := svc.EnsureOwnedAgent(ctx, EnsureRequest{
+		UserID: "usr_1", AgentID: "legacy-agent", Source: SourceClaweeLogin,
+	}); err != nil {
+		t.Fatalf("clawee login did not backfill account token: %v", err)
+	}
+	if token, err := store.GetActiveAccountToken(ctx, "usr_1"); err != nil || token.UserID != "usr_1" {
+		t.Fatalf("backfilled token = %#v err=%v", token, err)
 	}
 }
 
@@ -200,7 +241,7 @@ func TestEnsureOwnedAgentConcurrentCreateReusesWinner(t *testing.T) {
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("agents = %#v, %v", agents, err)
 	}
-	if _, err := baseStore.GetActiveAccountToken(context.Background(), "usr_1"); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("concurrent agent create changed account token: %v", err)
+	if token, err := baseStore.GetActiveAccountToken(context.Background(), "usr_1"); err != nil || token.UserID != "usr_1" {
+		t.Fatalf("concurrent agent create did not create account token: token=%#v err=%v", token, err)
 	}
 }

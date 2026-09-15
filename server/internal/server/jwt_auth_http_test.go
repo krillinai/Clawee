@@ -220,8 +220,8 @@ func TestClaweeRegisterAndLoginBindStableAgent(t *testing.T) {
 	if err != nil || owner.UserID != account.UserID {
 		t.Fatalf("agent owner = %#v err=%v", owner, err)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("clawee registration changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.UserID); err != nil || token.UserID != account.UserID {
+		t.Fatalf("clawee registration did not create account token: token=%#v err=%v", token, err)
 	}
 
 	login := loginClawee(t, router, "clawee@example.com", "passw0rd!", agentID)
@@ -240,8 +240,8 @@ func TestClaweeRegisterAndLoginBindStableAgent(t *testing.T) {
 	if second.Status != http.StatusOK {
 		t.Fatalf("second login = %#v", second)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("clawee login changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.UserID); err != nil || token.UserID != account.UserID {
+		t.Fatalf("clawee login did not preserve account token: token=%#v err=%v", token, err)
 	}
 
 	me := httptest.NewRecorder()
@@ -545,8 +545,8 @@ func TestExistingWebAccountFirstClaweeLoginCreatesBoundAgent(t *testing.T) {
 	if err != nil || owner.UserID != account.Account.UserID {
 		t.Fatalf("owner = %#v err=%v", owner, err)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("clawee login changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); err != nil || token.UserID != account.Account.UserID {
+		t.Fatalf("clawee login did not create account token: token=%#v err=%v", token, err)
 	}
 }
 
@@ -565,16 +565,16 @@ func TestClaweeLoginRetriesAfterSessionPersistenceFailure(t *testing.T) {
 	if first.Status != http.StatusInternalServerError {
 		t.Fatalf("first login = %#v", first)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("failed login changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); err != nil || token.UserID != account.Account.UserID {
+		t.Fatalf("failed login did not preserve account token: token=%#v err=%v", token, err)
 	}
 	store.failAt = 0
 	second := loginClawee(t, router, account.Account.Email, "passw0rd!", "retry-agent")
 	if second.Status != http.StatusOK || second.AgentID != "retry-agent" {
 		t.Fatalf("second login = %#v", second)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("successful login changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); err != nil || token.UserID != account.Account.UserID {
+		t.Fatalf("successful login did not preserve account token: token=%#v err=%v", token, err)
 	}
 }
 
@@ -616,8 +616,8 @@ func TestConcurrentFirstClaweeLoginReusesOneAgent(t *testing.T) {
 	if err != nil || owner.UserID != account.Account.UserID {
 		t.Fatalf("owner = %#v err=%v", owner, err)
 	}
-	if _, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); !errors.Is(err, mcpgateway.ErrAccountTokenNotFound) {
-		t.Fatalf("concurrent login changed account token: %v", err)
+	if token, err := proxyStore.GetActiveAccountToken(ctx, account.Account.UserID); err != nil || token.UserID != account.Account.UserID {
+		t.Fatalf("concurrent login did not create account token: token=%#v err=%v", token, err)
 	}
 }
 

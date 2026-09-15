@@ -306,7 +306,6 @@ func TestEmptyAccountAgentDetailTokenAndToolsReturnNotFound(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/v1/app/agents/detail",
-		"/api/v1/app/mcp/token",
 		"/api/v1/app/agents/tools",
 	} {
 		rec := httptest.NewRecorder()
@@ -316,6 +315,13 @@ func TestEmptyAccountAgentDetailTokenAndToolsReturnNotFound(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("GET %s status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/mcp/token", nil)
+	req.AddCookie(frontendCookie(t, cookies))
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"token_status":"missing"`) {
+		t.Fatalf("missing token status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	agents, err := proxyStore.ListAgents(context.Background(), mcpgateway.AgentFilter{})
 	if err != nil || len(agents) != 0 {
