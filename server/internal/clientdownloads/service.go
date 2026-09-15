@@ -202,12 +202,19 @@ func (s *Service) Public(ctx context.Context, gatewayURL string) (PublicResponse
 
 type catalogDocument struct {
 	Product   string            `json:"product"`
+	Kind      string            `json:"kind"`
 	Version   string            `json:"version"`
 	Artifacts []catalogArtifact `json:"artifacts"`
+	Files     []catalogFile     `json:"files"`
 	Desktop   struct {
 		MacosSigning   string `json:"macosSigning"`
 		WindowsSigning string `json:"windowsSigning"`
 	} `json:"desktop"`
+}
+type catalogFile struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"downloadUrl"`
+	SHA256      string `json:"sha256"`
 }
 type catalogArtifact struct {
 	Component   string `json:"component"`
@@ -219,7 +226,13 @@ type catalogArtifact struct {
 }
 
 func parseCatalog(doc catalogDocument) ([]Artifact, string, error) {
-	if doc.Product != "Clawee" || strings.TrimSpace(doc.Version) == "" || len(doc.Artifacts) == 0 {
+	if doc.Product != "Clawee" || strings.TrimSpace(doc.Version) == "" {
+		return nil, "", errors.New("invalid catalog")
+	}
+	if doc.Kind == "customer-desktop-delivery" {
+		return parseCustomerDesktopDelivery(doc)
+	}
+	if len(doc.Artifacts) == 0 {
 		return nil, "", errors.New("invalid catalog")
 	}
 	if doc.Desktop.MacosSigning != "" && doc.Desktop.MacosSigning != "unsigned" && doc.Desktop.MacosSigning != "developer-id-notarized" {
@@ -256,6 +269,36 @@ func parseCatalog(doc catalogDocument) ([]Artifact, string, error) {
 			signature = "signed"
 		}
 		out = append(out, Artifact{Platform: a.Platform, Arch: a.Arch, Version: doc.Version, DownloadURL: a.DownloadURL, SHA256: a.SHA256, Signature: signature})
+	}
+	if len(out) == 0 {
+		return nil, "", errors.New("catalog has no desktop packages")
+	}
+	return out, doc.Version, nil
+}
+
+func parseCustomerDesktopDelivery(doc catalogDocument) ([]Artifact, string, error) {
+	out := make([]Artifact, 0, 3)
+	seen := map[string]bool{}
+	for _, file := range doc.Files {
+		parts := strings.Split(strings.Trim(file.Name, "/"), "/")
+		if len(parts) != 3 || (parts[0] != "macos" && parts[0] != "windows") {
+			continue
+		}
+		platform, arch := parts[0], parts[1]
+		ext := strings.ToLower(parts[2])
+		if platform == "macos" {
+			if (arch != "arm64" && arch != "x64") || !strings.HasSuffix(ext, ".dmg") {
+				continue
+			}
+		} else if arch != "x64" || !strings.HasSuffix(ext, ".exe") {
+			continue
+		}
+		key := platform + "/" + arch
+		if seen[key] || !validCatalogURL(file.DownloadURL) || !sha256Pattern.MatchString(file.SHA256) {
+			return nil, "", errors.New("invalid desktop artifact")
+		}
+		seen[key] = true
+		out = append(out, Artifact{Platform: platform, Arch: arch, Version: doc.Version, DownloadURL: file.DownloadURL, SHA256: file.SHA256, Signature: "unsigned"})
 	}
 	if len(out) == 0 {
 		return nil, "", errors.New("catalog has no desktop packages")

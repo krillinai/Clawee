@@ -54,6 +54,25 @@ func TestPublicParsesDesktopArtifactsAndCaches(t *testing.T) {
 	}
 }
 
+func TestPublicParsesCustomerDesktopDeliveryFiles(t *testing.T) {
+	body := `{"schemaVersion":1,"product":"Clawee","kind":"customer-desktop-delivery","version":"0.1.7","files":[` +
+		`{"name":"macos/arm64/Clawee-0.1.7-arm64.dmg","downloadUrl":"https://cdn.example.com/a.dmg","sha256":"` + strings.Repeat("a", 64) + `"},` +
+		`{"name":"macos/x64/Clawee-0.1.7.dmg","downloadUrl":"https://cdn.example.com/b.dmg","sha256":"` + strings.Repeat("b", 64) + `"},` +
+		`{"name":"windows/x64/Clawee-Setup-0.1.7.exe","downloadUrl":"https://cdn.example.com/c.exe","sha256":"` + strings.Repeat("c", 64) + `"},` +
+		`{"name":"customer-delivery.json","downloadUrl":"https://cdn.example.com/meta.json","sha256":"` + strings.Repeat("d", 64) + `"}]}`
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	service := NewServiceWithHTTPClient(settings.NewMemoryStore(), client, time.Minute)
+	if _, err := service.Update(context.Background(), Config{GatewayURL: "https://gateway.example.com", CatalogURL: DefaultCatalogURL}, "admin", 0); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Public(context.Background(), "")
+	if err != nil || len(result.Packages) != 3 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
 func TestPublicRejectsInvalidJSON(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
