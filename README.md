@@ -31,6 +31,10 @@ Clawee 由两个边界清晰、彼此协作的部分组成：
 - **本地执行层**：共享 Web、本地 daemon、Electron 桌面端与内嵌 Codex Runtime，负责任务、会话、工作区文件、模型、Skill、定时任务和系统原生能力。
 - **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Skill Hub、知识库和共享文件。
 
+<p align="center">
+  <img src="./docs/assets/gateway.png" alt="Gateway 接入治理链路" width="960" />
+</p>
+
 桌面端和浏览器端使用同一套任务界面。桌面端额外提供内嵌 Runtime、文件系统、通知和更新等原生能力。Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一入口。
 
 Clawee 采用 Apache-2.0，通用能力全部开放。模型托管、计费、钉钉、百炼及其他外部服务都按需配置；未配置时不影响本地工作台与 Gateway 的核心能力。项目默认使用自带的模型服务接入方式，不依赖维护者运营的公共模型网关，也不替代企业已有的 OA、ERP、CRM 等业务系统。
