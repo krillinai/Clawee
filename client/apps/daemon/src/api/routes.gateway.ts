@@ -26,12 +26,8 @@ export async function registerGatewayRoutes(server: FastifyInstance, input: {
     try {
       if (!parsed.success) throw new Error('invalid input');
       gateway = resolveEnterpriseOrigin(parsed.data.gateway).origin;
-      const url = new URL(gateway);
-      if (url.protocol === 'http:' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
-        throw new Error('remote gateway requires https');
-      }
     } catch {
-      return reply.code(400).send(apiError('VALIDATION_FAILED', '请输入 HTTPS 服务端地址；HTTP 仅限本机'));
+      return reply.code(400).send(apiError('VALIDATION_FAILED', '请输入有效的 HTTP 或 HTTPS 服务端地址'));
     }
     if (!input.configPath || !input.canChange()) {
       return reply.code(409).send(apiError('VALIDATION_FAILED', '请先退出登录并等待运行中的任务结束'));

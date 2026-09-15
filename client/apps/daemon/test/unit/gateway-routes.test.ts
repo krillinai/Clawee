@@ -31,7 +31,16 @@ it('保存前清除旧认证，然后激活新网关', async () => {
   expect((await f.server.inject('/enterprise/gateway')).json().gateway).toBe('https://new.example');
 });
 
-it.each(['http://remote.example', 'https://user:secret@example.com', 'https://example.com/path', 'file:///tmp'])('拒绝不安全网关 %s', async gateway => {
+it('允许保存远程 HTTP 网关', async () => {
+  const f = await fixture();
+  const reply = await f.server.inject({ method: 'POST', url: '/enterprise/gateway', payload: { gateway: 'http://remote.example:1904/' } });
+  expect(reply.statusCode).toBe(200);
+  expect(f.clearSession).toHaveBeenCalledOnce();
+  expect(f.activate).toHaveBeenCalledWith('http://remote.example:1904');
+  expect(readFileSync(f.configPath, 'utf8')).toContain('http://remote.example:1904');
+});
+
+it.each(['https://user:secret@example.com', 'https://example.com/path', 'file:///tmp'])('拒绝无效网关 %s', async gateway => {
   const f = await fixture();
   expect((await f.server.inject({ method: 'POST', url: '/enterprise/gateway', payload: { gateway } })).statusCode).toBe(400);
   expect(f.clearSession).not.toHaveBeenCalled();
