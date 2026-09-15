@@ -70,6 +70,12 @@ Agent 动态是 Clawee 可承载的运行观测与使用分析场景。以下以
 
 ![哔哩哔哩数据洞察看板](docs/delivery/user-guides/assets/bilibili-data-insight.jpg)
 
+### Skill 中心
+
+Skill 中心用于集中校验、发布和回滚企业 Skill 包，支持按技能空间、发布状态和来源筛选，帮助团队统一维护可复用的工作方法。管理员可以在管理台查看版本摘要、配置授权范围，并将已发布的 Skill 提供给客户端使用；本地执行仍由 daemon 负责，Gateway 负责共享资源与治理边界。
+
+![Clawee 管理台技能中心](docs/assets/skills.png)
+
 ## 核心工作流
 
 ### 本地 Agent 任务
