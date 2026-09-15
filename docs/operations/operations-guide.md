@@ -266,6 +266,64 @@ docker run -d --name clawee-gateway \
 
 完成解析后，在客户端或浏览器中使用该域名访问 Gateway，不使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`。
 
+### 7.1 反向代理和 CDN 缓存策略
+
+如果 Gateway 前面使用 Nginx、云负载均衡或 CDN，必须将带认证、运行时状态或部署配置的响应设置为不缓存。不能只依赖浏览器的 `Cache-Control` 处理，也不能按 URL 缓存而忽略 Cookie、`Authorization` 或其他认证信息。
+
+以下路径应在 CDN 和反向代理层配置为完全绕过缓存，并由应用返回 `Cache-Control: no-store`：
+
+```text
+/api/
+/mcp
+/mcp/*
+/.well-known/oauth-protected-resource/mcp
+/.well-known/oauth-protected-resource/mcp/*
+/metrics
+/healthz
+/readyz
+/version
+/install
+/install.sh
+/install.ps1
+/office/collectors/install
+/office/collectors/install.sh
+/office/collectors/install.ps1
+/downloads/clawee-collector/*
+/office/collectors/downloads/clawee-collector/*
+```
+
+其中：
+
+- `/api/*` 包含认证、当前账户、应用数据、管理数据、文件和权限信息，禁止公共缓存。
+- `/mcp*` 的响应受 Bearer Token、账户授权和上游状态影响，必须禁止缓存。`no-cache` 只要求重新验证，不等于禁止存储，应使用 `no-store`。
+- `/.well-known/oauth-protected-resource/mcp*` 虽然是公开元数据，但内容依赖当前 Gateway 配置和上游状态；建议不缓存，至少不能使用长期缓存。
+- `/metrics` 可能包含运行和业务统计信息，应禁止缓存，并按企业规范限制访问来源。
+- `/healthz`、`/readyz` 和 `/version` 应反映当前实例状态和版本，不能缓存数小时或数天。
+- 安装页面和脚本包含注册码、动态域名和安装参数，必须禁止缓存。采集器二进制只有在文件路径包含不可变版本号且不会被覆盖时才可以公共缓存，否则也必须禁止缓存。
+
+以下静态资源不包含用户数据，可以继续使用公共缓存：
+
+```text
+/assets/*
+/favicon.*
+/logo.*
+/krillinai-*.png
+/krillinai-*.svg
+```
+
+`/admin`、`/app`、`/login`、`/register` 和 `/downloads` 返回 SPA 的 `index.html`，应保持 `Cache-Control: no-cache` 或更严格的 `no-store`，以便部署新版本后及时重新校验；不要将这些页面配置为长期公共缓存。静态带哈希的 `/assets/*` 可以继续使用长期不可变缓存。
+
+部署完成后应清理 CDN 中旧的动态响应，并确认以下行为：
+
+```bash
+curl -i https://<Gateway 域名>/api/v1/auth/me
+curl -i https://<Gateway 域名>/api/v1/admin/accounts
+curl -i https://<Gateway 域名>/.well-known/oauth-protected-resource/mcp
+curl -i https://<Gateway 域名>/mcp
+```
+
+未携带认证信息的 `/api/v1/auth/me`、`/api/v1/admin/accounts` 和 `/mcp` 应返回未认证错误，不能返回其他账户或权限数据。动态接口响应不应出现 `X-Cache: HIT`、较大的 `Age` 或长期 `max-age`。
+
 ## 8. 部署验证
 
 ### 8.1 服务接口验证
@@ -277,6 +335,15 @@ curl --fail http://<Gateway 域名>:1904/version
 ```
 
 三个接口均应返回成功响应，其中 `/version` 应显示本次部署的版本信息。
+
+如果域名经过 CDN 或反向代理，还应检查响应头：
+
+```bash
+curl -sS -D - -o /dev/null https://<Gateway 域名>/healthz
+curl -sS -D - -o /dev/null https://<Gateway 域名>/version
+```
+
+健康检查和版本接口不得命中长期缓存；认证、管理、应用和 MCP 接口必须返回 `Cache-Control: no-store` 或由代理直接绕过缓存。
 
 ### 8.2 管理员账户验证
 
