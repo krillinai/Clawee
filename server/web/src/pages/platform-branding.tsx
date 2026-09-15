@@ -210,6 +210,9 @@ function LogoEditor(props: {
         <div>
           <h2 className="text-sm font-semibold">{props.label}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
+            建议尺寸：{props.kind === "expanded" ? "1050 × 240" : "330 × 300"} px
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
             {props.draft.action === "replace" ? props.draft.file?.name : customSource ? "已配置" : "使用默认"}
           </p>
         </div>

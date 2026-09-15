@@ -34,6 +34,8 @@ describe("PlatformBrandingPage", () => {
   it("previews both files locally, preserves them across backgrounds, and resets one position", async () => {
     renderPage();
     await screen.findByRole("heading", { name: "平台外观" });
+    expect(screen.getByText("建议尺寸：1050 × 240 px")).toBeInTheDocument();
+    expect(screen.getByText("建议尺寸：330 × 300 px")).toBeInTheDocument();
 
     const expanded = new File(["expanded"], "expanded.png", { type: "image/png" });
     const compact = new File(["compact"], "compact.jpg", { type: "image/jpeg" });
