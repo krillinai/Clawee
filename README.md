@@ -1,11 +1,12 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./client/resources/logo-v2-white.svg" />
-  <img src="./client/resources/logo-v2-black.svg" alt="Clawee" width="260" />
-</picture>
-
-<h1 style="margin: -18px 0 4px;">可自托管的企业级 Agent</h1>
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/clawee-readme-logo-white.svg" />
+    <img src="./docs/assets/clawee-readme-logo-black.svg" alt="" width="260" />
+  </picture><br />
+  可自托管的企业级 Agent
+</h1>
 
 <p style="margin: 0 0 8px;">让 Agent 本地执行、企业能力接入与统一治理在一个平台中协同运行，构建以增长为核心的智能工作台。</p>
 
