@@ -496,6 +496,39 @@ describe('enterprise session manager', () => {
     expect(getMe).toHaveBeenCalledWith(credential.accessToken);
   });
 
+  it('keeps HTTP diagnostics in login errors for the Runtime API', async () => {
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(),
+      credentialStore: createStore(),
+      httpClient: createClient({
+        login: vi.fn(async () => {
+          throw new EnterpriseHttpError(
+            'ENTERPRISE_PROTOCOL_ERROR',
+            'decode',
+            502,
+            'invalid_login_response',
+            undefined,
+            'req_login_123'
+          );
+        })
+      }),
+      transportSecurity: 'secure_https'
+    });
+
+    await expect(manager.login({
+      email: 'user@example.com',
+      password: 'password-123'
+    })).rejects.toMatchObject({
+      code: 'ENTERPRISE_PROTOCOL_ERROR',
+      details: {
+        stage: 'decode',
+        statusCode: 502,
+        upstreamCode: 'invalid_login_response',
+        requestId: 'req_login_123'
+      }
+    });
+  });
+
   it('fails a stale identity check after a concurrent logout', async () => {
     const me = deferred<EnterpriseMeResult>();
     const manager = createEnterpriseSessionManager({

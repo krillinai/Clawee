@@ -676,7 +676,13 @@ function formatDingTalkPrepareError(error: unknown): string {
 
 function formatAccountError(error: unknown): string {
   if (!(error instanceof ApiClientError)) return '企业账户操作失败，请稍后重试。';
-  if (error.status === 404) return '企业登录服务暂未启用，请稍后重试。';
+  const message = error.status === 404
+    ? '企业登录服务暂未启用，请稍后重试。'
+    : accountErrorMessage(error);
+  return appendAccountErrorDiagnostics(message, error);
+}
+
+function accountErrorMessage(error: ApiClientError): string {
   switch (error.code) {
     case 'ENTERPRISE_UNAUTHORIZED':
       return '邮箱或密码不正确，请重新输入。';
@@ -698,8 +704,38 @@ function formatAccountError(error: unknown): string {
     case 'ENTERPRISE_INVALID_REQUEST':
       return '请检查邮箱、名称和密码后重试。';
     default:
-      return error.message || '企业账户操作失败，请稍后重试。';
+      return error.message && error.message !== 'Enterprise operation failed'
+        ? error.message
+        : '企业账户操作失败，请稍后重试。';
   }
+}
+
+function appendAccountErrorDiagnostics(
+  message: string,
+  error: ApiClientError
+): string {
+  const details = error.details;
+  const diagnostics: string[] = [`错误码：${error.code}`, `HTTP：${error.status}`];
+  if (details === undefined) return `${message}（${diagnostics.join('；')}）`;
+  const stage = stringValue(details.stage);
+  const upstreamCode = stringValue(details.upstreamCode);
+  const requestId = stringValue(details.requestId);
+  const retryAfterMs = numberValue(details.retryAfterMs);
+  const reason = stringValue(details.reason);
+  if (stage !== undefined) diagnostics.push(`阶段：${stage}`);
+  if (upstreamCode !== undefined) diagnostics.push(`上游错误：${upstreamCode}`);
+  if (requestId !== undefined) diagnostics.push(`请求 ID：${requestId}`);
+  if (retryAfterMs !== undefined) diagnostics.push(`建议等待：${retryAfterMs}ms`);
+  if (reason !== undefined) diagnostics.push(`原因：${reason}`);
+  return `${message}（${diagnostics.join('；')}）`;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function formatExpiry(value: string): string {

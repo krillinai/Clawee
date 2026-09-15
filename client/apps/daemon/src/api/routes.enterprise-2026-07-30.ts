@@ -8,7 +8,10 @@ import type {
   EnterpriseSessionManager
 } from '../enterprise/session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from '../enterprise/session-manager-2026-07-30.js';
-import { EnterpriseHttpError } from '../enterprise/http-client-2026-07-30.js';
+import {
+  EnterpriseHttpError,
+  enterpriseHttpErrorDetails
+} from '../enterprise/http-client-2026-07-30.js';
 import type { EnterpriseSkillManager } from '../enterprise/skill-manager-2026-07-30.js';
 import { EnterpriseSkillManagerError } from '../enterprise/skill-manager-2026-07-30.js';
 import type { EnterpriseMcpManager } from '../enterprise/mcp-manager-2026-08-07.js';
@@ -393,12 +396,28 @@ function sendEnterpriseError(reply: FastifyReply, error: unknown) {
   if (error instanceof EnterpriseSessionError) {
     return reply
       .code(error.statusCode)
-      .send(apiError(error.code, enterpriseErrorMessage(error.code), error.details));
+      .send(apiError(
+        error.code,
+        enterpriseErrorMessage(error.code),
+        error.details ?? {
+          statusCode: error.statusCode,
+          ...(error.diagnostic?.upstreamCode === undefined
+            ? {}
+            : { upstreamCode: error.diagnostic.upstreamCode }),
+          ...(error.diagnostic?.requestId === undefined
+            ? {}
+            : { requestId: error.diagnostic.requestId })
+        }
+      ));
   }
   if (error instanceof EnterpriseHttpError) {
     return reply
       .code(error.statusCode ?? 500)
-      .send(apiError(error.code, enterpriseErrorMessage(error.code)));
+      .send(apiError(
+        error.code,
+        enterpriseErrorMessage(error.code),
+        enterpriseHttpErrorDetails(error)
+      ));
   }
   if (error instanceof EnterpriseSkillManagerError) {
     return reply

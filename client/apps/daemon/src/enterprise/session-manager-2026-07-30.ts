@@ -30,7 +30,10 @@ import type {
   EnterpriseHttpClient,
   EnterpriseLoginResult
 } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import {
+  EnterpriseHttpError,
+  enterpriseHttpErrorDetails
+} from './http-client-2026-07-30.js';
 
 export type EnterpriseSessionManager = {
   startRestore(): void;
@@ -389,7 +392,7 @@ export function createEnterpriseSessionManager(input: {
               ? 'ENTERPRISE_UNAUTHORIZED'
               : 'ENTERPRISE_SESSION_EXPIRED',
             401,
-            undefined,
+            enterpriseHttpErrorDetails(error),
             enterpriseHttpDiagnostic(error)
           );
         }
@@ -412,7 +415,7 @@ export function createEnterpriseSessionManager(input: {
           throw new EnterpriseSessionError(
             'ENTERPRISE_SERVICE_UNAVAILABLE',
             503,
-            undefined,
+            enterpriseHttpErrorDetails(error),
             enterpriseHttpDiagnostic(error)
           );
         }
@@ -435,7 +438,12 @@ export function createEnterpriseSessionManager(input: {
       await rejectUnusableCredential(request);
       throw new EnterpriseSessionError(
         'ENTERPRISE_PROTOCOL_ERROR',
-        502
+        502,
+        {
+          reason: 'agent_id_mismatch',
+          expectedAgentId: request.expectedAgentId,
+          receivedAgentId: me.agentId
+        }
       );
     }
 
@@ -571,7 +579,12 @@ export function createEnterpriseSessionManager(input: {
       publish(operationGeneration, signedOutSnapshot());
       throw new EnterpriseSessionError(
         'ENTERPRISE_PROTOCOL_ERROR',
-        502
+        502,
+        {
+          reason: 'agent_id_mismatch',
+          expectedAgentId: agentId,
+          receivedAgentId: login.agentId
+        }
       );
     }
     return validateAuthenticatedSession({
@@ -1161,28 +1174,28 @@ function sessionErrorFromHttp(error: EnterpriseHttpError): EnterpriseSessionErro
       return new EnterpriseSessionError(
         error.code,
         400,
-        undefined,
+        enterpriseHttpErrorDetails(error),
         enterpriseHttpDiagnostic(error)
       );
     case 'ENTERPRISE_UNAUTHORIZED':
       return new EnterpriseSessionError(
         error.code,
         401,
-        undefined,
+        enterpriseHttpErrorDetails(error),
         enterpriseHttpDiagnostic(error)
       );
     case 'ENTERPRISE_SERVICE_UNAVAILABLE':
       return new EnterpriseSessionError(
         error.code,
         503,
-        undefined,
+        enterpriseHttpErrorDetails(error),
         enterpriseHttpDiagnostic(error)
       );
     default:
       return new EnterpriseSessionError(
         error.code,
         error.statusCode ?? 500,
-        undefined,
+        enterpriseHttpErrorDetails(error),
         enterpriseHttpDiagnostic(error)
       );
   }

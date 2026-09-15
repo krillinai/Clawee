@@ -3,6 +3,7 @@ import { userEvent } from '@testing-library/user-event';
 import type { EnterpriseSessionResponse } from '@clawee/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { EnterpriseAccountPage } from './EnterpriseAccountPage-2026-07-30.js';
+import { ApiClientError } from '../../runtime/errors.js';
 
 const signedOutSession: EnterpriseSessionResponse = {
   status: 'signed_out',
@@ -62,6 +63,33 @@ describe('EnterpriseAccountPage', () => {
       name: 'Enterprise Member',
       password: 'register123'
     });
+  });
+
+  it('shows safe enterprise diagnostics with account operation errors', async () => {
+    const user = userEvent.setup();
+    const onLogin = vi.fn(async () => {
+      throw new ApiClientError({
+        status: 502,
+        code: 'ENTERPRISE_PROTOCOL_ERROR',
+        message: 'Enterprise operation failed',
+        details: {
+          stage: 'decode',
+          statusCode: 502,
+          upstreamCode: 'invalid_login_response',
+          requestId: 'req_login_123'
+        }
+      });
+    });
+    renderAccount({ onLogin });
+
+    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '企业账户操作失败，请稍后重试。（错误码：ENTERPRISE_PROTOCOL_ERROR；HTTP：502；阶段：decode；上游错误：invalid_login_response；请求 ID：req_login_123）'
+    );
   });
 
   it('asks for agreement when login is submitted and continues after confirmation', async () => {

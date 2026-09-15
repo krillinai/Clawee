@@ -960,6 +960,19 @@ export class EnterpriseHttpError extends Error {
   }
 }
 
+/** 仅返回安全的传输元数据，不包含请求体或令牌。 */
+export function enterpriseHttpErrorDetails(
+  error: EnterpriseHttpError
+): Record<string, unknown> {
+  return {
+    stage: error.stage,
+    ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }),
+    ...(error.upstreamCode === undefined ? {} : { upstreamCode: error.upstreamCode }),
+    ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
+    ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs })
+  };
+}
+
 export function createEnterpriseHttpClient(input: {
   origin?: string;
   fetch?: typeof globalThis.fetch;
