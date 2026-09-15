@@ -16,10 +16,6 @@
 
 [项目特色](#项目特色) · [核心功能](#核心功能) · [核心工作流](#核心工作流) · [系统架构](#系统架构) · [快速开始](#快速开始) · [桌面与-web](#桌面与-web) · [配置与安全](#配置与安全) · [开发与验证](#开发与验证) · [文档](#文档)
 
-<p>
-  <img src="./docs/assets/clawee-homepage.png" alt="Clawee 首页" width="960" />
-</p>
-
 </div>
 
 ## 项目介绍
@@ -29,6 +25,11 @@ Clawee 是面向企业部署与治理的开源 Agent 平台。它将本地 Agent
 Clawee 由两个边界清晰、彼此协作的部分组成：
 
 - **本地执行层**：共享 Web、本地 daemon、Electron 桌面端与内嵌 Codex Runtime，负责任务、会话、工作区文件、模型、Skill、定时任务和系统原生能力。
+
+<p align="center">
+  <img src="./docs/assets/clawee-homepage.png" alt="Clawee 首页" width="960" />
+</p>
+
 - **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Skill Hub、知识库和共享文件。
 
 <p align="center">
