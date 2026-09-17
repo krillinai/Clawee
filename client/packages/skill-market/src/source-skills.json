@@ -5,7 +5,7 @@
     "titleZh": "专业视觉生成引擎",
     "tagline": "面向专业创意生产的 Stable Diffusion 引擎，适合封面、海报、视觉草图和批量图像工作流。",
     "summary": "InvokeAI 是视觉生成基础设施，适合团队化图片生产。它不应被描述为单个 skill，而应作为视觉工作流的底层工具或完整工具进入库。",
-    "category": "image-cover",
+    "category": "content-creation",
     "subcategory": "小红书首图",
     "platforms": [
       "小红书",
@@ -110,7 +110,7 @@
     "titleZh": "深度搜索调研助手",
     "tagline": "迭代式深度调研 agent，结合搜索、网页抓取和 LLM，输出带来源的 Markdown 报告。",
     "summary": "deep-research 会根据用户 query 生成搜索方向，递归处理网页结果，最后输出 Markdown 报告。README 显示它需要 Firecrawl API 和 OpenAI API，也支持 Docker 和本地 Node.js 运行。",
-    "category": "topic-trend",
+    "category": "data-analysis",
     "subcategory": "深度调研",
     "platforms": [
       "YouTube",
@@ -184,120 +184,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "videocaptioner",
-    "name": "VideoCaptioner",
-    "titleZh": "卡卡字幕助手",
-    "tagline": "基于 LLM 的视频字幕助手，覆盖字幕生成、断句、校正、翻译和字幕烧录。",
-    "summary": "VideoCaptioner 适合创作者把视频转成可编辑字幕，并继续完成校正、翻译和合成。README 显示它提供 CLI、GUI 桌面版、免费语音转录、字幕翻译、全流程转录到合成，以及 LLM API 配置。",
-    "category": "video-subtitle",
-    "subcategory": "字幕生成",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "抖音",
-      "TikTok"
-    ],
-    "tasks": [
-      "字幕生成",
-      "转录",
-      "校正",
-      "翻译",
-      "SRT 字幕",
-      "翻译字幕"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "WEIFENG2333",
-      "avatarUrl": "https://github.com/WEIFENG2333.png"
-    },
-    "github": {
-      "repo": "WEIFENG2333/VideoCaptioner",
-      "url": "https://github.com/WEIFENG2333/VideoCaptioner",
-      "stars": 15256,
-      "forks": 1290,
-      "license": "GPL-3.0",
-      "lastPushedAt": "2026-07-05",
-      "defaultBranch": "master",
-      "readmeText": "VideoCaptioner 是一款基于 LLM 的智能字幕助手，支持字幕生成、断句、校正、翻译和字幕合成。它适合把视频转成可编辑字幕，并进一步处理多语言内容。\n\n主要能力：\n\n- 从视频或音频生成字幕。\n- 使用 AI 辅助校正和断句。\n- 将字幕翻译为目标语言。\n- 将字幕合成到视频中。\n- 支持桌面端和命令行使用方式。\n\n使用前需要根据实际功能确认是否配置 LLM API Key。",
-      "readmeLanguage": "zh"
-    },
-    "examples": [
-      {
-        "type": "image",
-        "url": "https://raw.githubusercontent.com/WEIFENG2333/VideoCaptioner/master/docs/public/main.png",
-        "title": "字幕处理工作台",
-        "source": "readme",
-        "relevance": "interface-preview",
-        "approved": true
-      },
-      {
-        "type": "image",
-        "url": "https://raw.githubusercontent.com/WEIFENG2333/VideoCaptioner/master/docs/public/preview1.png",
-        "title": "字幕编辑预览",
-        "source": "docs",
-        "relevance": "interface-preview",
-        "approved": true
-      },
-      {
-        "type": "image",
-        "url": "https://raw.githubusercontent.com/WEIFENG2333/VideoCaptioner/master/docs/public/preview2.png",
-        "title": "字幕生成结果",
-        "source": "docs",
-        "relevance": "direct-output",
-        "approved": true
-      }
-    ],
-    "inputs": [
-      "视频文件",
-      "音频文件",
-      "字幕文件",
-      "目标语言"
-    ],
-    "outputs": [
-      "SRT 字幕",
-      "翻译字幕",
-      "校正字幕",
-      "烧录字幕视频"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先读取仓库 README，确认本机依赖、API Key 和视频文件路径，再执行字幕生成或翻译任务。",
-      "humanSteps": [
-        "导入视频或音频",
-        "生成或校正字幕",
-        "按平台需要翻译或烧录字幕"
-      ],
-      "command": "git clone https://github.com/WEIFENG2333/VideoCaptioner.git",
-      "officialDocsUrl": "https://github.com/WEIFENG2333/VideoCaptioner"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": true,
-      "privateDataRisk": true,
-      "notes": [
-        "会读取本地视频 / 音频文件。",
-        "使用 LLM 优化或翻译时可能需要 API Key。",
-        "GPL-3.0 许可需要在商用集成前复核。"
-      ]
-    },
-    "listingStatus": "featured",
-    "relatedSkillIds": [
-      "whisper",
-      "narratoai",
-      "biliup"
-    ]
-  },
-  {
     "id": "narratoai",
     "name": "NarratoAI",
     "titleZh": "AI 视频解说与剪辑",
     "tagline": "利用 AI 大模型，一键生成视频解说并辅助剪辑，适合短视频解说、二创和知识视频再包装。",
     "summary": "NarratoAI 面向视频解说和自动剪辑，README 提供 Docker、Windows 整合包和本地运行方式，并要求配置 API 密钥。适合内容团队把原始视频转成可发布的解说内容。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "视频切片",
     "platforms": [
       "YouTube",
@@ -377,7 +269,6 @@
     },
     "listingStatus": "featured",
     "relatedSkillIds": [
-      "videocaptioner",
       "hyperframes",
       "sadtalker"
     ]
@@ -388,7 +279,7 @@
     "titleZh": "superpowers",
     "tagline": "Superpowers 是一套给 coding agent 用的软件工程方法论 skill pack，用强制技能触发、设计先行、计划、TDD、验证和复盘来降低 Agent 乱改代码的风险。",
     "summary": "Superpowers 是一套给 coding agent 用的软件工程方法论 skill pack，用强制技能触发、设计先行、计划、TDD、验证和复盘来降低 Agent 乱改代码的风险。",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "自动化 / Agent 软件工程方法论 Skill Pack",
     "platforms": [
       "YouTube",
@@ -460,165 +351,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "n8n-io-n8n",
-    "name": "n8n",
-    "titleZh": "n8n",
-    "tagline": "n8n 是可视化工作流自动化平台，适合把资料抓取、AI 处理、表格/数据库同步、发布提醒和复盘流程串起来。",
-    "summary": "n8n 是可视化工作流自动化平台，适合把资料抓取、AI 处理、表格/数据库同步、发布提醒和复盘流程串起来。",
-    "category": "productivity",
-    "subcategory": "自动化 / 内容工作流自动化",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "内容工作流自动化",
-      "自动化",
-      "工作流",
-      "集成",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "n8n-io",
-      "avatarUrl": "https://github.com/n8n-io.png"
-    },
-    "github": {
-      "repo": "n8n-io/n8n",
-      "url": "https://github.com/n8n-io/n8n",
-      "stars": 191986,
-      "forks": 0,
-      "license": "Other / NOASSERTION",
-      "lastPushedAt": "2026-06-10T23:52:52Z",
-      "defaultBranch": "main",
-      "readmeText": "# n8n\n\nn8n 是可视化工作流自动化平台，适合把资料抓取、AI 处理、表格/数据库同步、发布提醒和复盘流程串起来。\n\n## 适合场景\n\n- 内容工作流自动化\n- 自动化\n- 工作流\n- 集成\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 n8n-io/n8n 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "用节点搭建跨工具自动化流程。",
-        "连接大量 API 和 SaaS，适合内容运营后台。",
-        "支持自托管和 AI 能力，能把内容生产变成流程系统。"
-      ],
-      "command": "git clone https://github.com/n8n-io/n8n.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": false,
-      "externalWrite": true,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": true,
-      "notes": [
-        "凭证管理是核心风险，不要把 token 写入笔记。",
-        "自托管、商业许可证和安全边界需要单独设计。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "yt-dlp-yt-dlp",
-    "name": "yt-dlp",
-    "titleZh": "yt-dlp",
-    "tagline": "yt-dlp 是一个高成熟度的命令行音视频下载工具，适合把公开视频、音频素材拉回本地，进入转录、拆解、选题研究和竞品分析流程。",
-    "summary": "yt-dlp 是一个高成熟度的命令行音视频下载工具，适合把公开视频、音频素材拉回本地，进入转录、拆解、选题研究和竞品分析流程。",
-    "category": "productivity",
-    "subcategory": "视频/音频资料获取",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "视频/音频资料获取",
-      "资料收集",
-      "视频下载",
-      "素材采集",
-      "本地素材文件",
-      "元数据"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "yt-dlp",
-      "avatarUrl": "https://github.com/yt-dlp.png"
-    },
-    "github": {
-      "repo": "yt-dlp/yt-dlp",
-      "url": "https://github.com/yt-dlp/yt-dlp",
-      "stars": 169726,
-      "forks": 0,
-      "license": "Unlicense",
-      "lastPushedAt": "2026-06-10T23:00:05Z",
-      "defaultBranch": "main",
-      "readmeText": "# yt-dlp\n\nyt-dlp 是一个高成熟度的命令行音视频下载工具，适合把公开视频、音频素材拉回本地，进入转录、拆解、选题研究和竞品分析流程。\n\n## 适合场景\n\n- 视频/音频资料获取\n- 资料收集\n- 视频下载\n- 素材采集\n- 本地素材文件\n- 元数据\n\n## 输入\n\n- 公开视频链接\n- 音频链接\n- 素材用途\n\n## 输出\n\n- 本地素材文件\n- 元数据\n- 后续转写输入",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "公开视频链接",
-      "音频链接",
-      "素材用途"
-    ],
-    "outputs": [
-      "本地素材文件",
-      "元数据",
-      "后续转写输入"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 yt-dlp/yt-dlp 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "支持大量视频网站和音频/视频格式，是内容资料采集的底层工具。",
-        "可与 Whisper / whisper.cpp 组合，把视频资料变成可搜索、可摘录、可分析的文本。",
-        "适合脚本化和批量化处理，能进入自动化内容研究流水线。"
-      ],
-      "command": "git clone https://github.com/yt-dlp/yt-dlp.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": false,
-      "privateDataRisk": false,
-      "notes": [
-        "注意平台 ToS、版权、转载授权和个人使用边界。",
-        "批量下载可能触发平台风控，需要控制频率和范围。",
-        "下载只是资料入口，不等于内容可以直接复用。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "stable-diffusion-webui",
     "name": "stable-diffusion-webui",
     "titleZh": "Stable Diffusion 视觉生成工作台",
     "tagline": "高采用度 Stable Diffusion WebUI，适合封面、海报、电商图、产品视觉草图和图片精修。",
     "summary": "stable-diffusion-webui 是使用 Gradio 实现的 Stable Diffusion Web 界面，提供 txt2img、img2img、inpainting、outpainting、upscale、prompt matrix、插件等能力。它是基础设施，不是单一 creator skill。",
-    "category": "image-cover",
+    "category": "content-creation",
     "subcategory": "视频封面",
     "platforms": [
       "小红书",
@@ -697,7 +435,7 @@
     "titleZh": "anthropic-skills",
     "tagline": "anthropic-skills 是 Anthropic 维护的公开 Agent Skills 仓库，包含 skill 创建、前端设计、目标澄清、迁移、安全、截图验证等多个官方/准官方 skill 能力。",
     "summary": "anthropic-skills 是 Anthropic 维护的公开 Agent Skills 仓库，包含 skill 创建、前端设计、目标澄清、迁移、安全、截图验证等多个官方/准官方 skill 能力。",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "自动化 / 官方 Agent Skills 集合",
     "platforms": [
       "YouTube",
@@ -768,88 +506,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "langgenius-dify",
-    "name": "dify",
-    "titleZh": "Dify",
-    "tagline": "Dify 是生产级 AI 应用和 Agentic workflow 平台，适合搭建内容生产助手、知识库问答、选题/文案自动化应用。",
-    "summary": "Dify 是生产级 AI 应用和 Agentic workflow 平台，适合搭建内容生产助手、知识库问答、选题/文案自动化应用。",
-    "category": "productivity",
-    "subcategory": "自动化 / AI 应用与 Agent 工作流",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "AI 应用与 Agent 工作流",
-      "自动化",
-      "AI 应用",
-      "Agent 工作流",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "langgenius",
-      "avatarUrl": "https://github.com/langgenius.png"
-    },
-    "github": {
-      "repo": "langgenius/dify",
-      "url": "https://github.com/langgenius/dify",
-      "stars": 144764,
-      "forks": 0,
-      "license": "Other / NOASSERTION",
-      "lastPushedAt": "2026-06-11T02:54:16Z",
-      "defaultBranch": "main",
-      "readmeText": "# dify\n\nDify 是生产级 AI 应用和 Agentic workflow 平台，适合搭建内容生产助手、知识库问答、选题/文案自动化应用。\n\n## 适合场景\n\n- AI 应用与 Agent 工作流\n- 自动化\n- AI 应用\n- Agent 工作流\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 langgenius/dify 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "提供 AI 应用、工作流、知识库和 Agent 能力。",
-        "适合把 Prompt、模型、工具调用和数据源封装成可复用应用。",
-        "更接近“内容生产 AI 后台”，而不是单个脚本。"
-      ],
-      "command": "git clone https://github.com/langgenius/dify.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "模型成本、数据权限、知识库质量和工作流调试复杂度需要管理。",
-        "生产使用前要明确数据是否进入第三方模型。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "firecrawl-firecrawl",
     "name": "firecrawl",
     "titleZh": "Firecrawl",
     "tagline": "Firecrawl 是面向 AI 应用的网页搜索、抓取和 Markdown 化工具，适合把网站、文章、产品页和竞品页面转成可喂给 LLM 的结构化资料。",
     "summary": "Firecrawl 是面向 AI 应用的网页搜索、抓取和 Markdown 化工具，适合把网站、文章、产品页和竞品页面转成可喂给 LLM 的结构化资料。",
-    "category": "topic-trend",
+    "category": "data-analysis",
     "subcategory": "网页抓取与 Markdown 化",
     "platforms": [
       "YouTube",
@@ -927,7 +589,7 @@
     "titleZh": "grill-me",
     "tagline": "grill-me：需求还含糊、方案需要被追问、想在动手前把决策树问清楚时",
     "summary": "grill-me：需求还含糊、方案需要被追问、想在动手前把决策树问清楚时",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "协作流程 skill",
     "platforms": [
       "YouTube",
@@ -997,164 +659,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "awesome-llm-apps-content-creator",
-    "name": "awesome-llm-apps",
-    "titleZh": "LLM Apps 内容创作样例库",
-    "tagline": "收集大量可运行的 AI Agent 与 RAG 应用，其中包含 content-creator skill，适合寻找内容创作 app 原型、工作流和可复用代码样例。",
-    "summary": "awesome-llm-apps 是高星 AI 应用样例库，不是单一 skill。它适合 Creator Skills Hub 作为内容创作应用灵感库和可运行样例来源，帮助内容团队理解 agent、RAG、自动化应用如何落到具体生产流程。",
-    "category": "productivity",
-    "subcategory": "可运行 AI 应用样例",
-    "platforms": [
-      "YouTube",
-      "公众号",
-      "团队内部"
-    ],
-    "tasks": [
-      "可运行 AI 应用样例",
-      "Agent",
-      "RAG",
-      "Demo",
-      "应用样例",
-      "工作流参考"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "Shubhamsaboo",
-      "avatarUrl": "https://github.com/Shubhamsaboo.png"
-    },
-    "github": {
-      "repo": "Shubhamsaboo/awesome-llm-apps",
-      "url": "https://github.com/Shubhamsaboo/awesome-llm-apps",
-      "stars": 116820,
-      "forks": 17379,
-      "license": "Apache-2.0",
-      "lastPushedAt": "2026-07-08",
-      "defaultBranch": "main",
-      "readmeText": "# awesome-llm-apps\n\nawesome-llm-apps 是高星 AI 应用样例库，不是单一 skill。它适合 Creator Skills Hub 作为内容创作应用灵感库和可运行样例来源，帮助内容团队理解 agent、RAG、自动化应用如何落到具体生产流程。\n\n## 适合场景\n\n- 可运行 AI 应用样例\n- Agent\n- RAG\n- Demo\n- 应用样例\n- 工作流参考\n\n## 输入\n\n- 创作场景\n- 应用目标\n- 模型 API Key\n\n## 输出\n\n- 应用样例\n- 工作流参考\n- 可运行原型",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "创作场景",
-      "应用目标",
-      "模型 API Key"
-    ],
-    "outputs": [
-      "应用样例",
-      "工作流参考",
-      "可运行原型"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 Shubhamsaboo/awesome-llm-apps 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "先看 content-creator 相关样例",
-        "选择最接近的应用目录",
-        "本地运行前检查依赖和 API Key"
-      ],
-      "command": "npx skills add shubhamsaboo/awesome-llm-apps@content-creator",
-      "officialDocsUrl": "https://skills.sh/shubhamsaboo/awesome-llm-apps/content-creator"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "仓库是应用集合，质量和维护节奏按子项目不同。",
-        "运行样例前需要检查依赖和外部 API。",
-        "不应把示例代码直接用于生产账号写入。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "comfy-org-comfyui",
-    "name": "ComfyUI",
-    "titleZh": "ComfyUI",
-    "tagline": "ComfyUI 是节点式图像生成工作流工具，适合需要高可控、可复用、可批量化视觉生产流程的创作者和技术团队。",
-    "summary": "ComfyUI 是节点式图像生成工作流工具，适合需要高可控、可复用、可批量化视觉生产流程的创作者和技术团队。",
-    "category": "image-cover",
-    "subcategory": "节点式图像生成工作流",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "节点式图像生成工作流",
-      "视觉生成",
-      "图像生成",
-      "工作流",
-      "封面",
-      "海报"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "Comfy-Org",
-      "avatarUrl": "https://github.com/Comfy-Org.png"
-    },
-    "github": {
-      "repo": "Comfy-Org/ComfyUI",
-      "url": "https://github.com/Comfy-Org/ComfyUI",
-      "stars": 116516,
-      "forks": 0,
-      "license": "GPL-3.0",
-      "lastPushedAt": "2026-06-11T02:54:35Z",
-      "defaultBranch": "main",
-      "readmeText": "# ComfyUI\n\nComfyUI 是节点式图像生成工作流工具，适合需要高可控、可复用、可批量化视觉生产流程的创作者和技术团队。\n\n## 适合场景\n\n- 节点式图像生成工作流\n- 视觉生成\n- 图像生成\n- 工作流\n- 封面\n- 海报\n\n## 输入\n\n- Prompt\n- 参考图\n- 品牌风格\n\n## 输出\n\n- 封面\n- 海报\n- 视觉素材",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "Prompt",
-      "参考图",
-      "品牌风格"
-    ],
-    "outputs": [
-      "封面",
-      "海报",
-      "视觉素材"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 Comfy-Org/ComfyUI 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "用节点把模型、提示词、ControlNet、放大、修复等步骤串成工作流。",
-        "适合保存和复用复杂视觉流程，而不是每次手工调参。",
-        "可作为封面、插图、角色视觉和批量素材生成的底层工具。"
-      ],
-      "command": "git clone https://github.com/Comfy-Org/ComfyUI.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "学习成本高；工作流、模型和插件管理复杂。",
-        "模型版权、肖像权和商业使用边界要单独记录。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "garrytan-gstack",
     "name": "gstack",
     "titleZh": "GStack",
     "tagline": "GStack：需要 CEO、设计师、工程经理、QA、发布工程师等角色一起审视需求或计划时",
     "summary": "GStack：需要 CEO、设计师、工程经理、QA、发布工程师等角色一起审视需求或计划时",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "多角色审视 skill",
     "platforms": [
       "YouTube",
@@ -1224,93 +734,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "whisper",
-    "name": "whisper",
-    "titleZh": "语音识别与字幕转写基础能力",
-    "tagline": "OpenAI Whisper 可把音频转写为文本，支持多语言识别和翻译任务，是字幕和素材整理的重要基础能力。",
-    "summary": "Whisper README 提供 pip 安装、ffmpeg 依赖、命令行转写和 Python 调用方式。它更像字幕、转写、访谈整理的基础设施，适合和 VideoCaptioner 等上层工具一起展示。",
-    "category": "video-subtitle",
-    "subcategory": "语音转写",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "抖音",
-      "公众号"
-    ],
-    "tasks": [
-      "语音转写",
-      "转写",
-      "翻译",
-      "字幕",
-      "转写文本",
-      "翻译文本"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "OpenAI",
-      "avatarUrl": "https://github.com/OpenAI.png"
-    },
-    "github": {
-      "repo": "openai/whisper",
-      "url": "https://github.com/openai/whisper",
-      "stars": 104515,
-      "forks": 12730,
-      "license": "MIT",
-      "lastPushedAt": "2026-04-15",
-      "defaultBranch": "main",
-      "readmeText": "Whisper 是通用语音识别模型，可用于多语言语音转写、翻译和字幕底稿生成。\n\n内容创作场景中，它常用于：\n\n- 视频字幕底稿。\n- 播客和访谈转写。\n- 直播回放整理。\n- 多语言内容处理。\n\n它本身更偏基础能力，通常需要与字幕编辑、翻译、摘要或发布工具组合使用。",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "音频文件",
-      "视频音轨",
-      "语言参数",
-      "模型大小"
-    ],
-    "outputs": [
-      "转写文本",
-      "翻译文本",
-      "字幕初稿"
-    ],
-    "install": {
-      "agentInstruction": "让 Agent 在本机检查 Python、ffmpeg 和模型下载环境，再使用短音频做转写测试。",
-      "humanSteps": [
-        "安装 whisper 和 ffmpeg",
-        "对音频或视频音轨执行转写",
-        "把文本交给字幕或内容整理流程"
-      ],
-      "command": "pip install -U openai-whisper",
-      "officialDocsUrl": "https://github.com/openai/whisper"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "会读取本地音频 / 视频文件。",
-        "大模型对硬件有要求。",
-        "转写结果需要人工校正。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": [
-      "videocaptioner",
-      "narratoai"
-    ]
-  },
-  {
     "id": "browser-use-browser-use",
     "name": "browser-use",
     "titleZh": "browser-use",
     "tagline": "browser-use 让 AI Agent 可以操作网页，适合竞品监控、后台巡检、网页任务自动化和内容运营流程提效。",
     "summary": "browser-use 让 AI Agent 可以操作网页，适合竞品监控、后台巡检、网页任务自动化和内容运营流程提效。",
-    "category": "productivity",
+    "category": "data-analysis",
     "subcategory": "浏览器自动化 Agent",
     "platforms": [
       "YouTube",
@@ -1386,7 +815,7 @@
     "titleZh": "ui-ux-pro-max",
     "tagline": "ui-ux-pro-max：需要更系统的 UI/UX、配色、字体、可访问性、响应式建议时",
     "summary": "ui-ux-pro-max：需要更系统的 UI/UX、配色、字体、可访问性、响应式建议时",
-    "category": "marketing-growth",
+    "category": "product-design",
     "subcategory": "UI/UX 检查 skill",
     "platforms": [
       "YouTube",
@@ -1464,7 +893,7 @@
     "titleZh": "MCP Servers",
     "tagline": "MCP Servers 是 Model Context Protocol 服务器集合，代表 Agent 连接外部工具、文件、GitHub、数据库和浏览器能力的基础设施方向。",
     "summary": "MCP Servers 是 Model Context Protocol 服务器集合，代表 Agent 连接外部工具、文件、GitHub、数据库和浏览器能力的基础设施方向。",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "MCP 工具连接生态",
     "platforms": [
       "YouTube",
@@ -1540,7 +969,7 @@
     "titleZh": "screenshot-to-code",
     "tagline": "screenshot-to-code 可以把截图转成 HTML/Tailwind/React/Vue 代码，适合快速复刻落地页、活动页和内容产品页面原型。",
     "summary": "screenshot-to-code 可以把截图转成 HTML/Tailwind/React/Vue 代码，适合快速复刻落地页、活动页和内容产品页面原型。",
-    "category": "marketing-growth",
+    "category": "product-design",
     "subcategory": "截图转前端代码",
     "platforms": [
       "YouTube",
@@ -1618,7 +1047,7 @@
     "titleZh": "Open Design",
     "tagline": "Open Design 是一个本地优先、开源的 AI 设计与 Agent 工作台，可用于网页、桌面、移动端原型、slides、images、videos、HyperFrames 等设计产物生成。",
     "summary": "Open Design 是一个本地优先、开源的 AI 设计与 Agent 工作台，可用于网页、桌面、移动端原型、slides、images、videos、HyperFrames 等设计产物生成。",
-    "category": "personal-brand",
+    "category": "product-design",
     "subcategory": "AI 设计与 Agent 工作台",
     "platforms": [
       "YouTube",
@@ -1690,88 +1119,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "flowiseai-flowise",
-    "name": "Flowise",
-    "titleZh": "Flowise",
-    "tagline": "Flowise 是可视化 AI Agent 和 RAG 工作流编排工具，适合快速搭建内容生产自动化原型。",
-    "summary": "Flowise 是可视化 AI Agent 和 RAG 工作流编排工具，适合快速搭建内容生产自动化原型。",
-    "category": "productivity",
-    "subcategory": "自动化 / 可视化 AI Agent 编排",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "可视化 AI Agent 编排",
-      "自动化",
-      "Agent 工作流",
-      "低代码",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "FlowiseAI",
-      "avatarUrl": "https://github.com/FlowiseAI.png"
-    },
-    "github": {
-      "repo": "FlowiseAI/Flowise",
-      "url": "https://github.com/FlowiseAI/Flowise",
-      "stars": 53463,
-      "forks": 0,
-      "license": "Other / NOASSERTION",
-      "lastPushedAt": "2026-06-10T07:32:39Z",
-      "defaultBranch": "main",
-      "readmeText": "# Flowise\n\nFlowise 是可视化 AI Agent 和 RAG 工作流编排工具，适合快速搭建内容生产自动化原型。\n\n## 适合场景\n\n- 可视化 AI Agent 编排\n- 自动化\n- Agent 工作流\n- 低代码\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 FlowiseAI/Flowise 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "用可视化方式搭建 LLM、工具、检索和 Agent 流程。",
-        "适合验证内容助手、资料问答、自动写作流程原型。",
-        "比纯代码更快试错，比完整平台更轻。"
-      ],
-      "command": "git clone https://github.com/FlowiseAI/Flowise.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "复杂流程的版本管理、可测试性和权限需要额外规范。",
-        "低代码原型容易变成难维护的生产系统。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "ggml-org-whisper-cpp",
     "name": "whisper.cpp",
     "titleZh": "whisper.cpp",
     "tagline": "whisper.cpp 是 Whisper 的 C/C++ 移植，适合本地、轻量、低依赖地做语音识别和字幕生成。",
     "summary": "whisper.cpp 是 Whisper 的 C/C++ 移植，适合本地、轻量、低依赖地做语音识别和字幕生成。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "本地轻量语音识别",
     "platforms": [
       "YouTube",
@@ -1842,88 +1195,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "lllyasviel-fooocus",
-    "name": "Fooocus",
-    "titleZh": "Fooocus",
-    "tagline": "Fooocus 强调低门槛图像生成体验，适合创作者快速生成封面、配图和视觉灵感，而不必先理解复杂节点和参数。",
-    "summary": "Fooocus 强调低门槛图像生成体验，适合创作者快速生成封面、配图和视觉灵感，而不必先理解复杂节点和参数。",
-    "category": "image-cover",
-    "subcategory": "低门槛图像生成",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "低门槛图像生成",
-      "视觉生成",
-      "图像生成",
-      "封面设计",
-      "封面",
-      "海报"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "lllyasviel",
-      "avatarUrl": "https://github.com/lllyasviel.png"
-    },
-    "github": {
-      "repo": "lllyasviel/Fooocus",
-      "url": "https://github.com/lllyasviel/Fooocus",
-      "stars": 50002,
-      "forks": 0,
-      "license": "GPL-3.0",
-      "lastPushedAt": "2025-12-01T19:17:07Z",
-      "defaultBranch": "main",
-      "readmeText": "# Fooocus\n\nFooocus 强调低门槛图像生成体验，适合创作者快速生成封面、配图和视觉灵感，而不必先理解复杂节点和参数。\n\n## 适合场景\n\n- 低门槛图像生成\n- 视觉生成\n- 图像生成\n- 封面设计\n- 封面\n- 海报\n\n## 输入\n\n- Prompt\n- 参考图\n- 品牌风格\n\n## 输出\n\n- 封面\n- 海报\n- 视觉素材",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "Prompt",
-      "参考图",
-      "品牌风格"
-    ],
-    "outputs": [
-      "封面",
-      "海报",
-      "视觉素材"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 lllyasviel/Fooocus 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "降低 Stable Diffusion 使用门槛，偏向提示词和结果体验。",
-        "适合快速封面、插图、社媒配图和视觉方向探索。",
-        "比 ComfyUI 更轻，但复杂可控性弱。"
-      ],
-      "command": "git clone https://github.com/lllyasviel/Fooocus.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "可控性和可维护性不如复杂工作流工具。",
-        "商业使用仍要看模型和素材许可证。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "remotion-dev-remotion",
     "name": "remotion",
     "titleZh": "Remotion",
     "tagline": "Remotion 是一个用 React 写视频的可编程视频生成框架，适合把固定视频结构做成模板，再批量生成数据驱动、字幕驱动、图文驱动的视频。",
     "summary": "Remotion 是一个用 React 写视频的可编程视频生成框架，适合把固定视频结构做成模板，再批量生成数据驱动、字幕驱动、图文驱动的视频。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "可编程视频生成",
     "platforms": [
       "YouTube",
@@ -1995,88 +1272,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "mifi-lossless-cut",
-    "name": "lossless-cut",
-    "titleZh": "LosslessCut",
-    "tagline": "LosslessCut 是无损音视频切割工具，适合快速整理素材、截取片段和做剪辑前处理。",
-    "summary": "LosslessCut 是无损音视频切割工具，适合快速整理素材、截取片段和做剪辑前处理。",
-    "category": "video-subtitle",
-    "subcategory": "无损切割与素材整理",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "抖音",
-      "TikTok"
-    ],
-    "tasks": [
-      "无损切割与素材整理",
-      "视频",
-      "剪辑",
-      "素材处理",
-      "视频草稿",
-      "字幕"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "mifi",
-      "avatarUrl": "https://github.com/mifi.png"
-    },
-    "github": {
-      "repo": "mifi/lossless-cut",
-      "url": "https://github.com/mifi/lossless-cut",
-      "stars": 41188,
-      "forks": 0,
-      "license": "GPL-2.0",
-      "lastPushedAt": "2026-06-05T06:40:15Z",
-      "defaultBranch": "main",
-      "readmeText": "# lossless-cut\n\nLosslessCut 是无损音视频切割工具，适合快速整理素材、截取片段和做剪辑前处理。\n\n## 适合场景\n\n- 无损切割与素材整理\n- 视频\n- 剪辑\n- 素材处理\n- 视频草稿\n- 字幕\n\n## 输入\n\n- 视频素材\n- 音频素材\n- 目标平台\n\n## 输出\n\n- 视频草稿\n- 字幕\n- 可发布素材",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "视频素材",
-      "音频素材",
-      "目标平台"
-    ],
-    "outputs": [
-      "视频草稿",
-      "字幕",
-      "可发布素材"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 mifi/lossless-cut 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "无需重新编码即可快速裁切音视频，保留原始质量。",
-        "适合素材拆条、粗剪、片段归档。",
-        "比完整剪辑软件轻，适合进入资料整理流程。"
-      ],
-      "command": "git clone https://github.com/mifi/lossless-cut.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "功能边界明确，不要期待完整剪辑能力。",
-        "批量素材管理仍需要文件命名和目录规范。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "2noise-chattts",
     "name": "ChatTTS",
     "titleZh": "ChatTTS",
     "tagline": "ChatTTS 是面向对话场景的开源 TTS 模型，适合观察中文/英文对话式配音、LLM 助手语音和短视频口播音色生成能力；但模型许可偏研究用途，商用要特别谨慎。",
     "summary": "ChatTTS 是面向对话场景的开源 TTS 模型，适合观察中文/英文对话式配音、LLM 助手语音和短视频口播音色生成能力；但模型许可偏研究用途，商用要特别谨慎。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "对话式 TTS / 中文配音",
     "platforms": [
       "YouTube",
@@ -2143,83 +1344,6 @@
         "AGPL-3.0 代码许可和 CC BY-NC 4.0 模型许可需要分开看，商业使用前必须重新核验。",
         "官方 README 对滥用风险有明确提醒，且提到通过音频质量压缩和高频噪声降低恶意用途风险。",
         "生成声音涉及肖像权、声音权、平台政策和内容标注问题。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "manimcommunity-manim",
-    "name": "manim",
-    "titleZh": "Manim",
-    "tagline": "Manim 是 Python 解释动画框架，适合做数学、课程、知识解释和结构化概念动画。",
-    "summary": "Manim 是 Python 解释动画框架，适合做数学、课程、知识解释和结构化概念动画。",
-    "category": "video-subtitle",
-    "subcategory": "教育动画与解释型视频",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "抖音",
-      "TikTok"
-    ],
-    "tasks": [
-      "教育动画与解释型视频",
-      "视频",
-      "动画",
-      "知识解释",
-      "视频草稿",
-      "字幕"
-    ],
-    "businessGoals": [
-      "content-production",
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "ManimCommunity",
-      "avatarUrl": "https://github.com/ManimCommunity.png"
-    },
-    "github": {
-      "repo": "ManimCommunity/manim",
-      "url": "https://github.com/ManimCommunity/manim",
-      "stars": 38916,
-      "forks": 0,
-      "license": "MIT",
-      "lastPushedAt": "2026-06-10T21:50:00Z",
-      "defaultBranch": "main",
-      "readmeText": "# manim\n\nManim 是 Python 解释动画框架，适合做数学、课程、知识解释和结构化概念动画。\n\n## 适合场景\n\n- 教育动画与解释型视频\n- 视频\n- 动画\n- 知识解释\n- 视频草稿\n- 字幕\n\n## 输入\n\n- 视频素材\n- 音频素材\n- 目标平台\n\n## 输出\n\n- 视频草稿\n- 字幕\n- 可发布素材",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "视频素材",
-      "音频素材",
-      "目标平台"
-    ],
-    "outputs": [
-      "视频草稿",
-      "字幕",
-      "可发布素材"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 ManimCommunity/manim 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "用代码生成精确的解释动画和图形变化。",
-        "适合知识可视化、公式演示、课程片段。",
-        "比手工动画更可复用，但更偏技术表达。"
-      ],
-      "command": "git clone https://github.com/ManimCommunity/manim.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": false,
-      "privateDataRisk": false,
-      "notes": [
-        "学习曲线偏技术化。",
-        "视觉风格偏解释和课程，不一定适合所有内容营销场景。"
       ]
     },
     "listingStatus": "verified",
@@ -2311,7 +1435,7 @@
     "titleZh": "HyperFrames 视频生成 Skills",
     "tagline": "HeyGen 开源的 HTML-to-video agent 工具，skills.sh 上视频相关 skill 安装量高，适合产品发布视频、网页转视频和 PR 转视频。",
     "summary": "HyperFrames 让 agent 用 HTML 写视频并渲染，适合内容团队做产品发布视频、网站转视频、社媒短片和程序化视频模板。它更偏视频生产基础设施，和数字人平台 HeyGen 有关联，但本仓库核心是 HTML 视频渲染。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "程序化视频生成",
     "platforms": [
       "YouTube",
@@ -2389,7 +1513,7 @@
     "titleZh": "Fish Speech",
     "tagline": "Fish Speech 是高关注开源 TTS 项目，适合观察 AI 配音、声音生成和多语言内容生产能力。",
     "summary": "Fish Speech 是高关注开源 TTS 项目，适合观察 AI 配音、声音生成和多语言内容生产能力。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "开源 TTS / 配音",
     "platforms": [
       "YouTube",
@@ -2461,319 +1585,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "googleworkspace-cli-agent-skills",
-    "name": "Google Workspace CLI",
-    "titleZh": "Google Workspace 内容运营助手",
-    "tagline": "Google Workspace CLI 内置 AI agent skills，可操作 Drive、Gmail、Calendar、Sheets、Docs 和 Chat，适合内容团队整理资料、表格、文档和发布协作。",
-    "summary": "Google Workspace CLI 是 Google 官方开源的命令行工具，仓库说明包含 AI agent skills。它更像内容团队的协作基础设施，适合用来处理选题表、素材清单、客户资料、邮件沟通和发布协作，而不是单一内容生成工具。",
-    "category": "productivity",
-    "subcategory": "文档与协作自动化",
-    "platforms": [
-      "公众号",
-      "Newsletter",
-      "团队内部"
-    ],
-    "tasks": [
-      "文档与协作自动化",
-      "Docs",
-      "Sheets",
-      "Gmail",
-      "文档",
-      "表格"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "googleworkspace",
-      "avatarUrl": "https://github.com/googleworkspace.png"
-    },
-    "github": {
-      "repo": "googleworkspace/cli",
-      "url": "https://github.com/googleworkspace/cli",
-      "stars": 29510,
-      "forks": 1699,
-      "license": "Apache-2.0",
-      "lastPushedAt": "2026-07-01",
-      "defaultBranch": "main",
-      "readmeText": "# Google Workspace CLI\n\nGoogle Workspace CLI 是 Google 官方开源的命令行工具，仓库说明包含 AI agent skills。它更像内容团队的协作基础设施，适合用来处理选题表、素材清单、客户资料、邮件沟通和发布协作，而不是单一内容生成工具。\n\n## 适合场景\n\n- 文档与协作自动化\n- Docs\n- Sheets\n- Gmail\n- 文档\n- 表格\n\n## 输入\n\n- Google Workspace 账号\n- 内容资料\n- 协作目标\n\n## 输出\n\n- 文档\n- 表格\n- 邮件草稿\n- 团队协作记录",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "Google Workspace 账号",
-      "内容资料",
-      "协作目标"
-    ],
-    "outputs": [
-      "文档",
-      "表格",
-      "邮件草稿",
-      "团队协作记录"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 googleworkspace/cli 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "安装对应 skill",
-        "完成 Google 账号授权",
-        "先用只读任务测试资料读取，再决定是否允许写入"
-      ],
-      "command": "npx skills add googleworkspace/cli@persona-content-creator",
-      "officialDocsUrl": "https://skills.sh/googleworkspace/cli/persona-content-creator"
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": false,
-      "externalWrite": true,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "涉及 Google 账号授权和云端资料。",
-        "可能写入 Docs、Sheets、Gmail 或 Calendar。",
-        "正式使用前需要明确只读 / 写入边界。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "assafelovic-gpt-researcher",
-    "name": "gpt-researcher",
-    "titleZh": "GPT Researcher",
-    "tagline": "GPT Researcher 是自动研究 Agent，可以围绕一个问题搜索、整理并生成研究材料，适合选题调研、竞品分析和内容策划前的资料初筛。",
-    "summary": "GPT Researcher 是自动研究 Agent，可以围绕一个问题搜索、整理并生成研究材料，适合选题调研、竞品分析和内容策划前的资料初筛。",
-    "category": "topic-trend",
-    "subcategory": "自动化深度研究",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "自动化深度研究",
-      "资料收集",
-      "深度研究",
-      "Agent",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "assafelovic",
-      "avatarUrl": "https://github.com/assafelovic.png"
-    },
-    "github": {
-      "repo": "assafelovic/gpt-researcher",
-      "url": "https://github.com/assafelovic/gpt-researcher",
-      "stars": 27624,
-      "forks": 0,
-      "license": "Apache-2.0",
-      "lastPushedAt": "2026-05-28T07:41:25Z",
-      "defaultBranch": "main",
-      "readmeText": "# gpt-researcher\n\nGPT Researcher 是自动研究 Agent，可以围绕一个问题搜索、整理并生成研究材料，适合选题调研、竞品分析和内容策划前的资料初筛。\n\n## 适合场景\n\n- 自动化深度研究\n- 资料收集\n- 深度研究\n- Agent\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 assafelovic/gpt-researcher 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "围绕主题自动检索、汇总和组织资料。",
-        "适合把开放问题变成初步研究报告或参考材料包。",
-        "可作为内容生产早期的“研究助手”，减少从零搜索的成本。"
-      ],
-      "command": "git clone https://github.com/assafelovic/gpt-researcher.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": false,
-      "notes": [
-        "自动研究可能引入幻觉、过时信息或来源混杂。",
-        "引用必须回到原始链接核验。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "panniantong-agent-reach",
-    "name": "Agent-Reach",
-    "titleZh": "Agent Reach",
-    "tagline": "Agent Reach 是给 AI Agent 补齐互联网读取、搜索和平台访问能力的脚手架，适合把网页、YouTube、GitHub、Reddit、B站、小红书、RSS 等来源接入 Agent 工作流。",
-    "summary": "Agent Reach 是给 AI Agent 补齐互联网读取、搜索和平台访问能力的脚手架，适合把网页、YouTube、GitHub、Reddit、B站、小红书、RSS 等来源接入 Agent 工作流。",
-    "category": "productivity",
-    "subcategory": "Agent 互联网访问脚手架",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "Agent 互联网访问脚手架",
-      "Agent",
-      "CLI",
-      "MCP",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "Panniantong",
-      "avatarUrl": "https://github.com/Panniantong.png"
-    },
-    "github": {
-      "repo": "Panniantong/agent-reach",
-      "url": "https://github.com/Panniantong/agent-reach",
-      "stars": 26217,
-      "forks": 2159,
-      "license": "MIT",
-      "lastPushedAt": "2026-06-11T09:15:00Z",
-      "defaultBranch": "main",
-      "readmeText": "# Agent-Reach\n\nAgent Reach 是给 AI Agent 补齐互联网读取、搜索和平台访问能力的脚手架，适合把网页、YouTube、GitHub、Reddit、B站、小红书、RSS 等来源接入 Agent 工作流。\n\n## 适合场景\n\n- Agent 互联网访问脚手架\n- Agent\n- CLI\n- MCP\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 Panniantong/agent-reach 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "给命令行 Agent 配置一组常用互联网访问工具，而不是每个平台单独折腾。",
-        "支持网页阅读、YouTube 字幕/搜索、RSS、GitHub、Reddit、Twitter/X、B站、小红书、LinkedIn、雪球、小宇宙等方向。",
-        "提供 agent-reach doctor 这类诊断入口，用来检查哪些平台可用、哪些需要配置。"
-      ],
-      "command": "git clone https://github.com/Panniantong/agent-reach.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": true,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "Cookie、Token、登录态只应保存在本地安全位置，不写入 Obsidian、不写入响应、不提交到仓库。",
-        "涉及小红书、Twitter/X、LinkedIn、Reddit 等平台时，要额外关注平台条款、账号风控和访问频率。",
-        "接入流程应按：官方文档/仓库确认 → 安装 → doctor 检查 → 只读测试 → 小范围 dry-run → 人工确认后再写入。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "langchain-deepagents-social-media",
-    "name": "deepagents",
-    "titleZh": "DeepAgents 社媒内容 Agent",
-    "tagline": "LangChain 的 agent harness，可通过 social-media skill 组织社媒内容生成、研究和发布前检查。",
-    "summary": "deepagents 是 LangChain 的高星 agent 基础框架，不是垂直内容工具。它适合内容团队构建自己的社媒 agent、研究 agent、审核 agent 和发布前检查流程。",
-    "category": "productivity",
-    "subcategory": "自动化 / 社媒 Agent 编排",
-    "platforms": [
-      "小红书",
-      "公众号",
-      "TikTok",
-      "团队内部"
-    ],
-    "tasks": [
-      "社媒 Agent 编排",
-      "社媒",
-      "编排",
-      "检查",
-      "Agent 流程",
-      "内容草稿"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "langchain-ai",
-      "avatarUrl": "https://github.com/langchain-ai.png"
-    },
-    "github": {
-      "repo": "langchain-ai/deepagents",
-      "url": "https://github.com/langchain-ai/deepagents",
-      "stars": 25930,
-      "forks": 3634,
-      "license": "MIT",
-      "lastPushedAt": "2026-07-08",
-      "defaultBranch": "main",
-      "readmeText": "# deepagents\n\ndeepagents 是 LangChain 的高星 agent 基础框架，不是垂直内容工具。它适合内容团队构建自己的社媒 agent、研究 agent、审核 agent 和发布前检查流程。\n\n## 适合场景\n\n- 社媒 Agent 编排\n- 社媒\n- 编排\n- 检查\n- Agent 流程\n- 内容草稿\n\n## 输入\n\n- 社媒任务\n- 工具权限\n- 模型 API Key\n\n## 输出\n\n- Agent 流程\n- 内容草稿\n- 检查结果",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "社媒任务",
-      "工具权限",
-      "模型 API Key"
-    ],
-    "outputs": [
-      "Agent 流程",
-      "内容草稿",
-      "检查结果"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 langchain-ai/deepagents 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "先阅读 social-media skill 说明",
-        "用只读社媒任务验证流程",
-        "涉及发布或账号写入时增加人工确认"
-      ],
-      "command": "npx skills add langchain-ai/deepagents@social-media",
-      "officialDocsUrl": "https://skills.sh/langchain-ai/deepagents/social-media"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "框架能力强但配置复杂。",
-        "可能连接外部工具和 API。",
-        "不应默认授权自动发布。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "frontend-slides",
     "name": "frontend-slides",
     "titleZh": "网页演示稿生成",
     "tagline": "用 coding agent 的前端能力生成漂亮的网页幻灯片，适合课程、发布会、提案、内容复盘和知识分享类演示稿。",
     "summary": "frontend-slides 把演示稿制作转成网页前端生产流程，让 agent 直接生成可浏览、可动画、可发布的 HTML slides。对内容创作者来说，它适合把选题、课程、产品介绍和内容策略包装成更有视觉表达力的演示页面。",
-    "category": "personal-brand",
+    "category": "content-creation",
     "subcategory": "网页幻灯片",
     "platforms": [
       "YouTube",
@@ -2871,8 +1688,7 @@
     },
     "listingStatus": "verified",
     "relatedSkillIds": [
-      "guizang-social-card-skill",
-      "codebase-to-course"
+      "guizang-social-card-skill"
     ]
   },
   {
@@ -2881,7 +1697,7 @@
     "titleZh": "find-skills",
     "tagline": "find-skills：想找某类能力、插件、工作流、工具包时",
     "summary": "find-skills：想找某类能力、插件、工作流、工具包时",
-    "category": "productivity",
+    "category": "office-collaboration",
     "subcategory": "协作流程 skill",
     "platforms": [
       "YouTube",
@@ -2951,245 +1767,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "alirezarezvani-claude-skills-content-creator",
-    "name": "claude-skills",
-    "titleZh": "Claude Skills 内容创作大库",
-    "tagline": "大型 Claude Code / Codex agent skills 集合，包含 content-creator、marketing、research 等技能，适合作为内容创作 skill 参考库。",
-    "summary": "alirezarezvani/claude-skills 是高星 agent skills 集合，覆盖工程、营销、内容、研究和运营等方向。对 Creator Skills Hub 来说，它更适合作为可拆分的 skill 来源库，而不是单一技能。",
-    "category": "copy-script",
-    "subcategory": "内容创作 Skill Pack",
-    "platforms": [
-      "公众号",
-      "Newsletter",
-      "团队内部"
-    ],
-    "tasks": [
-      "内容创作 Skill Pack",
-      "写作",
-      "SEO",
-      "社媒",
-      "博客草稿",
-      "社媒内容"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "alirezarezvani",
-      "avatarUrl": "https://github.com/alirezarezvani.png"
-    },
-    "github": {
-      "repo": "alirezarezvani/claude-skills",
-      "url": "https://github.com/alirezarezvani/claude-skills",
-      "stars": 21626,
-      "forks": 2898,
-      "license": "MIT",
-      "lastPushedAt": "2026-07-08",
-      "defaultBranch": "main",
-      "readmeText": "# claude-skills\n\nalirezarezvani/claude-skills 是高星 agent skills 集合，覆盖工程、营销、内容、研究和运营等方向。对 Creator Skills Hub 来说，它更适合作为可拆分的 skill 来源库，而不是单一技能。\n\n## 适合场景\n\n- 内容创作 Skill Pack\n- 写作\n- SEO\n- 社媒\n- 博客草稿\n- 社媒内容\n\n## 输入\n\n- 内容主题\n- 品牌语气\n- 平台要求\n\n## 输出\n\n- 博客草稿\n- 社媒内容\n- 内容日历\n- SEO 建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "内容主题",
-      "品牌语气",
-      "平台要求"
-    ],
-    "outputs": [
-      "博客草稿",
-      "社媒内容",
-      "内容日历",
-      "SEO 建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 alirezarezvani/claude-skills 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "安装 content-creator skill",
-        "补充品牌语气和目标平台",
-        "生成内容后人工复核事实和语气"
-      ],
-      "command": "npx skills add alirezarezvani/claude-skills@content-creator",
-      "officialDocsUrl": "https://skills.sh/alirezarezvani/claude-skills/content-creator"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": false,
-      "notes": [
-        "大库中 skill 数量多，正式入库前应拆分复核。",
-        "内容输出可能需要事实核查。",
-        "平台规则和版权边界需人工确认。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "jimliu-baoyu-skills",
-    "name": "baoyu-skills",
-    "titleZh": "baoyu-skills",
-    "tagline": "baoyu-skills 是宝玉老师开源的一组内容生产 skills，覆盖网页资料整理、YouTube 字幕、X/Twitter 转 Markdown、翻译、Markdown 清洗、图文视觉化、封面、演示稿、漫画分镜和发布分发等环节。",
-    "summary": "baoyu-skills 是宝玉老师开源的一组内容生产 skills，覆盖网页资料整理、YouTube 字幕、X/Twitter 转 Markdown、翻译、Markdown 清洗、图文视觉化、封面、演示稿、漫画分镜和发布分发等环节。",
-    "category": "video-subtitle",
-    "subcategory": "自动化 / 内容生产 skill 集合",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "内容生产 skill 集合",
-      "技能包",
-      "内容整理",
-      "资料收集",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "content-production",
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "JimLiu",
-      "avatarUrl": "https://github.com/JimLiu.png"
-    },
-    "github": {
-      "repo": "JimLiu/baoyu-skills",
-      "url": "https://github.com/JimLiu/baoyu-skills",
-      "stars": 21181,
-      "forks": 0,
-      "license": "NOASSERTION",
-      "lastPushedAt": "2026-06-10T22:56:23Z",
-      "defaultBranch": "main",
-      "readmeText": "# baoyu-skills\n\nbaoyu-skills 是宝玉老师开源的一组内容生产 skills，覆盖网页资料整理、YouTube 字幕、X/Twitter 转 Markdown、翻译、Markdown 清洗、图文视觉化、封面、演示稿、漫画分镜和发布分发等环节。\n\n## 适合场景\n\n- 内容生产 skill 集合\n- 技能包\n- 内容整理\n- 资料收集\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 JimLiu/baoyu-skills 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "把外部内容源转成 Markdown 或可继续处理的素材。",
-        "把内容进一步整理、翻译、格式化、视觉化。",
-        "支持文章封面、小红书图文、信息图、图表、PPT、漫画等内容表达形式。"
-      ],
-      "command": "git clone https://github.com/JimLiu/baoyu-skills.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": true,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": true,
-      "notes": [
-        "其中发布分发类 skill 属于高权限能力，不能直接自动执行。",
-        "涉及账号、Cookie、API Key、平台发布时，必须先做权限隔离、dry-run 和人工确认。",
-        "涉及图片生成后端的 skill，需要单独检查凭证和供应商配置。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
-    "id": "yikart-aitoearn",
-    "name": "AiToEarn",
-    "titleZh": "AiToEarn",
-    "tagline": "AiToEarn 是一个面向一人公司、创作者和内容运营团队的 AI 内容运营平台，尝试把内容创作、跨平台发布、互动运营和内容变现整合成 Agent 工作流；项目活跃、覆盖平台广，但因为涉及社交账号授权、自动发布和自动互动，适合先观察和小范围测试，不适合直接接入主账号重度依赖。",
-    "summary": "AiToEarn 是一个面向一人公司、创作者和内容运营团队的 AI 内容运营平台，尝试把内容创作、跨平台发布、互动运营和内容变现整合成 Agent 工作流；项目活跃、覆盖平台广，但因为涉及社交账号授权、自动发布和自动互动，适合先观察和小范围测试，不适合直接接入主账号重度依赖。",
-    "category": "publish-distribute",
-    "subcategory": "AI 内容运营与多平台发布",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "TikTok"
-    ],
-    "tasks": [
-      "AI 内容运营与多平台发布",
-      "发布分发",
-      "内容运营",
-      "变现",
-      "发布包",
-      "排期"
-    ],
-    "businessGoals": [
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "yikart",
-      "avatarUrl": "https://github.com/yikart.png"
-    },
-    "github": {
-      "repo": "yikart/AiToEarn",
-      "url": "https://github.com/yikart/AiToEarn",
-      "stars": 20774,
-      "forks": 3112,
-      "license": "MIT",
-      "lastPushedAt": "2026-05-21T02:55:15Z",
-      "defaultBranch": "main",
-      "readmeText": "# AiToEarn\n\nAiToEarn 是一个面向一人公司、创作者和内容运营团队的 AI 内容运营平台，尝试把内容创作、跨平台发布、互动运营和内容变现整合成 Agent 工作流；项目活跃、覆盖平台广，但因为涉及社交账号授权、自动发布和自动互动，适合先观察和小范围测试，不适合直接接入主账号重度依赖。\n\n## 适合场景\n\n- AI 内容运营与多平台发布\n- 发布分发\n- 内容运营\n- 变现\n- 发布包\n- 排期\n\n## 输入\n\n- 内容素材\n- 平台账号\n- 发布计划\n\n## 输出\n\n- 发布包\n- 排期\n- 平台素材",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "内容素材",
-      "平台账号",
-      "发布计划"
-    ],
-    "outputs": [
-      "发布包",
-      "排期",
-      "平台素材"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 yikart/AiToEarn 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "Monetize 内容赚钱：围绕 CPS、CPE、CPM 等结算模式，把内容创作者和商家推广任务连接起来。",
-        "Publish 内容发布 Agent：面向抖音、小红书、快手、B 站、视频号、TikTok、YouTube、Facebook、Instagram、Threads、X、Pinterest、LinkedIn 等平台做内容分发和排期。",
-        "Engage 互动 Agent：通过浏览器插件做自动点赞、收藏、关注、评论回复、评论挖掘和品牌监测。"
-      ],
-      "command": "git clone https://github.com/yikart/AiToEarn.git",
-      "officialDocsUrl": "https://aitoearn.ai/"
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": true,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": false,
-      "privateDataRisk": true,
-      "notes": [
-        "学习成本：中高。功能覆盖创作、发布、互动、变现和部署，链路较长。",
-        "成本 / 部署：Docker 本地试跑相对直接；生产环境需要服务器、对象存储、数据库、Redis、AI 模型密钥和 OAuth / Relay 配置。",
-        "许可证 / 商业使用：MIT，但仍需遵守各内容平台条款。",
-        "版权 / 平台政策：自动发布和自动互动可能触发平台风控，应先用测试账号验证。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "animateanyone",
     "name": "AnimateAnyone",
     "titleZh": "AnimateAnyone 角色动画",
     "tagline": "从角色图像生成可控人物动画，适合虚拟人、商品模特、IP 角色和短视频视觉实验。",
     "summary": "AnimateAnyone 面向一致、可控的人物图像到视频动画。它不是 agent skill，但在内容创作里可作为数字人、虚拟模特、IP 角色动画的基础能力。使用时需要区分研究 demo、模型许可和真实商业素材边界。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "数字人 / 角色图像到视频",
     "platforms": [
       "抖音",
@@ -3266,7 +1849,7 @@
     "titleZh": "khazix-skills",
     "tagline": "khazix-skills 是「数字生命卡兹克」开源的 AI Skills 合集，包含 AI 热点资讯查询、公众号长文写作、横纵分析研究、项目整理维护、磁盘清理分析等多个 skill。",
     "summary": "khazix-skills 是「数字生命卡兹克」开源的 AI Skills 合集，包含 AI 热点资讯查询、公众号长文写作、横纵分析研究、项目整理维护、磁盘清理分析等多个 skill。",
-    "category": "productivity",
+    "category": "content-creation",
     "subcategory": "自动化 / AI Skill 集合",
     "platforms": [
       "YouTube",
@@ -3343,7 +1926,7 @@
     "titleZh": "Shotcut",
     "tagline": "Shotcut 是跨平台开源视频剪辑软件，适合低成本完成常规剪辑任务，是商业剪辑软件之外的成熟备选。",
     "summary": "Shotcut 是跨平台开源视频剪辑软件，适合低成本完成常规剪辑任务，是商业剪辑软件之外的成熟备选。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "开源视频剪辑",
     "platforms": [
       "YouTube",
@@ -3419,7 +2002,7 @@
     "titleZh": "SadTalker 数字人口播",
     "tagline": "输入一张人像和一段音频，生成 talking head 视频，适合数字人口播、虚拟讲解和角色出镜实验。",
     "summary": "SadTalker 是 CVPR 2023 相关的高星开源项目，核心能力是从单张人像和音频生成带表情、头部运动和口型的 talking head 视频。适合作为数字人分类里的基础能力，但肖像、声音、模型权重和商用许可必须重点复核。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "数字人 / 单图 Talking Head",
     "platforms": [
       "YouTube",
@@ -3507,85 +2090,8 @@
     },
     "listingStatus": "verified",
     "relatedSkillIds": [
-      "wav2lip",
       "narratoai"
     ]
-  },
-  {
-    "id": "wav2lip",
-    "name": "Wav2Lip",
-    "titleZh": "Wav2Lip 口型同步",
-    "tagline": "经典音频驱动口型同步项目，可把语音与视频人物嘴型对齐，适合视频翻译配音和数字人口型修复。",
-    "summary": "Wav2Lip 是高星开源口型同步项目，常被用于视频翻译、配音重制和 talking head 工作流。它的内容创作价值很明确，但同样需要严格处理肖像、声音、版权和模型许可风险。",
-    "category": "video-subtitle",
-    "subcategory": "数字人 / 口型同步",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "抖音",
-      "TikTok"
-    ],
-    "tasks": [
-      "口型同步",
-      "配音",
-      "唇形",
-      "同步",
-      "口型同步视频",
-      "配音适配片段"
-    ],
-    "businessGoals": [
-      "content-production"
-    ],
-    "creator": {
-      "name": "Rudrabha",
-      "avatarUrl": "https://github.com/Rudrabha.png"
-    },
-    "github": {
-      "repo": "Rudrabha/Wav2Lip",
-      "url": "https://github.com/Rudrabha/Wav2Lip",
-      "stars": 13086,
-      "forks": 2831,
-      "license": null,
-      "lastPushedAt": "2025-06-22",
-      "defaultBranch": "main",
-      "readmeText": "# Wav2Lip\n\nWav2Lip 是高星开源口型同步项目，常被用于视频翻译、配音重制和 talking head 工作流。它的内容创作价值很明确，但同样需要严格处理肖像、声音、版权和模型许可风险。\n\n## 适合场景\n\n- 口型同步\n- 配音\n- 唇形\n- 同步\n- 口型同步视频\n- 配音适配片段\n\n## 输入\n\n- 授权视频\n- 配音音频\n- 模型权重\n\n## 输出\n\n- 口型同步视频\n- 配音适配片段",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "授权视频",
-      "配音音频",
-      "模型权重"
-    ],
-    "outputs": [
-      "口型同步视频",
-      "配音适配片段"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 Rudrabha/Wav2Lip 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "确认视频人物和声音授权",
-        "准备目标音频",
-        "生成后人工检查嘴型、语义和合规边界"
-      ],
-      "command": "git clone https://github.com/Rudrabha/Wav2Lip.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "可能被用于未授权换声或误导性视频。",
-        "license 未知，商用前必须复核。",
-        "涉及真人肖像和声音时必须取得授权。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
   },
   {
     "id": "rany2-edge-tts",
@@ -3593,7 +2099,7 @@
     "titleZh": "edge-tts",
     "tagline": "edge-tts 是一个 Python 工具，可直接调用 Microsoft Edge 在线文本转语音服务，不需要 Edge 浏览器、Windows 或 API key，适合快速批量生成旁白和字幕文件。",
     "summary": "edge-tts 是一个 Python 工具，可直接调用 Microsoft Edge 在线文本转语音服务，不需要 Edge 浏览器、Windows 或 API key，适合快速批量生成旁白和字幕文件。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "Edge 在线 TTS / 批量配音",
     "platforms": [
       "YouTube",
@@ -3666,89 +2172,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "jina-ai-reader",
-    "name": "reader",
-    "titleZh": "Jina Reader",
-    "tagline": "Jina Reader 是轻量网页读取工具，可以把网页快速转成 LLM 友好的文本输入，适合日常资料摘取和快速研究。",
-    "summary": "Jina Reader 是轻量网页读取工具，可以把网页快速转成 LLM 友好的文本输入，适合日常资料摘取和快速研究。",
-    "category": "topic-trend",
-    "subcategory": "网页转 LLM 输入",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "小红书",
-      "公众号"
-    ],
-    "tasks": [
-      "网页转 LLM 输入",
-      "资料收集",
-      "网页转 Markdown",
-      "LLM 输入",
-      "结构化资料",
-      "报告"
-    ],
-    "businessGoals": [
-      "content-production",
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "jina-ai",
-      "avatarUrl": "https://github.com/jina-ai.png"
-    },
-    "github": {
-      "repo": "jina-ai/reader",
-      "url": "https://github.com/jina-ai/reader",
-      "stars": 11162,
-      "forks": 0,
-      "license": "Apache-2.0",
-      "lastPushedAt": "2026-05-22T02:56:46Z",
-      "defaultBranch": "main",
-      "readmeText": "# reader\n\nJina Reader 是轻量网页读取工具，可以把网页快速转成 LLM 友好的文本输入，适合日常资料摘取和快速研究。\n\n## 适合场景\n\n- 网页转 LLM 输入\n- 资料收集\n- 网页转 Markdown\n- LLM 输入\n- 结构化资料\n- 报告\n\n## 输入\n\n- 任务目标\n- 资料来源\n- 输出格式\n\n## 输出\n\n- 结构化资料\n- 报告\n- 行动建议",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "任务目标",
-      "资料来源",
-      "输出格式"
-    ],
-    "outputs": [
-      "结构化资料",
-      "报告",
-      "行动建议"
-    ],
-    "install": {
-      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 jina-ai/reader 的 README，确认依赖、权限和输入素材，再执行对应任务。",
-      "humanSteps": [
-        "用简单 URL 前缀读取网页内容，降低网页转文本的操作成本。",
-        "适合把文章、网页、文档快速变成可总结、可摘录的内容。",
-        "比完整爬虫更轻，适合单页或少量页面的即时处理。"
-      ],
-      "command": "git clone https://github.com/jina-ai/reader.git",
-      "officialDocsUrl": ""
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": false,
-      "privateDataRisk": false,
-      "notes": [
-        "网页解析结果可能不完整，需要和原网页核对。",
-        "不应替代正式来源归档和事实核验。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": []
-  },
-  {
     "id": "krillinai-krillinai",
     "name": "KrillinAI",
     "titleZh": "krillinai-skills",
     "tagline": "krillinai-skills 是 KrillinAI 官方仓库里的 Agent Skills 集合，用于指导 Agent 操作 KrillinAI CLI，完成字幕、翻译、TTS 配音、横屏/竖屏渲染、封面和多阶段视频处理流程。",
     "summary": "krillinai-skills 是 KrillinAI 官方仓库里的 Agent Skills 集合，用于指导 Agent 操作 KrillinAI CLI，完成字幕、翻译、TTS 配音、横屏/竖屏渲染、封面和多阶段视频处理流程。",
-    "category": "video-subtitle",
+    "category": "content-creation",
     "subcategory": "自动化 / 视频翻译配音 Agent Skills 集合",
     "platforms": [
       "YouTube",
@@ -3826,7 +2255,7 @@
     "titleZh": "humanizer-zh",
     "tagline": "humanizer-zh：中文文本去 AI 味、公众号/自媒体文案润色时",
     "summary": "humanizer-zh：中文文本去 AI 味、公众号/自媒体文案润色时",
-    "category": "copy-script",
+    "category": "content-creation",
     "subcategory": "中文去 AI 味 skill",
     "platforms": [
       "小红书",
@@ -3896,95 +2325,12 @@
     "relatedSkillIds": []
   },
   {
-    "id": "follow-builders",
-    "name": "follow-builders",
-    "titleZh": "AI Builders 动态摘要",
-    "tagline": "追踪 X 和 YouTube 播客上的 AI builders 动态，并把他们的内容重组为 digest 摘要，适合选题、趋势观察和内容研究。",
-    "summary": "follow-builders 的定位是关注真实建设者，而不是泛泛的流量观点。它适合内容创作者持续追踪 AI builders 的产品、观点、播客和社交动态，再转化为选题池、趋势简报和内容研究材料。",
-    "category": "topic-trend",
-    "subcategory": "Builders 动态追踪",
-    "platforms": [
-      "X",
-      "YouTube",
-      "Newsletter",
-      "团队内部"
-    ],
-    "tasks": [
-      "Builders 动态追踪",
-      "X",
-      "播客",
-      "摘要",
-      "趋势摘要",
-      "Builders digest"
-    ],
-    "businessGoals": [
-      "content-production",
-      "creator-operations"
-    ],
-    "creator": {
-      "name": "zarazhangrui",
-      "avatarUrl": "https://github.com/zarazhangrui.png"
-    },
-    "github": {
-      "repo": "zarazhangrui/follow-builders",
-      "url": "https://github.com/zarazhangrui/follow-builders",
-      "stars": 5670,
-      "forks": 721,
-      "license": null,
-      "lastPushedAt": "2026-07-08",
-      "defaultBranch": "main",
-      "readmeText": "follow-builders 用于跟踪优秀创作者、创业者和内容账号。它适合把外部观察转成选题、观点、内容拆解和增长线索。\n\n适合场景：\n\n- 选题研究。\n- 个人品牌学习。\n- 竞品内容观察。\n- 增长案例收集。",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "Builders 列表",
-      "X 动态",
-      "YouTube 播客",
-      "更新频率"
-    ],
-    "outputs": [
-      "趋势摘要",
-      "Builders digest",
-      "选题线索",
-      "研究简报"
-    ],
-    "install": {
-      "agentInstruction": "给 Agent 提供目标创作者列表、关注角度和输出格式，让它持续整理可复用的内容洞察。",
-      "humanSteps": [
-        "先确定要追踪的 builders 范围",
-        "配置数据源和摘要频率",
-        "把摘要转入选题池前做事实核查"
-      ],
-      "command": "git clone https://github.com/zarazhangrui/follow-builders.git",
-      "officialDocsUrl": "https://github.com/zarazhangrui/follow-builders"
-    },
-    "risks": {
-      "requiresLogin": true,
-      "requiresApiKey": true,
-      "externalWrite": false,
-      "readsLocalFiles": false,
-      "commercialLicenseReview": true,
-      "privateDataRisk": false,
-      "notes": [
-        "X / YouTube 数据访问可能受平台限制。",
-        "摘要内容需要核对原始来源，避免二次误读。",
-        "license 未声明，复用代码前需要复核。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": [
-      "codebase-to-course",
-      "frontend-slides"
-    ]
-  },
-  {
     "id": "biliup",
     "name": "biliup",
     "titleZh": "B站命令行发布",
     "tagline": "B站命令行投稿、自动直播录制和视频搬运工具，支持多种登录方式、多 P 投稿，是本机 B站发布流程的底层工具。",
     "summary": "biliup 是面向 Bilibili 的命令行投稿和自动录制工具。对 Creator Skills Hub 来说，它属于发布分发层的关键基础工具：可以把已经渲染好的视频、标题、简介、标签、分区和封面提交到 B站。本机的 content-studio-bilibili-publish skill 是围绕 krillinaiHub 和 biliup 做的安全封装，不是替代 biliup。",
-    "category": "publish-distribute",
+    "category": "marketing-growth",
     "subcategory": "B站投稿自动化",
     "platforms": [
       "B站"
@@ -4056,91 +2402,7 @@
     },
     "listingStatus": "verified",
     "relatedSkillIds": [
-      "videocaptioner",
       "narratoai"
-    ]
-  },
-  {
-    "id": "codebase-to-course",
-    "name": "codebase-to-course",
-    "titleZh": "代码库转互动课程",
-    "tagline": "把任意代码库转成面向非技术 vibe coders 的单页互动 HTML 课程，适合产品教学、开源项目解读和知识内容生产。",
-    "summary": "codebase-to-course 将代码库分析、课程结构设计和网页课程呈现打包成一个 skill。它适合把技术产品、开源项目或内部工具转化为更容易理解的课程内容，但如果处理私有代码库，需要特别注意信息泄露风险。",
-    "category": "personal-brand",
-    "subcategory": "课程内容生成",
-    "platforms": [
-      "YouTube",
-      "B站",
-      "公众号",
-      "团队内部"
-    ],
-    "tasks": [
-      "课程内容生成",
-      "代码库",
-      "课程",
-      "HTML",
-      "互动 HTML 课程",
-      "课程大纲"
-    ],
-    "businessGoals": [
-      "personal-brand",
-      "lead-generation"
-    ],
-    "creator": {
-      "name": "zarazhangrui",
-      "avatarUrl": "https://github.com/zarazhangrui.png"
-    },
-    "github": {
-      "repo": "zarazhangrui/codebase-to-course",
-      "url": "https://github.com/zarazhangrui/codebase-to-course",
-      "stars": 5182,
-      "forks": 528,
-      "license": null,
-      "lastPushedAt": "2026-03-30",
-      "defaultBranch": "main",
-      "readmeText": "codebase-to-course 用于把代码库转成课程内容。它适合将项目结构、关键模块、技术决策和实践路径整理成课程大纲、讲稿和学习材料。\n\n适合场景：\n\n- 技术课程制作。\n- 产品技术讲解。\n- 企业内部培训。\n- 开源项目内容化。",
-      "readmeLanguage": "zh"
-    },
-    "examples": [],
-    "inputs": [
-      "代码库",
-      "目标读者",
-      "课程目标",
-      "讲解风格"
-    ],
-    "outputs": [
-      "互动 HTML 课程",
-      "课程大纲",
-      "项目讲解内容",
-      "教学页面"
-    ],
-    "install": {
-      "agentInstruction": "让 Agent 先只读分析代码库，生成课程结构后再决定是否生成完整讲稿。",
-      "humanSteps": [
-        "先确认代码库可被用于课程生成",
-        "指定目标读者和学习目标",
-        "生成后人工检查技术准确性和敏感信息"
-      ],
-      "command": "git clone https://github.com/zarazhangrui/codebase-to-course.git",
-      "officialDocsUrl": "https://github.com/zarazhangrui/codebase-to-course"
-    },
-    "risks": {
-      "requiresLogin": false,
-      "requiresApiKey": false,
-      "externalWrite": false,
-      "readsLocalFiles": true,
-      "commercialLicenseReview": true,
-      "privateDataRisk": true,
-      "notes": [
-        "处理私有代码库时可能暴露内部实现和业务信息。",
-        "自动生成课程需要人工检查准确性。",
-        "license 未声明，复用代码前需要复核。"
-      ]
-    },
-    "listingStatus": "verified",
-    "relatedSkillIds": [
-      "frontend-slides",
-      "follow-builders"
     ]
   },
   {
@@ -4149,7 +2411,7 @@
     "titleZh": "小红书图文与公众号封面",
     "tagline": "Claude Code / Codex skill，可生成小红书图文卡片、公众号 21:9 + 1:1 封面对和社交传播视觉素材，适合内容营销和图文笔记生产。",
     "summary": "guizang-social-card-skill 聚焦社交媒体视觉卡片生产，提供 28 种布局、10 套主题和单文件 HTML 到 PNG 的生成路线。它虽然未达到 5K stars 主库硬门槛，但由用户点名收录，且内容创作相关性很强，因此作为人工精选例外进入 demo。",
-    "category": "image-cover",
+    "category": "content-creation",
     "subcategory": "社交卡片生成",
     "platforms": [
       "小红书",
@@ -4231,8 +2493,7 @@
     "listingStatus": "curated-exception",
     "relatedSkillIds": [
       "invokeai",
-      "frontend-slides",
-      "follow-builders"
+      "frontend-slides"
     ]
   }
 ]
