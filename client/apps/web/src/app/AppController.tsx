@@ -6,6 +6,7 @@ import type {
   CodexProfileListResponse,
   CodexSkillListResponse,
   CodexSkillMarketInstallRecordResponse,
+  ConfigureModelServiceRequest,
   ConversationSearchResult,
   CreateMemoryRequest,
   CreateThreadRequest,
@@ -3241,8 +3242,17 @@ export function AppController(props: AppControllerProps) {
       && threadService !== null
       && connectionConfigRef.current !== null
     ) {
+      const submittedScope = composerAttachmentScope;
       const submitted = await submitRuntimePrompt(prompt, config, attachments, submissionMode);
       if (submitted) {
+        setComposerPromptByScope(current => {
+          if (!Object.prototype.hasOwnProperty.call(current, submittedScope)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[submittedScope];
+          return next;
+        });
         nextComposerFocusRequestIdRef.current += 1;
         setPendingComposerFocusRequestId(nextComposerFocusRequestIdRef.current);
       }
@@ -6380,6 +6390,23 @@ export function AppController(props: AppControllerProps) {
       memoryProjects={memoryProjectOptions}
       memoryThreads={memoryThreadOptions}
       codexStatus={connectionState.status === 'connected' ? connectionState.codexStatus : undefined}
+      modelServiceConfiguration={
+        modelAccessState.status === 'ready'
+          ? modelAccessState.configuration
+          : null
+      }
+      onModelServiceConfigure={
+        modelServiceConfigurationService === null
+          ? undefined
+          : async (input: ConfigureModelServiceRequest) => {
+              const response = await modelServiceConfigurationService.configure(input);
+              setModelAccessState(previous => ({
+                status: 'ready',
+                mode: previous.status === 'ready' ? previous.mode : 'platform_managed',
+                configuration: response.configuration
+              }));
+            }
+      }
       onBack={() => {
         dispatch({ type: 'back_to_app' });
         navigateToRoute(routeForConversation(state.selectedThreadId));

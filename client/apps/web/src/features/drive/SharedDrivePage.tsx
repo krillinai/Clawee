@@ -16,7 +16,8 @@ import {
   Replace,
   Search,
   Upload,
-  WifiOff
+  WifiOff,
+  X
 } from 'lucide-react';
 import {
   useEffect,
@@ -69,11 +70,14 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const replacementTargetRef = useRef<EnterpriseSharedFileResponse>();
+  const pendingUploadSpaceIdRef = useRef<string>();
   const [searchValue, setSearchValue] = useState(props.query);
   const [selectionError, setSelectionError] = useState<string>();
+  const [spacePickerOpen, setSpacePickerOpen] = useState(false);
   const selectedSpace = props.spaces?.find(
     space => space.spaceId === props.selectedSpaceId
   );
+  const writableSpaces = props.spaces?.filter(space => space.permissions.write) ?? [];
   const operationWorking = props.operation?.status === 'working';
 
   useEffect(() => {
@@ -85,6 +89,18 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
     replacementTargetRef.current = undefined;
   }, [props.selectedSpaceId]);
 
+  useEffect(() => {
+    if (!spacePickerOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSpacePickerOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [spacePickerOpen]);
+
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     props.onSearch(searchValue.trim());
@@ -92,7 +108,21 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
 
   function chooseUpload() {
     setSelectionError(undefined);
+    if (selectedSpace?.permissions.write) {
+      uploadInputRef.current?.click();
+      return;
+    }
+    setSpacePickerOpen(true);
+  }
+
+  function chooseUploadSpace(space: EnterpriseSharedSpaceResponse) {
+    setSpacePickerOpen(false);
+    pendingUploadSpaceIdRef.current = space.spaceId;
     uploadInputRef.current?.click();
+  }
+
+  function closeSpacePicker() {
+    setSpacePickerOpen(false);
   }
 
   function chooseReplacement(target: EnterpriseSharedFileResponse) {
@@ -104,13 +134,21 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
   function handleUploadSelection(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (file === undefined || selectedSpace === undefined) return;
+    if (file === undefined) return;
+    const targetSpaceId = selectedSpace?.permissions.write
+      ? selectedSpace.spaceId
+      : pendingUploadSpaceIdRef.current;
+    pendingUploadSpaceIdRef.current = undefined;
+    if (targetSpaceId === undefined) {
+      setSelectionError('请先选择要上传到的共享空间。');
+      return;
+    }
     const error = validateFile(file, props.maxFileSizeBytes);
     if (error !== undefined) {
       setSelectionError(error);
       return;
     }
-    props.onUpload(selectedSpace.spaceId, file);
+    props.onUpload(targetSpaceId, file);
   }
 
   function handleReplacementSelection(event: ChangeEvent<HTMLInputElement>) {
@@ -279,7 +317,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                     onChange={event => setSearchValue(event.target.value)}
                   />
                 </form>
-                {selectedSpace?.permissions.write ? (
+                {writableSpaces.length > 0 ? (
                   <>
                     <input
                       ref={uploadInputRef}
@@ -459,6 +497,44 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
           </section>
         </div>
       </div>
+      {spacePickerOpen ? (
+        <div
+          className="shared-drive-space-picker-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closeSpacePicker();
+          }}
+        >
+          <section
+            className="shared-drive-space-picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="选择上传空间"
+          >
+            <header>
+              <h3>选择上传空间</h3>
+              <button
+                type="button"
+                aria-label="关闭上传空间选择"
+                title="关闭"
+                onClick={closeSpacePicker}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </header>
+            <p>请选择要把文件上传到哪个共享空间。</p>
+            <ul>
+              {writableSpaces.map(space => (
+                <li key={space.spaceId}>
+                  <button type="button" onClick={() => chooseUploadSpace(space)}>
+                    <strong>{space.name}</strong>
+                    <span>{space.description || '暂无说明'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

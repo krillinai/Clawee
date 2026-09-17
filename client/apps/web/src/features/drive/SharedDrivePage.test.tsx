@@ -149,6 +149,34 @@ describe('SharedDrivePage', () => {
       .toBeInTheDocument();
   });
 
+  it('offers an upload entry on the all-files view and uploads to the chosen space', async () => {
+    const user = userEvent.setup();
+    const onUpload = vi.fn();
+    renderDrive({
+      spaces: [readOnlySpace, writableSpace],
+      selectedSpaceId: undefined,
+      files: [],
+      onUpload
+    });
+
+    const uploadButton = screen.getByRole('button', { name: '上传文件' });
+    expect(uploadButton).toBeInTheDocument();
+    await user.click(uploadButton);
+
+    const picker = screen.getByRole('dialog', { name: '选择上传空间' });
+    expect(within(picker).getByText('设计资料')).toBeInTheDocument();
+    expect(within(picker).queryByText('公司制度')).not.toBeInTheDocument();
+
+    await user.click(within(picker).getByRole('button', { name: /设计资料/ }));
+    const upload = new File(['new'], 'new.pdf', { type: 'application/pdf' });
+    await user.upload(
+      screen.getByLabelText('选择上传到共享网盘的文件'),
+      upload
+    );
+
+    expect(onUpload).toHaveBeenCalledWith(writableSpace.spaceId, upload);
+  });
+
   it('uploads, replaces, downloads, and requires explicit local overwrite', async () => {
     const user = userEvent.setup();
     const onUpload = vi.fn();

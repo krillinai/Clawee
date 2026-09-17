@@ -427,7 +427,7 @@ test('实际打包 App 可登录、查看账单与充值记录、管理连接器
     await expect(app.page.getByText('发布流程.md', { exact: true })).toBeVisible();
 
     await app.page.getByRole('button', {
-      name: '企业Skill中心',
+      name: '企业Skill',
       exact: true
     }).click();
     await expect(app.page.getByRole('tab', {

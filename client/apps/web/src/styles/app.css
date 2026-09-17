@@ -3817,6 +3817,18 @@ html.is-pane-resizing * {
   background: var(--surface-2);
 }
 
+.composer-attachment.composer-attachment-non-image {
+  width: auto;
+  flex: 0 0 auto;
+  height: 36px;
+  aspect-ratio: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+}
+
 .clawee-composer button.composer-attachment-preview-trigger:not(:disabled) {
   position: absolute;
   inset: 0;
@@ -3864,6 +3876,15 @@ html.is-pane-resizing * {
   color: var(--muted);
 }
 
+.composer-attachment-non-image .composer-attachment-file {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  color: var(--muted);
+}
+
 .composer-attachment-file span {
   width: 100%;
   overflow: hidden;
@@ -3873,6 +3894,13 @@ html.is-pane-resizing * {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-attachment-non-image .composer-attachment-file span {
+  width: auto;
+  max-width: 200px;
+  line-height: 1;
+  text-align: left;
 }
 
 .composer-attachment-status {
@@ -3898,6 +3926,13 @@ html.is-pane-resizing * {
   pointer-events: none;
 }
 
+.composer-attachment-non-image .composer-attachment-status {
+  position: static;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .composer-attachment-error .composer-attachment-preview-trigger img {
   opacity: 0.56;
 }
@@ -3912,6 +3947,10 @@ html.is-pane-resizing * {
   right: 4px;
   display: inline-flex;
   gap: 4px;
+}
+
+.composer-attachment-non-image .composer-attachment-actions {
+  position: static;
 }
 
 .clawee-composer .composer-attachment-actions button:not(:disabled) {

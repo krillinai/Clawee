@@ -1111,6 +1111,25 @@ describe('app CSS visual contracts', () => {
     expect(previewImage).toContain('background: transparent;');
   });
 
+  it('keeps composer file attachments as compact chips', () => {
+    const chip = cssBlock('.composer-attachment-non-image');
+    const file = cssBlock('.composer-attachment-non-image .composer-attachment-file');
+    const fileName = cssBlock('.composer-attachment-non-image .composer-attachment-file span');
+    const actions = cssBlock('.composer-attachment-non-image .composer-attachment-actions');
+
+    expect(chip).toContain('width: auto;');
+    expect(chip).toContain('flex: 0 0 auto;');
+    expect(chip).toContain('height: 36px;');
+    expect(chip).toContain('aspect-ratio: auto;');
+    expect(chip).toContain('display: flex;');
+    expect(chip).toContain('align-items: center;');
+    expect(file).toContain('position: static;');
+    expect(file).toContain('display: flex;');
+    expect(fileName).toContain('max-width: 200px;');
+    expect(fileName).toContain('text-align: left;');
+    expect(actions).toContain('position: static;');
+  });
+
   it('keeps user messages as bubbles and assistant replies as unframed prose', () => {
     const userBubble = cssBlock('.timeline-user_message .timeline-bubble');
     const lightUserBubble = cssBlock(':root[data-theme="light"] .timeline-user_message .timeline-bubble');

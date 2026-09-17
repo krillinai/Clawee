@@ -1226,7 +1226,7 @@ async function runPlatform(input: {
       '.schedules-view__header'
     ]);
 
-    await page.getByRole('button', { name: '企业Skill中心', exact: true }).click();
+    await page.getByRole('button', { name: '企业Skill', exact: true }).click();
     await expect(page.getByRole('tab', {
       name: '企业Skills',
       selected: true

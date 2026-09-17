@@ -79,6 +79,68 @@ describe('run event replay deduper', () => {
     ]);
   });
 
+  it('does not append an optimistic user message below the response when history text differs', () => {
+    const history = [
+      user('history_user', '武汉天气如何', 'run_weather'),
+      assistant('history_assistant', '武汉今天约 36°C。', 'run_weather')
+    ];
+    const cached = [
+      user('runtime_user', '武汉天气如何（用户原文）', 'run_weather'),
+      assistant('runtime_assistant', '武汉今天约 36°C。', 'run_weather')
+    ];
+
+    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual(history);
+  });
+
+  it('does not append an in-flight optimistic user message with attachments below history', () => {
+    const attachment = {
+      id: 'attachment-pdf',
+      fileName: '报告.pdf',
+      mime: 'application/pdf',
+      size: 4,
+      sha256: 'b'.repeat(64),
+      storageKey: 'bb/attachment-report.bin',
+      status: 'committed' as const,
+      createdAt: '2026-09-17T04:00:00.000Z',
+      updatedAt: '2026-09-17T04:00:00.000Z'
+    };
+    const history = [
+      {
+        ...user('history_user', '解析这个 PDF 并生成 HTML', 'run_pdf'),
+        attachments: [attachment]
+      },
+      assistant('history_assistant', '已生成 index.html。', 'run_pdf')
+    ];
+    const cached: TimelineItem[] = [
+      {
+        ...user('runtime_user', '解析这个 PDF 并生成 HTML（用户原文）'),
+        attachments: [attachment]
+      },
+      status('runtime_queued', undefined, 'queued')
+    ];
+
+    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
+      ...history,
+      status('runtime_queued', undefined, 'queued')
+    ]);
+  });
+
+  it('does not append an in-flight optimistic user message when history text differs only by whitespace', () => {
+    const history = [
+      user('history_user', '武汉天气如何'),
+      assistant('history_assistant', '武汉今天约 36°C。')
+    ];
+    const cached: TimelineItem[] = [
+      user('runtime_user', '武汉天气如何  '),
+      status('runtime_queued', undefined, 'queued')
+    ];
+
+    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
+      ...history,
+      status('runtime_queued', undefined, 'queued')
+    ]);
+  });
+
   it('keeps failed cached diagnostics even when history contains a failed turn', () => {
     const history = [
       user('history_user', '检查项目'),
@@ -205,7 +267,7 @@ function scheduleTrigger(id: string, runId: string): TimelineItem {
   };
 }
 
-function status(id: string, runId: string, label: string): TimelineItem {
+function status(id: string, runId: string | undefined, label: string): TimelineItem {
   return {
     kind: 'run_status',
     id,

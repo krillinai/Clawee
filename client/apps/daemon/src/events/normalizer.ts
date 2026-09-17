@@ -227,7 +227,7 @@ export function normalizeCodexEvent(input: NormalizeInput): AgentEventEnvelope {
     };
   }
 
-  if ((type === 'item.started' || type === 'item.completed') && item !== undefined && itemType === 'file_change') {
+  if (type === 'item.completed' && item !== undefined && itemType === 'file_change') {
     return {
       ...base,
       type: 'file_change',
@@ -417,7 +417,7 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
   }
 
   if (
-    (method === 'item/started' || method === 'item/completed')
+    method === 'item/completed'
     && itemType === 'fileChange'
   ) {
     return {
