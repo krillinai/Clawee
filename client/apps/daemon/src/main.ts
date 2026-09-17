@@ -299,26 +299,22 @@ async function main(): Promise<void> {
     codexEnv[CLAWEE_MODEL_API_KEY_ENV] = apiKey;
     try {
       let prepared;
-      if (context.mode === 'platform_managed') {
-        const modelCatalogPath = context.modelCatalogPath
-          ?? (await serializeCatalogOperation(
-            () => installModelCatalog({
-              codexBin,
-              codexHome,
-              codexVersion: versionProbe.version,
-              baseUrl: configuration.baseUrl,
-              apiKey,
-              defaultModel: configuration.model,
-              credentialVersion: context.credentialVersion ?? 1
-            })
-          )).path
-        prepared = await preparePlatformClientWithFallback(
-          configuration,
-          modelCatalogPath
-        );
-      } else {
-        prepared = await prepareActivatedClient(configuration);
-      }
+      const modelCatalogPath = context.modelCatalogPath
+        ?? (await serializeCatalogOperation(
+          () => installModelCatalog({
+            codexBin,
+            codexHome,
+            codexVersion: versionProbe.version,
+            baseUrl: configuration.baseUrl,
+            apiKey,
+            defaultModel: configuration.model,
+            credentialVersion: context.credentialVersion ?? 1
+          })
+        )).path;
+      prepared = await preparePlatformClientWithFallback(
+        configuration,
+        modelCatalogPath
+      );
       codexAppServerClient.activate(prepared.client);
       stopModelCatalogRefresh();
       if (context.mode === 'platform_managed') {
