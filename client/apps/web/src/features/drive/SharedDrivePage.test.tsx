@@ -122,7 +122,8 @@ describe('SharedDrivePage', () => {
     expect(onSearch).toHaveBeenCalledWith('design');
   });
 
-  it('only exposes write operations for writable spaces', () => {
+  it('keeps the upload entry visible and explains missing writable spaces', async () => {
+    const user = userEvent.setup();
     const view = renderDrive({
       spaces: [readOnlySpace],
       selectedSpaceId: readOnlySpace.spaceId,
@@ -133,10 +134,16 @@ describe('SharedDrivePage', () => {
         })
       ]
     });
-    expect(screen.queryByRole('button', { name: '上传文件' }))
-      .not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上传文件' }))
+      .toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /替换/ }))
       .not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '上传文件' }));
+    expect(screen.getByRole('dialog', { name: '选择上传空间' }))
+      .toBeInTheDocument();
+    expect(screen.getByText('当前账号没有可上传文件的共享空间。'))
+      .toBeInTheDocument();
 
     view.rerender(createDrive({
       spaces: [writableSpace],
