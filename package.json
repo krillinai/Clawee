@@ -22,6 +22,7 @@
     "server:build": "node scripts/clawee.mjs server build",
     "release:check": "node scripts/release-version.mjs check",
     "release:version": "node scripts/release-version.mjs set",
+    "desktop:package": "node scripts/clawee.mjs client desktop:package",
     "desktop:preflight:local": "node scripts/clawee.mjs client desktop:preflight:local",
     "desktop:preflight:release": "node scripts/clawee.mjs client desktop:preflight:release",
     "desktop:tag:check": "node scripts/clawee.mjs client desktop:tag:check"
