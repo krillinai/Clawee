@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Check, Moon, Sun } from 'lucide-react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent
+} from 'react';
+import { Check, Eye, EyeOff, KeyRound, LoaderCircle, Moon, Server, Sun } from 'lucide-react';
 import type {
   CodexProfileListResponse,
-  CodexStatusResponse
+  CodexStatusResponse,
+  ConfigureModelServiceRequest,
+  ModelServiceConfiguration
 } from '@clawee/protocol';
 import { CLAWEE_APP_VERSION } from '../../app-version.js';
 import type { ColorMode } from '../../styles/color-mode.js';
@@ -55,13 +63,16 @@ export type ClaweeSettingsViewProps = {
   memoryProjects?: MemoryScopeOption[];
   memoryThreads?: MemoryScopeOption[];
   codexStatus?: CodexStatusResponse;
+  modelServiceConfiguration?: ModelServiceConfiguration | null;
+  onModelServiceConfigure?(input: ConfigureModelServiceRequest): Promise<void>;
   onBack(): void;
 };
 
-type SettingsTab = 'general' | 'plugins' | 'memory' | 'profiles' | 'cleanup' | 'diagnostics' | 'about';
+type SettingsTab = 'general' | 'model' | 'plugins' | 'memory' | 'profiles' | 'cleanup' | 'diagnostics' | 'about';
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'general', label: '常规' },
+  { id: 'model', label: 'AI模型配置' },
   { id: 'plugins', label: '插件' },
   { id: 'memory', label: '记忆' },
   { id: 'profiles', label: 'Profiles' },
@@ -123,6 +134,13 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
           />
         ) : null}
         {activeTab === 'plugins' ? <PluginSettings runtimeStatus={props.runtimeStatus} /> : null}
+        {activeTab === 'model' ? (
+          <ModelServiceSettings
+            connected={props.runtimeStatus.connected}
+            configuration={props.modelServiceConfiguration ?? null}
+            onConfigure={props.onModelServiceConfigure}
+          />
+        ) : null}
         {activeTab === 'memory' ? (
           <MemorySettingsView
             connected={props.runtimeStatus.connected}
@@ -157,6 +175,131 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
         ) : null}
       </main>
     </div>
+  );
+}
+
+function ModelServiceSettings(props: {
+  connected: boolean;
+  configuration: ModelServiceConfiguration | null;
+  onConfigure?(input: ConfigureModelServiceRequest): Promise<void>;
+}) {
+  const [baseUrl, setBaseUrl] = useState(props.configuration?.baseUrl ?? '');
+  const [model, setModel] = useState(props.configuration?.model ?? '');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    setBaseUrl(props.configuration?.baseUrl ?? '');
+    setModel(props.configuration?.model ?? '');
+  }, [props.configuration?.baseUrl, props.configuration?.model]);
+
+  const available = props.connected && props.onConfigure !== undefined;
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!available || saving || !event.currentTarget.reportValidity()) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await props.onConfigure!({
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+        apiKey: apiKey.trim()
+      });
+      setApiKey('');
+    } catch (reason) {
+      setApiKey('');
+      setError(reason instanceof Error ? reason.message : '模型配置保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section
+      className="settings-section settings-management model-settings"
+      aria-labelledby="settings-model-title"
+    >
+      <header className="settings-management__header">
+        <div>
+          <h1 id="settings-model-title">AI模型配置</h1>
+          <p>配置本机 Codex Runtime 使用的模型服务。</p>
+        </div>
+      </header>
+      {!props.connected ? (
+        <p className="settings-notice">本地服务未连接，无法配置模型服务。</p>
+      ) : null}
+      {props.connected && props.onConfigure === undefined ? (
+        <p className="settings-notice">模型配置服务当前不可用。</p>
+      ) : null}
+      {error ? <p className="settings-error" role="alert">{error}</p> : null}
+      <form className="settings-card settings-form-grid" aria-label="AI模型配置" onSubmit={save}>
+        <label className="settings-form-wide">
+          <span><Server size={15} aria-hidden="true" />Base URL</span>
+          <input
+            aria-label="Base URL"
+            type="url"
+            inputMode="url"
+            autoComplete="url"
+            required
+            maxLength={2048}
+            value={baseUrl}
+            placeholder="https://api.example.com/v1"
+            disabled={!available || saving}
+            onChange={event => setBaseUrl(event.target.value)}
+          />
+        </label>
+        <label className="settings-form-wide">
+          <span><KeyRound size={15} aria-hidden="true" />API Key</span>
+          <span className="settings-secret-field">
+            <input
+              aria-label="API Key"
+              type={showApiKey ? 'text' : 'password'}
+              autoComplete="new-password"
+              required
+              value={apiKey}
+              placeholder="输入 API Key"
+              disabled={!available || saving}
+              onChange={event => setApiKey(event.target.value)}
+            />
+            <button
+              type="button"
+              aria-label={showApiKey ? '隐藏 API Key' : '显示 API Key'}
+              title={showApiKey ? '隐藏 API Key' : '显示 API Key'}
+              disabled={saving}
+              onClick={() => setShowApiKey(value => !value)}
+            >
+              {showApiKey
+                ? <EyeOff size={15} aria-hidden="true" />
+                : <Eye size={15} aria-hidden="true" />}
+            </button>
+          </span>
+          <small>API Key 仅保存到本机私有凭据文件，不会在界面回显。</small>
+        </label>
+        <label className="settings-form-wide">
+          <span>模型名字</span>
+          <input
+            aria-label="模型名字"
+            type="text"
+            autoComplete="off"
+            required
+            maxLength={200}
+            value={model}
+            placeholder="手动输入模型名字"
+            disabled={!available || saving}
+            onChange={event => setModel(event.target.value)}
+          />
+        </label>
+        <button className="settings-primary-button" type="submit" disabled={!available || saving}>
+          {saving
+            ? <LoaderCircle className="settings-spin" size={15} aria-hidden="true" />
+            : <Check size={15} aria-hidden="true" />}
+          {saving ? '正在保存' : '保存配置'}
+        </button>
+      </form>
+    </section>
   );
 }
 

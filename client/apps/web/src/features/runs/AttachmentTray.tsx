@@ -53,67 +53,70 @@ export function AttachmentTray(props: {
   return (
     <>
       <div className="composer-attachment-tray" aria-label="待发送附件">
-        {props.items.map(item => (
-          <div
-            key={item.localId}
-            className={`composer-attachment composer-attachment-${item.status}`}
-          >
-            {isImageAttachmentMime(item.mime) ? (
-              <button
-                className="composer-attachment-preview-trigger"
-                type="button"
-                aria-label={`预览附件 ${item.fileName}`}
-                title={`查看大图：${item.fileName}`}
-                onClick={(event) => {
-                  previewTriggerRef.current = event.currentTarget;
-                  setPreviewLocalId(item.localId);
-                }}
-              >
-                <img src={item.previewUrl} alt={item.fileName} />
-              </button>
-            ) : (
-              <div className="composer-attachment-file" title={item.fileName}>
-                <FileText aria-hidden="true" size={24} />
-                <span>{item.fileName}</span>
-              </div>
-            )}
-            {item.status === 'uploading' ? (
-              <span
-                className="composer-attachment-status"
-                role="status"
-                aria-label={`正在上传 ${item.fileName}`}
-              >
-                <LoaderCircle className="spin" aria-hidden="true" size={13} />
-                上传中
-              </span>
-            ) : null}
-            {item.status === 'error' ? (
-              <span className="composer-attachment-status composer-attachment-error" role="alert">
-                {item.error ?? '上传失败'}
-              </span>
-            ) : null}
-            <div className="composer-attachment-actions">
-              {item.status === 'error' && item.retryable !== false ? (
+        {props.items.map(item => {
+          const isImage = isImageAttachmentMime(item.mime);
+          return (
+            <div
+              key={item.localId}
+              className={`composer-attachment composer-attachment-${item.status}${isImage ? '' : ' composer-attachment-non-image'}`}
+            >
+              {isImage ? (
+                <button
+                  className="composer-attachment-preview-trigger"
+                  type="button"
+                  aria-label={`预览附件 ${item.fileName}`}
+                  title={`查看大图：${item.fileName}`}
+                  onClick={(event) => {
+                    previewTriggerRef.current = event.currentTarget;
+                    setPreviewLocalId(item.localId);
+                  }}
+                >
+                  <img src={item.previewUrl} alt={item.fileName} />
+                </button>
+              ) : (
+                <div className="composer-attachment-file" title={item.fileName}>
+                  <FileText aria-hidden="true" size={16} />
+                  <span>{item.fileName}</span>
+                </div>
+              )}
+              {item.status === 'uploading' ? (
+                <span
+                  className="composer-attachment-status"
+                  role="status"
+                  aria-label={`正在上传 ${item.fileName}`}
+                >
+                  <LoaderCircle className="spin" aria-hidden="true" size={13} />
+                  上传中
+                </span>
+              ) : null}
+              {item.status === 'error' ? (
+                <span className="composer-attachment-status composer-attachment-error" role="alert">
+                  {item.error ?? '上传失败'}
+                </span>
+              ) : null}
+              <div className="composer-attachment-actions">
+                {item.status === 'error' && item.retryable !== false ? (
+                  <button
+                    type="button"
+                    aria-label={`重试上传 ${item.fileName}`}
+                    title="重试上传"
+                    onClick={() => props.onRetry(item.localId)}
+                  >
+                    <RotateCcw aria-hidden="true" size={13} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  aria-label={`重试上传 ${item.fileName}`}
-                  title="重试上传"
-                  onClick={() => props.onRetry(item.localId)}
+                  aria-label={`移除附件 ${item.fileName}`}
+                  title="移除附件"
+                  onClick={() => props.onRemove(item.localId)}
                 >
-                  <RotateCcw aria-hidden="true" size={13} />
+                  <X aria-hidden="true" size={13} />
                 </button>
-              ) : null}
-              <button
-                type="button"
-                aria-label={`移除附件 ${item.fileName}`}
-                title="移除附件"
-                onClick={() => props.onRemove(item.localId)}
-              >
-                <X aria-hidden="true" size={13} />
-              </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {previewItem === undefined ? null : createPortal(
         <div

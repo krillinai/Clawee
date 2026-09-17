@@ -308,6 +308,40 @@
   grid-column: 1 / -1;
 }
 
+.settings-secret-field {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-secret-field input {
+  flex: 1 1 auto;
+}
+
+.settings-secret-field button {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.model-settings .settings-card {
+  padding: 16px;
+}
+
+.model-settings .settings-form-grid {
+  gap: 20px;
+}
+
+.model-settings .settings-primary-button {
+  justify-self: start;
+}
+
 .settings-advanced-fields {
   min-width: 0;
   border-top: 1px solid var(--border-hairline);

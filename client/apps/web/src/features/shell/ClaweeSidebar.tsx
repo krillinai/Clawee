@@ -154,7 +154,7 @@ export function ClaweeSidebar(props: {
     ...(props.activityAllowed === true
       ? [{ label: 'Agent动态', icon: Activity, view: 'activity' as const, onClick: () => props.onOpenView('activity') }]
       : []),
-    { label: '企业Skill中心', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
+    { label: '企业Skill', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
     { label: '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
     { label: '共享网盘', icon: HardDrive, view: 'drive', onClick: () => props.onOpenView('drive') },

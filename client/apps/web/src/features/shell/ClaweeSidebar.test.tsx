@@ -120,11 +120,11 @@ describe('ClaweeSidebar', () => {
     expect(primaryActions).not.toContainElement(searchButton);
     expect(screen.getByRole('button', { name: '定时任务' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '任务' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '企业Skill中心' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '企业Skill' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '连接器' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '企业知识库' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '共享网盘' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '企业Skill中心' }).nextElementSibling).toBe(screen.getByRole('button', { name: '连接器' }));
+    expect(screen.getByRole('button', { name: '企业Skill' }).nextElementSibling).toBe(screen.getByRole('button', { name: '连接器' }));
     expect(screen.getByRole('button', { name: '连接器' }).nextElementSibling).toBe(screen.getByRole('button', { name: '企业知识库' }));
     expect(screen.getByRole('button', { name: '企业知识库' }).nextElementSibling).toBe(screen.getByRole('button', { name: '共享网盘' }));
     expect(screen.getByRole('button', { name: '共享网盘' }).nextElementSibling).toBe(screen.getByRole('button', { name: '定时任务' }));

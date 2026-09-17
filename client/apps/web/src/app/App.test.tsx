@@ -1230,7 +1230,7 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: '企业Skill中心' }));
+    await user.click(await screen.findByRole('button', { name: '企业Skill' }));
 
     await waitFor(() => expect(window.location.hash).toBe('#/plugins'));
     expect(await screen.findByRole('tab', { name: '企业Skills', selected: true })).toBeInTheDocument();
@@ -1453,7 +1453,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '打开导航' }));
     expect(navigation).toHaveAttribute('data-mobile-open', 'true');
 
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     expect(navigation).toHaveAttribute('data-mobile-open', 'false');
 
     await user.click(screen.getByRole('button', { name: '打开导航' }));
@@ -1509,7 +1509,7 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: '打开导航' }));
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
 
     await waitFor(() => expect(window.location.hash).toBe('#/plugins'));
     expect(back).not.toHaveBeenCalled();
@@ -4110,7 +4110,7 @@ describe('App', () => {
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
     await waitFor(() => expect(skillRequests).toBe(1));
 
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await user.click(screen.getByRole('tab', { name: 'Skill市场' }));
     await waitFor(() => expect(recordRequests).toBe(1));
     expect(screen.queryByRole('heading', { name: 'Clawee：插件' })).not.toBeInTheDocument();
@@ -4155,7 +4155,7 @@ describe('App', () => {
       expect(screen.getByRole('textbox', { name: '输入任务' })).toHaveFocus();
     });
 
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(getSkillMarketCard('frontend-slides')).toBeInTheDocument());
     await user.click(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '使用' }));
@@ -4227,7 +4227,7 @@ describe('App', () => {
     expect(screen.queryByRole('option', { name: /github/ })).not.toBeInTheDocument();
     await user.keyboard('{Escape}');
 
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await user.click(screen.getByRole('tab', { name: 'Skill市场' }));
     await waitFor(() => expect(screen.getAllByTestId('skill-market-card')).toHaveLength(12));
     await showSkillMarketCard(user, 'frontend-slides');
@@ -4271,7 +4271,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await user.click(screen.getByRole('tab', { name: 'Skill市场' }));
     await waitFor(() => expect(screen.getAllByTestId('skill-market-card')).toHaveLength(12));
     await showSkillMarketCard(user, 'frontend-slides');
@@ -4322,7 +4322,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '使用' })).toBeEnabled());
 
@@ -4394,7 +4394,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '使用' })).toBeEnabled());
 
@@ -4420,7 +4420,7 @@ describe('App', () => {
     });
     expect(await screen.findByRole('heading', { name: '网页演示稿生成' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '使用' })).toBeEnabled());
     await user.click(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '使用' }));
@@ -4500,7 +4500,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '安装' })).toBeEnabled());
     await user.click(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '安装' }));
@@ -4582,7 +4582,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
     await waitFor(() => expect(skillRequests).toBe(1));
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await waitFor(() => expect(recordRequests).toBe(1));
     await waitFor(() => expect(within(getSkillMarketCard('frontend-slides')).getByRole('button', { name: '更新' })).toBeEnabled());
@@ -4639,7 +4639,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await user.click(await within(getSkillMarketCard('frontend-slides')).findByRole('button', { name: '安装' }));
 
@@ -4703,7 +4703,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '企业Skill中心' }));
+    await user.click(screen.getByRole('button', { name: '企业Skill' }));
     await showSkillMarketCard(user, 'frontend-slides');
     await user.click(await within(getSkillMarketCard('frontend-slides')).findByRole('button', { name: '更新' }));
 
@@ -8839,6 +8839,67 @@ describe('App', () => {
       resumeMode: 'auto'
     });
     expect(await screen.findByRole('button', { name: /跟进今天客户沟通/ })).toBeInTheDocument();
+  });
+
+  it('does not restore the submitted prompt when starting another new conversation', async () => {
+    const user = userEvent.setup();
+    const prompt = '总结今天的进展';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [] });
+      if (url.endsWith('/threads')) {
+        return jsonResponse({
+          thread: createThreadResponse({
+            id: 'thread_created_from_chat',
+            title: prompt,
+            cwd: '~',
+            canonicalCwd: '~'
+          })
+        }, { status: 201 });
+      }
+      if (url.endsWith('/runs')) return jsonResponse({ id: 'run_1', threadId: 'thread_created_from_chat', status: 'running' }, { status: 202 });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    const subscribeRunEvents = async (input: SubscribeRunEventsInput) => {
+      input.onEvent(
+        createRuntimeEvent(
+          'assistant_message',
+          {
+            type: 'assistant_message',
+            text: '已总结。',
+            format: 'plain_text',
+            delivery: 'message'
+          },
+          1
+        )
+      );
+      input.onEvent(createRuntimeEvent('done', { type: 'done', status: 'succeeded', terminationReason: 'completed' }, 2));
+    };
+
+    render(
+      <App
+        fileService={createFileService()}
+        hostBridge={hostBridge}
+        runtimeFetch={runtimeFetch}
+        subscribeRunEvents={subscribeRunEvents}
+      />
+    );
+
+    expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), prompt);
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText('已总结。')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '新建会话' }));
+
+    expect(screen.getByRole('textbox', { name: '输入任务' })).toHaveValue('');
   });
 
   it('applies selected composer runtime config when creating a new thread', async () => {

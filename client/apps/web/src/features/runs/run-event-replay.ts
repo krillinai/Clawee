@@ -86,11 +86,47 @@ export function mergeTimelineHistoryWithCache(
       continue;
     }
     if (consumeHistoryKey(item)) continue;
+    if (
+      item.kind === 'user_message' || item.kind === 'schedule_trigger'
+    ) {
+      const historyHasSameInput = item.runId === undefined
+        ? historyItems.some(historyItem => (
+          historyItem.kind === item.kind
+          && timelineUserInputsMatch(historyItem, item)
+        ))
+        : historyItems.some(historyItem => (
+          historyItem.kind === item.kind
+          && historyItem.runId === item.runId
+        ));
+      if (historyHasSameInput) continue;
+    }
     merged.push(item);
     historyIds.add(item.id);
   }
 
   return merged;
+}
+
+function timelineUserInputsMatch(
+  historyItem: TimelineItem,
+  cachedItem: TimelineItem
+): boolean {
+  if (historyItem.kind === 'schedule_trigger' && cachedItem.kind === 'schedule_trigger') {
+    return (
+      historyItem.prompt === cachedItem.prompt
+      && historyItem.triggeredAt === cachedItem.triggeredAt
+    );
+  }
+  if (historyItem.kind !== 'user_message' || cachedItem.kind !== 'user_message') return false;
+  const historyAttachmentIds = historyItem.attachments?.map(item => item.id) ?? [];
+  const cachedAttachmentIds = cachedItem.attachments?.map(item => item.id) ?? [];
+  if (
+    historyAttachmentIds.length > 0
+    && historyAttachmentIds.some(id => cachedAttachmentIds.includes(id))
+  ) {
+    return true;
+  }
+  return historyItem.text.trim() === cachedItem.text.trim();
 }
 
 function mergeCachedUserMessageAttachments(

@@ -21,6 +21,7 @@ describe('ClaweeSettingsView', () => {
     expect(screen.getByPlaceholderText('搜索暂不可用')).toBeDisabled();
     expect(screen.getByText('搜索暂不可用')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '常规' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'AI模型配置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '插件' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'MCP 服务' }))
       .not.toBeInTheDocument();
@@ -39,6 +40,47 @@ describe('ClaweeSettingsView', () => {
     expect(screen.queryByRole('switch', { name: '动态背景' })).not.toBeInTheDocument();
     expect(screen.queryByText('工作模式')).not.toBeInTheDocument();
     expect(screen.queryByText('适用于编程')).not.toBeInTheDocument();
+  });
+
+  it('configures the AI model service without exposing the saved API key', async () => {
+    const onModelServiceConfigure = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ClaweeSettingsView
+        runtimeStatus={runtimeStatus}
+        modelServiceConfiguration={{
+          baseUrl: 'https://model.example.com/v1',
+          model: 'gpt-5'
+        }}
+        onModelServiceConfigure={onModelServiceConfigure}
+        onBack={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI模型配置' }));
+    expect(screen.getByRole('heading', { name: 'AI模型配置' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Base URL' }))
+      .toHaveValue('https://model.example.com/v1');
+    expect(screen.getByRole('textbox', { name: '模型名字' })).toHaveValue('gpt-5');
+
+    const apiKey = screen.getByLabelText('API Key');
+    expect(apiKey).toHaveAttribute('type', 'password');
+    expect(apiKey).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: '显示 API Key' }));
+    expect(apiKey).toHaveAttribute('type', 'text');
+    fireEvent.change(apiKey, { target: { value: 'secret-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '隐藏 API Key' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+
+    await vi.waitFor(() => {
+      expect(onModelServiceConfigure).toHaveBeenCalledWith({
+        baseUrl: 'https://model.example.com/v1',
+        model: 'gpt-5',
+        apiKey: 'secret-key'
+      });
+      expect(apiKey).toHaveValue('');
+    });
+    expect(apiKey).toHaveAttribute('type', 'password');
   });
 
   it('notifies when the global default permission changes', () => {
