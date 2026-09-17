@@ -303,6 +303,11 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     setLoadError(undefined);
     setSaveError(undefined);
     setConflictOpen(false);
+    replaceObjectUrl(undefined);
+    setActivePath(undefined);
+    setMeta(undefined);
+    setSavedContent('');
+    setDraftContent('');
 
     try {
       const nextMeta = options?.knownMeta ?? await service.getMeta(thread.id, path);
@@ -313,13 +318,13 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
       let nextContent = '';
       let nextObjectUrl: string | undefined;
 
-      if (isTextMeta(nextMeta)) {
+      if (isTextMeta(nextMeta) && nextMeta.previewable) {
         const response = await service.openText(thread.id, path);
         if (!mountedRef.current || requestId !== openRequestIdRef.current) {
           return;
         }
         nextContent = response.content;
-      } else if (isBlobMeta(nextMeta)) {
+      } else if (isBlobMeta(nextMeta) && nextMeta.previewable) {
         const blob = await service.openBlob(thread.id, path);
         if (!mountedRef.current || requestId !== openRequestIdRef.current) {
           service.revokeBlob(blob.objectUrl);

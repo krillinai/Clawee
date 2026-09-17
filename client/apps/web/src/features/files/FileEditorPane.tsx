@@ -48,8 +48,15 @@ export function FileEditorPane(props: FileEditorPaneProps) {
   if (!meta) {
     return (
       <section className="file-editor-pane" data-toolbar={toolbar} aria-label="文件编辑区">
+        {errors.length === 0 ? null : (
+          <div className="file-error-bar" role="status">
+            {errors.map((error) => (
+              <span key={error}>{error}</span>
+            ))}
+          </div>
+        )}
         <div className="file-preview file-preview-empty">
-          <p>选择一个文件</p>
+          <p>{errors.length === 0 ? '选择一个文件' : '文件加载失败'}</p>
         </div>
       </section>
     );
@@ -145,6 +152,10 @@ type RenderContentArgs = {
 };
 
 function renderContent(args: RenderContentArgs) {
+  if (!args.meta.previewable && !args.meta.editable) {
+    return renderUnsupported(args.meta);
+  }
+
   if (isImagePreview(args.meta)) {
     return (
       <div className="file-preview file-preview-media">
@@ -292,18 +303,7 @@ function isTextLike(meta: WorkspaceFileMeta): boolean {
 }
 
 export function isPreviewable(meta: WorkspaceFileMeta): boolean {
-  if (
-    meta.kind === 'markdown' ||
-    meta.kind === 'json' ||
-    meta.kind === 'text' ||
-    meta.kind === 'code' ||
-    meta.kind === 'html' ||
-    isSvgSource(meta)
-  ) {
-    return true;
-  }
-
-  return meta.kind === 'image' || meta.kind === 'pdf';
+  return meta.previewable === true;
 }
 
 function isImagePreview(meta: WorkspaceFileMeta): boolean {

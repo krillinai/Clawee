@@ -557,6 +557,77 @@ describe('FileWorkspaceView', () => {
     expect(await screen.findByText('hello notes')).toBeInTheDocument();
   });
 
+  it('新文件加载失败时不会保留旧文件的预览状态', async () => {
+    const user = userEvent.setup();
+    const thread = createThread();
+    const service = createService({
+      directories: {
+        '': createDirectory({
+          nodes: [fileNode('ready.md', 'markdown'), fileNode('missing.md', 'markdown')]
+        })
+      },
+      contents: { 'ready.md': '# Ready' }
+    });
+    service.getMeta.mockImplementation(async (_threadId: string, path: string) => {
+      if (path === 'missing.md') throw new Error('文件不存在');
+      return createMeta({ path, name: path });
+    });
+
+    render(
+      <FileWorkspaceView
+        selectedThread={thread}
+        conversationPaths={['ready.md', 'missing.md']}
+        workspaceFileService={service}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+    await expandFileTree(user);
+    await user.click(screen.getByRole('treeitem', { name: 'missing.md' }));
+
+    expect(await screen.findByText('文件不存在')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Ready' })).not.toBeInTheDocument();
+  });
+
+  it('不可预览的文本文件不读取内容并展示不可用原因', async () => {
+    const user = userEvent.setup();
+    const thread = createThread();
+    const service = createService({
+      directories: {
+        '': createDirectory({ nodes: [fileNode('large.txt', 'text')] })
+      },
+      metas: {
+        'large.txt': createMeta({
+          path: 'large.txt',
+          name: 'large.txt',
+          kind: 'text',
+          mime: 'text/plain',
+          previewable: false,
+          editable: false,
+          reason: '文件超过支持的大小限制'
+        })
+      }
+    });
+
+    render(
+      <FileWorkspaceView
+        selectedThread={thread}
+        conversationPaths={['large.txt']}
+        workspaceFileService={service}
+        onClose={vi.fn()}
+      />
+    );
+
+    await expandFileTree(user);
+    await user.click(screen.getByRole('treeitem', { name: 'large.txt' }));
+
+    expect(await screen.findByText('文件超过支持的大小限制')).toBeInTheDocument();
+    expect(service.openText).not.toHaveBeenCalledWith(thread.id, 'large.txt');
+    expect(screen.queryByRole('button', { name: '预览' })).not.toBeInTheDocument();
+  });
+
   it('回到窗口时检测版本并自动刷新未修改的当前文件', async () => {
     const thread = createThread();
     const metas = {
