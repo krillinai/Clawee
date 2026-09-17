@@ -260,6 +260,115 @@ docker run -d --name clawee-gateway \
 - 配置目录以只读方式提供给服务；
 - 日志和数据目录不会因重启丢失。
 
+### 6.4 部署 Clawee client Server 模式
+
+`client/` 下的 `server:deploy:source` 用于将 Clawee client 的源码部署到 Linux 服务器，并以 Node daemon Server 模式运行。它不是 Gateway 的部署命令，也不会部署 `server/` 下的 Go 服务。
+
+本节示例使用以下目录：
+
+```text
+源码目录：/home/<SSH 用户>/clawee-agent
+数据目录：/home/<SSH 用户>/data/clawee-agent
+```
+
+远端服务器需要具备 Node.js 24、Corepack、pnpm 10.33.3、可执行的 `codex` 命令和 systemd。SSH 用户还需要能够免密码执行 `sudo systemctl`。先检查环境：
+
+```bash
+ssh <SSH 用户>@<服务器地址> '
+set -e
+node --version
+corepack --version
+corepack enable
+pnpm --version
+command -v codex
+command -v systemctl
+command -v sudo
+sudo -n true
+'
+```
+
+在远端创建源码和运行数据目录。运行数据必须位于源码目录之外，避免源码同步时被替换：
+
+```bash
+ssh <SSH 用户>@<服务器地址> '
+set -e
+mkdir -p /home/<SSH 用户>/clawee-agent
+mkdir -p /home/<SSH 用户>/data/clawee-agent/projects
+chmod 700 /home/<SSH 用户>/data/clawee-agent
+'
+```
+
+部署脚本只负责同步源码、安装依赖和重启服务，不会自动创建 systemd unit。首次部署前，在远端创建 `clawee-server.service`：
+
+```bash
+ssh <SSH 用户>@<服务器地址>
+```
+
+```bash
+PNPM_BIN="$(command -v pnpm)"
+CODEX_BIN="$(command -v codex)"
+CODEX_DIR="$(dirname "$CODEX_BIN")"
+
+sudo tee /etc/systemd/system/clawee-server.service >/dev/null <<EOF
+[Unit]
+Description=Clawee Client Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<SSH 用户>
+Group=<SSH 用户>
+WorkingDirectory=/home/<SSH 用户>/clawee-agent
+Environment=PATH=${CODEX_DIR}:/home/<SSH 用户>/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=${PNPM_BIN} --dir /home/<SSH 用户>/clawee-agent server:start -- --server --host 0.0.0.0 --port 19860 --data-dir /home/<SSH 用户>/data/clawee-agent
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable clawee-server.service
+```
+
+退出远端 Shell，回到本地仓库的 `client/` 目录执行源码部署：
+
+```bash
+cd <Clawee 仓库>/client
+
+pnpm server:deploy:source -- \
+  --host <SSH 用户>@<服务器地址> \
+  --dir /home/<SSH 用户>/clawee-agent \
+  --service clawee-server.service
+```
+
+如果 SSH 使用非 22 端口，增加 `--port <SSH 端口>`。目标源码目录首次使用时应为空，或者必须是此前由该脚本管理的目录；不要将现有的非 Clawee 目录直接作为 `--dir`。脚本会在远端按锁文件执行 `pnpm install --frozen-lockfile`，然后重启 systemd 服务并等待 `SERVER_READY`。
+
+部署完成后验证服务和客户端 Server 接口：
+
+```bash
+ssh <SSH 用户>@<服务器地址> \
+  'sudo systemctl status clawee-server.service --no-pager'
+
+ssh <SSH 用户>@<服务器地址> \
+  'sudo journalctl -u clawee-server.service -n 100 --no-pager'
+
+curl --fail http://<服务器地址>:19860/healthz
+```
+
+客户端 Server 的访问 Token 保存在数据目录中：
+
+```bash
+ssh <SSH 用户>@<服务器地址> \
+  'cat /home/<SSH 用户>/data/clawee-agent/server-token'
+```
+
+客户端访问地址为 `http://<服务器地址>:19860`。正式对外提供服务时，应通过 HTTPS 反向代理访问，并按企业防火墙策略限制 `19860` 端口。已有客户端运行数据时，迁移前应先停止服务并备份 `/home/<SSH 用户>/data/clawee-agent`。
+
 ## 7. 配置域名访问
 
 将企业域名解析到 Gateway 服务器 IP，并让访问请求指向 Gateway 的 `1904` 端口。
