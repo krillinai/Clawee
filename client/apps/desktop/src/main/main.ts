@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   app,
@@ -41,7 +40,6 @@ import {
 } from './protocol-handler.js';
 import { createSettingsStore } from './settings-store.js';
 import { TrayManager } from './tray-manager.js';
-import { startUpdater } from './updater.js';
 import { WindowManager } from './window-manager.js';
 import { desktopIpc } from '../shared/ipc.js';
 import type {
@@ -318,26 +316,6 @@ async function launchDesktop(): Promise<void> {
     quit: () => app.quit()
   });
   registerApplicationProtocol(development, appRoot, logger);
-  const updater = startUpdater({
-    logger,
-    enabled: process.env.CLAWEE_E2E_DISABLE_UPDATER !== '1'
-      && !development
-      && existsSync(join(process.resourcesPath, 'deployment', 'official-release.json')),
-    async prepareInstall() {
-      notifications.stop();
-      windowManager?.flushState();
-      settings.flush();
-      await logger.flush();
-      await bootstrap?.stop();
-    },
-    async recoverAfterInstallFailure() {
-      await bootstrap?.restartRuntime();
-      notifications.start();
-    },
-    setAllowQuit(value) {
-      allowQuit = value;
-    }
-  });
   queueDeepLink(findDeepLink(process.argv));
   const importSource = runtimeImportSource(
     process.argv,
@@ -378,7 +356,6 @@ async function launchDesktop(): Promise<void> {
     shutdownStarted = true;
     windowManager?.beginQuit();
     notifications.stop();
-    updater.dispose();
     tray.destroy();
     void Promise.all([
       bootstrap?.stop() ?? Promise.resolve(),

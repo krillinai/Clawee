@@ -559,8 +559,7 @@ function assertNoSymbolicLinks(root) {
 function assertDesktopRuntimeDependencies() {
   for (const relativePath of [
     'node_modules/@clawee/protocol/dist/index.js',
-    'node_modules/@iarna/toml/package.json',
-    'node_modules/electron-updater/package.json'
+    'node_modules/@iarna/toml/package.json'
   ]) {
     const path = resolve(desktopRuntimeStage, relativePath);
     if (!existsSync(path)) {

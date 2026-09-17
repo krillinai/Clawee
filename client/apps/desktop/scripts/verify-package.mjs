@@ -142,12 +142,6 @@ assertExists(join(
   'dist',
   'index.js'
 ));
-assertExists(join(
-  resourcesDir,
-  'node_modules',
-  'electron-updater',
-  'package.json'
-));
 assertAsarContents();
 assertBrandingContents();
 assertDaemonContents();
