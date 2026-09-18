@@ -236,7 +236,11 @@ func syncDingTalkAvatar(c *gin.Context, opts Options, account accounts.Account, 
 		return
 	}
 	current, err := opts.AccountService.AccountAvatar(c.Request.Context(), account.UserID)
-	if err == nil && current.Source == accounts.AvatarSourceUpload {
+	if err != nil {
+		logDingTalkUpstreamError(opts.Logger, err)
+		return
+	}
+	if current.Source != accounts.AvatarSourceGenerated {
 		return
 	}
 	data, contentType, err := fetcher.FetchAvatar(c.Request.Context(), avatarURL)
