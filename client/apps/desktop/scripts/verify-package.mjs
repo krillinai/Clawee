@@ -255,7 +255,11 @@ function assertBrandingContents() {
   }
 
   if (process.platform === 'darwin') {
-    assertExists(join(resourcesDir, 'icon.icns'));
+    assertSameFile(
+      'macOS bundle icon',
+      join(resourcesDir, 'icon.icns'),
+      join(sourceResourcesDir, 'icon.icns')
+    );
   }
 }
 

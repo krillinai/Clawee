@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
@@ -17,6 +20,45 @@ const legacyAssetHashes = new Set([
 ]);
 
 describe('品牌资源', () => {
+  it('macOS 打包直接使用原生生成的 ICNS', () => {
+    const config = readFileSync(resolve(desktopRoot, 'electron-builder.yml'), 'utf8');
+    expect(config).toContain('  icon: resources/icon.icns');
+    expect(readFileSync(resolve(desktopRoot, 'resources/icon.icns')).subarray(0, 4).toString()).toBe('icns');
+  });
+
+  it.skipIf(process.platform !== 'darwin')('macOS 原生解码的各尺寸图标保持原图案', async () => {
+    const temporaryDir = mkdtempSync(join(tmpdir(), 'clawee-icon-test-'));
+    const iconset = join(temporaryDir, 'decoded.iconset');
+    try {
+      execFileSync('iconutil', [
+        '-c', 'iconset', resolve(desktopRoot, 'resources/icon.icns'), '-o', iconset
+      ]);
+      for (const size of [16, 32, 128, 256, 512]) {
+        for (const scale of [1, 2]) {
+          const pixels = size * scale;
+          const name = `icon_${size}x${size}${scale === 2 ? '@2x' : ''}.png`;
+          const actual = await sharp(join(iconset, name))
+            .flatten({ background: '#ffffff' }).removeAlpha().raw()
+            .toBuffer({ resolveWithObject: true });
+          const expected = await sharp(resolve(desktopRoot, 'resources/icon.png'))
+            .resize(pixels, pixels).flatten({ background: '#ffffff' }).removeAlpha().raw()
+            .toBuffer();
+          expect(actual.info.width, name).toBe(pixels);
+          expect(actual.info.height, name).toBe(pixels);
+          expect(actual.data.length, name).toBe(expected.length);
+          let difference = 0;
+          for (let index = 0; index < expected.length; index++) {
+            difference += Math.abs(actual.data[index]! - expected[index]!);
+          }
+          // 允许原生缩放与 sharp 的采样差异，但拒绝小尺寸彩色乱码。
+          expect(difference / expected.length, name).toBeLessThan(12);
+        }
+      }
+    } finally {
+      rmSync(temporaryDir, { recursive: true, force: true });
+    }
+  });
+
   it('启动页和菜单栏使用新版图标', () => {
     const markHash = hash(resolve(repoRoot, 'resources/logo-v2-white-logo.png'));
     const trayHash = hash(resolve(repoRoot, 'resources/head.png'));

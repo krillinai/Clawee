@@ -92,7 +92,7 @@ mac:
     - ".*/Contents/Resources/codex-runtime/.*"
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
-  icon: resources/icon.png
+  icon: resources/icon.icns
   notarize: true
 dmg:
   sign: true
