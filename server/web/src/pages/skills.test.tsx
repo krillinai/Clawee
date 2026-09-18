@@ -80,7 +80,7 @@ describe("SkillsPage", () => {
     expect(screen.getByRole("button", { name: "确认替换" })).toBeEnabled();
     fireEvent.submit(screen.getByRole("dialog").querySelector("form") as HTMLFormElement);
     await waitFor(() => expect(uploadSkillVersionMock).toHaveBeenCalledWith({ skillId: published.skillId, spaceId: published.spaceId, version: "1.3.0", changelog: "", packageFile: file }));
-    expect(await screen.findByText(/renamed.*已上传并发布/)).toBeInTheDocument();
+    expect(await screen.findByText(/renamed.*已上传，待审批/)).toBeInTheDocument();
   });
 
   it("deletes only unpublished Skills after confirmation", async () => {
@@ -188,7 +188,7 @@ describe("SkillsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "上传版本" }));
     const dialog = screen.getByRole("dialog", { name: "上传 Skill 版本" });
     expect(dialog.querySelector('[data-slot="field-group"]')).toBeInTheDocument();
-    expect(within(dialog).getByText("ZIP 可直接包含 SKILL.md，也可将全部内容放在单一顶层目录中；上传成功后将自动发布该版本，并替换当前发布版本。")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/上传成功后将自动发布/)).not.toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText("版本号"), { target: { value: "1.3.0" } });
     fireEvent.change(within(dialog).getByLabelText("更新说明"), { target: { value: "补充安装脚本" } });
     const file = new File(["zip"], "code-review.zip", { type: "application/zip" });
@@ -198,7 +198,7 @@ describe("SkillsPage", () => {
     fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
 
 		await waitFor(() => expect(uploadSkillVersionMock).toHaveBeenCalledWith({ spaceId: "skillspace_default", version: "1.3.0", changelog: "补充安装脚本", packageFile: file }));
-    expect(await screen.findByText("Skill“code-review”版本 1.3.0 已上传并发布")).toBeInTheDocument();
+    expect(await screen.findByText("Skill“code-review”版本 1.3.0 已上传，待审批")).toBeInTheDocument();
   });
 
   it("links each skill to its independent detail page", async () => {
@@ -299,7 +299,7 @@ describe("SkillsPage", () => {
     expect(screen.getByText("main")).toBeInTheDocument();
     expect(screen.getByText("skills/")).toBeInTheDocument();
     expect(screen.getByText("每小时")).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "自动发布" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "审批后发布" })).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
     expect(screen.getByTitle("a".repeat(40))).toHaveTextContent("aaaaaaaa");
     expect(screen.getByRole("link", { name: "查看 Commit aaaaaaaa" })).toHaveAttribute("href", `https://github.com/acme/skills/commit/${"a".repeat(40)}`);

@@ -80,6 +80,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.DELETE("/skills", skillOperationLog(opts.Logger, "skill_delete"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillDelete), handleSkillDelete(opts.SkillHubService))
 	admin.PATCH("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
+	admin.POST("/skills/versions/review", skillOperationLog(opts.Logger, "skill_review"), read, handleSkillReview(opts.SkillHubService))
 	admin.POST("/skills/current-version/remove", skillOperationLog(opts.Logger, skillActionClear), skillRequirePermission(opts.RBACService, rbac.PermissionSkillUnpublish), handleSkillClearCurrent(opts.SkillHubService))
 	if opts.SkillSourceService == nil {
 		return
@@ -474,6 +475,13 @@ func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 			skillError(c, err)
 			return
 		}
+		space, err := service.GetSpace(c.Request.Context(), item.Skill.SpaceID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		account, _ := currentAccount(c)
+		item.CanReview = space.ApproverUserID != "" && space.ApproverUserID == account.UserID
 		c.JSON(http.StatusOK, item)
 	}
 }
@@ -687,6 +695,31 @@ func handleSkillSetCurrent(service *skillhub.Service) gin.HandlerFunc {
 	}
 }
 
+func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request struct {
+			SkillID   string `json:"skill_id"`
+			VersionID string `json:"version_id"`
+			Decision  string `json:"decision"`
+			Comment   string `json:"comment"`
+		}
+		if decodeSkillJSON(c, &request) != nil || (request.Decision != "approved" && request.Decision != "rejected") {
+			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		account, _ := currentAccount(c)
+		c.Set(skillIDKey, request.SkillID)
+		c.Set(skillVersionKey, request.VersionID)
+		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.Set(skillSHAKey, version.PackageSHA256)
+		c.JSON(http.StatusOK, version)
+	}
+}
+
 func handleSkillClearCurrent(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
@@ -864,6 +897,10 @@ func decodeSkillJSON(c *gin.Context, target any) error {
 func skillError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "技能中心操作失败"
 	switch {
+	case errors.Is(err, skillhub.ErrApprovalRequired):
+		status, code, message = http.StatusConflict, "skill_approval_required", "该版本尚未通过所属技能空间审批人的审批"
+	case errors.Is(err, skillhub.ErrReviewForbidden):
+		status, code, message = http.StatusForbidden, "skill_review_forbidden", "只有所属技能空间的审批人可以审核版本"
 	case errors.Is(err, skillhub.ErrInvalidRequest):
 		status, code, message = http.StatusBadRequest, "invalid_request", "请求参数不合法"
 	case errors.Is(err, skillhub.ErrPackageInvalid):

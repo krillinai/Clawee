@@ -200,7 +200,7 @@ func TestSkillSourceRoutesEnforcePermissionsAndSupportLifecycle(t *testing.T) {
 		}
 	}
 
-	skill, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
+	skill, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,8 +300,8 @@ func TestSkillHubUploadStoresCreatorNameSnapshot(t *testing.T) {
 	})
 	adminCookies := register(t, router, `{"email":"admin@example.com","name":"平台管理员","password":"passw0rd!"}`)
 
-	first := uploadSkillVersion(t, router, adminCookie(t, adminCookies), "1.0", skillPackage(t))
-	second := uploadSkillVersion(t, router, adminCookie(t, adminCookies), "2.0", skillPackage(t))
+	first := uploadApprovedSkillVersion(t, router, adminCookie(t, adminCookies), "1.0", skillPackage(t))
+	second := uploadApprovedSkillVersion(t, router, adminCookie(t, adminCookies), "2.0", skillPackage(t))
 	if first.Skill.CreatedBy != "平台管理员" || second.Skill.CreatedBy != "平台管理员" {
 		t.Fatalf("creator snapshots: first=%q second=%q", first.Skill.CreatedBy, second.Skill.CreatedBy)
 	}
@@ -309,7 +309,7 @@ func TestSkillHubUploadStoresCreatorNameSnapshot(t *testing.T) {
 
 func TestLegacySkillHubDynamicRoutesNotFound(t *testing.T) {
 	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
-	created, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
+	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestLegacySkillHubDynamicRoutesNotFound(t *testing.T) {
 func TestSkillHubCurrentVersionMutationsRejectQueryOnlySkillID(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
-	created, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
+	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,9 +384,11 @@ func TestSkillHubRoutesEnforceAuthenticationAndSupportPublishFlow(t *testing.T) 
 		t.Fatalf("upload status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	created := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
-	if created.Skill.CurrentVersionID == nil || *created.Skill.CurrentVersionID != created.Version.VersionID {
-		t.Fatalf("uploaded version was not published: %#v", created)
+	if created.Skill.CurrentVersionID != nil || created.Version.ApprovalStatus != "pending" {
+		t.Fatalf("uploaded version must await approval: %#v", created)
 	}
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/current-version", `{"skill_id":"`+created.Skill.SkillID+`","version_id":"`+created.Version.VersionID+`"}`, adminCookies), http.StatusConflict, "skill_approval_required")
+	created = approveAndPublishSkillHTTP(t, router, adminCookie(t, adminCookies), created)
 
 	recorder = httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/app/skills", nil)
@@ -509,7 +511,7 @@ func TestSkillHubAdminVersionFilesPreviewAndPackageRoutes(t *testing.T) {
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
-	created, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1.0", Package: bytes.NewReader(packageBody.Bytes()), CreatedBy: "admin"})
+	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0", Package: bytes.NewReader(packageBody.Bytes()), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,12 +572,12 @@ func TestSkillHubAdminVersionRoutesRejectForeignVersion(t *testing.T) {
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	firstData := skillPackageNamed(t, "first")
-	first, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
+	first, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	secondData := skillPackageNamed(t, "second")
-	second, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
+	second, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +595,7 @@ func TestSkillHubStoredPackageCorruptionReturnsInternalError(t *testing.T) {
 	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: packageRoot})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
-	created, err := skillService.UploadVersion(context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
+	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,9 +618,9 @@ func TestSkillHubLaterLowerVersionUploadBecomesPublishedDefault(t *testing.T) {
 	userCookies := register(t, router, `{"email":"user@example.com","password":"passw0rd!"}`)
 
 	firstPackage := skillPackageWithDescription(t, "code-review", "first")
-	first := uploadSkillVersion(t, router, adminCookie(t, adminCookies), "2.0", firstPackage)
+	first := uploadApprovedSkillVersion(t, router, adminCookie(t, adminCookies), "2.0", firstPackage)
 	secondPackage := skillPackageWithDescription(t, "code-review", "second")
-	second := uploadSkillVersion(t, router, adminCookie(t, adminCookies), "1.0", secondPackage)
+	second := uploadApprovedSkillVersion(t, router, adminCookie(t, adminCookies), "1.0", secondPackage)
 	if second.Skill.SkillID != first.Skill.SkillID || second.Skill.CurrentVersionID == nil || *second.Skill.CurrentVersionID != second.Version.VersionID {
 		t.Fatalf("second upload did not become current: first=%#v second=%#v", first, second)
 	}
@@ -669,7 +671,7 @@ func TestSkillHubReplacementAndUnpublishedDeletion(t *testing.T) {
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, RBACService: rbacService, SkillHubService: service})
 	cookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
-	original := uploadSkillVersion(t, router, adminCookie(t, cookies), "1", skillPackageNamed(t, "original"))
+	original := uploadApprovedSkillVersion(t, router, adminCookie(t, cookies), "1", skillPackageNamed(t, "original"))
 	body, contentType := skillUploadBodyWithPackage(t, map[string]string{"skill_id": original.Skill.SkillID, "version": "2"}, skillPackageNamed(t, "renamed"))
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/skills/versions", body)
 	request.Header.Set("Content-Type", contentType)
@@ -680,9 +682,10 @@ func TestSkillHubReplacementAndUnpublishedDeletion(t *testing.T) {
 		t.Fatalf("replace: %d %s", recorder.Code, recorder.Body.String())
 	}
 	replaced := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
-	if replaced.Skill.SkillID != original.Skill.SkillID || replaced.Skill.Name != "renamed" {
+	if replaced.Skill.SkillID != original.Skill.SkillID || replaced.Skill.Name != "original" || replaced.Version.SkillName != "renamed" || replaced.Version.ApprovalStatus != "pending" {
 		t.Fatalf("replaced = %#v", replaced)
 	}
+	replaced = approveAndPublishSkillHTTP(t, router, adminCookie(t, cookies), replaced)
 	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"skill_id": " ", "version": "3"}, skillPackageNamed(t, "invalid-target"))
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/skills/versions", body)
 	request.Header.Set("Content-Type", contentType)
@@ -776,7 +779,7 @@ func TestSkillHubUploadNormalizesMacOSMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created := uploadSkillVersion(t, router, admin, "1.0", uploaded.Bytes())
+	created := uploadApprovedSkillVersion(t, router, admin, "1.0", uploaded.Bytes())
 	downloadRecorder := httptest.NewRecorder()
 	downloadRequest := httptest.NewRequest(http.MethodGet, "/api/v1/app/skills/package?skill_id="+created.Skill.SkillID, nil)
 	downloadRequest.AddCookie(frontend)
@@ -913,6 +916,7 @@ func TestSkillHubOperationLogRecordsClearedVersionIdentifiers(t *testing.T) {
 		t.Fatalf("upload status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
 	created := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
+	created = approveAndPublishSkillHTTP(t, router, adminCookie(t, adminCookies), created)
 
 	recorder = httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/skills/current-version", bytes.NewBufferString(`{"skill_id":"`+created.Skill.SkillID+`","version_id":"`+created.Version.VersionID+`"}`))
@@ -1027,7 +1031,7 @@ func skillPackageWithDescription(t *testing.T, name, description string) []byte 
 	return body.Bytes()
 }
 
-func uploadSkillVersion(t *testing.T, router http.Handler, adminCookie *http.Cookie, version string, packageData []byte) skillhub.MutationResult {
+func uploadApprovedSkillVersion(t *testing.T, router http.Handler, adminCookie *http.Cookie, version string, packageData []byte) skillhub.MutationResult {
 	t.Helper()
 	body, contentType := skillUploadBodyWithPackage(t, map[string]string{"version": version}, packageData)
 	recorder := httptest.NewRecorder()
@@ -1038,7 +1042,7 @@ func uploadSkillVersion(t *testing.T, router http.Handler, adminCookie *http.Coo
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
-	return decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
+	return approveAndPublishSkillHTTP(t, router, adminCookie, decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes()))
 }
 
 func assertSkillError(t *testing.T, recorder *httptest.ResponseRecorder, status int, code string) {

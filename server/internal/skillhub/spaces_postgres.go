@@ -12,8 +12,9 @@ import (
 const spaceSummarySelect = `SELECT sp.space_id,sp.name,sp.description,sp.created_by,sp.updated_by,sp.created_at,sp.updated_at,
 (SELECT count(DISTINCT g.user_id) FROM data_resource_grants g WHERE g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.action='read'),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id),
-(SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id AND s.current_version_id IS NOT NULL)
-FROM skill_spaces sp`
+(SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id AND s.current_version_id IS NOT NULL),
+COALESCE(sp.approver_user_id,''),COALESCE(a.name,'')
+FROM skill_spaces sp LEFT JOIN accounts a ON a.user_id=sp.approver_user_id`
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
 	_, err := s.pool.Exec(ctx, `INSERT INTO skill_spaces (space_id,name,description,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -199,7 +200,7 @@ func (s *PostgresStore) RemoveSpaceMember(ctx context.Context, spaceID, userID s
 
 func scanSpaceSummary(row rowScanner, item *SpaceSummary) error {
 	if err := row.Scan(&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt,
-		&item.MemberCount, &item.SkillCount, &item.PublishedCount); err != nil {
+		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &item.ApproverUserID, &item.ApproverName); err != nil {
 		return err
 	}
 	item.CreatedAt, item.UpdatedAt = item.CreatedAt.UTC(), item.UpdatedAt.UTC()

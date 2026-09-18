@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Edit3, UserPlus } from "lucide-react";
+import { Edit3, ShieldCheck, UserPlus } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { DataTableShell, EmptyState, ErrorAlert, LoadingState, ModalShell, TableStateRow } from "@/components/governance-ui";
@@ -9,12 +9,15 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   addSkillSpaceMember,
   createSkillSpace,
   listSkillSpaceCandidates,
   listSkillSpaceMembers,
   listSkillSpaces,
+  listSkillSpaceApproverCandidates,
+  setSkillSpaceApprover,
   removeSkillSpaceMember,
   updateSkillSpace,
   updateSkillSpaceMember,
@@ -41,6 +44,17 @@ export function SkillSpacesPanel({
   const [authorizationId, setAuthorizationId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [approverTarget, setApproverTarget] = useState<SkillSpace | null>(null);
+  const [approverUserId, setApproverUserId] = useState("none");
+  const candidatesQuery = useQuery({ queryKey: ["skill-space-approver-candidates"], queryFn: listSkillSpaceApproverCandidates, enabled: Boolean(approverTarget) });
+  const approverMutation = useMutation({
+    mutationFn: () => setSkillSpaceApprover(approverTarget!.spaceId, approverUserId === "none" ? "" : approverUserId),
+    onSuccess: () => {
+      setApproverTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
+      void queryClient.invalidateQueries({ queryKey: ["skill"] });
+    }
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => editing
@@ -87,22 +101,42 @@ export function SkillSpacesPanel({
       </div>
     ) : null}
     <DataTableShell minWidth={860}>
-      <TableHeader><TableRow><TableHead className="min-w-72">空间</TableHead><TableHead className="w-24 text-right">成员</TableHead><TableHead className="w-24 text-right">技能</TableHead><TableHead className="w-24 text-right">已发布</TableHead><TableHead className="w-52">更新时间</TableHead><TableHead className="w-40 text-right">操作</TableHead></TableRow></TableHeader>
+      <TableHeader><TableRow><TableHead className="min-w-72">空间</TableHead><TableHead className="min-w-32">审批人</TableHead><TableHead className="w-24 text-right">成员</TableHead><TableHead className="w-24 text-right">技能</TableHead><TableHead className="w-24 text-right">已发布</TableHead><TableHead className="w-52">更新时间</TableHead><TableHead className="min-w-72 text-right">操作</TableHead></TableRow></TableHeader>
       <TableBody>
-        {spacesQuery.isLoading ? <TableStateRow colSpan={6}><LoadingState label="正在加载技能空间" /></TableStateRow> : null}
-        {spacesQuery.isError ? <TableStateRow colSpan={6} tone="danger"><ErrorAlert>技能空间加载失败</ErrorAlert></TableStateRow> : null}
-        {!spacesQuery.isLoading && !spacesQuery.isError && spaces.length === 0 ? <TableStateRow colSpan={6}><EmptyState title="暂无技能空间" /></TableStateRow> : null}
+        {spacesQuery.isLoading ? <TableStateRow colSpan={7}><LoadingState label="正在加载技能空间" /></TableStateRow> : null}
+        {spacesQuery.isError ? <TableStateRow colSpan={7} tone="danger"><ErrorAlert>技能空间加载失败</ErrorAlert></TableStateRow> : null}
+        {!spacesQuery.isLoading && !spacesQuery.isError && spaces.length === 0 ? <TableStateRow colSpan={7}><EmptyState title="暂无技能空间" /></TableStateRow> : null}
         {spaces.map((space) => <TableRow key={space.spaceId}>
           <TableCell><div className="text-sm font-medium leading-5">{space.name}</div><div className="mt-0.5 max-w-96 truncate text-[13px] leading-5 text-muted-foreground">{space.description || "-"}</div></TableCell>
+          <TableCell>{space.approverName || space.approverUserId || "未配置"}</TableCell>
           <TableCell className="text-right font-mono text-sm">{space.memberCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.skillCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.publishedCount}</TableCell>
           <TableCell className="font-mono text-[13px] text-muted-foreground">{formatDateTime(space.updatedAt)}</TableCell>
-          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button> : null}</div></TableCell>
+          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <><Button aria-label={`配置 ${space.name} 审批人`} onClick={() => { setApproverTarget(space); setApproverUserId(space.approverUserId || "none"); approverMutation.reset(); }} size="sm" variant="secondary"><ShieldCheck data-icon="inline-start" aria-hidden="true" />审批人</Button><Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button></> : null}</div></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
 
     <ModalShell open={editing !== undefined} onClose={() => setEditing(undefined)} title={editing ? "编辑技能空间" : "新建技能空间"} contextLabel="技能中心">
       <form onSubmit={submitSpace}><FieldGroup><Field><FieldLabel htmlFor="skill-space-name">空间名称</FieldLabel><Input id="skill-space-name" maxLength={100} required value={name} onChange={(event) => setName(event.target.value)} /></Field><Field><FieldLabel htmlFor="skill-space-description">说明</FieldLabel><Textarea id="skill-space-description" maxLength={500} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>{saveMutation.isError ? <ErrorAlert>保存失败：{errorText(saveMutation.error)}</ErrorAlert> : null}<Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button disabled={saveMutation.isPending || !name.trim()} type="submit" variant="primary">保存</Button></Field></FieldGroup></form>
+    </ModalShell>
+
+    <ModalShell open={Boolean(approverTarget)} onClose={() => { if (!approverMutation.isPending) setApproverTarget(null); }} title="配置技能空间审批人" contextLabel={approverTarget?.name}>
+      <form onSubmit={(event) => { event.preventDefault(); approverMutation.mutate(); }}>
+        <FieldGroup>
+          <Field><FieldLabel htmlFor="skill-space-approver">审批人</FieldLabel>
+            <Select value={approverUserId} onValueChange={setApproverUserId}>
+              <SelectTrigger id="skill-space-approver" disabled={candidatesQuery.isLoading || candidatesQuery.isError}><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="none">未配置</SelectItem>
+                {approverTarget?.approverUserId && !candidatesQuery.data?.some((candidate) => candidate.userId === approverTarget.approverUserId) ? <SelectItem value={approverTarget.approverUserId} disabled>{approverTarget.approverName || approverTarget.approverUserId}（不可用）</SelectItem> : null}
+                {candidatesQuery.data?.map((candidate) => <SelectItem key={candidate.userId} value={candidate.userId}>{candidate.name} · {candidate.email}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          {candidatesQuery.isError ? <ErrorAlert>审批人列表加载失败</ErrorAlert> : null}
+          {approverMutation.isError ? <ErrorAlert>保存失败：{errorText(approverMutation.error)}</ErrorAlert> : null}
+          <Field className="justify-end" orientation="horizontal"><Button disabled={approverMutation.isPending} type="button" variant="outline" onClick={() => setApproverTarget(null)}>取消</Button><Button disabled={approverMutation.isPending || candidatesQuery.isLoading || candidatesQuery.isError} type="submit" variant="primary">保存</Button></Field>
+        </FieldGroup>
+      </form>
     </ModalShell>
 
     <MemberAuthorizationDrawer

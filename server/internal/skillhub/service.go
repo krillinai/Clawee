@@ -93,7 +93,7 @@ func (s *Service) UploadVersion(ctx context.Context, input UploadVersionInput) (
 	}
 	return s.CreateVersionFromPackage(ctx, CreateVersionInput{
 		SpaceID: input.SpaceID, Version: input.Version, Changelog: input.Changelog, Package: input.Package,
-		CreatedBy: input.CreatedBy, Publish: true, Resolution: resolution, TargetSkillID: input.TargetSkillID,
+		CreatedBy: input.CreatedBy, Resolution: resolution, TargetSkillID: input.TargetSkillID,
 		UploadedByUserID: input.UploadedByUserID, UploadedByAgentID: input.UploadedByAgentID,
 	})
 }

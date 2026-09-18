@@ -277,7 +277,7 @@ func (s *SourceSyncService) Run(ctx context.Context, run SourceSyncRun) error {
 			continue
 		}
 		run.CreatedVersionCount++
-		if source.AutoPublish {
+		if created.Skill.CurrentVersionID != nil && *created.Skill.CurrentVersionID == created.Version.VersionID {
 			run.PublishedCount++
 		}
 		item.SkillID = stringPointer(created.Skill.SkillID)

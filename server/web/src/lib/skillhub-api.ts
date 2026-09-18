@@ -15,6 +15,11 @@ export type AdminSkill = {
 };
 
 export type SkillVersion = {
+  approvalStatus?: "pending" | "approved" | "rejected";
+  skillName?: string;
+  reviewedBy?: string;
+  reviewedAt?: string | null;
+  reviewComment?: string;
   versionId: string;
   skillId: string;
   version: string;
@@ -117,6 +122,7 @@ export type GitHubSourceSummary = {
 };
 
 export type AdminSkillDetail = {
+  canReview?: boolean;
   skill: AdminSkill;
   versions: SkillVersion[];
 };
@@ -162,6 +168,8 @@ export type PublishedSkill = {
 };
 
 export type SkillSpace = {
+  approverUserId?: string;
+  approverName?: string;
   spaceId: string;
   name: string;
   description: string;
@@ -213,6 +221,11 @@ type AdminSkillResponse = {
 };
 
 type SkillVersionResponse = {
+  approval_status?: "pending" | "approved" | "rejected";
+  skill_name?: string;
+  reviewed_by?: string;
+  reviewed_at?: string | null;
+  review_comment?: string;
   version_id: string;
   skill_id: string;
   version: string;
@@ -323,6 +336,7 @@ type GitHubSourceInput = {
 };
 
 type AdminSkillDetailResponse = {
+  can_review?: boolean;
   skill: AdminSkillResponse;
   versions: SkillVersionResponse[];
 };
@@ -346,6 +360,8 @@ type PublishedSkillResponse = {
 };
 
 type SkillSpaceResponse = {
+  approver_user_id?: string;
+  approver_name?: string;
   space_id: string;
   name: string;
   description: string;
@@ -408,7 +424,7 @@ export function getPublishedSkillVersionFile(skillId: string, versionId: string,
 
 export async function getSkill(skillId: string) {
   const response = await adminApi.get<AdminSkillDetailResponse>(`/skills/detail?skill_id=${encodeURIComponent(skillId)}`);
-  return { skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
+  return { ...(response.can_review === undefined ? {} : { canReview: response.can_review }), skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
 }
 
 type SkillVersionUploadInput = { skillId?: string; spaceId?: string; version: string; changelog: string; packageFile: File };
@@ -445,6 +461,19 @@ async function uploadSkillVersionTo(url: string, input: SkillVersionUploadInput)
 export async function listSkillSpaces() {
   const response = await adminApi.get<ListResponse<SkillSpaceResponse>>("/skill-spaces");
   return response.items.map(mapSkillSpace);
+}
+
+export async function listSkillSpaceApproverCandidates() {
+  const response = await adminApi.get<ListResponse<{ user_id: string; name: string; email: string }>>("/skill-spaces/approver-candidates");
+  return response.items.map((item) => ({ userId: item.user_id, name: item.name, email: item.email }));
+}
+
+export function setSkillSpaceApprover(spaceId: string, userId: string) {
+  return adminApi.put<void>("/skill-spaces/approver", { space_id: spaceId, user_id: userId });
+}
+
+export async function reviewSkillVersion(skillId: string, versionId: string, decision: "approved" | "rejected", comment: string) {
+  return mapVersion(await adminApi.post<SkillVersionResponse>("/skills/versions/review", { skill_id: skillId, version_id: versionId, decision, comment }));
 }
 
 export async function moveSkillsToSpace(input: { skillIds: string[]; targetSpaceId: string }): Promise<SkillSpaceMoveResult> {
@@ -645,6 +674,7 @@ function mapSkill(item: AdminSkillResponse): AdminSkill {
 
 function mapVersion(item: SkillVersionResponse): SkillVersion {
   return {
+    ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment }),
     versionId: item.version_id,
     skillId: item.skill_id,
     version: item.version,
@@ -778,6 +808,7 @@ function mapPublishedSkill(item: PublishedSkillResponse): PublishedSkill {
 
 function mapSkillSpace(item: SkillSpaceResponse): SkillSpace {
   return {
+    ...(item.approver_user_id === undefined ? {} : { approverUserId: item.approver_user_id, approverName: item.approver_name }),
     spaceId: item.space_id,
     name: item.name,
     description: item.description,

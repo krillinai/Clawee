@@ -8,7 +8,9 @@ import {
   listSkillSpaceMembers,
   listSkillSpaces,
   removeSkillSpaceMember,
-  updateSkillSpaceMember
+  updateSkillSpaceMember,
+  listSkillSpaceApproverCandidates,
+  setSkillSpaceApprover
 } from "@/lib/skillhub-api";
 
 import { SkillSpacesPanel } from "./skill-spaces-panel";
@@ -22,7 +24,9 @@ vi.mock("@/lib/skillhub-api", async () => {
     listSkillSpaceMembers: vi.fn(),
     listSkillSpaces: vi.fn(),
     removeSkillSpaceMember: vi.fn(),
-    updateSkillSpaceMember: vi.fn()
+    updateSkillSpaceMember: vi.fn(),
+    listSkillSpaceApproverCandidates: vi.fn(),
+    setSkillSpaceApprover: vi.fn()
   };
 });
 
@@ -51,6 +55,18 @@ const member = {
 };
 
 describe("SkillSpacesPanel", () => {
+  it("configures the space reviewer with the existing shadcn select and dialog", async () => {
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "配置 研发技能 审批人" }));
+    const dialog = screen.getByRole("dialog", { name: "配置技能空间审批人" });
+    const select = within(dialog).getByRole("combobox");
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole("option", { name: /李四/ }));
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(setSkillSpaceApprover).toHaveBeenCalledWith("skillspace_dev", "usr_2"));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listSkillSpaces).mockResolvedValue([space]);
@@ -62,6 +78,8 @@ describe("SkillSpacesPanel", () => {
     vi.mocked(addSkillSpaceMember).mockResolvedValue({ ...member, userId: "usr_2" });
     vi.mocked(updateSkillSpaceMember).mockResolvedValue(member);
     vi.mocked(removeSkillSpaceMember).mockResolvedValue(undefined);
+    vi.mocked(listSkillSpaceApproverCandidates).mockResolvedValue([{ userId: "usr_2", name: "李四", email: "lisi@example.com" }]);
+    vi.mocked(setSkillSpaceApprover).mockResolvedValue(undefined);
   });
 
   it("reuses the member authorization flow for adding, editing and removing members", async () => {

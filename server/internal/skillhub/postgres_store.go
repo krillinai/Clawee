@@ -71,16 +71,20 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 			if skill.SpaceID != proposed.SpaceID {
 				return Skill{}, Version{}, ErrConflict
 			}
-			if _, err = tx.Exec(ctx, `UPDATE skills SET name=$2 WHERE skill_id=$1`, skill.SkillID, proposed.Name); err != nil {
-				return Skill{}, Version{}, mapStoreError(err)
+			var occupied bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM skills WHERE name=$1 AND skill_id<>$2)`, proposed.Name, skill.SkillID).Scan(&occupied); err != nil {
+				return Skill{}, Version{}, err
 			}
-			skill.Name = proposed.Name
+			if occupied {
+				return Skill{}, Version{}, ErrConflict
+			}
 		}
 	default:
 		return Skill{}, Version{}, ErrInvalidRequest
 	}
 
 	version.SkillID = skill.SkillID
+	version.SkillName, version.ApprovalStatus = proposed.Name, "pending"
 	var sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256 any
 	if version.Source != nil {
 		sourceID = version.Source.SourceID
@@ -88,25 +92,16 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		sourceCommitSHA = version.Source.CommitSHA
 		sourceContentSHA256 = version.Source.ContentSHA256
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO skill_versions (version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at,source_id,source_path,source_commit_sha,source_content_sha256,uploaded_by_user_id,uploaded_by_agent_id,uploaded_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+	_, err = tx.Exec(ctx, `INSERT INTO skill_versions (version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at,source_id,source_path,source_commit_sha,source_content_sha256,uploaded_by_user_id,uploaded_by_agent_id,uploaded_by_name,skill_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		version.VersionID, version.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, version.CreatedAt,
-		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName)
+		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName, version.SkillName)
 	if err != nil {
 		return Skill{}, Version{}, mapStoreError(err)
-	}
-	if options.Publish {
-		_, err = tx.Exec(ctx, `UPDATE skills SET current_version_id=$2,updated_at=$3 WHERE skill_id=$1`, skill.SkillID, version.VersionID, version.CreatedAt)
-		if err != nil {
-			return Skill{}, Version{}, err
-		}
-		currentVersionID := version.VersionID
-		skill.CurrentVersionID = &currentVersionID
-		skill.UpdatedAt = version.CreatedAt
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Skill{}, Version{}, mapStoreError(err)
 	}
-	if options.Publish || skill.CurrentVersionID == nil {
+	if skill.CurrentVersionID == nil {
 		skill.Description = version.Description
 	}
 	return skill, version, nil
@@ -178,7 +173,7 @@ func (s *PostgresStore) GetAdmin(ctx context.Context, skillID string) (AdminDeta
 	}
 	rows, err := s.pool.Query(ctx, `SELECT v.version_id,v.skill_id,v.version,v.description,v.changelog,v.package_path,v.package_sha256,v.created_at,
 v.source_id,src.repository_owner,src.repository_name,v.source_path,v.source_commit_sha,v.source_content_sha256,
-v.uploaded_by_user_id,v.uploaded_by_agent_id
+v.uploaded_by_user_id,v.uploaded_by_agent_id,v.skill_name,v.approval_status,COALESCE(v.approved_space_id,''),COALESCE(v.reviewed_by,''),v.reviewed_at,v.review_comment
 FROM skill_versions v
 LEFT JOIN skill_sources src ON src.source_id=v.source_id
 WHERE v.skill_id=$1 ORDER BY v.created_at DESC`, skillID)
@@ -321,6 +316,32 @@ func (s *PostgresStore) SetCurrentVersion(ctx context.Context, skillID, versionI
 	if version.SkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
+	var approver string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,'') FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&approver); err != nil {
+		return Skill{}, Version{}, err
+	}
+	if approver == "" {
+		return Skill{}, Version{}, ErrApprovalRequired
+	}
+	var approverActive bool
+	if err := tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, approver).Scan(&approverActive); err != nil {
+		return Skill{}, Version{}, err
+	}
+	if !approverActive {
+		return Skill{}, Version{}, ErrApprovalRequired
+	}
+	if err := tx.QueryRow(ctx, `SELECT skill_name,approval_status,COALESCE(approved_space_id,'') FROM skill_versions WHERE version_id=$1 FOR UPDATE`, versionID).Scan(&version.SkillName, &version.ApprovalStatus, &version.ApprovedSpaceID); err != nil {
+		return Skill{}, Version{}, err
+	}
+	if version.ApprovalStatus != "approved" || version.ApprovedSpaceID != skill.SpaceID {
+		return Skill{}, Version{}, ErrApprovalRequired
+	}
+	if version.SkillName != "" && version.SkillName != skill.Name {
+		if _, err := tx.Exec(ctx, `UPDATE skills SET name=$2 WHERE skill_id=$1`, skillID, version.SkillName); err != nil {
+			return Skill{}, Version{}, mapStoreError(err)
+		}
+		skill.Name = version.SkillName
+	}
 	if skill.CurrentVersionID == nil || *skill.CurrentVersionID != versionID {
 		if _, err := tx.Exec(ctx, `UPDATE skills SET current_version_id=$2,updated_at=$3 WHERE skill_id=$1`, skillID, versionID, now); err != nil {
 			return Skill{}, Version{}, mapStoreError(err)
@@ -367,7 +388,10 @@ func (s *PostgresStore) MoveSkillsToSpace(ctx context.Context, skillIDs []string
 	if found != int64(len(skillIDs)) {
 		return SkillSpaceMoveResult{}, ErrNotFound
 	}
-	tag, err := tx.Exec(ctx, `UPDATE skills SET space_id=$2,updated_at=$3 WHERE skill_id=ANY($1) AND space_id<>$2`, skillIDs, targetSpaceID, now)
+	if _, err := tx.Exec(ctx, `UPDATE skill_versions SET approval_status='pending',approved_space_id=NULL,reviewed_by=NULL,reviewed_at=NULL,review_comment='' WHERE skill_id IN (SELECT skill_id FROM skills WHERE skill_id=ANY($1) AND space_id<>$2)`, skillIDs, targetSpaceID); err != nil {
+		return SkillSpaceMoveResult{}, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE skills SET space_id=$2,current_version_id=NULL,updated_at=$3 WHERE skill_id=ANY($1) AND space_id<>$2`, skillIDs, targetSpaceID, now)
 	if err != nil {
 		return SkillSpaceMoveResult{}, mapStoreError(err)
 	}
@@ -419,7 +443,7 @@ SELECT s.skill_id,s.space_id,sp.name,s.name,v.description,v.version_id,v.version
 FROM skills s
 JOIN skill_spaces sp ON sp.space_id=s.space_id
 JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version_id=s.current_version_id
-WHERE s.current_version_id IS NOT NULL`
+WHERE s.current_version_id IS NOT NULL AND v.approval_status='approved' AND v.approved_space_id=s.space_id`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -457,14 +481,20 @@ func scanVersion(row rowScanner, version *Version) error {
 
 func scanVersionSource(row rowScanner, version *Version) error {
 	var sourceID, repositoryOwner, repositoryName, sourcePath, sourceCommitSHA, sourceContentSHA256, uploadedByUserID, uploadedByAgentID pgtype.Text
+	var reviewedAt pgtype.Timestamptz
 	if err := row.Scan(
 		&version.VersionID, &version.SkillID, &version.Version, &version.Description, &version.Changelog, &version.PackagePath, &version.PackageSHA256, &version.CreatedAt,
 		&sourceID, &repositoryOwner, &repositoryName, &sourcePath, &sourceCommitSHA, &sourceContentSHA256, &uploadedByUserID, &uploadedByAgentID,
+		&version.SkillName, &version.ApprovalStatus, &version.ApprovedSpaceID, &version.ReviewedBy, &reviewedAt, &version.ReviewComment,
 	); err != nil {
 		return err
 	}
 	if uploadedByUserID.Valid {
 		version.UploadedByUserID = uploadedByUserID.String
+	}
+	if reviewedAt.Valid {
+		now := reviewedAt.Time.UTC()
+		version.ReviewedAt = &now
 	}
 	if uploadedByAgentID.Valid {
 		version.UploadedByAgentID = uploadedByAgentID.String

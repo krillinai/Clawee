@@ -34,7 +34,13 @@ type SpaceStore interface {
 	RemoveSpaceMember(context.Context, string, string) error
 }
 
+type ReviewStore interface {
+	SetSpaceApprover(context.Context, string, string, string, time.Time) error
+	ReviewVersion(context.Context, string, string, string, bool, string, time.Time) (Version, error)
+}
+
 type CreateVersionOptions struct {
+	// 保留旧调用契约；创建版本不再直接发布，发布必须通过审批门禁。
 	Publish       bool
 	Resolution    string
 	TargetSkillID string
@@ -120,18 +126,11 @@ func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version V
 		s.skills[skill.SkillID] = skill
 		s.byName[skill.Name] = skill.SkillID
 	}
-	if options.Resolution == VersionResolutionReplace {
-		delete(s.byName, skill.Name)
-		skill.Name = proposed.Name
-		s.byName[skill.Name] = skill.SkillID
-	}
+	version.SkillName = proposed.Name
+	version.ApprovalStatus = "pending"
+	version.ApprovedSpaceID, version.ReviewedBy, version.ReviewComment, version.ReviewedAt = "", "", "", nil
 	version.SkillID = skill.SkillID
 	s.versions[skill.SkillID] = append([]Version{version}, s.versions[skill.SkillID]...)
-	if options.Publish {
-		currentVersionID := version.VersionID
-		skill.CurrentVersionID = &currentVersionID
-		skill.UpdatedAt = version.CreatedAt
-	}
 	s.skills[skill.SkillID] = skill
 	return s.adminSkill(skill), version, nil
 }
@@ -269,6 +268,17 @@ func (s *MemoryStore) SetCurrentVersion(_ context.Context, skillID, versionID st
 	if targetSkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
+	if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || s.spaces[skill.SpaceID].ApproverUserID == "" {
+		return Skill{}, Version{}, ErrApprovalRequired
+	}
+	if target.SkillName != "" && target.SkillName != skill.Name {
+		if owner := s.byName[target.SkillName]; owner != "" && owner != skillID {
+			return Skill{}, Version{}, ErrConflict
+		}
+		delete(s.byName, skill.Name)
+		skill.Name = target.SkillName
+		s.byName[skill.Name] = skillID
+	}
 	if skill.CurrentVersionID == nil || *skill.CurrentVersionID != versionID {
 		value := versionID
 		skill.CurrentVersionID = &value
@@ -297,6 +307,14 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 			continue
 		}
 		skill.SpaceID = targetSpaceID
+		skill.CurrentVersionID = nil
+		for i := range s.versions[skillID] {
+			s.versions[skillID][i].ApprovalStatus = "pending"
+			s.versions[skillID][i].ApprovedSpaceID = ""
+			s.versions[skillID][i].ReviewedBy = ""
+			s.versions[skillID][i].ReviewedAt = nil
+			s.versions[skillID][i].ReviewComment = ""
+		}
 		skill.UpdatedAt = now
 		s.skills[skillID] = skill
 		result.MovedCount++
@@ -349,7 +367,7 @@ func (s *MemoryStore) published(skill Skill) (PublishedDetail, bool) {
 		return PublishedDetail{}, false
 	}
 	for _, version := range s.versions[skill.SkillID] {
-		if version.VersionID == *skill.CurrentVersionID {
+		if version.VersionID == *skill.CurrentVersionID && version.ApprovalStatus == "approved" && version.ApprovedSpaceID == skill.SpaceID {
 			spaceName := s.spaces[skill.SpaceID].Name
 			return PublishedDetail{PublishedItem: PublishedItem{
 				SkillID: skill.SkillID, SpaceID: skill.SpaceID, SpaceName: spaceName, Name: skill.Name, Description: version.Description,

@@ -38,7 +38,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seeded, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{
+	seeded, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{
 		SpaceID: primary.SpaceID, Version: "1.0.0", Package: bytes.NewReader(skillPackageNamed(t, "space-demo")), CreatedBy: "技能管理员",
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 		t.Fatalf("authorized upload status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	uploaded := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
-	if uploaded.Skill.CurrentVersionID == nil || *uploaded.Skill.CurrentVersionID != uploaded.Version.VersionID || uploaded.Version.UploadedByUserID != user.Account.UserID || uploaded.Version.UploadedByAgentID != login.AgentID {
+	if uploaded.Skill.CurrentVersionID == nil || *uploaded.Skill.CurrentVersionID != seeded.Version.VersionID || uploaded.Version.ApprovalStatus != "pending" || uploaded.Version.UploadedByUserID != user.Account.UserID || uploaded.Version.UploadedByAgentID != login.AgentID {
 		t.Fatalf("uploaded result=%#v", uploaded)
 	}
 	if uploaded.Skill.SpaceName != primary.Name {
@@ -118,7 +118,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	recorder = request(http.MethodPost, "/api/v1/app/skills/versions", login.AccessToken, body, contentType)
 	assertSkillError(t, recorder, http.StatusConflict, "conflict")
 	detail, err := service.GetAdmin(ctx, seeded.Skill.SkillID)
-	if err != nil || detail.Skill.SpaceID != primary.SpaceID || detail.Skill.CurrentVersionID == nil || *detail.Skill.CurrentVersionID != uploaded.Version.VersionID {
+	if err != nil || detail.Skill.SpaceID != primary.SpaceID || detail.Skill.CurrentVersionID == nil || *detail.Skill.CurrentVersionID != seeded.Version.VersionID {
 		t.Fatalf("original skill changed after cross-space conflict: %#v, %v", detail, err)
 	}
 
@@ -140,7 +140,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 		t.Fatalf("client replacement: %d %s", recorder.Code, recorder.Body.String())
 	}
 	replacement := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
-	if replacement.Skill.SkillID != seeded.Skill.SkillID || replacement.Skill.Name != "client-renamed" {
+	if replacement.Skill.SkillID != seeded.Skill.SkillID || replacement.Skill.Name != "space-demo" || replacement.Version.SkillName != "client-renamed" || replacement.Version.ApprovalStatus != "pending" {
 		t.Fatalf("replacement = %#v", replacement)
 	}
 
@@ -247,11 +247,11 @@ func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "move-first")), CreatedBy: "空间管理员"})
+	first, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "move-first")), CreatedBy: "空间管理员"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{SpaceID: target.SpaceID, Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "move-second")), CreatedBy: "空间管理员"})
+	second, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{SpaceID: target.SpaceID, Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "move-second")), CreatedBy: "空间管理员"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 		t.Fatalf("batch move status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	detail, err := service.GetAdmin(ctx, first.Skill.SkillID)
-	if err != nil || detail.Skill.SpaceID != target.SpaceID || detail.Skill.CurrentVersionID == nil {
+	if err != nil || detail.Skill.SpaceID != target.SpaceID || detail.Skill.CurrentVersionID != nil || detail.Versions[0].ApprovalStatus != "pending" {
 		t.Fatalf("moved skill=%#v, %v", detail, err)
 	}
 

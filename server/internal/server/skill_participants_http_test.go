@@ -28,11 +28,11 @@ func TestSkillParticipantsAndAvatarRespectSpaceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{SpaceID: space.SpaceID, Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "participants")), CreatedBy: creator.Account.Name, UploadedByUserID: creator.Account.UserID})
+	first, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{SpaceID: space.SpaceID, Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "participants")), CreatedBy: creator.Account.Name, UploadedByUserID: creator.Account.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.UploadVersion(ctx, skillhub.UploadVersionInput{SpaceID: space.SpaceID, Version: "2", Package: bytes.NewReader(skillPackageNamed(t, "participants")), CreatedBy: updater.Account.Name, UploadedByUserID: updater.Account.UserID})
+	_, err = uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{SpaceID: space.SpaceID, Version: "2", Package: bytes.NewReader(skillPackageNamed(t, "participants")), CreatedBy: updater.Account.Name, UploadedByUserID: updater.Account.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}

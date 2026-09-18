@@ -22,7 +22,7 @@ func TestServiceUploadVersionStoresImmutablePackage(t *testing.T) {
 	service := NewService(Config{Store: store, PackageRoot: root, Clock: func() time.Time { return now }})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})
 
-	result, err := service.UploadVersion(context.Background(), UploadVersionInput{
+	result, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1.2.0", Changelog: "修复安装说明", Package: bytes.NewReader(data), CreatedBy: "usr_admin",
 	})
 	if err != nil {
@@ -44,7 +44,7 @@ func TestServiceUploadVersionStoresImmutablePackage(t *testing.T) {
 		t.Fatalf("package_sha256 = %q, want stored package digest", result.Version.PackageSHA256)
 	}
 
-	_, err = service.UploadVersion(context.Background(), UploadVersionInput{
+	_, err = uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1.2.0", Package: bytes.NewReader(data), CreatedBy: "usr_admin",
 	})
 	if !errors.Is(err, ErrConflict) {
@@ -79,7 +79,7 @@ func TestServiceReplacementRenamesOriginalAndPreservesHistory(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
 	upload := func(name, version, target string) (MutationResult, error) {
-		return service.UploadVersion(ctx, UploadVersionInput{TargetSkillID: target, Version: version, CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD(name)}}))})
+		return uploadApprovedVersion(service, ctx, UploadVersionInput{TargetSkillID: target, Version: version, CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD(name)}}))})
 	}
 	original, err := upload("original", "1", "")
 	if err != nil {
@@ -121,7 +121,7 @@ func TestServiceDeletesOnlyUnpublishedSkillsAndPackages(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})
-	result, err := service.UploadVersion(ctx, UploadVersionInput{Version: "1", CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("delete-me")}}))})
+	result, err := uploadApprovedVersion(service, ctx, UploadVersionInput{Version: "1", CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("delete-me")}}))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestServiceUploadVersionStoresNormalizedPackage(t *testing.T) {
 		{name: "wrapper/scripts/._run.sh", body: "metadata"},
 	})
 
-	result, err := service.UploadVersion(context.Background(), UploadVersionInput{
+	result, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1.0", Package: bytes.NewReader(uploaded), CreatedBy: "admin",
 	})
 	if err != nil {
@@ -211,13 +211,13 @@ func TestServiceUploadVersionPublishesLatestUploadAndConflictPreservesCurrent(t 
 	now := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	service := NewService(Config{Store: store, PackageRoot: root, Clock: func() time.Time { return now }})
 	firstData := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: "---\nname: code-review\ndescription: first\n---\n# First\n"}})
-	first, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "2.0", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
+	first, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "2.0", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Hour)
 	secondData := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: "---\nname: code-review\ndescription: second\n---\n# Second\n"}})
-	second, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
+	second, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestServiceUploadVersionPublishesLatestUploadAndConflictPreservesCurrent(t 
 		t.Fatalf("published = %#v, %v", published, err)
 	}
 
-	_, err = service.UploadVersion(context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
+	_, err = uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate upload error = %v", err)
 	}
@@ -321,7 +321,7 @@ func TestServiceCreateVersionFromPackageTargetPreservesOrPublishesCurrent(t *tes
 	root := t.TempDir()
 	store := NewMemoryStore()
 	service := NewService(Config{Store: store, PackageRoot: root})
-	initial, err := service.UploadVersion(context.Background(), UploadVersionInput{
+	initial, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1.0", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})), CreatedBy: "admin",
 	})
 	if err != nil {
@@ -350,11 +350,11 @@ func TestServiceCreateVersionFromPackageTargetPreservesOrPublishesCurrent(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if published.Skill.CurrentVersionID == nil || *published.Skill.CurrentVersionID != published.Version.VersionID {
+	if published.Version.ApprovalStatus != "pending" || published.Skill.CurrentVersionID == nil || *published.Skill.CurrentVersionID != initial.Version.VersionID {
 		t.Fatalf("published result = %#v", published)
 	}
 	current, err := service.GetPublished(context.Background(), initial.Skill.SkillID)
-	if err != nil || current.VersionID != published.Version.VersionID {
+	if err != nil || current.VersionID != initial.Version.VersionID {
 		t.Fatalf("GetPublished() = %#v, %v", current, err)
 	}
 }
@@ -363,7 +363,7 @@ func TestServiceCreateVersionFromPackageCreateOnlyRejectsExistingName(t *testing
 	root := t.TempDir()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})
-	if _, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"}); err != nil {
+	if _, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := service.CreateVersionFromPackage(context.Background(), CreateVersionInput{
@@ -382,13 +382,13 @@ func TestServiceCreateVersionFromPackageCreateOnlyRejectsExistingName(t *testing
 func TestServiceCreateVersionFromPackageTargetRequiresExistingMatchingSkill(t *testing.T) {
 	root := t.TempDir()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})
-	one, err := service.UploadVersion(context.Background(), UploadVersionInput{
+	one, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})), CreatedBy: "admin",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, err := service.UploadVersion(context.Background(), UploadVersionInput{
+	two, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("two")}})), CreatedBy: "admin",
 	})
 	if err != nil {
@@ -415,7 +415,7 @@ func TestServicePublishesClearsAndDownloadsCurrentVersion(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(Config{Store: store, PackageRoot: root})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})
-	created, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(data), CreatedBy: "usr_admin"})
+	created, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(data), CreatedBy: "usr_admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestServiceListsReadsAndDownloadsVersionPackage(t *testing.T) {
 		{name: "wrapper/assets/logo.bin", body: string([]byte{0, 1, 2})},
 		{name: "wrapper/assets/control.bin", body: string([]byte{1, 2, 3})},
 	})
-	created, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(data), CreatedBy: "admin"})
+	created, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1.0", Package: bytes.NewReader(data), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestServicePublishedVersionFilesOnlyAllowCurrentVersion(t *testing.T) {
 		{name: "SKILL.md", body: validSkillMD("first")},
 		{name: "docs/guide.md", body: "first guide"},
 	})
-	first, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
+	first, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +530,7 @@ func TestServicePublishedVersionFilesOnlyAllowCurrentVersion(t *testing.T) {
 		{name: "SKILL.md", body: validSkillMD("second")},
 		{name: "private.md", body: "unpublished history"},
 	})
-	second, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "2", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
+	second, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "2", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,12 +561,12 @@ func TestServiceRejectsInvalidVersionFileAccess(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
 	firstData := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("first")}})
-	first, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
+	first, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(firstData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	secondData := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("second")}})
-	second, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
+	second, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(secondData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +592,7 @@ func TestServiceRejectsInvalidVersionFileAccess(t *testing.T) {
 		{name: "SKILL.md", body: validSkillMD("large")},
 		{name: "large.txt", body: strings.Repeat("x", int(MaxFilePreviewSize+1))},
 	})
-	large, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "2", Package: bytes.NewReader(largeData), CreatedBy: "admin"})
+	large, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "2", Package: bytes.NewReader(largeData), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +606,7 @@ func TestServiceRejectsCorruptedStoredVersionArchive(t *testing.T) {
 	root := t.TempDir()
 	service := NewService(Config{Store: store, PackageRoot: root})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("valid")}})
-	created, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"})
+	created, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestServiceValidatesUploadFields(t *testing.T) {
 		{Version: "1", Package: nil, CreatedBy: "admin"},
 	}
 	for _, input := range tests {
-		if _, err := service.UploadVersion(context.Background(), input); !errors.Is(err, ErrInvalidRequest) {
+		if _, err := uploadApprovedVersion(service, context.Background(), input); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatalf("UploadVersion(%#v) error = %v, want ErrInvalidRequest", input, err)
 		}
 	}
@@ -661,7 +661,7 @@ func TestServiceRejectsUnexpectedStoredPackagePath(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("valid")}})
-	created, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"})
+	created, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,11 +735,11 @@ func TestServiceMovesSkillsToSpaceAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.UploadVersion(context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("first")}})), CreatedBy: "admin"})
+	first, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("first")}})), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.UploadVersion(context.Background(), UploadVersionInput{SpaceID: target.SpaceID, Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("second")}})), CreatedBy: "admin"})
+	second, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{SpaceID: target.SpaceID, Version: "1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("second")}})), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +749,7 @@ func TestServiceMovesSkillsToSpaceAtomically(t *testing.T) {
 		t.Fatalf("MoveSkillsToSpace() = %#v, %v", result, err)
 	}
 	detail, err := service.GetAdmin(context.Background(), first.Skill.SkillID)
-	if err != nil || detail.Skill.SpaceID != target.SpaceID || detail.Skill.CurrentVersionID == nil {
+	if err != nil || detail.Skill.SpaceID != target.SpaceID || detail.Skill.CurrentVersionID != nil || detail.Versions[0].ApprovalStatus != "pending" {
 		t.Fatalf("moved skill = %#v, %v", detail, err)
 	}
 

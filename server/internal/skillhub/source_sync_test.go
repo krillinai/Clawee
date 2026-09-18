@@ -142,12 +142,12 @@ func TestSourceSyncServiceEndToEndWithLocalGitRepository(t *testing.T) {
 	}
 	secondRun := fixture.latestRun()
 	if secondRun.Status != SourceSyncRunStatusSuccess || secondRun.TargetCommitSHA == nil || *secondRun.TargetCommitSHA != secondCommit ||
-		secondRun.DiscoveredCount != 2 || secondRun.CreatedVersionCount != 1 || secondRun.PublishedCount != 1 {
+		secondRun.DiscoveredCount != 2 || secondRun.CreatedVersionCount != 1 || secondRun.PublishedCount != 0 {
 		t.Fatalf("second run = %#v", secondRun)
 	}
 	alpha = fixture.skillDetailByName("alpha")
 	beta = fixture.skillDetailByName("beta")
-	if len(alpha.Versions) != 2 || alpha.Skill.CurrentVersionID == nil || *alpha.Skill.CurrentVersionID != alpha.Versions[0].VersionID ||
+	if len(alpha.Versions) != 2 || alpha.Skill.CurrentVersionID != nil || alpha.Versions[0].ApprovalStatus != "pending" ||
 		alpha.Versions[0].Version != "git-"+secondCommit || alpha.Versions[0].Source == nil || alpha.Versions[0].Source.CommitSHA != secondCommit {
 		t.Fatalf("auto-published alpha = %#v", alpha)
 	}
@@ -318,7 +318,7 @@ func TestSourceSyncServiceAutoPublishUsesSharedVersionTransaction(t *testing.T) 
 	for _, publish := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "enabled"}[publish], func(t *testing.T) {
 			fixture := newSourceSyncFixture(t, map[string]string{"skills/one/SKILL.md": validSkillMD("one")}, publish)
-			initial, err := fixture.versionService.UploadVersion(context.Background(), UploadVersionInput{
+			initial, err := uploadApprovedVersion(fixture.versionService, context.Background(), UploadVersionInput{
 				Version: "manual-1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})), CreatedBy: "admin",
 			})
 			if err != nil {
@@ -334,8 +334,8 @@ func TestSourceSyncServiceAutoPublishUsesSharedVersionTransaction(t *testing.T) 
 				t.Fatalf("detail = %#v, %v", detail, err)
 			}
 			wantCurrent := initial.Version.VersionID
-			if publish {
-				wantCurrent = detail.Versions[0].VersionID
+			if detail.Versions[0].ApprovalStatus != "pending" || fixture.latestRun().PublishedCount != 0 {
+				t.Fatal("source auto publish bypassed approval")
 			}
 			if *detail.Skill.CurrentVersionID != wantCurrent {
 				t.Fatalf("current version = %q, want %q", *detail.Skill.CurrentVersionID, wantCurrent)
@@ -365,7 +365,7 @@ func TestSourceSyncServiceRecordsBusinessConflictsWithoutReplacingCurrent(t *tes
 
 	t.Run("existing name", func(t *testing.T) {
 		fixture := newSourceSyncFixture(t, map[string]string{"skills/one/SKILL.md": validSkillMD("one")}, true)
-		initial, err := fixture.versionService.UploadVersion(context.Background(), UploadVersionInput{
+		initial, err := uploadApprovedVersion(fixture.versionService, context.Background(), UploadVersionInput{
 			Version: "manual-1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})), CreatedBy: "admin",
 		})
 		if err != nil {
@@ -385,7 +385,7 @@ func TestSourceSyncServiceRecordsBusinessConflictsWithoutReplacingCurrent(t *tes
 
 	t.Run("bound path renamed", func(t *testing.T) {
 		fixture := newSourceSyncFixture(t, map[string]string{"skills/one/SKILL.md": validSkillMD("renamed")}, true)
-		initial, err := fixture.versionService.UploadVersion(context.Background(), UploadVersionInput{
+		initial, err := uploadApprovedVersion(fixture.versionService, context.Background(), UploadVersionInput{
 			Version: "manual-1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("original")}})), CreatedBy: "admin",
 		})
 		if err != nil {
@@ -457,7 +457,7 @@ func TestSourceSyncServiceRetriesResolvedBusinessConflicts(t *testing.T) {
 
 func TestSourceSyncServiceDoesNotTreatUnrelatedVersionConflictAsNameChange(t *testing.T) {
 	fixture := newSourceSyncFixture(t, map[string]string{"skills/one/SKILL.md": validSkillMD("one")}, false)
-	initial, err := fixture.versionService.UploadVersion(context.Background(), UploadVersionInput{
+	initial, err := uploadApprovedVersion(fixture.versionService, context.Background(), UploadVersionInput{
 		Version: "manual-1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})), CreatedBy: "admin",
 	})
 	if err != nil {
@@ -508,7 +508,7 @@ func TestSourceSyncServiceRecordsInvalidAndMissingWithoutUnpublishing(t *testing
 		"skills/good/SKILL.md":    validSkillMD("good"),
 		"skills/invalid/SKILL.md": "not frontmatter",
 	}, true)
-	missingSkill, err := fixture.versionService.UploadVersion(context.Background(), UploadVersionInput{
+	missingSkill, err := uploadApprovedVersion(fixture.versionService, context.Background(), UploadVersionInput{
 		Version: "manual-1", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("missing")}})), CreatedBy: "admin",
 	})
 	if err != nil {

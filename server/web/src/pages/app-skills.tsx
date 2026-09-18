@@ -58,7 +58,7 @@ function PublishedSkillList() {
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();
-      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传并发布`);
+      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传，待审批`);
       void queryClient.invalidateQueries({ queryKey: ["app-skills"] });
       void queryClient.invalidateQueries({ queryKey: ["app-skill-spaces"] });
     }
@@ -118,7 +118,6 @@ function PublishedSkillList() {
         open={uploadOpen}
         onClose={closeUpload}
         title="上传 Skill"
-        subtitle="ZIP 可直接包含 SKILL.md，也可将全部内容放在单一顶层目录中；上传成功后将自动发布该版本，并替换当前发布版本。"
       >
         <form onSubmit={submitUpload}>
           <FieldGroup>

@@ -145,7 +145,7 @@ export function SkillsPage() {
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();
-      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传并发布`);
+      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传，待审批`);
       void queryClient.invalidateQueries({ queryKey: skillsKey });
       void queryClient.invalidateQueries({ queryKey: ["skill", result.skill.skillId] });
       void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
@@ -572,7 +572,6 @@ export function SkillsPage() {
         open={uploadOpen}
         onClose={closeUpload}
         title={uploadTarget ? `替换上传 Skill：${uploadTarget.name}` : "上传 Skill 版本"}
-        subtitle="ZIP 可直接包含 SKILL.md，也可将全部内容放在单一顶层目录中；上传成功后将自动发布该版本，并替换当前发布版本。"
       >
         <form onSubmit={submitUpload}>
           <FieldGroup>
@@ -749,7 +748,7 @@ function SkillSourcesTable({
             <TableHead>分支</TableHead>
             <TableHead>扫描根</TableHead>
             <TableHead>调度</TableHead>
-            <TableHead>自动发布</TableHead>
+            <TableHead>发布方式</TableHead>
             <TableHead>状态</TableHead>
             <TableHead>最近同步</TableHead>
             <TableHead>Commit</TableHead>
@@ -771,7 +770,7 @@ function SkillSourcesTable({
               <TableCell>{source.branch || "默认"}</TableCell>
               <TableCell className="max-w-40"><span className="block truncate" title={source.scanRoot}>{source.scanRoot}</span></TableCell>
               <TableCell>{scheduleLabel(source.schedule)}</TableCell>
-              <TableCell><Badge variant={source.autoPublish ? "success" : "muted"}>{source.autoPublish ? "自动发布" : "手动发布"}</Badge></TableCell>
+              <TableCell><Badge variant="muted">审批后发布</Badge></TableCell>
               <TableCell><Badge variant={isEnabled ? "success" : "muted"}>{isEnabled ? "启用" : "已停用"}</Badge></TableCell>
               <TableCell className="font-mono text-xs">{formatDateTime(source.lastSuccessAt ?? source.lastAttemptAt)}</TableCell>
               <TableCell className="font-mono text-xs">

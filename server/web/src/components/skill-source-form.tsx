@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -58,7 +57,6 @@ export function SkillSourceForm({
   const [scanRoot, setScanRoot] = useState(source?.scanRoot ?? ".");
   const [excludePrefixes, setExcludePrefixes] = useState(source?.excludePaths.join("\n") ?? "");
   const [token, setToken] = useState(initialToken);
-  const [autoPublish, setAutoPublish] = useState(source?.autoPublish ?? false);
   const [schedule, setSchedule] = useState(source?.schedule ?? "manual");
   const repository = parseGitHubRepositoryURL(repositoryURL);
 
@@ -73,7 +71,7 @@ export function SkillSourceForm({
       scanRoot: scanRoot.trim(),
       excludePaths: excludePrefixes.split("\n").map((item) => item.trim()).filter(Boolean),
       ...(token.trim() ? { token: token.trim() } : {}),
-      autoPublish,
+      autoPublish: false,
       schedule
     });
   }
@@ -137,13 +135,6 @@ export function SkillSourceForm({
               </SelectGroup>
             </SelectContent>
           </Select>
-        </Field>
-        <Field orientation="horizontal">
-          <Checkbox checked={autoPublish} id="source-auto-publish" onCheckedChange={(checked) => setAutoPublish(checked === true)} />
-          <div className="grid gap-1.5 leading-none">
-            <FieldLabel htmlFor="source-auto-publish">自动发布发现的版本</FieldLabel>
-            <FieldDescription>同步成功后自动将新发现版本设为当前版本。</FieldDescription>
-          </div>
         </Field>
         <Field className="flex-wrap justify-end" orientation="horizontal">
           <Button disabled={pending} onClick={onCancel} type="button" variant="outline">取消</Button>

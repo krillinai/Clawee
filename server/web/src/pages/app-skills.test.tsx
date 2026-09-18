@@ -149,7 +149,7 @@ describe("AppSkillsPage published detail", () => {
       changelog: "首次上传",
       packageFile: file
     }));
-    expect(await screen.findByText("Skill“release-helper”版本 1.0.0 已上传并发布")).toBeInTheDocument();
+    expect(await screen.findByText("Skill“release-helper”版本 1.0.0 已上传，待审批")).toBeInTheDocument();
   });
 
   it("disables uploading when the user has no writable space", async () => {

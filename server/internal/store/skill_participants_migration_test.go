@@ -91,6 +91,22 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
+	if _, err := provider.UpTo(ctx, 56); err != nil {
+		t.Fatal(err)
+	}
+	for _, spaceID := range []string{"product", "market"} {
+		if err := service.SetSpaceApprover(ctx, spaceID, "viewer", "system"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, version := range []struct{ skillID, versionID string }{{"tracked", "tracked-5"}, {"legacy", "legacy-2"}, {"hidden", "hidden-1"}} {
+		if _, err := service.ReviewVersion(ctx, version.skillID, version.versionID, "viewer", true, "测试发布前审批"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.SetCurrentVersion(ctx, version.skillID, version.versionID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	detail, err := service.GetPublished(ctx, "tracked")
 	if err != nil {
 		t.Fatal(err)
@@ -121,8 +137,10 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 			}
 		}
 	}
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for version := 56; version >= 52; version-- {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var remainingColumns int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns

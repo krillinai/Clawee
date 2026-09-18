@@ -34,6 +34,8 @@ var (
 	ErrSpaceNameConflict    = errors.New("skill space name conflict")
 	ErrMemberNotFound       = errors.New("skill space member not found")
 	ErrMemberAlreadyExists  = errors.New("skill space member already exists")
+	ErrApprovalRequired     = errors.New("skill version approval required")
+	ErrReviewForbidden      = errors.New("skill space reviewer required")
 )
 
 type Skill struct {
@@ -50,6 +52,12 @@ type Skill struct {
 }
 
 type Version struct {
+	SkillName         string                 `json:"skill_name"`
+	ApprovalStatus    string                 `json:"approval_status"`
+	ApprovedSpaceID   string                 `json:"-"`
+	ReviewedBy        string                 `json:"reviewed_by"`
+	ReviewedAt        *time.Time             `json:"reviewed_at"`
+	ReviewComment     string                 `json:"review_comment"`
 	VersionID         string                 `json:"version_id"`
 	SkillID           string                 `json:"skill_id"`
 	Version           string                 `json:"version"`
@@ -65,8 +73,9 @@ type Version struct {
 }
 
 type AdminDetail struct {
-	Skill    Skill     `json:"skill"`
-	Versions []Version `json:"versions"`
+	CanReview bool      `json:"can_review"`
+	Skill     Skill     `json:"skill"`
+	Versions  []Version `json:"versions"`
 }
 
 type MutationResult struct {
@@ -137,14 +146,16 @@ type CreateVersionInput struct {
 }
 
 type Space struct {
-	SpaceID     string    `json:"space_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedBy   string    `json:"created_by,omitempty"`
-	UpdatedBy   string    `json:"updated_by,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Actions     []string  `json:"actions,omitempty"`
+	ApproverUserID string    `json:"approver_user_id"`
+	ApproverName   string    `json:"approver_name"`
+	SpaceID        string    `json:"space_id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	CreatedBy      string    `json:"created_by,omitempty"`
+	UpdatedBy      string    `json:"updated_by,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Actions        []string  `json:"actions,omitempty"`
 }
 
 type SpaceSummary struct {

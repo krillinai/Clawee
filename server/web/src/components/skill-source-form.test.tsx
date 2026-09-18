@@ -40,7 +40,7 @@ describe("SkillSourceForm", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("submits a new GitHub source with its schedule and auto-publish selection", () => {
+  it("submits a new GitHub source without bypassing approval", () => {
     const onSubmit = vi.fn();
     render(<SkillSourceForm onCancel={vi.fn()} onSubmit={onSubmit} />);
 
@@ -51,7 +51,7 @@ describe("SkillSourceForm", () => {
     fireEvent.change(screen.getByLabelText("访问 Token"), { target: { value: "ghp_secret" } });
     fireEvent.click(screen.getByRole("combobox", { name: "同步调度" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "每日" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "自动发布发现的版本" }));
+    expect(screen.queryByRole("checkbox", { name: "自动发布发现的版本" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "创建来源" }));
 
     expect(onSubmit).toHaveBeenCalledWith({
@@ -62,7 +62,7 @@ describe("SkillSourceForm", () => {
       scanRoot: "packages",
       excludePaths: ["archive", "legacy"],
       token: "ghp_secret",
-      autoPublish: true,
+      autoPublish: false,
       schedule: "daily"
     });
   });
@@ -84,7 +84,7 @@ describe("SkillSourceForm", () => {
       branch: "main",
       scanRoot: "skills/",
       excludePaths: ["archive/"],
-      autoPublish: true,
+      autoPublish: false,
       schedule: "hourly"
     });
   });

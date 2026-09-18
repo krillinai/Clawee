@@ -31,10 +31,26 @@ import {
 	unbindGitHubSourceItem,
 	updateGitHubSource,
 	uploadAppSkillVersion,
-	uploadSkillVersion
+	uploadSkillVersion,
+  listSkillSpaceApproverCandidates,
+  setSkillSpaceApprover,
+  reviewSkillVersion
 } from "./skillhub-api";
 
 describe("skillhub api", () => {
+  it("maps reviewer candidates and sends approval configuration and decisions", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ user_id: "reviewer", name: "审批人", email: "reviewer@example.com" }] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ version_id: "v1", skill_id: "skill-1", version: "1", description: "", changelog: "", package_sha256: "hash", source: null, created_at: "2026-09-18T00:00:00Z", approval_status: "approved", skill_name: "技能", reviewed_by: "reviewer", reviewed_at: "2026-09-18T00:00:00Z", review_comment: "通过" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listSkillSpaceApproverCandidates()).resolves.toEqual([{ userId: "reviewer", name: "审批人", email: "reviewer@example.com" }]);
+    await setSkillSpaceApprover("space-1", "reviewer");
+    await expect(reviewSkillVersion("skill-1", "v1", "approved", "通过")).resolves.toMatchObject({ approvalStatus: "approved", reviewedBy: "reviewer", reviewComment: "通过" });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/admin/skill-spaces/approver", expect.objectContaining({ method: "PUT", body: JSON.stringify({ space_id: "space-1", user_id: "reviewer" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/skills/versions/review", expect.objectContaining({ method: "POST", body: JSON.stringify({ skill_id: "skill-1", version_id: "v1", decision: "approved", comment: "通过" }) }));
+  });
+
   afterEach(() => vi.unstubAllGlobals());
 
   it("maps GitHub source availability from admin status", async () => {
