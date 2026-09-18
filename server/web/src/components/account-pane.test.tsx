@@ -32,14 +32,54 @@ describe("AccountPane", () => {
     const image = container.querySelector("img")!;
     fireEvent.error(image);
     expect(container.querySelector("img")).toBeNull();
+    expect(screen.queryByRole("button", { name: "更换头像" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "User" }));
+    const dialog = screen.getByRole("dialog", { name: "头像设置" });
 
     const file = new File(["png"], "avatar.png", { type: "image/png" });
-    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    const input = within(dialog).getByLabelText("选择头像图片");
+    const chooseFile = vi.spyOn(input, "click");
+    fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+    expect(chooseFile).toHaveBeenCalledOnce();
+    fireEvent.change(input, { target: { files: [file] } });
     await waitFor(() => expect(uploadAccountAvatar).toHaveBeenCalledWith(file));
     await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toContain("?v="));
+    expect(within(dialog).getByRole("img", { name: "当前头像" }).getAttribute("src")).toContain("?v=");
 
     fireEvent.click(screen.getByRole("button", { name: "恢复默认头像" }));
     await waitFor(() => expect(deleteAccountAvatar).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "完成" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(screen.queryByRole("dialog", { name: "头像设置" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "User" })).toHaveFocus());
+  });
+
+  it("头像操作失败在模态框内提示，并允许重试", async () => {
+    vi.mocked(deleteAccountAvatar).mockRejectedValueOnce(new Error("头像恢复失败"));
+    renderPane(baseAccount);
+    fireEvent.click(screen.getByRole("button", { name: "User" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认头像" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("头像恢复失败");
+    expect(screen.getByRole("button", { name: "更换头像" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "恢复默认头像" })).toBeEnabled();
+  });
+
+  it("头像处理期间禁用操作并阻止关闭，完成后可退出", async () => {
+    let finish!: () => void;
+    vi.mocked(deleteAccountAvatar).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    renderPane(baseAccount);
+    fireEvent.click(screen.getByRole("button", { name: "User" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认头像" }));
+    expect(screen.getByRole("button", { name: "处理中..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "恢复默认头像" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "完成" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "头像设置" })).toBeInTheDocument();
+    finish();
+    await waitFor(() => expect(screen.getByRole("button", { name: "完成" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(screen.queryByRole("dialog", { name: "头像设置" })).not.toBeInTheDocument();
   });
 
   it("hides dingtalk controls when the provider is disabled", () => {

@@ -62,6 +62,13 @@ describe("AdminLayout", () => {
     expect(brandLink.querySelector('img[src="/favicon.ico"]')).not.toBeInTheDocument();
     expect(brandLink).not.toHaveTextContent("CG");
     expect(screen.getByText("Clawee管理后台")).toBeInTheDocument();
+    const accountPane = screen.getByRole("group", { name: "账户信息" });
+    const feedbackButton = within(accountPane).getByRole("button", { name: "提交异常反馈" });
+    expect(within(accountPane).getByRole("button", { name: "管理员" })).toHaveAttribute("aria-haspopup", "dialog");
+    expect(within(accountPane).queryByRole("button", { name: "更换头像" })).not.toBeInTheDocument();
+    expect(within(accountPane).queryByRole("button", { name: "恢复默认头像" })).not.toBeInTheDocument();
+    expect(feedbackButton.textContent).toBe("");
+    expect(feedbackButton).toHaveClass("h-9", "w-9");
     expect(screen.queryByText("Clawee AI网关")).not.toBeInTheDocument();
     expect(screen.queryByText("企业治理控制台")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent)).toEqual(["总览"]);

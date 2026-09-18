@@ -20,8 +20,10 @@ it('列表复用统一表格，状态与异常材料筛选保留参数并重置�
   expect(screen.getByRole('heading', { name: '问题反馈' })).toHaveClass('text-2xl');
   expect(screen.getAllByRole('columnheader')).toHaveLength(8);
   expect(container.querySelector('[data-slot="card"]')).toBeInTheDocument();
-  expect(screen.getByRole('tab', { name: '待处理' })).toHaveAttribute('aria-selected', 'true');
-  fireEvent.mouseDown(screen.getByRole('tab', { name: '处理中' }), { button: 0, ctrlKey: false });
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '筛选反馈状态' })).toHaveTextContent('待处理');
+  fireEvent.click(screen.getByRole('combobox', { name: '筛选反馈状态' }));
+  fireEvent.click(await screen.findByRole('option', { name: '处理中' }));
   await waitFor(() => {
     const params = vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)![0];
     expect(params.get('status')).toBe('investigating');
@@ -39,6 +41,34 @@ it('加载失败在统一表格内展示重试入口', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('反馈列表加载失败');
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   expect(await screen.findByText('没有符合条件的反馈')).toBeInTheDocument();
+});
+it('来源、版本与日期筛选保留其他条件，清空条件并重置分页', async () => {
+  page('/admin/feedback?status=all&keyword=排障&cursor=old-page');
+  await screen.findByText('没有符合条件的反馈');
+  expect(screen.getByRole('combobox', { name: '筛选反馈状态' })).toHaveTextContent('全部状态');
+  for (const [label, key, value, expected] of [
+    ['来源', 'source', 'desktop', 'desktop'],
+    ['App 版本', 'version', '0.1.15', '0.1.15'],
+    ['开始时间', 'from', '2026-09-01', '2026-09-01T00:00:00Z'],
+    ['结束时间', 'to', '2026-09-18', '2026-09-18T23:59:59Z']
+  ]) {
+    fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+    await waitFor(() => {
+      const params = vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)![0];
+      expect(params.get(key!)).toBe(expected);
+      expect(params.get('status')).toBe('all');
+      expect(params.get('keyword')).toBe('排障');
+      expect(params.has('cursor')).toBe(false);
+    });
+  }
+  fireEvent.change(screen.getByLabelText('来源'), { target: { value: '' } });
+  await waitFor(() => {
+    const params = vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)![0];
+    expect(params.has('source')).toBe(false);
+    expect(params.get('version')).toBe('0.1.15');
+    expect(params.get('from')).toBe('2026-09-01T00:00:00Z');
+    expect(params.get('to')).toBe('2026-09-18T23:59:59Z');
+  });
 });
 it('详情安全显示正文和partial，日志切换后才读取，处理冲突不覆盖', async () => { vi.mocked(feedbackAdminApi.operate).mockRejectedValue(new APIError('conflict', 409, 'feedback_version_conflict')); page('/admin/feedback/fb_test0001'); expect(await screen.findByText(report.description!)).toBeInTheDocument(); expect(screen.getByText('desktop:unavailable')).toBeInTheDocument(); expect(document.querySelector('img')).toBeNull(); fireEvent.click(screen.getByRole('button', { name: '标记已处理' })); fireEvent.change(screen.getByLabelText('内部处理结论（必填）'), { target: { value: '已定位' } }); fireEvent.change(screen.getByLabelText('验证方法与结果（必填）'), { target: { value: '测试通过，未发布' } }); fireEvent.click(screen.getByRole('button', { name: '确认' })); expect(await screen.findByText('反馈版本或状态已变更，请关闭表单并重新读取。')).toBeInTheDocument(); expect(vi.mocked(feedbackAdminApi.operate).mock.calls[0]?.[2]).toMatchObject({ expected_version: 1, resolution_summary: '已定位', verification: '测试通过，未发布' }); });
 it('只读账号隐藏处理操作，quarantine不读取正文', async () => { access.allowed = false; vi.mocked(feedbackAdminApi.get).mockResolvedValue({ ...report, security_state: 'quarantine', description: undefined, manifest: undefined }); page('/admin/feedback/fb_test0001'); expect(await screen.findByText('材料尚未就绪、已隔离或已过期，不能读取正文与处理。')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: '标记已处理' })).not.toBeInTheDocument(); expect(feedbackAdminApi.read).not.toHaveBeenCalled(); });

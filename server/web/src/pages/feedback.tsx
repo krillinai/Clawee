@@ -3,7 +3,7 @@ import { ArrowLeft, Check, Download, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAdminPermission } from '@/components/admin-permissions';
-import { DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSearchField, LoadingState, PageHeader, PageShell, TableStateRow } from '@/components/governance-ui';
+import { DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSearchField, FilterSelect, LoadingState, PageHeader, PageShell, TableStateRow } from '@/components/governance-ui';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,19 +27,23 @@ export function FeedbackPageView() {
   return (
     <PageShell>
       <PageHeader title="问题反馈" />
-      <Tabs value={params.get('status') ?? 'open'} onValueChange={value => change('status', value)}>
-        <TabsList aria-label="反馈状态" className="h-auto justify-start">
-          {Object.entries(statuses).map(([key, text]) => <TabsTrigger key={key} value={key}>{text}</TabsTrigger>)}
-        </TabsList>
-        <TabsContent value={params.get('status') ?? 'open'} aria-label="反馈列表" className="mt-6 grid gap-4">
+      <section aria-label="反馈列表" className="grid min-w-0 gap-3">
           <FilterRow compact>
             <FilterSearchField aria-label="编号或描述" placeholder="编号或描述" value={params.get('keyword') ?? ''} onChange={e => change('keyword', e.target.value)} />
+            <FilterSelect ariaLabel="筛选反馈状态" value={params.get('status') ?? 'open'} onChange={value => change('status', value)}>
+              {Object.entries(statuses).map(([key, text]) => <option key={key} value={key}>{key === 'all' ? '全部状态' : text}</option>)}
+            </FilterSelect>
             <Input className="w-full sm:w-40" aria-label="来源" placeholder="来源" value={params.get('source') ?? ''} onChange={e => change('source', e.target.value)} />
             <Input className="w-full sm:w-40" aria-label="App 版本" placeholder="App 版本" value={params.get('version') ?? ''} onChange={e => change('version', e.target.value)} />
+          </FilterRow>
+          <FilterRow compact>
             {['from', 'to'].map(key => (
-              <Input key={key} className="w-full sm:w-40" aria-label={key === 'from' ? '开始时间' : '结束时间'} type="date" value={params.get(key)?.slice(0, 10) ?? ''} onChange={e => change(key, e.target.value ? `${e.target.value}T${key === 'to' ? '23:59:59' : '00:00:00'}Z` : '')} />
+              <label key={key} className="grid w-full gap-1 text-xs text-muted-foreground sm:w-40">
+                {key === 'from' ? '开始时间' : '结束时间'}
+                <Input className="w-full" aria-label={key === 'from' ? '开始时间' : '结束时间'} type="date" value={params.get(key)?.slice(0, 10) ?? ''} onChange={e => change(key, e.target.value ? `${e.target.value}T${key === 'to' ? '23:59:59' : '00:00:00'}Z` : '')} />
+              </label>
             ))}
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex h-9 items-center gap-2 self-end text-sm">
               <Checkbox aria-label="包含异常材料" checked={params.get('include_unavailable') === 'true'} onCheckedChange={checked => change('include_unavailable', checked === true ? 'true' : '')} />
               包含异常材料
             </label>
@@ -78,8 +82,7 @@ export function FeedbackPageView() {
             </TableBody>
           </DataTableShell>
           {query.data?.meta.has_next ? <div className="flex justify-end"><Button variant="outline" onClick={() => { const next = new URLSearchParams(params); next.set('cursor', query.data!.meta.next_cursor); setParams(next); window.scrollTo(0, 0); }}>下一页</Button></div> : null}
-        </TabsContent>
-      </Tabs>
+      </section>
     </PageShell>
   );
 }

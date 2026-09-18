@@ -229,14 +229,13 @@ export function AdminSidebar({ account }: { account?: Account }) {
         </div>
       </SidebarFooter>
       <SidebarFooter className="p-4 pt-2">
-        {account ? <FeedbackCollector /> : null}
         <Button asChild className="w-full justify-start" size="sm" variant="ghost">
           <NavLink to="/downloads">
             <Download aria-hidden="true" data-icon="inline-start" />
             下载客户端
           </NavLink>
         </Button>
-        <AccountPane account={account} collapseLogout showThemeSwitcher={false} />
+        <AccountPane account={account} accountActions={account ? <FeedbackCollector /> : undefined} collapseLogout showThemeSwitcher={false} />
       </SidebarFooter>
     </Sidebar>
   );

@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Ellipsis, ImagePlus, LayoutDashboard, Link2, LogOut, RotateCcw, Unlink, UserRound } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -24,6 +24,7 @@ type AccountPaneProps = {
   collapseLogout?: boolean;
   showThemeSwitcher?: boolean;
   switchTo?: "admin" | "app";
+  accountActions?: ReactNode;
 };
 
 export const dingtalkBindURL = "/api/v1/auth/dingtalk/bind/start?redirect=/app/agents";
@@ -32,17 +33,19 @@ export function startDingTalkBinding(assign: (url: string) => void = window.loca
   assign(dingtalkBindURL);
 }
 
-export function AccountPane({ account, collapseLogout = false, showThemeSwitcher = true, switchTo }: AccountPaneProps) {
+export function AccountPane({ account, collapseLogout = false, showThemeSwitcher = true, switchTo, accountActions }: AccountPaneProps) {
   const [unbindOpen, setUnbindOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [unbindPending, setUnbindPending] = useState(false);
   const [unbindError, setUnbindError] = useState<unknown>();
   const [unboundUserID, setUnboundUserID] = useState("");
   const [avatarNonce, setAvatarNonce] = useState(0);
+  const [avatarOpen, setAvatarOpen] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string>();
   const [failedAvatarSrc, setFailedAvatarSrc] = useState<string>();
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const accountNameRef = useRef<HTMLButtonElement>(null);
   const isAdmin = account !== undefined && hasAnyAdminPermission(account);
   const alternatePortal = switchTo === "admin" && isAdmin
     ? { href: "/admin", icon: LayoutDashboard, label: "进入管理后台" }
@@ -126,7 +129,16 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
               <span aria-hidden={showAvatar ? "true" : undefined}>{avatarLabel}</span>
               {showAvatar ? <img alt="" className="absolute inset-0 size-full object-cover" onError={() => setFailedAvatarSrc(avatarSrc)} src={avatarSrc} /> : null}
             </div>
-            <strong className="min-w-0 flex-1 truncate text-sm">{account?.name || "用户"}</strong>
+            <button
+              aria-haspopup="dialog"
+              className="min-w-0 flex-1 truncate rounded-sm text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => { setAvatarError(undefined); setAvatarOpen(true); }}
+              ref={accountNameRef}
+              title="设置头像"
+              type="button"
+            >
+              {account?.name || "用户"}
+            </button>
             <Badge className="shrink-0" variant="muted">
               {accountRole}
             </Badge>
@@ -152,17 +164,7 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
               </Popover>
             ) : null}
           </div>
-          <input accept="image/jpeg,image/png" className="hidden" onChange={changeAvatar} ref={avatarInputRef} type="file" />
-          <div className="flex items-center gap-2">
-            <Button disabled={avatarBusy} onClick={() => avatarInputRef.current?.click()} size="sm" variant="outline">
-              <ImagePlus aria-hidden="true" data-icon="inline-start" />
-              {avatarBusy ? "处理中..." : "更换头像"}
-            </Button>
-            <Button aria-label="恢复默认头像" disabled={avatarBusy} onClick={restoreAvatar} size="icon" title="恢复默认头像" variant="ghost">
-              <RotateCcw aria-hidden="true" />
-            </Button>
-          </div>
-          {avatarError ? <p className="text-xs text-destructive" role="status">{avatarError}</p> : null}
+          {accountActions ? <div className="flex items-center gap-2">{accountActions}</div> : null}
           <span className="break-all font-mono text-xs text-muted-foreground">{account?.email}</span>
           {dingtalkBound ? (
             <div className="grid gap-2">
@@ -227,6 +229,34 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
           ) : null}
         </CardContent>
       </Card>
+
+      <Dialog open={avatarOpen} onOpenChange={(open) => { if (!avatarBusy) setAvatarOpen(open); }}>
+        <DialogContent className="sm:max-w-sm" onCloseAutoFocus={(event) => { event.preventDefault(); accountNameRef.current?.focus(); }}>
+          <DialogHeader>
+            <DialogTitle>头像设置</DialogTitle>
+            <DialogDescription>PNG / JPEG</DialogDescription>
+          </DialogHeader>
+          <div className="relative mx-auto grid size-20 place-items-center overflow-hidden rounded-full bg-primary/10 text-2xl font-semibold text-primary">
+            <span aria-hidden={showAvatar ? "true" : undefined}>{avatarLabel}</span>
+            {showAvatar ? <img alt="当前头像" className="absolute inset-0 size-full object-cover" onError={() => setFailedAvatarSrc(avatarSrc)} src={avatarSrc} /> : null}
+          </div>
+          <input accept="image/jpeg,image/png" aria-label="选择头像图片" className="hidden" disabled={avatarBusy} onChange={changeAvatar} ref={avatarInputRef} type="file" />
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button disabled={avatarBusy} onClick={() => avatarInputRef.current?.click()} variant="outline">
+              <ImagePlus aria-hidden="true" data-icon="inline-start" />
+              {avatarBusy ? "处理中..." : "更换头像"}
+            </Button>
+            <Button disabled={avatarBusy} onClick={restoreAvatar} variant="ghost">
+              <RotateCcw aria-hidden="true" data-icon="inline-start" />
+              恢复默认头像
+            </Button>
+          </div>
+          {avatarError ? <p className="text-sm text-destructive" role="alert">{avatarError}</p> : null}
+          <DialogFooter>
+            <Button disabled={avatarBusy} onClick={() => setAvatarOpen(false)} variant="outline">完成</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={unbindOpen}

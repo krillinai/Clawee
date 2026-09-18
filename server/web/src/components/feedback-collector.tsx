@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { FeedbackScreenshotEditor } from './feedback-screenshot-editor';
 
 type Snapshot = ReturnType<typeof feedbackDiagnosticsSnapshot> & {
@@ -83,7 +84,14 @@ export function FeedbackCollector() {
   const publicPreview = snapshot ? { description: snapshot.description, reproduction_steps: snapshot.reproduction_steps, occurred_at: snapshot.occurred_at, page: snapshot.page, user_agent: snapshot.user_agent, language: snapshot.language, errors: snapshot.errors, dropped_errors: snapshot.dropped_errors } : undefined;
   const sizeBytes = (publicPreview ? new TextEncoder().encode(JSON.stringify(publicPreview)).length : 0) + screenshots.reduce((size, file) => size + file.size, 0);
   return <>
-    <Button className="w-full justify-start" size="sm" variant="ghost" onClick={() => { setOpen(true); void checkPolicy(); }}><Bug size={16} />提交异常反馈</Button>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button aria-label="提交异常反馈" size="icon" variant="ghost" onClick={() => { setOpen(true); void checkPolicy(); }}><Bug aria-hidden="true" size={16} /></Button>
+        </TooltipTrigger>
+        <TooltipContent>提交异常反馈</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value); }}>
       <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl" onPaste={event => { if (!snapshot) { const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/')); if (files.length) { event.preventDefault(); addScreenshots(files); } } }}>
         <DialogHeader><DialogTitle>提交管理后台异常反馈</DialogTitle><DialogDescription>将描述、截图及当前浏览器异常记录发送给 Clawee 软件维护方 gateway.clawee.work。资料可能包含业务内容。</DialogDescription></DialogHeader>
