@@ -5,6 +5,42 @@ import { RuntimeClient } from '../../runtime/client.js';
 
 beforeEach(() => { localStorage.clear(); HTMLDialogElement.prototype.showModal = vi.fn(function(this: HTMLDialogElement) { this.open = true; }); });
 describe('主动会话反馈', () => {
+  it('保留中文组合输入及两个文本框的换行', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ external_feedback_allowed: true }));
+    const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl });
+    render(<FeedbackButton client={client} threadId="thread_test" />);
+    fireEvent.click(await screen.findByRole('button', { name: '反馈当前会话问题' }));
+    for (const name of ['问题描述', '复现步骤']) {
+      const field = screen.getByRole('textbox', { name });
+      fireEvent.compositionStart(field);
+      fireEvent.change(field, { target: { value: '中文输入' } });
+      fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+      fireEvent.compositionEnd(field, { data: '中文输入' });
+      fireEvent.change(field, { target: { value: '中文输入\n第二行' } });
+      expect(screen.getByRole('textbox', { name })).toHaveValue('中文输入\n第二行');
+    }
+    expect(fetchImpl.mock.calls).toHaveLength(1);
+  });
+  it.each(['submitted', 'queued', 'uploading', 'failed'] as const)('明确显示 %s 的回执，不将上传中误报为成功', async state => {
+    const draft = { local_feedback_id: 'receipt_test', thread_id: 'thread_test', description: '问题', state, size_bytes: 81920, expires_at: new Date().toISOString(), ...(state === 'submitted' ? { report_id: 'fb_test', centre_status: 'open' } : {}) };
+    const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl: vi.fn(async url => String(url).endsWith('/policy') ? Response.json({ external_feedback_allowed: true }) : Response.json(draft)) });
+    localStorage.setItem('clawee-feedback:thread_test', draft.local_feedback_id);
+    render(<FeedbackButton client={client} threadId="thread_test" />);
+    fireEvent.click(await screen.findByRole('button', { name: '反馈当前会话问题' }));
+    const receipt = await screen.findByRole('status');
+    if (state === 'submitted') {
+      expect(receipt).toHaveTextContent('反馈提交成功');
+      expect(receipt).toHaveTextContent('处理状态：待处理');
+      expect(receipt).toHaveTextContent('反馈编号：fb_test');
+      fireEvent.click(screen.getByRole('button', { name: '完成' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    } else {
+      expect(receipt).not.toHaveTextContent('反馈提交成功');
+      const titles = { queued: '等待上传', uploading: '正在上传', failed: '未完成' };
+      expect(receipt).toHaveTextContent(titles[state]);
+      expect(screen.queryByRole('button', { name: '完成' })).not.toBeInTheDocument();
+    }
+  });
   it('超限反馈保留导出入口，不重试发送', async () => {
     const draft = { local_feedback_id: '00000000-0000-0000-0000-000000000001', thread_id: 'thread_test', description: '问题', state: 'failed', error_code: 'FEEDBACK_QUOTA_EXCEEDED', size_bytes: 10, screenshots: [], retry_count: 0, expires_at: new Date().toISOString(), external_feedback_allowed: true, manifest: { completeness: 'partial', artifacts: [], missing_items: ['collection:quota_exceeded'] } };
     const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl: vi.fn(async url => String(url).endsWith('/policy') ? Response.json({ external_feedback_allowed: true }) : Response.json(draft)) });

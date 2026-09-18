@@ -1,11 +1,12 @@
-import { Bug, Download, Trash2, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Bug, CheckCircle2, CircleAlert, Download, LoaderCircle, Trash2, X } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { FeedbackDraft } from '@clawee/protocol';
 import type { RuntimeClient } from '../../runtime/client.js';
 import './feedback.css';
 
 const states: Record<FeedbackDraft['state'], string> = { collecting: '正在采集', awaiting_consent: '等待确认', queued: '等待上传', uploading: '正在上传', submitted: '已提交', failed: '未完成', cancelled: '已取消' };
+const centreStates: Record<string, string> = { open: '待处理', investigating: '处理中', resolved: '已处理' };
 export function FeedbackButton({ client, threadId }: { client: RuntimeClient | null; threadId: string }) {
   const [allowed, setAllowed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -21,6 +22,7 @@ export function FeedbackButton({ client, threadId }: { client: RuntimeClient | n
 }
 function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; threadId: string; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const fieldId = useId();
   const [description, setDescription] = useState('');
   const [steps, setSteps] = useState('');
   const [occurredAt, setOccurredAt] = useState(new Date().toISOString().slice(0, 16));
@@ -51,11 +53,19 @@ function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; 
   const frozen = draft !== undefined;
   return createPortal(<dialog ref={dialog} className="feedback-dialog" onCancel={onClose}>
     <header><h2>反馈当前会话问题</h2><button type="button" aria-label="关闭" title="关闭" onClick={onClose}><X size={18} /></button></header>
+    {draft ? <div role="status" aria-live="polite" className={`feedback-receipt feedback-receipt--${draft.state}`}>
+      {draft.state === 'submitted' ? <CheckCircle2 size={24} aria-hidden="true" /> : draft.state === 'failed' ? <CircleAlert size={24} aria-hidden="true" /> : <LoaderCircle size={24} aria-hidden="true" />}
+      <div><strong>{draft.state === 'submitted' ? '反馈提交成功' : states[draft.state]}</strong>
+        {draft.report_id ? <p>反馈编号：{draft.report_id}</p> : null}
+        {draft.centre_status ? <p>处理状态：{centreStates[draft.centre_status] ?? '未知状态'}</p> : null}
+        <p>材料大小：{(draft.size_bytes / 1024 / 1024).toFixed(2)} MiB</p>
+      </div>
+    </div> : null}
     <div className="feedback-dialog-body" onPaste={event => { if (frozen) return; const files = Array.from(event.clipboardData.files).filter(f => ['image/png', 'image/jpeg', 'image/webp'].includes(f.type)); if (files.length) { event.preventDefault(); setScreenshots(old => [...old, ...files].slice(0, 5)); } }}>
       <p>接收方：Clawee 软件维护方<br />接收域名：gateway.clawee.work<br />当前会话：{threadId}</p>
-      <label>问题描述<textarea maxLength={10000} value={draft?.description ?? description} disabled={frozen} onChange={e => setDescription(e.target.value)} /></label>
-      {!frozen ? <><label>发生时间<input type="datetime-local" value={occurredAt} onChange={e => setOccurredAt(e.target.value)} /></label><label>复现步骤<textarea maxLength={10000} value={steps} onChange={e => setSteps(e.target.value)} /></label><label>问题截图<input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => { setScreenshots(old => [...old, ...Array.from(e.target.files ?? [])].slice(0, 5)); e.target.value = ''; }} /></label><div className="feedback-screenshots">{screenshots.map((file, index) => <ScreenshotEditor key={`${index}:${file.name}`} file={file} onChange={next => setScreenshots(old => old.map((f, i) => i === index ? next : f))} onRemove={() => setScreenshots(old => old.filter((_, i) => i !== index))} />)}</div></> : null}
-      {draft ? <><p aria-live="polite">{states[draft.state]} · {(draft.size_bytes / 1024 / 1024).toFixed(2)} MiB{draft.report_id ? ` · ${draft.report_id}` : ''}</p>{draft.centre_status ? <p>中心处理状态：{draft.centre_status}<br />{draft.public_resolution_summary}</p> : null}<p>本地材料保留至 {new Date(draft.expires_at).toLocaleString()}</p>{draft.manifest ? <><h3>材料清单</h3><ul>{draft.manifest.artifacts.map(a => <li key={a.artifact_id}>{a.name} · {a.record_count} 条 · {(a.size_bytes / 1024).toFixed(1)} KiB</li>)}</ul>{draft.manifest.missing_items.length ? <><h3>缺失项（partial）</h3><ul>{draft.manifest.missing_items.map(item => <li key={item}>{item}</li>)}</ul></> : null}</> : null}{draft.error_code ? <p role="alert">{draft.error_code}；材料保留在本机。</p> : null}</> : null}
+      <div className="feedback-field"><label htmlFor={`${fieldId}-description`}>问题描述</label><textarea id={`${fieldId}-description`} rows={4} maxLength={10000} value={draft?.description ?? description} readOnly={frozen} onChange={e => setDescription(e.target.value)} /></div>
+      {!frozen ? <><label>发生时间<input type="datetime-local" value={occurredAt} onChange={e => setOccurredAt(e.target.value)} /></label><div className="feedback-field"><label htmlFor={`${fieldId}-steps`}>复现步骤</label><textarea id={`${fieldId}-steps`} rows={4} maxLength={10000} value={steps} onChange={e => setSteps(e.target.value)} /></div><label>问题截图<input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => { setScreenshots(old => [...old, ...Array.from(e.target.files ?? [])].slice(0, 5)); e.target.value = ''; }} /></label><div className="feedback-screenshots">{screenshots.map((file, index) => <ScreenshotEditor key={`${index}:${file.name}`} file={file} onChange={next => setScreenshots(old => old.map((f, i) => i === index ? next : f))} onRemove={() => setScreenshots(old => old.filter((_, i) => i !== index))} />)}</div></> : null}
+      {draft ? <>{draft.public_resolution_summary ? <p>{draft.public_resolution_summary}</p> : null}<p>本地材料保留至 {new Date(draft.expires_at).toLocaleString()}</p>{draft.manifest ? <><h3>材料清单</h3><ul>{draft.manifest.artifacts.map(a => <li key={a.artifact_id}>{a.name} · {a.record_count} 条 · {(a.size_bytes / 1024).toFixed(1)} KiB</li>)}</ul>{draft.manifest.missing_items.length ? <><h3>缺失项（partial）</h3><ul>{draft.manifest.missing_items.map(item => <li key={item}>{item}</li>)}</ul></> : null}</> : null}{draft.error_code ? <p role="alert">{draft.error_code}；材料保留在本机。</p> : null}</> : null}
       {draft?.state === 'awaiting_consent' && draft.manifest ? <><label className="feedback-check"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />将问题描述、截图及当前会话的完整已留存记录和相关诊断日志发送给 Clawee 软件维护方 gateway.clawee.work。资料可能包含业务内容，请确认可以发送。</label>{draft.manifest.completeness === 'partial' ? <label className="feedback-check"><input type="checkbox" checked={partial} onChange={e => setPartial(e.target.checked)} />已查看缺失项，同意发送部分资料</label> : null}</> : null}
       {error ? <p role="alert">{error}</p> : null}
     </div><footer>
@@ -67,6 +77,7 @@ function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; 
       {draft?.manifest ? <button type="button" disabled={busy} onClick={() => void run(exportFiles)}><Download size={16} />本地导出</button> : null}
       {draft && !['submitted', 'cancelled'].includes(draft.state) ? <button type="button" disabled={busy} onClick={() => void run(async () => { await client.post(`/feedback/drafts/${draft.local_feedback_id}/cancel`); await refresh(draft.local_feedback_id); })}>取消上传</button> : null}
       {draft ? <button type="button" disabled={busy || ['collecting', 'queued', 'uploading'].includes(draft.state)} onClick={() => { localStorage.removeItem(receiptKey); setDraft(undefined); setConfirmed(false); setPartial(false); }}>新建反馈</button> : null}
+      {draft?.state === 'submitted' ? <button type="button" className="feedback-primary-button" onClick={onClose}>完成</button> : null}
     </footer><p className="feedback-footnote">取消不会立即删除中心已接收资料。截图不保证自动脱敏，匿名提交不代表没有个人或企业数据。</p>
   </dialog>, document.body);
 }
