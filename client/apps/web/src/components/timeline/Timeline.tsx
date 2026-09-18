@@ -7,12 +7,14 @@ import {
   Clock3,
   Copy,
   FileText,
+  FileSpreadsheet,
   FilePenLine,
   Globe2,
   Image as ImageIcon,
   LoaderCircle,
   PackageCheck,
   Pencil,
+  Presentation,
   ShieldCheck,
   ShieldX
 } from 'lucide-react';
@@ -751,6 +753,42 @@ function collectCompletedCommandRunIds(items: TimelineItem[]): Set<string> {
   return completedRunIds;
 }
 
+function MessageAttachment(props: {
+  attachment: NonNullable<Extract<TimelineItem, { kind: 'user_message' }>['attachments']>[number];
+  previewUrl?: string;
+}) {
+  const { attachment, previewUrl } = props;
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState<string>();
+  const hasPreview = Boolean(previewUrl && attachment.mime.startsWith('image/') && previewUrl !== failedPreviewUrl);
+  const extensionIndex = attachment.fileName.lastIndexOf('.');
+  const extension = extensionIndex > 0 ? attachment.fileName.slice(extensionIndex) : '';
+  const name = extensionIndex > 0 ? attachment.fileName.slice(0, extensionIndex) : attachment.fileName;
+  const format = extension.slice(1).toUpperCase();
+  const Icon = attachment.mime.startsWith('image/') ? ImageIcon
+    : ['XLS', 'XLSX', 'CSV', 'TSV'].includes(format) ? FileSpreadsheet
+    : ['PPT', 'PPTX'].includes(format) ? Presentation
+    : FileText;
+
+  return (
+    <figure className={hasPreview ? 'timeline-message-attachment-image' : 'timeline-message-attachment-compact'}>
+      {hasPreview ? (
+        <img src={previewUrl} alt={attachment.fileName} onError={() => setFailedPreviewUrl(previewUrl)} />
+      ) : (
+        <div className="timeline-message-attachment-file" aria-hidden="true">
+          <Icon size={20} />
+        </div>
+      )}
+      <figcaption>
+        <strong title={attachment.fileName} aria-label={attachment.fileName}>
+          <span className="timeline-message-attachment-name">{name}</span>
+          {extension ? <span className="timeline-message-attachment-extension">{extension}</span> : null}
+        </strong>
+        <span>{hasPreview ? '' : format ? `${format} · ` : ''}{formatAttachmentSize(attachment.size)}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
 function renderMessageContent(
   item: Extract<TimelineItem, { kind: 'user_message' | 'assistant_message' }>,
   onOpenFile?: (path: string) => void,
@@ -764,24 +802,13 @@ function renderMessageContent(
     <>
       {item.kind === 'user_message' && (item.attachments?.length ?? 0) > 0 ? (
         <div className="timeline-message-attachments">
-          {item.attachments?.map(attachment => {
-            const previewUrl = item.attachmentPreviewUrls?.[attachment.id];
-            return (
-              <figure key={attachment.id}>
-                {previewUrl && attachment.mime.startsWith('image/') ? (
-                  <img src={previewUrl} alt={attachment.fileName} />
-                ) : (
-                  <div className="timeline-message-attachment-file" aria-hidden="true">
-                    <FileText size={26} />
-                  </div>
-                )}
-                <figcaption>
-                  <strong>{attachment.fileName}</strong>
-                  <span>{formatAttachmentSize(attachment.size)}</span>
-                </figcaption>
-              </figure>
-            );
-          })}
+          {item.attachments?.map(attachment => (
+            <MessageAttachment
+              key={attachment.id}
+              attachment={attachment}
+              previewUrl={item.attachmentPreviewUrls?.[attachment.id]}
+            />
+          ))}
         </div>
       ) : null}
       <MarkdownRenderer

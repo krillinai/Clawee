@@ -184,6 +184,63 @@ describe('Timeline', () => {
     expect(screen.getByText('描述图片')).toBeInTheDocument();
   });
 
+  it('renders documents and images without previews as compact file rows', () => {
+    const { container } = render(
+      <Timeline items={[{
+        kind: 'user_message',
+        id: 'user_files',
+        text: '检查文件',
+        source: 'runtime',
+        attachments: ['pdf', 'docx', 'xlsx', 'png'].map((extension, index) => ({
+          id: `file_${index}`,
+          fileName: `长文件名称_${extension}.${extension}`,
+          mime: extension === 'png' ? 'image/png' : 'application/octet-stream',
+          size: 2048,
+          sha256: 'a'.repeat(64),
+          storageKey: `at/file_${index}.bin`,
+          status: 'committed',
+          createdAt: '2026-07-12T00:00:00.000Z',
+          updatedAt: '2026-07-12T00:00:00.000Z'
+        }))
+      }]} />
+    );
+
+    expect(container.querySelectorAll('.timeline-message-attachment-compact')).toHaveLength(4);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    for (const extension of ['pdf', 'docx', 'xlsx', 'png']) {
+      expect(screen.getByTitle(`长文件名称_${extension}.${extension}`)).toHaveTextContent(
+        `长文件名称_${extension}.${extension}`
+      );
+      expect(screen.getByText(`.${extension}`)).toBeInTheDocument();
+      expect(screen.getByText(`${extension.toUpperCase()} · 2 KB`)).toBeInTheDocument();
+    }
+  });
+
+  it('falls back to a compact file row when an image preview fails and retries a new URL', () => {
+    const item: Extract<TimelineItem, { kind: 'user_message' }> = {
+      kind: 'user_message',
+      id: 'user_image_failure',
+      text: '检查图片',
+      source: 'runtime',
+      attachments: [{
+        id: 'image_1', fileName: 'screen.png', mime: 'image/png', size: 2048,
+        sha256: 'a'.repeat(64), storageKey: 'at/image_1.bin', status: 'committed',
+        createdAt: '2026-07-12T00:00:00.000Z', updatedAt: '2026-07-12T00:00:00.000Z'
+      }],
+      attachmentPreviewUrls: { image_1: 'blob:broken' }
+    };
+    const { container, rerender } = render(<Timeline items={[item]} />);
+    fireEvent.error(screen.getByRole('img', { name: 'screen.png' }));
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(container.querySelector('.timeline-message-attachment-compact')).toBeInTheDocument();
+
+    rerender(<Timeline items={[{
+      ...item, attachmentPreviewUrls: { image_1: 'blob:recovered' }
+    }]} />);
+    expect(screen.getByRole('img', { name: 'screen.png' })).toHaveAttribute('src', 'blob:recovered');
+  });
+
   it('copies and edits a user message from its action row', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => undefined);

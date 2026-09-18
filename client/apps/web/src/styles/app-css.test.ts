@@ -40,6 +40,15 @@ function hexChannels(value: string): number[] {
 }
 
 describe('app CSS visual contracts', () => {
+  it('keeps document attachments compact and preserves filename extensions', () => {
+    expect(cssBlock('.timeline-message-attachments')).toContain('width: min(360px, 100%);');
+    expect(cssBlock('.timeline-message-attachment-compact')).toContain('min-height: 64px;');
+    expect(cssBlock('.timeline-message-attachment-file')).not.toContain('aspect-ratio');
+    expect(cssBlock('.timeline-message-attachment-file')).toContain('width: 36px;');
+    expect(cssBlock('.timeline-message-attachments .timeline-message-attachment-extension')).toContain('flex: 0 0 auto;');
+    expect(cssBlock('.timeline-message-attachments img')).toContain('aspect-ratio: 4 / 3;');
+  });
+
   it('keeps body copy readable and navigation or status text at 12px or larger', () => {
     const productCss = [appCss, skillMarketCss, schedulesCss, settingsCss, taskCenterCss].join('\n');
 

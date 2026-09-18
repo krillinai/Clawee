@@ -1068,8 +1068,10 @@ select:focus-visible {
 }
 
 .timeline-message-attachments {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 220px));
+  width: min(360px, 100%);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -1089,13 +1091,28 @@ select:focus-visible {
   object-fit: cover;
 }
 
+.timeline-message-attachment-image {
+  width: min(220px, 100%);
+}
+
+.timeline-message-attachment-compact {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
 .timeline-message-attachment-file {
-  width: 100%;
-  aspect-ratio: 4 / 3;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
   background: var(--surface-2);
   color: var(--muted);
+  border-radius: 6px;
 }
 
 .timeline-message-attachments figcaption {
@@ -1103,6 +1120,27 @@ select:focus-visible {
   display: grid;
   gap: 2px;
   padding: 7px 8px;
+}
+
+.timeline-message-attachment-compact figcaption {
+  padding: 0;
+}
+
+.timeline-message-attachments strong {
+  display: flex;
+  min-width: 0;
+}
+
+.timeline-message-attachments .timeline-message-attachment-name {
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.timeline-message-attachments .timeline-message-attachment-extension {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: inherit;
 }
 
 .timeline-message-attachments strong,
