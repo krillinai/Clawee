@@ -26,6 +26,14 @@ export async function registerRunRoutes(
   } = {}
 ): Promise<void> {
   const sseHeartbeatMs = options.sseHeartbeatMs ?? 15_000;
+  const sseConnections = new Map<FastifyReply, () => void>();
+  server.addHook('preClose', async () => {
+    for (const [reply, cleanup] of sseConnections) {
+      cleanup();
+      const socket = reply.raw.socket;
+      reply.raw.end(() => socket?.end());
+    }
+  });
   server.post<{ Body: unknown }>('/runs', async (request, reply) => {
     const parsedBody = parseRunRequest(request.body);
     if (!parsedBody.ok) {
@@ -171,7 +179,9 @@ export async function registerRunRoutes(
     const cleanup = () => {
       clearInterval(heartbeat);
       unsubscribe();
+      sseConnections.delete(reply);
     };
+    sseConnections.set(reply, cleanup);
     request.raw.on('close', cleanup);
     reply.raw.on('close', cleanup);
 

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UtilityProcess } from 'electron';
 import type { DesktopLogger } from '../src/main/logger.js';
 
@@ -22,6 +22,54 @@ import {
 describe('DaemonManager', () => {
   beforeEach(() => {
     electronMocks.fork.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('clears shutdown timers when the daemon exits normally', async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    electronMocks.fork.mockReturnValue(child as unknown as UtilityProcess);
+    const manager = new DaemonManager(fakeLogger());
+    const started = manager.start(startInput());
+    await Promise.resolve();
+    child.stdout.write('{"address":"127.0.0.1:43120","token":"secret"}\n');
+    await started;
+
+    await manager.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reserves time for forced cleanup within the total shutdown budget', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    const child = new FakeUtilityProcess();
+    vi.spyOn(child, 'postMessage').mockImplementation(() => undefined);
+    const kill = vi.spyOn(child, 'kill').mockImplementation(() => undefined);
+    electronMocks.fork.mockReturnValue(child as unknown as UtilityProcess);
+    const cleanup = vi.fn(async () => undefined);
+    const manager = new DaemonManager(fakeLogger(), cleanup);
+    const started = manager.start(startInput());
+    await Promise.resolve();
+    child.stdout.write('{"address":"127.0.0.1:43120","token":"secret"}\n');
+    await started;
+    child.emit('message', { type: 'codex_child_started', pid: 43121 });
+
+    let stopped = false;
+    const stop = manager.stop(5_000).then(() => { stopped = true; });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(cleanup).toHaveBeenCalledWith(43121, false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(process.kill).toHaveBeenCalledWith(child.pid, 'SIGKILL');
+    expect(cleanup).toHaveBeenCalledWith(43121, true);
+    await vi.advanceTimersByTimeAsync(500);
+    await stop;
+    expect(stopped).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('waits for Codex process-tree cleanup after the daemon exits', async () => {
@@ -49,6 +97,23 @@ describe('DaemonManager', () => {
     finishCleanup?.();
     await stopped;
     expect(resolved).toBe(true);
+  });
+
+  it('does not wait indefinitely for Codex cleanup after the daemon exits', async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    electronMocks.fork.mockReturnValue(child as unknown as UtilityProcess);
+    const manager = new DaemonManager(fakeLogger(), () => new Promise(() => undefined));
+    const started = manager.start(startInput());
+    await Promise.resolve();
+    child.stdout.write('{"address":"127.0.0.1:43120","token":"secret"}\n');
+    await started;
+    child.emit('message', { type: 'codex_child_started', pid: 43121 });
+
+    const stop = manager.stop(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stop;
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

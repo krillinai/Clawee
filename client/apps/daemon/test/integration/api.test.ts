@@ -403,6 +403,45 @@ describe('runtime api', () => {
     expect(close).toHaveBeenCalledWith();
   });
 
+  it('ends live SSE connections and persists canceled runs during shutdown', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-'));
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const fake = createFakeCodex(tempDir, { stdoutLines: [], hang: true });
+    const runManager = createRunManager({
+      db,
+      dataDir: tempDir,
+      codexBin: fake.bin,
+      codexHome: join(tempDir, 'codex-home')
+    });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, db, runManager, sseHeartbeatMs: 20
+    });
+    await server.listen({ host: '127.0.0.1', port: 0 });
+    const created = await authPost('/runs', {
+      prompt: 'shutdown', cwd: tempDir, sandbox: 'read-only'
+    });
+    const run = created.json() as { id: string };
+    await waitForRunStatus(run.id, 'running');
+    const address = server.server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/runs/${run.id}/events`,
+      {
+        headers: { authorization: 'Bearer secret' },
+        signal: AbortSignal.timeout(2_000)
+      }
+    );
+    const startedAt = Date.now();
+    const close = server.close();
+    await response.text();
+    await close;
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    server = undefined;
+
+    expect(runManager.getRun(run.id)?.status).toBe('canceled');
+    expect(readFileSync(join(tempDir, 'runs', run.id, 'events.ndjson'), 'utf8'))
+      .toContain('"type":"done"');
+  });
+
   it('rejects unauthorized requests', async () => {
     server = await buildServer({ token: 'secret' });
     const response = await server.inject({ method: 'GET', url: '/codex/status' });

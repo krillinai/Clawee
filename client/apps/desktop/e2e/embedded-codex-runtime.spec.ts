@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, sep } from 'node:path';
 import {
   expect,
@@ -41,8 +42,81 @@ import {
 } from './embedded-runtime-fixture.js';
 import {
   closePackagedApp,
+  waitForProcessExit,
   type PackagedApp
 } from './packaged-app.js';
+
+test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进程', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  const measurements: Array<{ mode: string; durationMs: number }> = [];
+  try {
+    app = await fixture.launch();
+    for (const mode of ['unconfigured', 'idle', 'running']) {
+      if (app === undefined) throw new Error('退出回归 App 未启动');
+      await waitForEmbeddedRuntimeReady(app.page);
+      if (mode !== 'unconfigured') await ensureEmbeddedWorkspaceSignedIn(app.page);
+      let runId: string | undefined;
+      if (mode === 'running') {
+        const project = await runtimeRequest<{ project: { id: string } }>(
+          app.page, 'POST', '/projects', {
+            cwd: fixture.workspace, name: '退出回归', sandbox: 'read-only'
+          }
+        );
+        expect(project.status).toBe(201);
+        const thread = await runtimeRequest<{ thread: { id: string } }>(
+          app.page, 'POST', '/threads', {
+            projectId: project.body.project.id, title: '退出回归', sandbox: 'read-only'
+          }
+        );
+        expect(thread.status).toBe(201);
+        const baseline = fixture.modelServer.requests.length;
+        const run = await startRun(app.page, {
+          threadId: thread.body.thread.id, prompt: CONTROLLED_HANG_PROMPT
+        });
+        runId = run.id;
+        await expect.poll(() => fixture.modelServer.requests.slice(baseline).some(
+          request => controlledModelRequestContainsText(request, CONTROLLED_HANG_PROMPT)
+        )).toBe(true);
+      }
+      const logPath = join(fixture.userData, 'logs', 'desktop-main.log');
+      const entries = readFileSync(logPath, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const daemonPid = entries.reverse().find(entry => entry.message === 'Daemon Utility Process ready')
+        ?.details.pid as number;
+      expect(daemonPid).toBeGreaterThan(0);
+      const runtimePids = process.platform === 'win32' ? [] : execFileSync(
+        'ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }
+      ).trim().split('\n').map(line => line.trim().split(/\s+/).map(Number))
+        .filter(([, parentPid]) => parentPid === daemonPid).map(([pid]) => pid!);
+      const previousApp = app;
+      const startedAt = Date.now();
+      const exited = waitForProcessExit(app.process, 5_500);
+      await app.page.evaluate(() => { void window.claweeDesktop?.quit(); }).catch(() => undefined);
+      expect(await exited).toBe(true);
+      const durationMs = Date.now() - startedAt;
+      measurements.push({ mode, durationMs });
+      expect(durationMs).toBeLessThan(mode === 'unconfigured' ? 2_000 : 5_500);
+      for (const pid of [daemonPid, ...runtimePids]) {
+        await expect.poll(() => {
+          try { process.kill(pid, 0); return false; } catch { return true; }
+        }).toBe(true);
+      }
+      await app.browser.close().catch(() => undefined);
+      app = undefined;
+      if (mode !== 'running') app = await fixture.relaunch(previousApp);
+      if (runId !== undefined) {
+        expect(readFileSync(join(fixture.dataDir, 'runs', runId, 'events.ndjson'), 'utf8'))
+          .toContain('"type":"done"');
+      }
+    }
+    writeDesktopE2EReport('clawee-desktop-shutdown-e2e.json', {
+      generatedAt: new Date().toISOString(), measurements, result: 'PASS'
+    });
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
 
 test('packaged App ignores a legacy Runtime Home without relocating it', async () => {
   test.setTimeout(240_000);

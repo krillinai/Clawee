@@ -246,40 +246,57 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
   }
 
   private async stopInternal(timeoutMs: number): Promise<void> {
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
+    const remaining = () => Math.max(0, deadline - Date.now());
     const child = this.child;
     if (child === undefined) {
       this.connection = undefined;
+      await settlesWithin(this.codexCleanupWork, remaining());
       return;
     }
     this.intentionalStop = true;
+    this.logger.info('Daemon shutdown started', { timeoutMs, pid: child.pid });
     const exited = waitForExit(child);
     try {
-      child.postMessage({ type: 'shutdown' });
-    } catch {
-      child.kill();
-    }
-    if (await this.waitForExitAndCleanup(exited, timeoutMs)) return;
-    child.kill();
-    await this.terminateKnownCodexProcesses(false);
-    if (await this.waitForExitAndCleanup(exited, 2_000)) return;
-    if (child.pid !== undefined && process.platform !== 'win32') {
       try {
-        process.kill(child.pid, 'SIGKILL');
+        child.postMessage({ type: 'shutdown' });
       } catch {
-        // The process may already have exited between checks.
+        child.kill();
       }
+      // 优先留时间给任务和日志收尾，总预算内为终止和强制清理各留半秒。
+      if (await this.waitForExitAndCleanup(exited, Math.max(0, remaining() - 1_000))) return;
+      this.logger.warn('Daemon graceful shutdown timed out', {
+        durationMs: Date.now() - startedAt
+      });
+      child.kill();
+      const softCleanup = this.terminateKnownCodexProcesses(false);
+      if (await settlesWithin(
+        Promise.all([exited, softCleanup]).then(() => this.codexCleanupWork),
+        Math.max(0, remaining() - 500)
+      )) return;
+      this.logger.warn('Daemon forced shutdown', { durationMs: Date.now() - startedAt });
+      if (this.child === child && child.pid !== undefined && process.platform !== 'win32') {
+        try {
+          process.kill(child.pid, 'SIGKILL');
+        } catch {
+          // The process may already have exited between checks.
+        }
+      }
+      const forceCleanup = this.terminateKnownCodexProcesses(true);
+      if (!await settlesWithin(
+        Promise.all([exited, forceCleanup]).then(() => this.codexCleanupWork), remaining()
+      )) this.logger.warn('Daemon shutdown deadline reached');
+    } finally {
+      this.logger.info('Daemon shutdown completed', { durationMs: Date.now() - startedAt });
     }
-    await this.terminateKnownCodexProcesses(true);
-    await this.waitForExitAndCleanup(exited, 1_000);
   }
 
   private async waitForExitAndCleanup(
     exited: Promise<void>,
     timeoutMs: number
   ): Promise<boolean> {
-    if (!await settlesWithin(exited, timeoutMs)) return false;
-    await this.codexCleanupWork;
-    return true;
+    return await settlesWithin(exited.then(() => this.codexCleanupWork), timeoutMs);
   }
 
   private async terminateKnownCodexProcesses(force: boolean): Promise<void> {
@@ -494,11 +511,18 @@ function waitForExit(child: UtilityProcess): Promise<void> {
   });
 }
 
-async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {
-  return await Promise.race([
-    work.then(() => true),
-    new Promise<boolean>(resolve => setTimeout(() => resolve(false), timeoutMs))
-  ]);
+export async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 async function terminateCodexProcessTreeByPlatform(

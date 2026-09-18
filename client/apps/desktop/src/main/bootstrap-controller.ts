@@ -14,6 +14,7 @@ import {
 import {
   DaemonStartError,
   DaemonManager,
+  settlesWithin,
   type DaemonStartInput
 } from './daemon-manager.js';
 import type { DesktopLogger } from './logger.js';
@@ -151,15 +152,17 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     this.updateState({ startupMetrics });
   }
 
-  async stop(): Promise<void> {
+  async stop(timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    const remaining = () => Math.max(0, deadline - Date.now());
     if (this.stableTimer !== undefined) clearTimeout(this.stableTimer);
     this.runAbortController?.abort();
     const runWork = this.runWork;
-    await Promise.all([
-      this.input.daemon.stop(),
+    await settlesWithin(Promise.all([
+      this.input.daemon.stop(remaining()),
       runWork?.catch(() => undefined) ?? Promise.resolve()
-    ]);
-    await this.input.daemon.stop();
+    ]).then(() => undefined), remaining());
+    await this.input.daemon.stop(remaining());
   }
 
   private async startInternal(signal?: AbortSignal): Promise<void> {

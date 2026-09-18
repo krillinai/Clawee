@@ -16,7 +16,7 @@ const MAX_QUEUE_BYTES = 5 * 1024 * 1024;
 const FLUSH_DELAY_MS = 500;
 const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000] as const;
 const MAX_BATCH_AGE_MS = 60_000;
-const CLOSE_TIMEOUT_MS = 2_000;
+const CLOSE_TIMEOUT_MS = 500;
 
 type QueuedEvent = {
   event: EnterpriseActivityEvent;
@@ -203,10 +203,20 @@ export function createEnterpriseActivityReporter(input: {
       if (closed) return;
       if (flushTimer !== undefined) clearTimeout(flushTimer);
       flushTimer = undefined;
-      await Promise.race([flush(), delay(CLOSE_TIMEOUT_MS)]);
-      paused = true;
-      closed = true;
-      clearQueue();
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          flush(),
+          new Promise<void>(resolve => {
+            timeout = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+          })
+        ]);
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        paused = true;
+        closed = true;
+        clearQueue();
+      }
     }
   };
 }

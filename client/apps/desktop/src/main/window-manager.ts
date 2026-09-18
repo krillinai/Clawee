@@ -155,6 +155,7 @@ export class WindowManager {
   }
 
   async loadBootstrap(): Promise<void> {
+    if (this.quitting) return;
     this.cancelWorkspaceLoad(new WorkspaceLoadError(
       'WORKSPACE_LOAD_FAILED',
       'Workspace load was replaced by the local bootstrap page'
@@ -162,7 +163,7 @@ export class WindowManager {
     const window = this.create();
     const onDomReady = () => {
       this.startupMetrics.bootstrapDomReadyAt ??= Date.now();
-      if (!window.isVisible()) window.show();
+      if (!this.quitting && !window.isVisible()) window.show();
     };
     const onFinish = () => {
       this.startupMetrics.bootstrapDidFinishLoadAt ??= Date.now();
@@ -175,7 +176,7 @@ export class WindowManager {
       window.webContents.removeListener('dom-ready', onDomReady);
       window.webContents.removeListener('did-finish-load', onFinish);
     }
-    if (!window.isVisible()) window.show();
+    if (!this.quitting && !window.isVisible()) window.show();
   }
 
   async loadWorkspace(
@@ -255,6 +256,7 @@ export class WindowManager {
   }
 
   show(): void {
+    if (this.quitting) return;
     const window = this.create();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -270,6 +272,7 @@ export class WindowManager {
     this.quitting = true;
     this.windowStateWriter?.flush();
     this.cancelWorkspaceLoad(new Error('Application is quitting'));
+    if (this.window !== undefined && !this.window.isDestroyed()) this.window.hide();
   }
 
   flushState(): void {

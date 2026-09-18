@@ -10,7 +10,7 @@ import {
 } from 'electron';
 import { createWindowsApplicationMenuTemplate } from './application-menu.js';
 import { BootstrapController } from './bootstrap-controller.js';
-import { DaemonManager } from './daemon-manager.js';
+import { DaemonManager, settlesWithin } from './daemon-manager.js';
 import {
   startRuntimeDataImport,
   type RuntimeDataImportTask
@@ -52,6 +52,8 @@ app.setName('Clawee');
 app.commandLine.appendSwitch('lang', 'zh-CN');
 const DEVELOPMENT = !app.isPackaged;
 const APP_ENTRY_AT = Date.now();
+const DESKTOP_SHUTDOWN_TIMEOUT_MS = 5_000;
+const SHUTDOWN_LOG_FLUSH_RESERVE_MS = 500;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -76,6 +78,7 @@ async function launchDesktop(): Promise<void> {
   let migrationTask: RuntimeDataImportTask | undefined;
 
   const queueDeepLink = (value: string | undefined) => {
+    if (shutdownStarted) return;
     if (value === undefined) return;
     const route = deepLinkToRoute(value);
     if (route === undefined) return;
@@ -201,6 +204,7 @@ async function launchDesktop(): Promise<void> {
   });
 
   const navigate = (route: string) => {
+    if (shutdownStarted) return;
     if (!workspaceLoaded) {
       pendingRoutes.push(route);
       return;
@@ -239,11 +243,13 @@ async function launchDesktop(): Promise<void> {
     navigate
   });
   const loadWorkspace = (): Promise<void> => {
+    if (shutdownStarted) return Promise.resolve();
     if (workspaceLoadWork !== undefined) return workspaceLoadWork;
     workspaceLoadWork = (async () => {
       workspaceLoaded = false;
       try {
         await windowManager?.loadWorkspace();
+        if (shutdownStarted) return;
         workspaceLoaded = true;
         bootstrap?.markWorkspaceReady();
         windowManager?.show();
@@ -252,6 +258,7 @@ async function launchDesktop(): Promise<void> {
         }
         notifications.start();
       } catch (error) {
+        if (shutdownStarted) return;
         logger.error('Failed to load the Clawee workspace', {
           message: error instanceof Error ? error.message : String(error)
         });
@@ -354,20 +361,32 @@ async function launchDesktop(): Promise<void> {
     event.preventDefault();
     if (shutdownStarted) return;
     shutdownStarted = true;
+    const startedAt = Date.now();
+    const deadline = startedAt + DESKTOP_SHUTDOWN_TIMEOUT_MS;
+    const cleanupTimeoutMs = DESKTOP_SHUTDOWN_TIMEOUT_MS - SHUTDOWN_LOG_FLUSH_RESERVE_MS;
+    logger.info('Desktop shutdown started', { timeoutMs: DESKTOP_SHUTDOWN_TIMEOUT_MS });
     windowManager?.beginQuit();
     notifications.stop();
     tray.destroy();
-    void Promise.all([
-      bootstrap?.stop() ?? Promise.resolve(),
+    void settlesWithin(Promise.allSettled([
+      bootstrap?.stop(cleanupTimeoutMs) ?? Promise.resolve(),
       migrationTask?.cancel() ?? Promise.resolve()
-    ])
+    ]).then(results => {
+      for (const result of results) {
+        if (result.status === 'rejected') throw result.reason;
+      }
+    }), cleanupTimeoutMs)
+      .then(completed => {
+        if (!completed) logger.warn('Desktop shutdown cleanup deadline reached');
+      })
       .catch(error => {
         logger.error('Desktop shutdown failed', {
           message: error instanceof Error ? error.message : String(error)
         });
       })
       .finally(() => {
-        void logger.flush().finally(() => {
+        logger.info('Desktop shutdown cleanup completed', { durationMs: Date.now() - startedAt });
+        void settlesWithin(logger.flush(), Math.max(0, deadline - Date.now())).finally(() => {
           allowQuit = true;
           app.quit();
         });

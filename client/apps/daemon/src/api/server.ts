@@ -733,6 +733,9 @@ export async function buildServer(input: BuildServerInput) {
         .send(apiError('VALIDATION_FAILED', 'body must be valid JSON'));
     }
     if ((error as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      if (request.method === 'POST' && request.url.startsWith('/enterprise/skills/versions')) {
+        return reply.code(413).send(apiError('ENTERPRISE_SKILL_PACKAGE_TOO_LARGE', 'Enterprise skill package is too large'));
+      }
       if (
         request.method === 'POST'
         && request.url.startsWith('/enterprise/knowledge-bases/')
@@ -762,33 +765,66 @@ export async function buildServer(input: BuildServerInput) {
     throw error;
   });
 
+  let shutdownError: unknown;
+  let runCloseWork: Promise<void> | undefined;
+  let shutdownStartedAt = 0;
+  server.addHook('preClose', async () => {
+    shutdownStartedAt = Date.now();
+    reportDaemonPerformance({ component: 'shutdown', event: 'started' });
+    try {
+      scheduler.stop();
+    } catch (error) {
+      shutdownError = error;
+    }
+    // 在 HTTP 等待连接关闭前取消任务，同时禁止后续任务启动。
+    runCloseWork = runManager.close().finally(() => {
+      reportDaemonPerformance({
+        component: 'shutdown', event: 'stage_completed', stage: 'runs',
+        durationMs: Date.now() - shutdownStartedAt
+      });
+    });
+    void runCloseWork.catch(() => undefined);
+  });
+
   server.addHook('onClose', async () => {
-    let firstError: unknown;
-    const capture = async (operation: () => void | Promise<void>) => {
+    let firstError: unknown = shutdownError;
+    const capture = async (stage: string, operation: () => void | Promise<void>) => {
+      const startedAt = Date.now();
       try {
         await operation();
       } catch (error) {
         firstError ??= error;
+      } finally {
+        reportDaemonPerformance({
+          component: 'shutdown', event: 'stage_completed', stage,
+          durationMs: Date.now() - startedAt
+        });
       }
     };
 
-    await capture(() => clearInterval(attachmentCleanupTimer));
-    await capture(() => unsubscribeRuntimeReady?.());
-    await capture(() => unsubscribeModelCatalogChanges?.());
-    await capture(() => input.modelServiceRuntime?.signOut());
-    await capture(() => unsubscribeApprovalNotifications());
-    await capture(() => scheduler.stop());
-    await capture(() => runManager.close());
-    await capture(() => activityReporter?.close());
-    await capture(() => enterpriseSessionManager.close());
-    await capture(() => codexSessionProvider.close());
-    await capture(() => codexModelCatalog.close());
-    await capture(() => agentCapabilityTokens.close());
+    await capture('attachment_timer', () => clearInterval(attachmentCleanupTimer));
+    await capture('runtime_subscription', () => unsubscribeRuntimeReady?.());
+    await capture('catalog_subscription', () => unsubscribeModelCatalogChanges?.());
+    await capture('approval_subscription', () => unsubscribeApprovalNotifications());
+    await capture('run_logs', () => runCloseWork ?? runManager.close());
+    await capture('activity', () => activityReporter?.close());
+    await Promise.all([
+      capture('model_runtime', () => input.modelServiceRuntime?.signOut()),
+      capture('enterprise_session', () => enterpriseSessionManager.close()),
+      capture('codex_sessions', () => codexSessionProvider.close()),
+      capture('model_catalog', () => codexModelCatalog.close()),
+      capture('capability_tokens', () => agentCapabilityTokens.close())
+    ]);
     if (ownsDb) {
-      await capture(() => {
+      await capture('database', () => {
         if (db.open) db.close();
       });
     }
+    reportDaemonPerformance({
+      component: 'shutdown', event: 'completed',
+      durationMs: Date.now() - shutdownStartedAt,
+      failed: firstError !== undefined
+    });
     if (firstError !== undefined) throw firstError;
   });
 
@@ -1132,6 +1168,8 @@ function reportDaemonPerformance(details: Record<string, unknown>): void {
   } catch {
     // Performance diagnostics must not affect Runtime requests.
   }
+  // 桌面退出诊断仅通过 IPC 记录，保持独立 daemon 的标准输出契约。
+  if (details.component === 'shutdown') return;
   console.info(JSON.stringify(message));
 }
 

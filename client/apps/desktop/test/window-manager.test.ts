@@ -2,8 +2,44 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   DebouncedWindowStateWriter,
   nativePageZoomFactor,
-  nativeWindowChromeOptions
+  nativeWindowChromeOptions,
+  WindowManager
 } from '../src/main/window-manager.js';
+
+const windowMocks = vi.hoisted(() => ({
+  hide: vi.fn(), show: vi.fn(), loadURL: vi.fn(),
+  on: vi.fn(), isDestroyed: () => false,
+  isMinimized: () => false, isMaximized: () => false,
+  getBounds: () => ({ width: 1280, height: 820 }),
+  webContents: {
+    setZoomFactor: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn()
+  }
+}));
+vi.mock('electron', () => ({
+  BrowserWindow: vi.fn(function () { return windowMocks; }),
+  screen: {}, shell: {}
+}));
+
+describe('窗口退出', () => {
+  it('立即隐藏窗口，且退出期间不再显示或加载启动页', async () => {
+    const update = vi.fn(() => ({ closeBehavior: 'hide' as const, notificationsEnabled: true }));
+    const manager = new WindowManager({
+      preloadPath: '', development: false, appEntryAt: 0, requestQuit: vi.fn(),
+      settings: {
+        read: () => ({ closeBehavior: 'hide', notificationsEnabled: true }),
+        update, flush: vi.fn()
+      }
+    });
+    manager.create();
+    manager.beginQuit();
+    expect(update).toHaveBeenCalledOnce();
+    expect(windowMocks.hide).toHaveBeenCalledOnce();
+    manager.show();
+    await manager.loadBootstrap();
+    expect(windowMocks.show).not.toHaveBeenCalled();
+    expect(windowMocks.loadURL).not.toHaveBeenCalled();
+  });
+});
 
 describe('Window state debounce', () => {
   it('coalesces move and resize bursts and flushes the final state', () => {

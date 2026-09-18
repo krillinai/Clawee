@@ -52,7 +52,7 @@ import {
 } from './codex/runtime-state.js';
 import { createRuntimeToken } from './security/token.js';
 import { resolveServerToken } from './security/server-token.js';
-import { installGracefulShutdown } from './shutdown.js';
+import { installGracefulShutdown, installParentPortShutdown } from './shutdown.js';
 import {
   createProductionServerInput,
   resolveEnterpriseStartupArguments,
@@ -447,7 +447,20 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     }
   });
-  installParentPortShutdown();
+  installParentPortShutdown({
+    parentPort: (process as NodeJS.Process & {
+      parentPort?: {
+        on(event: 'message', listener: (event: unknown) => void): unknown;
+      };
+    }).parentPort,
+    close: closeServer,
+    onError(error) {
+      console.error(`Failed to close daemon after parent request: ${String(error)}`);
+      process.exitCode = 1;
+    },
+    // HTTP、任务日志及数据库清理完成后，不再等待 IPC 等残留句柄。
+    finish: () => process.exit()
+  });
   if (serverMode === undefined) {
     console.log(JSON.stringify({ address, token }));
     return;
@@ -481,24 +494,6 @@ async function closeServer(): Promise<void> {
   }
   releaseRuntimeLock?.();
   if (firstError !== undefined) throw firstError;
-}
-
-function installParentPortShutdown(): void {
-  const parentPort = (
-    process as NodeJS.Process & {
-      parentPort?: {
-        on(event: 'message', listener: (event: { data?: unknown } | unknown) => void): void;
-      };
-    }
-  ).parentPort;
-  parentPort?.on('message', event => {
-    const payload = isRecord(event) && 'data' in event ? event.data : event;
-    if (!isRecord(payload) || payload.type !== 'shutdown') return;
-    void closeServer().catch(error => {
-      console.error(`Failed to close daemon after parent request: ${String(error)}`);
-      process.exitCode = 1;
-    });
-  });
 }
 
 async function resolveCapabilities(

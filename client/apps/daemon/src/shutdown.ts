@@ -5,6 +5,34 @@ type SignalSource = {
   off(signal: ShutdownSignal, listener: () => void): unknown;
 };
 
+export function installParentPortShutdown(input: {
+  parentPort?: {
+    on(event: 'message', listener: (event: unknown) => void): unknown;
+  };
+  close(): Promise<void>;
+  onError(error: unknown): void;
+  finish(): void;
+}): void {
+  let closing = false;
+  input.parentPort?.on('message', event => {
+    const payload = typeof event === 'object' && event !== null && 'data' in event
+      ? event.data
+      : event;
+    if (
+      typeof payload !== 'object' || payload === null
+      || !('type' in payload) || payload.type !== 'shutdown' || closing
+    ) return;
+    closing = true;
+    const keepAlive = setInterval(() => undefined, 1_000);
+    void input.close()
+      .catch(input.onError)
+      .finally(() => {
+        clearInterval(keepAlive);
+        input.finish();
+      });
+  });
+}
+
 export function installGracefulShutdown(input: {
   close(): Promise<void>;
   onError(error: unknown): void;

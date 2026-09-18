@@ -226,7 +226,7 @@ describe('enterprise activity reporter', () => {
     );
   });
 
-  it('limits close flush waiting to two seconds', async () => {
+  it('退出时最多等待活动上报 500 毫秒', async () => {
     vi.useFakeTimers();
     const reporter = createEnterpriseActivityReporter({
       httpClient: { reportAgentActivity: vi.fn(() => new Promise<void>(() => undefined)) },
@@ -236,13 +236,23 @@ describe('enterprise activity reporter', () => {
     reporter.registerRun(runInput('closing'));
 
     const closing = reporter.close();
-    await vi.advanceTimersByTimeAsync(1_999);
+    await vi.advanceTimersByTimeAsync(499);
     let closed = false;
     void closing.then(() => { closed = true; });
     await Promise.resolve();
     expect(closed).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await closing;
+  });
+
+  it('上报完成后清除退出等待计时器', async () => {
+    vi.useFakeTimers();
+    const reporter = createEnterpriseActivityReporter({
+      httpClient: { reportAgentActivity: vi.fn(async () => undefined) },
+      requireAccessToken: vi.fn(async () => 'access-token')
+    });
+    await reporter.close();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('does not retry an in-flight request after close times out', async () => {
@@ -258,7 +268,7 @@ describe('enterprise activity reporter', () => {
     reporter.registerRun(runInput('closing_failure'));
 
     const closing = reporter.close();
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(500);
     await closing;
     expect(reportAgentActivity).toHaveBeenCalledOnce();
 
