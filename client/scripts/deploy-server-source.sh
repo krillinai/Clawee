@@ -108,8 +108,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "$repository_root" ls-files \
-  --cached --others --exclude-standard -z >"$file_list_path"
+while IFS= read -r -d '' source_path; do
+  if [[ -e "$repository_root/$source_path" || -L "$repository_root/$source_path" ]]; then
+    printf '%s\0' "$source_path"
+  fi
+done < <(git -C "$repository_root" ls-files --cached --others --exclude-standard -z) \
+  >"$file_list_path"
 [[ -s "$file_list_path" ]] || fail '没有可部署的源码文件'
 
 tar_options=(--no-xattrs)
@@ -189,7 +193,8 @@ command -v pnpm >/dev/null 2>&1 || {
   exit 1
 }
 printf '正在安装源码依赖\n'
-pnpm --dir "$stage_dir" install --frozen-lockfile
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+  pnpm --dir "$stage_dir" install --frozen-lockfile
 
 if [[ -L "$target_dir" || (-e "$target_dir" && ! -d "$target_dir") ]]; then
   echo 'SERVER_SOURCE_TARGET_INVALID' >&2
