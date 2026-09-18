@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,11 @@ func TestSkillApprovalMigrationAndLifecycleOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	_, version, err := store.CreateVersion(ctx, skillhub.Skill{SpaceID: skillhub.DefaultSpaceID, Name: "renamed"}, skillhub.Version{VersionID: "v2", Version: "2", Description: "新版", PackagePath: "v2.zip", PackageSHA256: strings.Repeat("b", 64), CreatedAt: now}, skillhub.CreateVersionOptions{Publish: true, Resolution: skillhub.VersionResolutionReplace, TargetSkillID: "legacy"})
+	if _, err := skillhub.NewPostgresSourceStore(pool).CreateSource(ctx, skillhub.GitHubSource{SourceID: "approval-source", Provider: skillhub.GitHubSourceProvider, RepositoryOwner: "clawee", RepositoryName: "skills", Branch: "main", ScanRoot: ".", ExcludePaths: []string{}, Schedule: skillhub.SourceScheduleManual, Status: skillhub.SourceStatusActive, CreatedBy: "writer", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	source := &skillhub.VersionSourceEvidence{SourceID: "approval-source", RepositoryOwner: "clawee", RepositoryName: "skills", Path: "skills/renamed", CommitSHA: strings.Repeat("c", 40), ContentSHA256: strings.Repeat("d", 64)}
+	_, version, err := store.CreateVersion(ctx, skillhub.Skill{SpaceID: skillhub.DefaultSpaceID, Name: "renamed"}, skillhub.Version{VersionID: "v2", Version: "2", Description: "新版", PackagePath: "v2.zip", PackageSHA256: strings.Repeat("b", 64), CreatedAt: now, UploadedByUserID: "writer", UploadedByAgentID: "agent-writer", Source: source}, skillhub.CreateVersionOptions{Publish: true, Resolution: skillhub.VersionResolutionReplace, TargetSkillID: "legacy"})
 	if err != nil || version.ApprovalStatus != "pending" {
 		t.Fatalf("上传新版：%#v %v", version, err)
 	}
@@ -77,8 +82,12 @@ func TestSkillApprovalMigrationAndLifecycleOnPostgres(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, "legacy", "v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("更新绕过门禁：%v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, "legacy", "v2", "reviewer", false, "驳回"); err != nil {
+	rejected, err := service.ReviewVersion(ctx, "legacy", "v2", "reviewer", false, "驳回")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if rejected.SkillName != "renamed" || rejected.UploadedByUserID != "writer" || rejected.UploadedByAgentID != "agent-writer" || !reflect.DeepEqual(rejected.Source, source) || rejected.ApprovalStatus != "rejected" || rejected.ReviewComment != "驳回" {
+		t.Fatalf("审核响应丢失版本数据：%#v", rejected)
 	}
 	t.Run("更换审批人时不能使用旧授权审核", func(t *testing.T) {
 		raceCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

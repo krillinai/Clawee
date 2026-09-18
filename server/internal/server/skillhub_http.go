@@ -33,16 +33,18 @@ const (
 	skillSourceActionBind        = "skill_source_item_bind"
 	skillSourceActionUnbind      = "skill_source_item_unbind"
 
-	skillActorKey    = "skill_actor_id"
-	skillIDKey       = "skill_id"
-	skillVersionKey  = "skill_version_id"
-	skillSHAKey      = "skill_package_sha256"
-	skillResultKey   = "skill_result"
-	skillSourceIDKey = "skill_source_id"
-	skillRunIDKey    = "skill_source_run_id"
-	skillCommitKey   = "skill_source_commit_sha"
-	skillIDsKey      = "skill_ids"
-	skillSpaceIDKey  = "skill_space_id"
+	skillActorKey          = "skill_actor_id"
+	skillIDKey             = "skill_id"
+	skillVersionKey        = "skill_version_id"
+	skillSHAKey            = "skill_package_sha256"
+	skillResultKey         = "skill_result"
+	skillSourceIDKey       = "skill_source_id"
+	skillRunIDKey          = "skill_source_run_id"
+	skillCommitKey         = "skill_source_commit_sha"
+	skillIDsKey            = "skill_ids"
+	skillSpaceIDKey        = "skill_space_id"
+	skillApproverKey       = "skill_approver_user_id"
+	skillReviewDecisionKey = "skill_review_decision"
 )
 
 func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
@@ -710,12 +712,14 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 		account, _ := currentAccount(c)
 		c.Set(skillIDKey, request.SkillID)
 		c.Set(skillVersionKey, request.VersionID)
+		c.Set(skillReviewDecisionKey, request.Decision)
 		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
 		if err != nil {
 			skillError(c, err)
 			return
 		}
 		c.Set(skillSHAKey, version.PackageSHA256)
+		c.Set(skillSpaceIDKey, version.ApprovedSpaceID)
 		c.JSON(http.StatusOK, version)
 	}
 }
@@ -807,6 +811,9 @@ func skillOperationLog(logger *zap.Logger, action string) gin.HandlerFunc {
 			zap.String("version_id", skillContextValue(c, skillVersionKey)),
 			zap.String("result", result),
 			zap.String("package_sha256", skillContextValue(c, skillSHAKey)),
+			zap.String("space_id", skillContextValue(c, skillSpaceIDKey)),
+			zap.String("approver_user_id", skillContextValue(c, skillApproverKey)),
+			zap.String("review_decision", skillContextValue(c, skillReviewDecisionKey)),
 		)
 	}
 }

@@ -48,8 +48,8 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/skill-spaces/detail", read, handleAdminSkillSpace(opts.SkillHubService))
 	admin.POST("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceCreate), handleAdminCreateSkillSpace(opts.SkillHubService))
 	admin.PATCH("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
-	admin.GET("/skill-spaces/approver-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverCandidates(opts.AccountService))
-	admin.PUT("/skill-spaces/approver", skillOperationLog(opts.Logger, "skill_space_approver_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApprover(opts.SkillHubService, opts.AccountService))
+	admin.GET("/skill-spaces/approver-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverCandidates(opts.AccountService, opts.RBACService))
+	admin.PUT("/skill-spaces/approver", skillOperationLog(opts.Logger, "skill_space_approver_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApprover(opts.SkillHubService, opts.AccountService, opts.RBACService))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
 	admin.GET("/skill-spaces/member-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
 	admin.POST("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
@@ -57,7 +57,7 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/skill-spaces/account-grants/remove", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberDelete), handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
 }
 
-func handleSkillSpaceApproverCandidates(accountService *accounts.Service) gin.HandlerFunc {
+func handleSkillSpaceApproverCandidates(accountService *accounts.Service, rbacService *rbac.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		accountItems, err := accountService.ListAccounts(c.Request.Context())
 		if err != nil {
@@ -66,7 +66,15 @@ func handleSkillSpaceApproverCandidates(accountService *accounts.Service) gin.Ha
 		}
 		items := []gin.H{}
 		for _, account := range accountItems {
-			if account.Status == accounts.StatusActive {
+			if account.Status != accounts.StatusActive {
+				continue
+			}
+			allowed, err := rbacService.HasPermission(c.Request.Context(), account.UserID, rbac.PermissionSkillRead)
+			if err != nil {
+				skillError(c, err)
+				return
+			}
+			if allowed {
 				items = append(items, gin.H{"user_id": account.UserID, "name": account.DisplayName(), "email": account.Email})
 			}
 		}
@@ -74,7 +82,7 @@ func handleSkillSpaceApproverCandidates(accountService *accounts.Service) gin.Ha
 	}
 }
 
-func handleSkillSpaceApprover(service *skillhub.Service, accountService *accounts.Service) gin.HandlerFunc {
+func handleSkillSpaceApprover(service *skillhub.Service, accountService *accounts.Service, rbacService *rbac.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
 			SpaceID string `json:"space_id"`
@@ -84,16 +92,27 @@ func handleSkillSpaceApprover(service *skillhub.Service, accountService *account
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
+		request.SpaceID = strings.TrimSpace(request.SpaceID)
 		request.UserID = strings.TrimSpace(request.UserID)
+		c.Set(skillSpaceIDKey, request.SpaceID)
+		c.Set(skillApproverKey, request.UserID)
 		if request.UserID != "" {
 			target, err := accountService.Account(c.Request.Context(), request.UserID)
 			if err != nil || target.Status != accounts.StatusActive {
 				skillError(c, skillhub.ErrMemberNotFound)
 				return
 			}
+			allowed, err := rbacService.HasPermission(c.Request.Context(), target.UserID, rbac.PermissionSkillRead)
+			if err != nil {
+				skillError(c, err)
+				return
+			}
+			if !allowed {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "error": "审批人必须具有技能查看权限"})
+				return
+			}
 		}
 		account, _ := currentAccount(c)
-		c.Set(skillSpaceIDKey, request.SpaceID)
 		if err := service.SetSpaceApprover(c.Request.Context(), request.SpaceID, request.UserID, account.UserID); err != nil {
 			skillError(c, err)
 			return

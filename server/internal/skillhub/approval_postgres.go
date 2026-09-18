@@ -54,7 +54,11 @@ func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, r
 		return Version{}, ErrReviewForbidden
 	}
 	var version Version
-	if err := scanVersion(tx.QueryRow(ctx, `SELECT version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at FROM skill_versions WHERE skill_id=$1 AND version_id=$2 FOR UPDATE`, skillID, versionID), &version); err != nil {
+	if err := scanVersionSource(tx.QueryRow(ctx, `SELECT v.version_id,v.skill_id,v.version,v.description,v.changelog,v.package_path,v.package_sha256,v.created_at,
+v.source_id,src.repository_owner,src.repository_name,v.source_path,v.source_commit_sha,v.source_content_sha256,
+v.uploaded_by_user_id,v.uploaded_by_agent_id,v.skill_name,v.approval_status,COALESCE(v.approved_space_id,''),COALESCE(v.reviewed_by,''),v.reviewed_at,v.review_comment
+FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id
+WHERE v.skill_id=$1 AND v.version_id=$2 FOR UPDATE OF v`, skillID, versionID), &version); err != nil {
 		return Version{}, mapNotFound(err)
 	}
 	status := "rejected"
