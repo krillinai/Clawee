@@ -229,6 +229,24 @@ describe('MarkdownRenderer', () => {
     )).toEqual(['reports/aso-audit.html', 'data/score.xlsx']);
   });
 
+  it('extracts the target of a markdown file link instead of its filename label', () => {
+    expect(extractWorkspaceFilePaths(
+      '| [`clawee-user-guide.pdf`](/workspace/output/pdf/clawee-user-guide.pdf:1) | PDF |'
+    )).toEqual(['/workspace/output/pdf/clawee-user-guide.pdf']);
+  });
+
+  it('deduplicates file link targets without merging distinct same-name files', () => {
+    expect(extractWorkspaceFilePaths(
+      '[report.pdf](draft/report.pdf) [report.pdf](final/report.pdf:2:3) `final/report.pdf`'
+    )).toEqual(['draft/report.pdf', 'final/report.pdf']);
+  });
+
+  it('does not treat filenames in external link labels as workspace files', () => {
+    expect(extractWorkspaceFilePaths(
+      '[guide.pdf](https://example.com/guide.pdf) [guide.pdf](#guide)'
+    )).toEqual([]);
+  });
+
   it('does not throw on nested or multiline emphasis', () => {
     render(<MarkdownRenderer variant="assistant" text={'**a *b* c**\n\n**第一行\n第二行**'} />);
 

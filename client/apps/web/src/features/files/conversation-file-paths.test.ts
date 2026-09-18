@@ -42,4 +42,13 @@ describe('collectConversationFilePaths', () => {
       source: 'runtime'
     }])).toEqual([]);
   });
+
+  it('uses the markdown file link target without adding an invalid basename fallback', () => {
+    expect(collectConversationFilePaths([{
+      kind: 'assistant_message',
+      id: 'message',
+      text: '[`clawee-user-guide.pdf`](/workspace/output/pdf/clawee-user-guide.pdf:1)',
+      source: 'runtime'
+    }])).toEqual(['/workspace/output/pdf/clawee-user-guide.pdf']);
+  });
 });

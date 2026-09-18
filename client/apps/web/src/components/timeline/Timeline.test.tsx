@@ -781,6 +781,28 @@ describe('Timeline', () => {
     expect(screen.getByLabelText('任务成果')).toBeInTheDocument();
   });
 
+  it('renders a single PDF artifact for a markdown link and opens its target path', async () => {
+    const user = userEvent.setup();
+    const onOpenFile = vi.fn();
+    render(
+      <Timeline
+        items={[{
+          kind: 'assistant_message',
+          id: 'a1',
+          text: '| 文件 | 类型 |\n|---|---|\n| [`clawee-user-guide.pdf`](/workspace/output/pdf/clawee-user-guide.pdf:1) | PDF |',
+          source: 'runtime'
+        }]}
+        onOpenFile={onOpenFile}
+      />
+    );
+
+    expect(screen.getAllByText('PDF 文档')).toHaveLength(1);
+    await user.click(screen.getByRole('button', {
+      name: '打开成果 /workspace/output/pdf/clawee-user-guide.pdf'
+    }));
+    expect(onOpenFile).toHaveBeenCalledExactlyOnceWith('/workspace/output/pdf/clawee-user-guide.pdf');
+  });
+
   it('keeps user messages conservative while still rendering code and safe links', () => {
     render(
       <Timeline

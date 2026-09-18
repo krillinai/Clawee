@@ -51,8 +51,15 @@ export function isWorkspaceFilePath(value: string): boolean {
 export function extractWorkspaceFilePaths(text: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
-  for (const match of text.matchAll(createWorkspaceFilePathRegex())) {
-    const path = match[0];
+  // 文件链接整体匹配，避免把显示标签误当成另一个工作区路径。
+  const regex = new RegExp(`!?\\[[^\\]]*\\]\\(([^)\\s]+)\\)|(${WORKSPACE_FILE_PATH_SOURCE})`, 'giu');
+  for (const match of text.matchAll(regex)) {
+    if (match[0].startsWith('![')) continue;
+    if (match[1] !== undefined && /^(?:[a-z][a-z\d+.-]*:|#)/i.test(match[1])) continue;
+    const path = match[1] !== undefined
+      ? match[1].replace(/:\d+(?::\d+)?$/, '')
+      : match[2]!;
+    if (!isWorkspaceFilePath(path)) continue;
     if (seen.has(path)) continue;
     seen.add(path);
     paths.push(path);
