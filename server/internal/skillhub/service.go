@@ -177,11 +177,12 @@ func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVers
 
 	now := s.clock().UTC()
 	versionID := newID("skillver")
-	skill := Skill{SkillID: newID("skill"), SpaceID: input.SpaceID, Name: metadata.Name, Description: metadata.Description, CreatedBy: input.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	skill := Skill{SkillID: newID("skill"), SpaceID: input.SpaceID, Name: metadata.Name, Description: metadata.Description, CreatedBy: input.CreatedBy, CreatedByUserID: strings.TrimSpace(input.UploadedByUserID), CreatedAt: now, UpdatedAt: now}
 	version := Version{
 		VersionID: versionID, Version: input.Version, Description: metadata.Description,
 		Changelog: input.Changelog, PackagePath: versionID + ".zip", PackageSHA256: hex.EncodeToString(hash.Sum(nil)), Source: input.Source, CreatedAt: now,
 		UploadedByUserID: strings.TrimSpace(input.UploadedByUserID), UploadedByAgentID: strings.TrimSpace(input.UploadedByAgentID),
+		UploadedByName: input.CreatedBy,
 	}
 	finalPath := filepath.Join(s.packageRoot, version.PackagePath)
 	if err := os.Rename(normalizedPath, finalPath); err != nil {
@@ -225,11 +226,30 @@ func (s *Service) GetAdmin(ctx context.Context, skillID string) (AdminDetail, er
 }
 
 func (s *Service) ListPublished(ctx context.Context) ([]PublishedItem, error) {
-	return s.store.ListPublished(ctx)
+	items, err := s.store.ListPublished(ctx)
+	return s.enrichPublished(ctx, items, err)
 }
 
 func (s *Service) GetPublished(ctx context.Context, skillID string) (PublishedDetail, error) {
-	return s.store.GetPublished(ctx, strings.TrimSpace(skillID))
+	detail, err := s.store.GetPublished(ctx, strings.TrimSpace(skillID))
+	if err != nil {
+		return detail, err
+	}
+	items, enrichErr := s.enrichPublished(ctx, []PublishedItem{detail.PublishedItem}, nil)
+	if enrichErr != nil {
+		return PublishedDetail{}, enrichErr
+	}
+	if len(items) == 1 {
+		detail.PublishedItem = items[0]
+	}
+	return detail, nil
+}
+
+func (s *Service) enrichPublished(ctx context.Context, items []PublishedItem, err error) ([]PublishedItem, error) {
+	if err != nil {
+		return nil, err
+	}
+	return s.store.EnrichPublished(ctx, items)
 }
 
 func (s *Service) OpenCurrentPackageForUser(ctx context.Context, userID, skillID, expectedVersionID string) (PackageDownload, error) {

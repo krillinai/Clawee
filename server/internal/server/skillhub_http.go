@@ -55,6 +55,7 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 
 	app.GET("/skills", list)
 	app.GET("/skills/detail", detail)
+	app.GET("/skills/participant-avatar", handleSkillParticipantAvatar(opts.SkillHubService, opts.AccountService))
 	app.GET("/skills/version-files", handlePublishedSkillVersionFiles(opts.SkillHubService))
 	app.GET("/skills/version-file", handlePublishedSkillVersionFile(opts.SkillHubService))
 	app.GET("/skills/package", skillOperationLog(opts.Logger, skillActionDownload), download)
@@ -384,7 +385,7 @@ func setSkillSourceAudit(c *gin.Context, sourceID, runID string, commit *string)
 func handleSkillList(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		account, _ := currentAccount(c)
-		items, err := service.ListPublishedForUser(c.Request.Context(), account.UserID)
+		items, err := service.ListPublishedForUser(c.Request.Context(), account.UserID, c.Query("space_id"))
 		if err != nil {
 			skillError(c, err)
 			return

@@ -125,11 +125,12 @@ func (s *Service) UploadVersionForUser(ctx context.Context, userID, agentID stri
 	return s.UploadVersion(ctx, input)
 }
 
-func (s *Service) ListPublishedForUser(ctx context.Context, userID string) ([]PublishedItem, error) {
+func (s *Service) ListPublishedForUser(ctx context.Context, userID, spaceID string) ([]PublishedItem, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, ErrInvalidRequest
 	}
-	return s.store.ListPublishedForUser(ctx, strings.TrimSpace(userID))
+	items, err := s.store.ListPublishedForUser(ctx, strings.TrimSpace(userID), strings.TrimSpace(spaceID))
+	return s.enrichPublished(ctx, items, err)
 }
 
 func (s *Service) GetPublishedForUser(ctx context.Context, userID, skillID string) (PublishedDetail, error) {

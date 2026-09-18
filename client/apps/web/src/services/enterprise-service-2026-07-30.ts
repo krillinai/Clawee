@@ -248,6 +248,12 @@ export function createEnterpriseService(client: ClientLike) {
     listSkills(): Promise<EnterpriseSkillListResponse> {
       return client.get('/enterprise/skills');
     },
+    getSkillParticipantAvatar(skillId: string, userId: string): Promise<Response> {
+      if (client.rawGet === undefined) {
+        return Promise.reject(new Error('Runtime raw response access is unavailable'));
+      }
+      return client.rawGet(`/enterprise/skills/${encodeURIComponent(skillId)}/participants/${encodeURIComponent(userId)}/avatar`);
+    },
     getSkillDetail(skillId: string): Promise<EnterpriseSkillDetailResponse> {
       return client.get(`/enterprise/skills/${encodeURIComponent(skillId)}`);
     },

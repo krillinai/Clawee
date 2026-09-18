@@ -35,7 +35,7 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 	skill := Skill{}
 	switch options.Resolution {
 	case VersionResolutionByName:
-		_, err = tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at) VALUES ($1,$2,$3,NULL,$4,$5,$6) ON CONFLICT (name) DO NOTHING`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt)
+		_, err = tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at,created_by_user_id) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7) ON CONFLICT (name) DO NOTHING`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt, nullableText(proposed.CreatedByUserID))
 		if err != nil {
 			return Skill{}, Version{}, mapSkillCreateError(err)
 		}
@@ -54,7 +54,7 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return Skill{}, Version{}, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at) VALUES ($1,$2,$3,NULL,$4,$5,$6)`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt)
+		_, err = tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at,created_by_user_id) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7)`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt, nullableText(proposed.CreatedByUserID))
 		if err != nil {
 			return Skill{}, Version{}, mapSkillCreateError(err)
 		}
@@ -79,9 +79,9 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		sourceCommitSHA = version.Source.CommitSHA
 		sourceContentSHA256 = version.Source.ContentSHA256
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO skill_versions (version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at,source_id,source_path,source_commit_sha,source_content_sha256,uploaded_by_user_id,uploaded_by_agent_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+	_, err = tx.Exec(ctx, `INSERT INTO skill_versions (version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at,source_id,source_path,source_commit_sha,source_content_sha256,uploaded_by_user_id,uploaded_by_agent_id,uploaded_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		version.VersionID, version.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, version.CreatedAt,
-		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID))
+		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName)
 	if err != nil {
 		return Skill{}, Version{}, mapStoreError(err)
 	}
@@ -166,11 +166,17 @@ func (s *PostgresStore) ListPublished(ctx context.Context) ([]PublishedItem, err
 	return items, rows.Err()
 }
 
-func (s *PostgresStore) ListPublishedForUser(ctx context.Context, userID string) ([]PublishedItem, error) {
-	rows, err := s.pool.Query(ctx, publishedSelect+` AND EXISTS (
+func (s *PostgresStore) ListPublishedForUser(ctx context.Context, userID, spaceID string) ([]PublishedItem, error) {
+	query := publishedSelect + ` AND EXISTS (
 		SELECT 1 FROM data_resource_grants g
 		WHERE g.user_id=$1 AND g.resource_type=$2 AND g.resource_id=s.space_id AND g.action=$3
-	) ORDER BY s.updated_at DESC`, userID, ResourceTypeSpace, SpaceActionRead)
+	)`
+	args := []any{userID, ResourceTypeSpace, SpaceActionRead}
+	if spaceID != "" {
+		query += ` AND s.space_id=$4`
+		args = append(args, spaceID)
+	}
+	rows, err := s.pool.Query(ctx, query+` ORDER BY s.updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +188,56 @@ func (s *PostgresStore) ListPublishedForUser(ctx context.Context, userID string)
 			return nil, err
 		}
 		items = append(items, detail.PublishedItem)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) EnrichPublished(ctx context.Context, items []PublishedItem) ([]PublishedItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, 0, len(items))
+	byID := make(map[string]int, len(items))
+	for index, item := range items {
+		ids = append(ids, item.SkillID)
+		byID[item.SkillID] = index
+		items[index].Contributors = nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT s.skill_id, s.created_by_user_id, COALESCE(NULLIF(btrim(creator.name), ''), s.created_by),
+		       contributor.user_id, COALESCE(NULLIF(btrim(account.name), ''), contributor.name, '企业成员')
+		FROM skills s
+		LEFT JOIN accounts creator ON creator.user_id=s.created_by_user_id
+		LEFT JOIN LATERAL (
+		    SELECT v.uploaded_by_user_id AS user_id, MAX(v.created_at) AS last_updated_at,
+		           (array_agg(NULLIF(v.uploaded_by_name, '') ORDER BY v.created_at DESC, v.version_id DESC))[1] AS name
+		    FROM skill_versions v
+		    WHERE v.skill_id=s.skill_id AND v.uploaded_by_user_id IS NOT NULL
+		      AND v.uploaded_by_user_id IS DISTINCT FROM s.created_by_user_id
+		    GROUP BY v.uploaded_by_user_id
+		) contributor ON TRUE
+		LEFT JOIN accounts account ON account.user_id=contributor.user_id
+		WHERE s.skill_id=ANY($1)
+		ORDER BY s.skill_id, contributor.last_updated_at DESC, contributor.user_id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var skillID, creatorName string
+		var creatorID, userID, name pgtype.Text
+		if err := rows.Scan(&skillID, &creatorID, &creatorName, &userID, &name); err != nil {
+			return nil, err
+		}
+		index, ok := byID[skillID]
+		if !ok {
+			continue
+		}
+		creator := newSkillParticipant(skillID, creatorID.String, creatorName)
+		items[index].Creator = &creator
+		if userID.Valid {
+			items[index].Contributors = append(items[index].Contributors, newSkillParticipant(skillID, userID.String, name.String))
+		}
 	}
 	return items, rows.Err()
 }

@@ -2,6 +2,7 @@ package skillhub
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -11,7 +12,8 @@ type Store interface {
 	ListAdmin(context.Context) ([]Skill, error)
 	GetAdmin(context.Context, string) (AdminDetail, error)
 	ListPublished(context.Context) ([]PublishedItem, error)
-	ListPublishedForUser(context.Context, string) ([]PublishedItem, error)
+	ListPublishedForUser(context.Context, string, string) ([]PublishedItem, error)
+	EnrichPublished(context.Context, []PublishedItem) ([]PublishedItem, error)
 	GetPublished(context.Context, string) (PublishedDetail, error)
 	MoveSkillsToSpace(context.Context, []string, string, time.Time) (SkillSpaceMoveResult, error)
 	SetCurrentVersion(context.Context, string, string, time.Time) (Skill, Version, error)
@@ -158,11 +160,14 @@ func (s *MemoryStore) ListPublished(_ context.Context) ([]PublishedItem, error) 
 	return items, nil
 }
 
-func (s *MemoryStore) ListPublishedForUser(_ context.Context, userID string) ([]PublishedItem, error) {
+func (s *MemoryStore) ListPublishedForUser(_ context.Context, userID, spaceID string) ([]PublishedItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	items := []PublishedItem{}
 	for _, skill := range s.skills {
+		if spaceID != "" && skill.SpaceID != spaceID {
+			continue
+		}
 		if !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionRead) {
 			continue
 		}
@@ -171,6 +176,30 @@ func (s *MemoryStore) ListPublishedForUser(_ context.Context, userID string) ([]
 		}
 	}
 	sortPublished(items)
+	return items, nil
+}
+
+func (s *MemoryStore) EnrichPublished(_ context.Context, items []PublishedItem) ([]PublishedItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range items {
+		skill := s.skills[items[index].SkillID]
+		creator := newSkillParticipant(skill.SkillID, skill.CreatedByUserID, skill.CreatedBy)
+		items[index].Creator = &creator
+		items[index].Contributors = nil
+		versions := append([]Version(nil), s.versions[items[index].SkillID]...)
+		sort.SliceStable(versions, func(left, right int) bool {
+			return versions[left].CreatedAt.After(versions[right].CreatedAt)
+		})
+		seen := map[string]bool{skill.CreatedByUserID: true}
+		for _, version := range versions {
+			if version.UploadedByUserID == "" || seen[version.UploadedByUserID] {
+				continue
+			}
+			seen[version.UploadedByUserID] = true
+			items[index].Contributors = append(items[index].Contributors, newSkillParticipant(skill.SkillID, version.UploadedByUserID, version.UploadedByName))
+		}
+	}
 	return items, nil
 }
 

@@ -44,6 +44,7 @@ type Skill struct {
 	Description      string    `json:"description"`
 	CurrentVersionID *string   `json:"current_version_id"`
 	CreatedBy        string    `json:"created_by"`
+	CreatedByUserID  string    `json:"-"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -59,6 +60,7 @@ type Version struct {
 	Source            *VersionSourceEvidence `json:"source"`
 	UploadedByUserID  string                 `json:"uploaded_by_user_id,omitempty"`
 	UploadedByAgentID string                 `json:"uploaded_by_agent_id,omitempty"`
+	UploadedByName    string                 `json:"-"`
 	CreatedAt         time.Time              `json:"created_at"`
 }
 
@@ -79,15 +81,23 @@ type SkillSpaceMoveResult struct {
 }
 
 type PublishedItem struct {
-	SkillID       string    `json:"skill_id"`
-	SpaceID       string    `json:"space_id"`
-	SpaceName     string    `json:"space_name"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	VersionID     string    `json:"version_id"`
-	Version       string    `json:"version"`
-	PackageSHA256 string    `json:"package_sha256"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	SkillID       string             `json:"skill_id"`
+	SpaceID       string             `json:"space_id"`
+	SpaceName     string             `json:"space_name"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	VersionID     string             `json:"version_id"`
+	Version       string             `json:"version"`
+	PackageSHA256 string             `json:"package_sha256"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	Creator       *SkillParticipant  `json:"creator,omitempty"`
+	Contributors  []SkillParticipant `json:"contributors,omitempty"`
+}
+
+type SkillParticipant struct {
+	UserID    string `json:"user_id,omitempty"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url,omitempty"`
 }
 
 type PublishedDetail struct {

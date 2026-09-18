@@ -38,6 +38,14 @@ afterEach(() => {
 });
 
 describe('enterprise skill manager', () => {
+  it('preserves space and participant metadata when computing local status', () => {
+    const metadata = {
+      spaceId: 'product', spaceName: '产品空间',
+      creator: { userId: 'creator', name: '张三' },
+      contributors: [{ userId: 'updater', name: '李四', avatarUrl: '/avatar' }]
+    };
+    expect(computeEnterpriseSkillState({ remote: remoteSkill(metadata) })).toMatchObject(metadata);
+  });
   it('computes all seven statuses and orthogonal local integrity', () => {
     const cases: Array<{
       expected: EnterpriseSkillStatus;

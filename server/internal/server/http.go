@@ -108,6 +108,10 @@ type DingTalkClient interface {
 	ResolveMember(context.Context, string) (dingtalk.Member, error)
 }
 
+type DingTalkAvatarFetcher interface {
+	FetchAvatar(context.Context, string) ([]byte, string, error)
+}
+
 type DingTalkAuthOptions struct {
 	Enabled       bool
 	ProviderKey   string

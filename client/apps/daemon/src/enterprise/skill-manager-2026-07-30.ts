@@ -21,7 +21,8 @@ import type {
 import type {
   EnterpriseHttpClient,
   EnterpriseRemoteSkill,
-  EnterpriseRemoteSkillDetail
+  EnterpriseRemoteSkillDetail,
+  EnterpriseSkillParticipantAvatarImage
 } from './http-client-2026-07-30.js';
 import { EnterpriseHttpError } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
@@ -34,6 +35,7 @@ export type EnterpriseSkillManager = {
   getSkillDetail(skillId: string): Promise<EnterpriseSkillDetailResponse>;
   installSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;
   updateSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;
+  getParticipantAvatar?(skillId: string, userId: string): Promise<EnterpriseSkillParticipantAvatarImage>;
 };
 
 export class EnterpriseSkillManagerError extends Error {
@@ -72,7 +74,11 @@ export function computeEnterpriseSkillState(input: {
       : { installedVersion: input.enterpriseRecord.version }),
     ...(input.remote?.updatedAt === undefined
       ? {}
-      : { updatedAt: input.remote.updatedAt })
+      : { updatedAt: input.remote.updatedAt }),
+    ...(input.remote?.spaceId === undefined ? {} : { spaceId: input.remote.spaceId }),
+    ...(input.remote?.spaceName === undefined ? {} : { spaceName: input.remote.spaceName }),
+    ...(input.remote?.creator === undefined ? {} : { creator: input.remote.creator }),
+    ...(input.remote?.contributors === undefined ? {} : { contributors: input.remote.contributors })
   };
 
   if (input.local === undefined) {
@@ -223,6 +229,15 @@ export function createEnterpriseSkillManager(input: {
       skills: await aggregateRemoteList(remoteSkills),
       refreshedAt: now().toISOString()
     };
+  }
+
+  async function getParticipantAvatar(skillId: string, userId: string): Promise<EnterpriseSkillParticipantAvatarImage> {
+    const accessToken = await requireToken();
+    const loadAvatar = input.httpClient.getSkillParticipantAvatar;
+    if (loadAvatar === undefined) {
+      throw new EnterpriseSkillManagerError('ENTERPRISE_SERVICE_UNAVAILABLE', 503);
+    }
+    return retryRead(() => loadAvatar(accessToken, skillId, userId));
   }
 
   async function aggregateRemoteList(
@@ -528,6 +543,7 @@ export function createEnterpriseSkillManager(input: {
   return {
     listSkills,
     getSkillDetail,
+    getParticipantAvatar,
     installSkill(skillId) {
       return mutateSkill(skillId, false);
     },

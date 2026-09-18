@@ -262,6 +262,29 @@ export async function registerEnterpriseRoutes(
     }
   });
 
+  server.get<{ Params: { skillId: string; userId: string } }>(
+    '/enterprise/skills/:skillId/participants/:userId/avatar',
+    async (request, reply) => {
+      const parsed = z.object({
+        skillId: z.string().trim().min(1).max(256),
+        userId: z.string().trim().min(1).max(256)
+      }).safeParse(request.params);
+      if (!parsed.success) {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'Participant identity is invalid'));
+      }
+      const loadAvatar = input.skillManager.getParticipantAvatar;
+      if (loadAvatar === undefined) {
+        return reply.code(503).send(apiError('ENTERPRISE_SERVICE_UNAVAILABLE', 'Participant avatar is unavailable'));
+      }
+      try {
+        const avatar = await loadAvatar(parsed.data.skillId, parsed.data.userId);
+        return reply.header('Cache-Control', 'private, no-store').type(avatar.contentType).send(Buffer.from(avatar.content));
+      } catch (error) {
+        return sendEnterpriseError(reply, error);
+      }
+    }
+  );
+
   server.get<{ Params: { skillId: string } }>(
     '/enterprise/skills/:skillId',
     async (request, reply) => {

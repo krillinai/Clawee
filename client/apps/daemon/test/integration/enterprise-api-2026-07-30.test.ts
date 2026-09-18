@@ -15,6 +15,7 @@ import type {
   EnterpriseHttpClient,
   EnterpriseMeResult
 } from '../../src/enterprise/http-client-2026-07-30.js';
+import { EnterpriseHttpError } from '../../src/enterprise/http-client-2026-07-30.js';
 import type { EnterpriseActivityReporter } from '../../src/enterprise/activity-reporter-2026-08-28.js';
 import type {
   EnterpriseKnowledgeManager
@@ -412,6 +413,39 @@ describe('enterprise runtime API', () => {
     ).toBe(200);
     expect(enterpriseSkillManager.installSkill).toHaveBeenCalledWith('skill_1');
     expect(enterpriseSkillManager.updateSkill).toHaveBeenCalledWith('skill_1');
+    const avatar = await authRequest('GET', '/enterprise/skills/skill_1/participants/user_1/avatar');
+    expect(avatar.statusCode).toBe(503);
+    expect(avatar.json()).toMatchObject({ error: { code: 'ENTERPRISE_SERVICE_UNAVAILABLE' } });
+  });
+
+  it('authenticates participant avatars, validates identities and forwards gateway errors', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-api-'));
+    const content = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    const getParticipantAvatar = vi.fn(async () => ({ content, contentType: 'image/svg+xml' as const }));
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore(), enterpriseHttpClient: createClient(),
+      enterpriseOrigin: 'https://enterprise.example',
+      enterpriseSkillManager: { ...createEnterpriseSkillManager(), getParticipantAvatar }
+    });
+    const url = '/enterprise/skills/skill_1/participants/user_1/avatar';
+    expect((await server.inject({ method: 'GET', url })).statusCode).toBe(401);
+    expect(getParticipantAvatar).not.toHaveBeenCalled();
+    const invalid = await authRequest('GET', '/enterprise/skills/skill_1/participants/%20/avatar');
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+    expect(getParticipantAvatar).not.toHaveBeenCalled();
+    const avatar = await authRequest('GET', url);
+    expect(avatar.statusCode).toBe(200);
+    expect(avatar.headers['content-type']).toContain('image/svg+xml');
+    expect(avatar.headers['cache-control']).toBe('private, no-store');
+    expect(avatar.rawPayload).toEqual(content);
+    expect(getParticipantAvatar).toHaveBeenCalledWith('skill_1', 'user_1');
+    getParticipantAvatar.mockRejectedValueOnce(new EnterpriseHttpError('ENTERPRISE_FORBIDDEN', 'response', 403));
+    const forbidden = await authRequest('GET', url);
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json()).toMatchObject({ error: { code: 'ENTERPRISE_FORBIDDEN' } });
   });
 
   it('exposes MCP catalog refresh and local preference routes without token fields', async () => {

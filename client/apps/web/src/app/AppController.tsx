@@ -6470,6 +6470,7 @@ export function AppController(props: AppControllerProps) {
         },
         onRefresh: refreshEnterpriseHub,
         onLoadDetail: loadEnterpriseSkillDetail,
+        onLoadParticipantAvatar: enterpriseService?.getSkillParticipantAvatar,
         onInstall: skillId => void installEnterpriseSkill(skillId),
         onUpdate: skillId => void updateEnterpriseSkill(skillId),
         onUse: (skill, projectId) => void useEnterpriseSkill(skill, projectId),

@@ -2153,6 +2153,34 @@
   gap: 10px;
 }
 
+.enterprise-skill-participant-avatars {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.enterprise-skill-participant-avatars .skill-market-avatar--small,
+.enterprise-skill-participant-more {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--surface);
+}
+
+.enterprise-skill-participant-avatars .skill-market-avatar--small + .skill-market-avatar--small,
+.enterprise-skill-participant-more {
+  margin-left: -8px;
+}
+
+.enterprise-skill-participant-more {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .enterprise-skill-row .skill-market-card__title {
   font-size: 14px;
   font-weight: 600;

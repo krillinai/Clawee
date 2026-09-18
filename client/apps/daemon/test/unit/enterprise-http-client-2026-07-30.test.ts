@@ -25,6 +25,31 @@ afterEach(() => {
 });
 
 describe('enterprise HTTP client', () => {
+  it('preserves skill space and participant summaries from the gateway', async () => {
+    const fetch = vi.fn(async () => jsonResponse({ data: [{
+      skill_id: 'skill-1', name: 'participants', description: '技能', version_id: 'version-1', version: '1',
+      package_sha256: 'a'.repeat(64), updated_at: '2026-09-18T00:00:00Z',
+      space_id: 'product', space_name: '产品空间', creator: { user_id: 'creator', name: '张三' },
+      contributors: [{ user_id: 'updater', name: '李四', avatar_url: '/protected-avatar' }]
+    }] }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    expect(await client.listSkills('token')).toMatchObject([{
+      spaceId: 'product', spaceName: '产品空间', creator: { userId: 'creator', name: '张三' },
+      contributors: [{ userId: 'updater', name: '李四', avatarUrl: '/protected-avatar' }]
+    }]);
+  });
+
+  it('fetches participant avatars with authorization and encoded identities', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('<svg/>', { headers: { 'Content-Type': 'image/svg+xml' } }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    const avatar = await client.getSkillParticipantAvatar!('token', 'skill/一', 'user/二');
+    const requested = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(requested.origin).toBe(ORIGIN);
+    expect(requested.searchParams.get('skill_id')).toBe('skill/一');
+    expect(requested.searchParams.get('user_id')).toBe('user/二');
+    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer token' });
+    expect(avatar.contentType).toBe('image/svg+xml');
+  });
   it('register sends the fixed client and stable agent identity', async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(JSON.parse(String(init?.body))).toEqual({

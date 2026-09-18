@@ -34,6 +34,7 @@ fi
 
 CLAW_GATEWAY_TEST_DATABASE_URL="$TEST_DATABASE_URL" go test ./internal/sharedfiles -run TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace -count=1
 CLAW_GATEWAY_TEST_DATABASE_URL="$TEST_DATABASE_URL" go test ./internal/accounts -run TestPostgresStoreBindsExternalIdentity -count=1
+CLAW_GATEWAY_TEST_DATABASE_URL="$TEST_DATABASE_URL" go test ./internal/store -run TestSkillParticipantsMigrationAndAggregationOnPostgres -count=1
 
 if [[ -d web ]]; then
   (cd web && pnpm test)

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SkillAuthorAvatar } from './SkillMarketCover.js';
+import { EnterpriseSkillParticipantAvatar } from './EnterpriseSkillParticipantAvatar.js';
 import { SkillUseProjectDialog, type SkillMarketProjectOption } from './SkillUseProjectDialog.js';
 
 export type EnterpriseSkillOperation =
@@ -47,6 +48,7 @@ export type EnterpriseSkillHubViewProps = {
   onOpenAccount(): void;
   onRefresh(): void;
   onLoadDetail(skillId: string): Promise<EnterpriseSkillDetailResponse>;
+  onLoadParticipantAvatar?(skillId: string, userId: string): Promise<Response>;
   onInstall(skillId: string): void;
   onUpdate(skillId: string): void;
   onUse(skill: EnterpriseSkillResponse, projectId: string): void;
@@ -54,30 +56,22 @@ export type EnterpriseSkillHubViewProps = {
   onUploadSkill?(): void;
 };
 
-const mockEnterpriseSkillInputs: Array<[string, string, string, EnterpriseSkillStatus]> = [
-  ['brand-compliance', '品牌合规审查', '检查营销内容中的品牌规范与敏感表达', 'installed'],
-  ['competitor-intelligence', '竞品动态监测', '汇总竞品发布、价格与渠道变化', 'installed'],
-  ['customer-insights', '客户洞察分析', '整理客户反馈、画像与流失风险', 'update_available'],
-  ['social-operations', '社媒运营助手', '生成内容计划并复盘互动表现', 'installed'],
-  ['channel-campaigns', '渠道投放分析', '对比渠道消耗、转化与 ROI', 'not_installed'],
-  ['business-weekly', '经营周报生成', '汇总核心业务指标并生成管理摘要', 'installed']
+const mockEnterpriseSkillInputs: Array<[string, string, string, EnterpriseSkillStatus, string]> = [
+  ['brand-compliance', '品牌合规审查', '检查营销内容中的品牌规范与敏感表达', 'installed', '林晓'],
+  ['competitor-intelligence', '竞品动态监测', '汇总竞品发布、价格与渠道变化', 'installed', '周宁'],
+  ['customer-insights', '客户洞察分析', '整理客户反馈、画像与流失风险', 'update_available', '陈嘉'],
+  ['social-operations', '社媒运营助手', '生成内容计划并复盘互动表现', 'installed', '许一'],
+  ['channel-campaigns', '渠道投放分析', '对比渠道消耗、转化与 ROI', 'not_installed', '赵晨'],
+  ['business-weekly', '经营周报生成', '汇总核心业务指标并生成管理摘要', 'installed', '王璐']
 ];
 
-const mockEnterpriseSkills: EnterpriseSkillResponse[] = mockEnterpriseSkillInputs.map(([skillId, name, description, status]) => ({
+const mockEnterpriseSkills: EnterpriseSkillResponse[] = mockEnterpriseSkillInputs.map(([skillId, name, description, status, author]) => ({
   skillId, name, description, status,
+  creator: { name: author },
   version: '1.2.0', installedVersion: status === 'not_installed' ? undefined : '1.1.0',
   updatedAt: '2026-08-03T08:00:00.000Z', integrity: status === 'not_installed' ? 'not_applicable' : 'verified',
   actions: status === 'not_installed' ? ['install'] : status === 'update_available' ? ['update', 'use'] : ['use']
 }));
-
-const mockEnterpriseSkillAuthors: Record<string, string> = {
-  'brand-compliance': '林晓',
-  'competitor-intelligence': '周宁',
-  'customer-insights': '陈嘉',
-  'social-operations': '许一',
-  'channel-campaigns': '赵晨',
-  'business-weekly': '王璐'
-};
 
 const mockEnterpriseSkillUsage: Record<string, number> = {
   'brand-compliance': 1284,
@@ -103,13 +97,29 @@ type ActiveDetail = {
 export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnterpriseStatusFilter>('all');
+  const [spaceFilter, setSpaceFilter] = useState('all');
   const [activeDetail, setActiveDetail] = useState<ActiveDetail>();
   const [pendingUseSkill, setPendingUseSkill] = useState<EnterpriseSkillResponse>();
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailRequestRef = useRef(0);
   const mutationLocked = props.operation !== undefined && props.operation.error === undefined;
-  const skills = props.skills !== undefined && props.skills.length > 0 ? props.skills : mockEnterpriseSkills;
+  const skills = props.session.status === 'signed_out' && !props.skills?.length
+    ? mockEnterpriseSkills
+    : props.skills ?? [];
+  const spaces = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const skill of skills) {
+      if (skill.spaceId !== undefined) byId.set(skill.spaceId, skill.spaceName ?? skill.spaceId);
+    }
+    return [...byId.entries()].sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'));
+  }, [skills]);
+
+  useEffect(() => {
+    if (spaceFilter !== 'all' && !spaces.some(([spaceId]) => spaceId === spaceFilter)) {
+      setSpaceFilter('all');
+    }
+  }, [spaces, spaceFilter]);
 
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -124,6 +134,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
       ) {
         return false;
       }
+      if (spaceFilter !== 'all' && skill.spaceId !== spaceFilter) return false;
       if (normalizedQuery.length === 0) return true;
       return [
         skill.skillId,
@@ -131,10 +142,12 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
         skill.description ?? '',
         skill.version ?? '',
         skill.installedVersion ?? '',
-        getEnterpriseSkillAuthor(skill.skillId)
+        skill.creator?.name ?? '',
+        ...(skill.contributors ?? []).map(item => item.name),
+        skill.spaceName ?? ''
       ].some(value => value.toLocaleLowerCase().includes(normalizedQuery));
     });
-  }, [skills, query, statusFilter]);
+  }, [skills, query, statusFilter, spaceFilter]);
   const installedCount = skills.filter(skill => skill.status === 'installed').length;
   const updateCount = skills.filter(skill => skill.status === 'update_available').length;
   const availableCount = skills.filter(skill => skill.status === 'not_installed').length;
@@ -231,6 +244,13 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
             <EnterpriseFilterButton active={statusFilter === 'update_available'} count={updateCount} label="可更新" onClick={() => setStatusFilter('update_available')} />
             <EnterpriseFilterButton active={statusFilter === 'not_installed'} count={availableCount} label="未安装" onClick={() => setStatusFilter('not_installed')} />
           </div>
+          <label className="enterprise-skill-filter">
+            <span>空间</span>
+            <select aria-label="技能空间" onChange={event => setSpaceFilter(event.target.value)} value={spaceFilter}>
+              <option value="all">全部空间</option>
+              {spaces.map(([spaceId, name]) => <option key={spaceId} value={spaceId}>{name}</option>)}
+            </select>
+          </label>
         </div>
       </div>
 
@@ -274,6 +294,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
               operation={props.operation}
               skill={skill}
               onInstall={props.onInstall}
+              onLoadParticipantAvatar={props.onLoadParticipantAvatar}
               onOpen={trigger => openDetail(skill, trigger)}
               onUpdate={props.onUpdate}
               onUse={() => requestUse(skill)}
@@ -341,8 +362,15 @@ function EnterpriseSkillRow(props: {
   onInstall(skillId: string): void;
   onUpdate(skillId: string): void;
   onUse(): void;
+  onLoadParticipantAvatar?(skillId: string, userId: string): Promise<Response>;
 }) {
-  const author = getEnterpriseSkillAuthor(props.skill.skillId);
+  const creator = props.skill.creator;
+  const author = creator?.name ?? '企业成员';
+  const participants = creator === undefined
+    ? props.skill.contributors ?? []
+    : [creator, ...(props.skill.contributors ?? [])];
+  const visibleParticipants = participants.slice(0, 3);
+  const extraParticipantCount = Math.max(0, participants.length - visibleParticipants.length);
   return (
     <article
       className="enterprise-skill-row skill-market-card"
@@ -357,16 +385,23 @@ function EnterpriseSkillRow(props: {
       >
           <span className="skill-market-card__body">
           <span className="skill-market-card__identity">
-            <SkillAuthorAvatar name={author} />
+            <span className="enterprise-skill-participant-avatars" title={`参与者：${participants.map(item => item.name).join('、')}`}>
+              {visibleParticipants.map((participant, index) => (
+                <EnterpriseSkillParticipantAvatar key={`${participant.userId ?? participant.name}-${index}`} skillId={props.skill.skillId} userId={participant.userId} name={participant.name} src={participant.avatarUrl} onLoadAvatar={props.onLoadParticipantAvatar} />
+              ))}
+              {participants.length === 0 ? <SkillAuthorAvatar name={author} /> : null}
+              {extraParticipantCount > 0 ? <span className="enterprise-skill-participant-more">+{extraParticipantCount}</span> : null}
+            </span>
             <span className="skill-market-card__identity-copy">
               <span className="skill-market-card__title">{props.skill.name}</span>
-              <span className="skill-market-card__author">{author}</span>
+              <span className="skill-market-card__author">{author}{props.skill.spaceName ? ` · ${props.skill.spaceName}` : ''}</span>
             </span>
           </span>
           <span className="skill-market-card__tagline" title={props.skill.description}>
             {props.skill.description ?? props.skill.skillId}
           </span>
           <span className="skill-market-card__tags">
+            {participants.length > 1 || (creator === undefined && participants.length > 0) ? <span title={participants.map(item => item.name).join('、')}>{participants.map(item => item.name).join('、')}</span> : null}
             <span>使用 {formatUsageCount(getEnterpriseSkillUsage(props.skill.skillId))} 次</span>
           </span>
         </span>
@@ -499,6 +534,18 @@ function EnterpriseSkillDetailDialog(props: {
                 <div>
                   <dt>更新时间</dt>
                   <dd>{formatUpdatedAt(skill.updatedAt)}</dd>
+                </div>
+                <div>
+                  <dt>所属空间</dt>
+                  <dd>{skill.spaceName ?? '空间信息暂不可用'}</dd>
+                </div>
+                <div>
+                  <dt>创建者</dt>
+                  <dd>{skill.creator?.name ?? '企业成员'}</dd>
+                </div>
+                <div>
+                  <dt>更新参与者</dt>
+                  <dd>{(skill.contributors ?? []).map(item => item.name).join('、') || '暂无'}</dd>
                 </div>
                 <div>
                   <dt>本地状态</dt>
@@ -649,10 +696,6 @@ function formatVersionSummary(skill: EnterpriseSkillResponse): string {
   if (skill.installedVersion !== undefined) return `本地 ${skill.installedVersion}`;
   if (skill.version !== undefined) return `版本 ${skill.version}`;
   return '版本未知';
-}
-
-function getEnterpriseSkillAuthor(skillId: string): string {
-  return mockEnterpriseSkillAuthors[skillId] ?? '企业成员';
 }
 
 function getEnterpriseSkillUsage(skillId: string): number {

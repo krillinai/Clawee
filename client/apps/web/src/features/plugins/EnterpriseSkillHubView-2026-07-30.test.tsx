@@ -18,6 +18,43 @@ const signedInSession: EnterpriseSessionResponse = {
 };
 
 describe('EnterpriseSkillHubView', () => {
+  it('shows real participant names, avatar overflow and space information', () => {
+    const skill = {
+      ...createSkill('participants', 'installed', 'verified', ['use']),
+      spaceId: 'product', spaceName: '产品技能空间',
+      creator: { userId: 'creator', name: '张三' },
+      contributors: [
+        { userId: 'user-2', name: '李四' },
+        { userId: 'user-3', name: '王五' },
+        { userId: 'user-4', name: '赵六' },
+        { userId: 'user-5', name: '钱七' }
+      ]
+    };
+    renderHub({ skills: [skill] });
+    const row = screen.getByTestId('enterprise-skill-participants');
+    expect(within(row).getByText('张三 · 产品技能空间')).toBeInTheDocument();
+    expect(within(row).getByLabelText('张三')).toHaveClass('skill-market-avatar');
+    expect(within(row).getByLabelText('李四')).toHaveClass('skill-market-avatar');
+    expect(within(row).getByText('+2')).toBeInTheDocument();
+    expect(within(row).getByText('张三、李四、王五、赵六、钱七')).toBeInTheDocument();
+  });
+
+  it('combines space, status and participant name search filters', async () => {
+    const user = userEvent.setup();
+    renderHub({ skills: [
+      { ...createSkill('product-installed', 'installed', 'verified', ['use']), spaceId: 'product', spaceName: '产品空间', creator: { name: '张三' } },
+      { ...createSkill('product-new', 'not_installed', 'not_applicable', ['install']), spaceId: 'product', spaceName: '产品空间', contributors: [{ userId: 'updater', name: '李四' }] },
+      { ...createSkill('market-new', 'not_installed', 'not_applicable', ['install']), spaceId: 'market', spaceName: '市场空间' }
+    ] });
+    await user.selectOptions(screen.getByRole('combobox', { name: '技能空间' }), 'product');
+    expect(screen.queryByTestId('enterprise-skill-market-new')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /未安装/ }));
+    expect(screen.queryByTestId('enterprise-skill-product-installed')).not.toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox', { name: '搜索企业 Skill' }), '李四');
+    const row = screen.getByTestId('enterprise-skill-product-new');
+    expect(row).toBeInTheDocument();
+    expect(within(row).getByText('李四')).toBeInTheDocument();
+  });
   it('renders all enterprise statuses with the exact allowed actions', () => {
     renderHub({
       skills: [
