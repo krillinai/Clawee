@@ -1076,6 +1076,51 @@ describe('Composer', () => {
     ).not.toBeInTheDocument());
   });
 
+  it('submits mixed image and document attachments with a third-party model', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => true);
+    const onUploadAttachment = vi.fn(async (file: File) => ({
+      ...attachment(file.name),
+      id: file.name,
+      mime: file.type
+    }));
+    mockObjectUrls();
+    render(
+      <Composer
+        {...defaultProps}
+        model="third-party-flash"
+        models={[{
+          ...codexModels[0]!,
+          id: 'third-party-flash',
+          model: 'third-party-flash',
+          displayName: 'Third-party Flash',
+          supportedReasoningEfforts: [],
+          defaultReasoningEffort: null
+        }]}
+        imageInputSupported
+        onUploadAttachment={onUploadAttachment}
+        onSubmit={onSubmit}
+      />
+    );
+    await user.upload(screen.getByLabelText('选择文件'), [
+      new File(['png'], 'screen.png', { type: 'image/png' }),
+      new File(['pdf'], 'guide.pdf', { type: 'application/pdf' })
+    ]);
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), '查看每个文件，提供表格');
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(
+      '查看每个文件，提供表格',
+      expect.objectContaining({ model: 'third-party-flash' }),
+      [
+        expect.objectContaining({ attachment: expect.objectContaining({ id: 'screen.png' }) }),
+        expect.objectContaining({ attachment: expect.objectContaining({ id: 'guide.pdf' }) })
+      ]
+    ));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('keeps an accepted attachment preview alive when submission changes the composer key', async () => {
     const user = userEvent.setup();
     mockObjectUrls();
@@ -1233,6 +1278,9 @@ describe('Composer', () => {
     await user.upload(fileInput, new File(['png'], 'screen.png', { type: 'image/png' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '当前 Codex 版本不支持图片输入，请更新 Codex'
+    );
+    expect(screen.getByRole('alert')).toHaveAttribute(
+      'title', '当前 Codex 版本不支持图片输入，请更新 Codex'
     );
     expect(screen.queryByRole('button', { name: '重试上传 screen.png' }))
       .not.toBeInTheDocument();

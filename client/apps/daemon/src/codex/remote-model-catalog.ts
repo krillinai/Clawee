@@ -29,7 +29,7 @@ export type InstallModelCatalogResult = {
 };
 
 type CatalogMeta = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   credentialVersion: number;
   requestUrl: string;
   defaultModel: string;
@@ -141,7 +141,7 @@ export async function installModelCatalog(input: {
     );
     writePrivateJson(paths.lastSuccess, normalized.catalog);
     writePrivateJson(paths.meta, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       credentialVersion: input.credentialVersion,
       requestUrl,
       defaultModel: input.defaultModel,
@@ -358,7 +358,7 @@ function readMeta(path: string): CatalogMeta | undefined {
     const value = JSON.parse(readFileSync(path, 'utf8')) as unknown;
     if (
       !isRecord(value)
-      || value.schemaVersion !== 2
+      || value.schemaVersion !== 3
       || !Number.isSafeInteger(value.credentialVersion)
       || typeof value.requestUrl !== 'string'
       || typeof value.defaultModel !== 'string'

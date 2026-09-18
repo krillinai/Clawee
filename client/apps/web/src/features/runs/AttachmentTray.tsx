@@ -90,7 +90,11 @@ export function AttachmentTray(props: {
                 </span>
               ) : null}
               {item.status === 'error' ? (
-                <span className="composer-attachment-status composer-attachment-error" role="alert">
+                <span
+                  className="composer-attachment-status composer-attachment-error"
+                  role="alert"
+                  title={item.error ?? '上传失败'}
+                >
                   {item.error ?? '上传失败'}
                 </span>
               ) : null}

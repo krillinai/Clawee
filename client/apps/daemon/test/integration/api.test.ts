@@ -1756,7 +1756,7 @@ describe('runtime api', () => {
         description: 'Configured by the Clawee model service.',
         supportedReasoningEfforts: [],
         defaultReasoningEffort: null,
-        inputModalities: ['text'],
+        inputModalities: ['text', 'image'],
         isDefault: true
       }]
     });
@@ -1807,7 +1807,7 @@ describe('runtime api', () => {
         description: 'Configured by the Clawee model service.',
         supportedReasoningEfforts: [],
         defaultReasoningEffort: null,
-        inputModalities: ['text'],
+        inputModalities: ['text', 'image'],
         isDefault: true
       }]
     });

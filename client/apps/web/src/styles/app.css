@@ -3939,6 +3939,7 @@ html.is-pane-resizing * {
 
 .composer-attachment-status.composer-attachment-error {
   color: var(--danger);
+  pointer-events: auto;
 }
 
 .composer-attachment-actions {

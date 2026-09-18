@@ -117,7 +117,7 @@ function configuredModelResponse(model: string): CodexModelResponse {
     description: 'Configured by the Clawee model service.',
     supportedReasoningEfforts: [],
     defaultReasoningEffort: null,
-    inputModalities: ['text'],
+    inputModalities: ['text', 'image'],
     isDefault: true
   };
 }

@@ -62,7 +62,7 @@ describe('Codex model catalog', () => {
           description: 'Configured by the Clawee model service.',
           supportedReasoningEfforts: [],
           defaultReasoningEffort: null,
-          inputModalities: ['text'],
+          inputModalities: ['text', 'image'],
           isDefault: true
         },
         model('gpt-5.6-sol', { isDefault: false })

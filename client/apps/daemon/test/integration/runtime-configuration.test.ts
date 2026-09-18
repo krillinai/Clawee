@@ -289,7 +289,7 @@ describe('Codex Runtime configuration', () => {
         shell_type: 'unified_exec',
         context_window: 64_000,
         max_context_window: 64_000,
-        input_modalities: ['text'],
+        input_modalities: ['text', 'image'],
         supports_image_detail_original: false,
         support_verbosity: false,
         base_instructions: 'Fake Codex base instructions'

@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('remote model catalog', () => {
-  it('converts the real OpenAI list shape with conservative capabilities', async () => {
+  it('converts the OpenAI list shape without disabling image input', async () => {
     const fixture = setup();
     const fetch = vi.fn(async () => jsonResponse({
       object: 'list',
@@ -57,7 +57,7 @@ describe('remote model catalog', () => {
       max_context_window: 64_000,
       default_reasoning_level: null,
       supported_reasoning_levels: [],
-      input_modalities: ['text'],
+      input_modalities: ['text', 'image'],
       supports_image_detail_original: false,
       supports_search_tool: false,
       supports_parallel_tool_calls: false,
@@ -91,6 +91,7 @@ describe('remote model catalog', () => {
         slug: 'model-b',
         display_name: 'Remote Model B',
         base_instructions: 'Remote instructions',
+        input_modalities: ['text'],
         future_capability: { enabled: true }
       }]
     }), 'model-a');
@@ -100,6 +101,8 @@ describe('remote model catalog', () => {
     expect(catalog.revision).toBe('remote-v1');
     expect(catalog.models.map(model => model.slug)).toEqual(['model-a', 'model-b']);
     expect(catalog.models[1]?.future_capability).toEqual({ enabled: true });
+    expect(catalog.models[1]?.input_modalities).toEqual(['text']);
+    expect(catalog.models[0]?.input_modalities).toEqual(['text', 'image']);
   });
 
   it.each([
@@ -178,6 +181,23 @@ describe('remote model catalog', () => {
       'If-None-Match': '"catalog-v1"'
     });
     expect(fetch.mock.calls[2]?.[1]?.headers).not.toHaveProperty('If-None-Match');
+  });
+
+  it('refreshes legacy text-only catalogs without reusing their ETag', async () => {
+    const fixture = setup();
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => jsonResponse({
+      object: 'list',
+      data: [{ id: 'model-a' }]
+    }, { etag: '"catalog-v1"' }));
+    await install(fixture, fetch, 'model-a');
+    const metaPath = join(fixture.codexHome, 'model-catalogs', 'clawee-catalog-meta.json');
+    const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+    writeFileSync(metaPath, JSON.stringify({ ...meta, schemaVersion: 2 }));
+
+    const result = await install(fixture, fetch, 'model-a');
+
+    expect(fetch.mock.calls[1]?.[1]?.headers).not.toHaveProperty('If-None-Match');
+    expect(readCatalog(result.path).models[0]?.input_modalities).toEqual(['text', 'image']);
   });
 
   it('does a full GET without ETag and detects unchanged content', async () => {

@@ -146,7 +146,8 @@ export function createGeneratedModel(
     comp_hash: null,
     effective_context_window_percent: 95,
     experimental_supported_tools: [],
-    input_modalities: ['text'],
+    // 普通 /models 列表没有能力声明，不能据此禁用图片输入。
+    input_modalities: ['text', 'image'],
     supports_search_tool: false,
     use_responses_lite: false,
     tool_mode: null,
