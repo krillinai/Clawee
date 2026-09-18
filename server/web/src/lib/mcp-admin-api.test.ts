@@ -546,7 +546,7 @@ describe("mcp-admin-api", () => {
       domain: "crm",
       riskLevel: "low"
     });
-    const status = await updateMCPCapabilityStatus("crm.customer/search", "active");
+    const status = await updateMCPCapabilityStatus("cap_search", "active");
     const renamed = await renameMCPCapability("crm.customer/search", "crm.customer.lookup");
     const gates = await updateMCPCapabilityGates("cap_search", {
       approvalRequired: true,
@@ -567,7 +567,7 @@ describe("mcp-admin-api", () => {
       "/api/v1/admin/mcp/capabilities",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ capability_id: "crm.customer/search", status: "active" })
+        body: JSON.stringify({ capability_id: "cap_search", status: "active" })
       })
     );
     expect(status.status).toBe("active");

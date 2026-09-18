@@ -158,10 +158,17 @@ export function MCPCapabilitiesPage() {
   const hasLoadError = capabilitiesQuery.isError || serversQuery.isError || grantsQuery.isError;
 
   const statusMutation = useMutation({
-    mutationFn: ({ exposedName, nextStatus }: { exposedName: string; nextStatus: string }) =>
-      updateMCPCapabilityStatus(exposedName, nextStatus),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: capabilitiesQueryKey });
+    mutationFn: ({ capabilityId, nextStatus }: { capabilityId: string; nextStatus: string }) =>
+      updateMCPCapabilityStatus(capabilityId, nextStatus),
+    onSuccess: async (update) => {
+      await queryClient.cancelQueries({ queryKey: capabilitiesQueryKey });
+      queryClient.setQueryData<MCPCapability[]>(capabilitiesQueryKey, (current) =>
+        current?.map((capability) => capability.id === update.id
+          ? { ...capability, status: update.status, updatedAt: update.updatedAt }
+          : capability
+        )
+      );
+      await queryClient.invalidateQueries({ queryKey: capabilitiesQueryKey });
     }
   });
 
@@ -532,12 +539,12 @@ export function MCPCapabilitiesPage() {
                             <Eye aria-hidden="true" />
                             详情
                           </Button>
-                          {canUpdateStatus && capability.status === "pending" ? (
+                          {canUpdateStatus && (capability.status === "pending" || capability.status === "disabled") ? (
                             <Button
                               disabled={statusMutation.isPending}
                               onClick={() => {
                                 statusMutation.mutate({
-                                  exposedName: capability.exposedName,
+                                  capabilityId: capability.id,
                                   nextStatus: "active"
                                 });
                               }}
@@ -552,7 +559,7 @@ export function MCPCapabilitiesPage() {
                               disabled={statusMutation.isPending}
                               onClick={() => {
                                 statusMutation.mutate({
-                                  exposedName: capability.exposedName,
+                                  capabilityId: capability.id,
                                   nextStatus: "disabled"
                                 });
                               }}

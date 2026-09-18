@@ -943,9 +943,9 @@ export function deleteMCPCapability(capabilityId: string) {
   return adminApi.post<void>("/mcp/capabilities/remove", { capability_id: capabilityId });
 }
 
-export async function updateMCPCapabilityStatus(exposedName: string, status: string) {
+export async function updateMCPCapabilityStatus(capabilityId: string, status: string) {
   const response = await adminApi.patch<MCPCapabilityStatusResponse>("/mcp/capabilities", {
-    capability_id: exposedName,
+    capability_id: capabilityId,
     status
   });
   return mapCapabilityStatusUpdate(response);

@@ -131,7 +131,7 @@ const grants: MCPGrant[] = [
 
 describe("MCPCapabilitiesPage", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     listMCPCapabilitiesMock.mockResolvedValue(capabilities);
     listMCPUpstreamServersMock.mockResolvedValue(servers);
     listMCPGrantsMock.mockImplementation((filters = {}) =>
@@ -200,8 +200,59 @@ describe("MCPCapabilitiesPage", () => {
     fireEvent.click(within(row).getByRole("button", { name: "启用" }));
 
     await waitFor(() => {
-      expect(updateMCPCapabilityStatusMock).toHaveBeenCalledWith("crm.customer.delete", "active");
+      expect(updateMCPCapabilityStatusMock).toHaveBeenCalledWith("cap_pending", "active");
     });
+  });
+
+  it("启用成功后立即切换按钮，并在列表刷新期间禁止重复操作", async () => {
+    listMCPCapabilitiesMock.mockResolvedValueOnce(capabilities).mockImplementationOnce(() => new Promise(() => {}));
+    renderPage();
+
+    const row = await findRowByText("crm.customer.delete");
+    fireEvent.click(within(row).getByRole("button", { name: "启用" }));
+
+    await waitFor(() => {
+      expect(within(row).getByRole("button", { name: "禁用" })).toBeDisabled();
+    });
+    expect(within(row).queryByRole("button", { name: "启用" })).not.toBeInTheDocument();
+  });
+
+  it("能力可以依次启用、禁用并重新启用", async () => {
+    let current = capabilities;
+    listMCPCapabilitiesMock.mockImplementation(() => Promise.resolve(current));
+    updateMCPCapabilityStatusMock.mockImplementation(async (id, status) => {
+      current = current.map((item) => item.id === id ? { ...item, status } : item);
+      return { id, status, exposedName: "crm.customer.delete", updatedAt: "2026-05-27T10:00:00Z" };
+    });
+    renderPage();
+
+    const row = await findRowByText("crm.customer.delete");
+    fireEvent.click(within(row).getByRole("button", { name: "启用" }));
+    await waitFor(() => expect(within(row).getByRole("button", { name: "禁用" })).toBeEnabled());
+    expect(within(row).getByText("正常")).toBeInTheDocument();
+
+    fireEvent.click(within(row).getByRole("button", { name: "禁用" }));
+    await waitFor(() => expect(within(row).getByRole("button", { name: "启用" })).toBeEnabled());
+    expect(within(row).getByText("已停用")).toBeInTheDocument();
+
+    fireEvent.click(within(row).getByRole("button", { name: "启用" }));
+    await waitFor(() => {
+      expect(updateMCPCapabilityStatusMock).toHaveBeenNthCalledWith(1, "cap_pending", "active");
+      expect(updateMCPCapabilityStatusMock).toHaveBeenNthCalledWith(2, "cap_pending", "disabled");
+      expect(updateMCPCapabilityStatusMock).toHaveBeenNthCalledWith(3, "cap_pending", "active");
+    });
+  });
+
+  it("启用请求失败时保留原状态并恢复操作按钮", async () => {
+    updateMCPCapabilityStatusMock.mockRejectedValueOnce(new Error("启用失败"));
+    renderPage();
+
+    const row = await findRowByText("crm.customer.delete");
+    fireEvent.click(within(row).getByRole("button", { name: "启用" }));
+
+    expect(await screen.findByText("启用失败")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "启用" })).toBeEnabled();
+    expect(within(row).queryByRole("button", { name: "禁用" })).not.toBeInTheDocument();
   });
 
   it("does not open rename editing for missing capabilities", async () => {
