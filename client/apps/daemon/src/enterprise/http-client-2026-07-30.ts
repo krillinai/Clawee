@@ -38,7 +38,8 @@ const accountSchema = z.object({
   user_id: z.string().min(1).optional(),
   email: z.string().min(1),
   name: z.string(),
-  status: z.string()
+  status: z.string(),
+  avatar_url: z.string().min(1).optional()
 }).superRefine((account, context) => {
   if (account.account_id === undefined && account.user_id === undefined) {
     context.addIssue({
@@ -262,7 +263,19 @@ const remoteSkillSchema = z.object({
   version_id: z.string().min(1),
   version: z.string(),
   package_sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  updated_at: z.string().datetime({ offset: true })
+  updated_at: z.string().datetime({ offset: true }),
+  space_id: z.string().min(1).optional(),
+  space_name: z.string().optional(),
+  creator: z.object({
+    user_id: z.string().min(1).optional(),
+    name: z.string(),
+    avatar_url: z.string().min(1).optional()
+  }).optional(),
+  contributors: z.array(z.object({
+    user_id: z.string().min(1),
+    name: z.string(),
+    avatar_url: z.string().min(1).optional()
+  })).optional()
 });
 const skillListResponseSchema = z.object({
   data: z.array(remoteSkillSchema)
@@ -613,6 +626,18 @@ export type EnterpriseRemoteSkill = {
   version: string;
   packageSha256: string;
   updatedAt: string;
+  spaceId?: string;
+  spaceName?: string;
+  creator?: {
+    userId?: string;
+    name: string;
+    avatarUrl?: string;
+  };
+  contributors?: Array<{
+    userId: string;
+    name: string;
+    avatarUrl?: string;
+  }>;
 };
 
 export type EnterpriseAccountMcpToken = {
@@ -753,6 +778,11 @@ export type EnterprisePlatformBranding = {
 export type EnterprisePlatformBrandingImage = {
   content: Uint8Array;
   contentType: 'image/png' | 'image/jpeg';
+};
+
+export type EnterpriseSkillParticipantAvatarImage = {
+  content: Uint8Array;
+  contentType: 'image/png' | 'image/jpeg' | 'image/svg+xml';
 };
 
 export type EnterpriseDingTalkAuthorizationInput = {
@@ -932,6 +962,11 @@ export type EnterpriseHttpClient = {
     accessToken: string,
     skillId: string
   ): Promise<EnterpriseRemoteSkillDetail>;
+  getSkillParticipantAvatar?(
+    accessToken: string,
+    skillId: string,
+    userId: string
+  ): Promise<EnterpriseSkillParticipantAvatarImage>;
   downloadSkillPackage(
     input: EnterpriseDownloadInput
   ): Promise<{ bytes: number; sha256: string }>;
@@ -1090,14 +1125,18 @@ export function createEnterpriseHttpClient(input: {
     }
   }
 
-  async function requestPlatformBrandingImage(
+  function requestImage(accessToken: string, path: string, maxBytes: number): Promise<EnterprisePlatformBrandingImage>;
+  function requestImage(accessToken: string, path: string, maxBytes: number, allowGeneratedSvg: true): Promise<EnterpriseSkillParticipantAvatarImage>;
+  async function requestImage(
     accessToken: string,
-    kind: 'sidebar-logo' | 'sidebar-compact-logo'
-  ): Promise<EnterprisePlatformBrandingImage> {
+    path: string,
+    maxBytes: number,
+    allowGeneratedSvg = false
+  ): Promise<EnterpriseSkillParticipantAvatarImage> {
     let response: Response;
     try {
       response = await fetchImpl(
-        new URL(`/api/v1/app/platform-branding/${kind}`, origin),
+        new URL(path, origin),
         {
           headers: jsonHeaders(accessToken, false),
           method: 'GET',
@@ -1109,15 +1148,15 @@ export function createEnterpriseHttpClient(input: {
     }
     if (!response.ok) throw await createResponseError(response);
     const contentType = response.headers.get('content-type')?.split(';', 1)[0];
-    if (contentType !== 'image/png' && contentType !== 'image/jpeg') {
+    if (contentType !== 'image/png' && contentType !== 'image/jpeg' && !(allowGeneratedSvg && contentType === 'image/svg+xml')) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
     }
     const declaredSize = parseContentLength(response.headers.get('content-length'));
-    if (declaredSize !== undefined && (declaredSize === 0 || declaredSize > 1024 * 1024)) {
+    if (declaredSize !== undefined && (declaredSize === 0 || declaredSize > maxBytes)) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
     }
     const content = new Uint8Array(await response.arrayBuffer());
-    if (content.byteLength === 0 || content.byteLength > 1024 * 1024) {
+    if (content.byteLength === 0 || content.byteLength > maxBytes) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
     }
     return { content, contentType };
@@ -1336,7 +1375,7 @@ export function createEnterpriseHttpClient(input: {
     },
 
     getPlatformBrandingImage(accessToken, kind) {
-      return requestPlatformBrandingImage(accessToken, kind);
+      return requestImage(accessToken, `/api/v1/app/platform-branding/${kind}`, 1024 * 1024);
     },
 
     async revealAccountMcpToken(accessToken) {
@@ -1410,6 +1449,11 @@ export function createEnterpriseHttpClient(input: {
           ? {}
           : { changelog: response.data.changelog })
       };
+    },
+
+    getSkillParticipantAvatar(accessToken, skillId, userId) {
+      const query = new URLSearchParams({ skill_id: skillId, user_id: userId });
+      return requestImage(accessToken, `/api/v1/app/skills/participant-avatar?${query.toString()}`, 2 * 1024 * 1024, true);
     },
 
     async listKnowledgeBases(accessToken) {
@@ -2089,7 +2133,8 @@ function accountSummary(account: z.infer<typeof accountSchema>): EnterpriseAccou
   return {
     subjectId: account.account_id ?? account.user_id!,
     email: account.email,
-    name: account.name
+    name: account.name,
+    ...(account.avatar_url === undefined ? {} : { avatarUrl: account.avatar_url })
   };
 }
 
@@ -2105,7 +2150,23 @@ function mapRemoteSkill(
     versionId: skill.version_id,
     version: skill.version,
     packageSha256: skill.package_sha256,
-    updatedAt: skill.updated_at
+    updatedAt: skill.updated_at,
+    ...(skill.space_id === undefined ? {} : { spaceId: skill.space_id }),
+    ...(skill.space_name === undefined ? {} : { spaceName: skill.space_name }),
+    ...(skill.creator === undefined ? {} : {
+      creator: {
+        ...(skill.creator.user_id === undefined ? {} : { userId: skill.creator.user_id }),
+        name: skill.creator.name,
+        ...(skill.creator.avatar_url === undefined ? {} : { avatarUrl: skill.creator.avatar_url })
+      }
+    }),
+    ...(skill.contributors === undefined ? {} : {
+      contributors: skill.contributors.map(item => ({
+        userId: item.user_id,
+        name: item.name,
+        ...(item.avatar_url === undefined ? {} : { avatarUrl: item.avatar_url })
+      }))
+    })
   };
 }
 

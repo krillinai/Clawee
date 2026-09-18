@@ -1,16 +1,89 @@
 package dingtalk
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/jpeg"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type avatarRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f avatarRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestFetchAvatarValidatesCompleteImages(t *testing.T) {
+	for _, format := range []string{"png", "jpeg"} {
+		t.Run(format, func(t *testing.T) {
+			var encoded bytes.Buffer
+			picture := image.NewRGBA(image.Rect(0, 0, 2, 2))
+			var err error
+			if format == "png" {
+				err = png.Encode(&encoded, picture)
+			} else {
+				err = jpeg.Encode(&encoded, picture, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			data := encoded.Bytes()
+			httpClient := &http.Client{Transport: avatarRoundTripper(func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+			})}
+			client := NewClientWithEndpoints("app", "secret", httpClient, Endpoints{}, time.Now)
+			actual, contentType, err := client.FetchAvatar(context.Background(), "https://static.dingtalk.com/avatar")
+			if err != nil || !bytes.Equal(actual, data) || contentType != "image/"+format {
+				t.Fatalf("valid avatar: content type=%q, error=%v", contentType, err)
+			}
+			for size := 1; size < len(encoded.Bytes()); size++ {
+				data = encoded.Bytes()[:size]
+				if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+					continue
+				}
+				if _, _, err := client.FetchAvatar(context.Background(), "https://static.dingtalk.com/avatar"); err == nil {
+					t.Fatal("truncated avatar was accepted")
+				}
+				break
+			}
+		})
+	}
+}
+
+func TestTrustedAvatarURL(t *testing.T) {
+	for _, test := range []struct {
+		url     string
+		trusted bool
+	}{
+		{url: "https://static.dingtalk.com/media/avatar.png", trusted: true},
+		{url: "http://static.dingtalk.com/media/avatar.png"},
+		{url: "https://dingtalk.com.attacker.example/avatar.png"},
+		{url: "https://127.0.0.1/avatar.png"},
+		{url: "https://user@static.dingtalk.com/avatar.png"},
+		{url: "https://static.dingtalk.com:443/avatar.png"},
+	} {
+		t.Run(test.url, func(t *testing.T) {
+			parsed, err := url.Parse(test.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if trustedAvatarURL(parsed) != test.trusted {
+				t.Fatalf("trustedAvatarURL(%q) != %v", test.url, test.trusted)
+			}
+		})
+	}
+}
 
 func TestResolveMemberUsesFourStepFlowAndCachesAppToken(t *testing.T) {
 	var appTokenCalls atomic.Int32
@@ -23,7 +96,7 @@ func TestResolveMemberUsesFourStepFlowAndCachesAppToken(t *testing.T) {
 			if r.Header.Get("x-acs-dingtalk-access-token") != "user-token" {
 				t.Fatal("missing user token header")
 			}
-			writeJSON(t, w, map[string]any{"unionId": "union-1", "nick": "昵称"})
+			writeJSON(t, w, map[string]any{"unionId": "union-1", "nick": "昵称", "avatarUrl": "https://img.dingtalk.com/avatar.jpg"})
 		case "/app-token":
 			appTokenCalls.Add(1)
 			writeJSON(t, w, map[string]any{"accessToken": "app-token", "expireIn": 7200})
@@ -48,7 +121,7 @@ func TestResolveMemberUsesFourStepFlowAndCachesAppToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if member != (Member{UnionID: "union-1", UserID: "staff-1", Name: "成员", Email: "member@example.com"}) {
+		if member != (Member{UnionID: "union-1", UserID: "staff-1", Name: "成员", Email: "member@example.com", AvatarURL: "https://img.dingtalk.com/avatar.jpg"}) {
 			t.Fatalf("member = %#v", member)
 		}
 	}
@@ -159,7 +232,7 @@ func TestStaffEmailPriority(t *testing.T) {
 			}))
 			defer server.Close()
 			client := NewClientWithEndpoints("app", "secret", server.Client(), Endpoints{UserDetail: server.URL}, time.Now)
-			_, email, err := client.userDetail(context.Background(), "app-token", "staff-1")
+			_, email, _, err := client.userDetail(context.Background(), "app-token", "staff-1")
 			if err != nil || email != test.wantEmail {
 				t.Fatalf("email = %q, error = %v; want %q", email, err, test.wantEmail)
 			}

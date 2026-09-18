@@ -873,6 +873,7 @@ export type EnterpriseAccountSummary = {
   subjectId: string;
   email: string;
   name: string;
+  avatarUrl?: string;
 };
 
 export type EnterpriseSessionResponse = {
@@ -1417,6 +1418,16 @@ export type EnterpriseSkillIntegrity =
 
 export type EnterpriseSkillAction = 'install' | 'update' | 'use';
 
+export type EnterpriseSkillParticipant = {
+  userId: string;
+  name: string;
+  avatarUrl?: string;
+};
+
+export type EnterpriseSkillCreator = Omit<EnterpriseSkillParticipant, 'userId'> & {
+  userId?: string;
+};
+
 export type EnterpriseSkillResponse = {
   skillId: string;
   name: string;
@@ -1427,6 +1438,10 @@ export type EnterpriseSkillResponse = {
   status: EnterpriseSkillStatus;
   integrity: EnterpriseSkillIntegrity;
   actions: EnterpriseSkillAction[];
+  spaceId?: string;
+  spaceName?: string;
+  creator?: EnterpriseSkillCreator;
+  contributors?: EnterpriseSkillParticipant[];
 };
 
 export type EnterpriseSkillListResponse = {

@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +17,7 @@ import (
 )
 
 const maxResponseBytes = 1 << 20
+const maxAvatarBytes = 2 << 20
 
 type Endpoints struct {
 	UserToken     string
@@ -69,7 +73,7 @@ func (c *Client) ResolveMember(ctx context.Context, code string) (Member, error)
 	if err != nil {
 		return Member{}, err
 	}
-	unionID, fallbackName, err := c.currentUser(ctx, userToken)
+	unionID, fallbackName, avatarURL, err := c.currentUser(ctx, userToken)
 	if err != nil {
 		return Member{}, err
 	}
@@ -81,14 +85,70 @@ func (c *Client) ResolveMember(ctx context.Context, code string) (Member, error)
 	if err != nil {
 		return Member{}, err
 	}
-	name, email, err := c.userDetail(ctx, appToken, userID)
+	name, email, detailAvatarURL, err := c.userDetail(ctx, appToken, userID)
 	if err != nil {
 		return Member{}, err
 	}
 	if strings.TrimSpace(name) == "" {
 		name = fallbackName
 	}
-	return Member{UnionID: unionID, UserID: userID, Name: strings.TrimSpace(name), Email: strings.TrimSpace(email)}, nil
+	if strings.TrimSpace(avatarURL) == "" {
+		avatarURL = detailAvatarURL
+	}
+	return Member{UnionID: unionID, UserID: userID, Name: strings.TrimSpace(name), Email: strings.TrimSpace(email), AvatarURL: strings.TrimSpace(avatarURL)}, nil
+}
+
+func (c *Client) FetchAvatar(ctx context.Context, avatarURL string) ([]byte, string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(avatarURL))
+	if err != nil || !trustedAvatarURL(parsed) {
+		return nil, "", &APIError{Step: "avatar", Code: "invalid_url"}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, "", &APIError{Step: "avatar", Code: "invalid_url"}
+	}
+	client := *c.httpClient
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("too many avatar redirects")
+		}
+		if !trustedAvatarURL(next.URL) {
+			return fmt.Errorf("untrusted avatar redirect")
+		}
+		return nil
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, "", &APIError{Step: "avatar", Code: "transport_error"}
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, "", &APIError{Step: "avatar", Code: "http_error", HTTPStatus: response.StatusCode}
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxAvatarBytes+1))
+	if err != nil || len(raw) == 0 || len(raw) > maxAvatarBytes {
+		return nil, "", &APIError{Step: "avatar", Code: "invalid_response", HTTPStatus: response.StatusCode}
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 4096 || config.Height > 4096 || (format != "jpeg" && format != "png") {
+		return nil, "", &APIError{Step: "avatar", Code: "invalid_image", HTTPStatus: response.StatusCode}
+	}
+	if _, decodedFormat, err := image.Decode(bytes.NewReader(raw)); err != nil || decodedFormat != format {
+		return nil, "", &APIError{Step: "avatar", Code: "invalid_image", HTTPStatus: response.StatusCode}
+	}
+	contentType := "image/jpeg"
+	if format == "png" {
+		contentType = "image/png"
+	}
+	return raw, contentType, nil
+}
+
+func trustedAvatarURL(value *url.URL) bool {
+	if value == nil || value.Scheme != "https" || value.Host == "" || value.User != nil || value.Port() != "" {
+		return false
+	}
+	host := strings.ToLower(value.Hostname())
+	return host == "dingtalk.com" || strings.HasSuffix(host, ".dingtalk.com")
 }
 
 func (c *Client) exchangeUserToken(ctx context.Context, code string) (string, error) {
@@ -107,20 +167,21 @@ func (c *Client) exchangeUserToken(ctx context.Context, code string) (string, er
 	return response.AccessToken, nil
 }
 
-func (c *Client) currentUser(ctx context.Context, userToken string) (string, string, error) {
+func (c *Client) currentUser(ctx context.Context, userToken string) (string, string, string, error) {
 	var response struct {
-		UnionID string `json:"unionId"`
-		Nick    string `json:"nick"`
+		UnionID   string `json:"unionId"`
+		Nick      string `json:"nick"`
+		AvatarURL string `json:"avatarUrl"`
 	}
 	err := c.doJSON(ctx, "current_user", http.MethodGet, c.endpoints.CurrentUser, nil,
 		map[string]string{"x-acs-dingtalk-access-token": userToken}, &response)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if strings.TrimSpace(response.UnionID) == "" {
-		return "", "", &APIError{Step: "current_user", Code: "invalid_response", HTTPStatus: http.StatusOK}
+		return "", "", "", &APIError{Step: "current_user", Code: "invalid_response", HTTPStatus: http.StatusOK}
 	}
-	return strings.TrimSpace(response.UnionID), strings.TrimSpace(response.Nick), nil
+	return strings.TrimSpace(response.UnionID), strings.TrimSpace(response.Nick), strings.TrimSpace(response.AvatarURL), nil
 }
 
 func (c *Client) getAppToken(ctx context.Context) (string, error) {
@@ -169,7 +230,7 @@ func (c *Client) userIDByUnionID(ctx context.Context, appToken, unionID string) 
 	return strings.TrimSpace(response.Result.UserID), nil
 }
 
-func (c *Client) userDetail(ctx context.Context, appToken, userID string) (string, string, error) {
+func (c *Client) userDetail(ctx context.Context, appToken, userID string) (string, string, string, error) {
 	var response struct {
 		ErrCode int `json:"errcode"`
 		Result  *struct {
@@ -177,17 +238,18 @@ func (c *Client) userDetail(ctx context.Context, appToken, userID string) (strin
 			OrgEmail  string `json:"org_email"`
 			Email     string `json:"email"`
 			Extension string `json:"extension"`
+			Avatar    string `json:"avatar"`
 		} `json:"result"`
 	}
 	endpoint := withAccessToken(c.endpoints.UserDetail, appToken)
 	if err := c.doJSON(ctx, "user_detail", http.MethodPost, endpoint, map[string]string{"userid": userID}, nil, &response); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if response.ErrCode != 0 {
-		return "", "", &APIError{Step: "user_detail", Code: fmt.Sprint(response.ErrCode), HTTPStatus: http.StatusOK}
+		return "", "", "", &APIError{Step: "user_detail", Code: fmt.Sprint(response.ErrCode), HTTPStatus: http.StatusOK}
 	}
 	if response.Result == nil {
-		return "", "", &APIError{Step: "user_detail", Code: "invalid_response", HTTPStatus: http.StatusOK}
+		return "", "", "", &APIError{Step: "user_detail", Code: "invalid_response", HTTPStatus: http.StatusOK}
 	}
 	email := strings.TrimSpace(response.Result.OrgEmail)
 	if email == "" {
@@ -201,7 +263,7 @@ func (c *Client) userDetail(ctx context.Context, appToken, userID string) (strin
 			}
 		}
 	}
-	return strings.TrimSpace(response.Result.Name), email, nil
+	return strings.TrimSpace(response.Result.Name), email, strings.TrimSpace(response.Result.Avatar), nil
 }
 
 func withAccessToken(endpoint, token string) string {
