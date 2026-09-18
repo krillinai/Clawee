@@ -1171,7 +1171,7 @@ describe('Composer', () => {
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
   });
 
-  it('uploads data, source, config and HTML attachments without image input support', async () => {
+  it('uploads data, source, config, HTML and Office attachments without image input support', async () => {
     const user = userEvent.setup();
     const onUploadAttachment = vi.fn(async (file: File) => ({
       ...attachment(file.name),
@@ -1192,7 +1192,10 @@ describe('Composer', () => {
       new File(['enabled: true'], 'config.yaml', { type: 'application/yaml' }),
       new File(['<script>throw new Error("must not execute")</script>'], 'page.html', {
         type: 'text/html'
-      })
+      }),
+      new File(['docx'], 'report.docx', { type: '' }),
+      new File(['xlsx'], 'report.xlsx', { type: 'application/vnd.ms-excel' }),
+      new File(['pptx'], 'report.pptx', { type: 'application/octet-stream' })
     ];
 
     await user.upload(screen.getByLabelText('选择文件'), files);

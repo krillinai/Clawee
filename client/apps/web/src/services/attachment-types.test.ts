@@ -14,6 +14,9 @@ describe('attachment types', () => {
     ['html', 'text/html'],
     ['htm', 'text/html'],
     ['css', 'text/css'],
+    ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
     ...[
       'log', 'toml', 'ini', 'cfg', 'conf', 'properties', 'env',
       'jsonc', 'jsonl', 'ndjson', 'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx',
@@ -59,7 +62,7 @@ describe('attachment types', () => {
       .toBeUndefined();
     expect(resolveAttachmentMime({ name: 'photo.svg', type: 'image/svg+xml' }))
       .toBeUndefined();
-    expect(resolveAttachmentMime({ name: 'workbook.xlsx', type: 'application/vnd.ms-excel' }))
+    expect(resolveAttachmentMime({ name: 'workbook.xls', type: 'application/vnd.ms-excel' }))
       .toBeUndefined();
   });
 });

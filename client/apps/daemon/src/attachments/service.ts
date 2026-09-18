@@ -22,6 +22,7 @@ import {
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { nanoid } from 'nanoid';
 import { extractText, getDocumentProxy } from 'unpdf';
+import { OFFICE_ATTACHMENT_FORMATS, OfficeAttachmentError, processOfficeAttachment } from './office.js';
 
 export const ATTACHMENT_MAX_SIZE_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -29,6 +30,7 @@ export const ATTACHMENT_CONTEXT_CHAR_LIMIT = 80_000;
 export const ATTACHMENT_CONTEXT_FILE_CHAR_LIMIT = 40_000;
 
 const ALLOWED_MIME_TYPES = new Set([
+  ...Object.keys(OFFICE_ATTACHMENT_FORMATS),
   'application/json',
   'application/pdf',
   'image/gif',
@@ -145,7 +147,7 @@ export function createAttachmentService(input: CreateAttachmentServiceInput) {
     const owner = validateOwner(request);
     const fileName = sanitizeFileName(request.fileName);
     const mime = normalizeMime(request.mime);
-    validateContent(request.content, mime, maxSizeBytes);
+    await validateContent(request.content, mime, maxSizeBytes);
     const sha256 = createHash('sha256').update(request.content).digest('hex');
 
     if (owner.draftId !== undefined) {
@@ -343,11 +345,11 @@ export function createAttachmentService(input: CreateAttachmentServiceInput) {
         continue;
       }
 
-      const extracted = await extractAttachmentText(row, path);
       const availableChars = Math.max(
         0,
         Math.min(ATTACHMENT_CONTEXT_FILE_CHAR_LIMIT, remainingContextChars)
       );
+      const extracted = await extractAttachmentText(row, path, availableChars);
       const truncated = truncateAttachmentText(extracted.content, availableChars);
       remainingContextChars -= truncated.content.length;
       textAttachments.push({
@@ -471,7 +473,7 @@ function normalizeMime(value: string): string {
   return mime;
 }
 
-function validateContent(content: Buffer, declaredMime: string, maxSizeBytes: number): void {
+async function validateContent(content: Buffer, declaredMime: string, maxSizeBytes: number): Promise<void> {
   if (content.length === 0) {
     throw new AttachmentServiceError('VALIDATION_FAILED', 'Attachment must not be empty', 400);
   }
@@ -482,6 +484,10 @@ function validateContent(content: Buffer, declaredMime: string, maxSizeBytes: nu
       413,
       { maxSizeBytes, size: content.length }
     );
+  }
+  if (OFFICE_ATTACHMENT_FORMATS[declaredMime] !== undefined) {
+    await processOfficeContent(content, declaredMime, 'validate');
+    return;
   }
   const detectedMime = detectMime(content, declaredMime);
   if (detectedMime !== declaredMime) {
@@ -524,9 +530,13 @@ function detectMime(content: Buffer, declaredMime: string): string {
 
 async function extractAttachmentText(
   row: AttachmentRow,
-  path: string
+  path: string,
+  maxChars: number
 ): Promise<{ content: string; detail?: string }> {
   const content = await readFile(path);
+  if (OFFICE_ATTACHMENT_FORMATS[row.mime] !== undefined) {
+    return processOfficeContent(content, row.mime, 'extract', maxChars);
+  }
   if (row.mime === 'application/pdf') {
     try {
       const pdf = await getDocumentProxy(new Uint8Array(
@@ -567,6 +577,19 @@ async function extractAttachmentText(
   }
 
   return { content: normalizeExtractedText(content.toString('utf8')) };
+}
+
+async function processOfficeContent(
+  content: Buffer, mime: string, mode: 'validate' | 'extract', maxChars?: number
+) {
+  try {
+    return await processOfficeAttachment(content, mime, mode, maxChars);
+  } catch (error) {
+    if (error instanceof OfficeAttachmentError) {
+      throw new AttachmentServiceError(error.code, error.message, 415, { mime });
+    }
+    throw error;
+  }
 }
 
 function normalizeExtractedText(value: string): string {

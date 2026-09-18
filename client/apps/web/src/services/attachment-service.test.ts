@@ -55,8 +55,11 @@ describe('attachment service', () => {
   it.each([
     ['data.csv', 'application/vnd.ms-excel', 'text/csv'],
     ['index.ts', 'video/mp2t', 'text/plain'],
-    ['config.yaml', 'application/yaml', 'text/yaml']
-  ])('uploads %s with a canonical text MIME type', async (fileName, browserMime, mime) => {
+    ['config.yaml', 'application/yaml', 'text/yaml'],
+    ['report.docx', '', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['report.xlsx', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['report.pptx', 'application/octet-stream', 'application/vnd.openxmlformats-officedocument.presentationml.presentation']
+  ])('uploads %s with a canonical MIME type', async (fileName, browserMime, mime) => {
     const postBinary = vi.fn(async () => ({ attachment: { id: 'attachment-text' } }));
     const service = createAttachmentService({ postBinary } as unknown as RuntimeClient);
     const file = new File(['text content'], fileName, { type: browserMime });

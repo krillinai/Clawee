@@ -873,7 +873,7 @@ describe('runtime api', () => {
     });
   });
 
-  it('runs PDF-independent text attachments as prompt context without image capability', async () => {
+  it.each(['md', 'docx', 'xlsx', 'pptx'] as const)('runs %s attachments as prompt context without image capability', async format => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-run-documents-'));
     const fake = createFakeCodex(tempDir, {
       stdoutLines: [
@@ -898,14 +898,20 @@ describe('runtime api', () => {
       profile: 'default',
       sandbox: 'read-only'
     })).json().thread as { id: string };
+    const { createDocx, createXlsx, createPptx, OFFICE_MIMES } = await import('../helpers/office-fixtures.js');
+    const content = format === 'md' ? Buffer.from('# Requirements\nUse the shared daemon service.')
+      : format === 'docx' ? createDocx('Use the shared daemon service.')
+        : format === 'xlsx' ? await createXlsx() : createPptx();
+    const mime = format === 'md' ? 'text/markdown' : OFFICE_MIMES[format];
     const uploaded = await authUpload(
       `/attachments?${new URLSearchParams({
         draftId: 'draft-documents',
-        fileName: 'requirements.md',
-        mime: 'text/markdown'
+        fileName: `requirements.${format}`,
+        mime
       })}`,
-      Buffer.from('# Requirements\nUse the shared daemon service.')
+      content
     );
+    expect(uploaded.statusCode).toBe(201);
     const attachmentId = uploaded.json().attachment.id as string;
 
     const created = await authPost('/runs', {
@@ -919,9 +925,10 @@ describe('runtime api', () => {
 
     expect(fake.readArgv()).not.toContain('--image');
     expect(fake.readPrompt()).toContain(
-      '附件 1：requirements.md（text/markdown）'
+      `附件 1：requirements.${format}（${mime}`
     );
-    expect(fake.readPrompt()).toContain('Use the shared daemon service.');
+    expect(fake.readPrompt()).toContain(format === 'xlsx' ? 'E3=公式：A3*2'
+      : format === 'pptx' ? 'First displayed slide' : 'Use the shared daemon service.');
     expect(fake.readPrompt()).toContain('根据附件给出实现建议');
     expect(created.json()).toMatchObject({
       attachments: [{
