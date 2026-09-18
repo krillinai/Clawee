@@ -31,6 +31,76 @@ func TestAccountDisplayNameUsesStableFallbackOrder(t *testing.T) {
 	}
 }
 
+func TestGeneratedAvatarIsStableAndEscaped(t *testing.T) {
+	account := Account{UserID: "usr-1", Email: "avatar@example.com", Name: "<张三>"}
+	first := GeneratedAvatar(account)
+	second := GeneratedAvatar(account)
+	if first.ContentType != "image/svg+xml" || first.Source != AvatarSourceGenerated {
+		t.Fatalf("generated avatar metadata = %#v", first)
+	}
+	if string(first.Data) != string(second.Data) {
+		t.Fatal("generated avatar is not stable")
+	}
+	if !strings.Contains(string(first.Data), ">&lt;</text>") {
+		t.Fatalf("generated avatar label was not escaped: %s", first.Data)
+	}
+}
+
+func TestAccountCreationStoresAndRestoresGeneratedAvatar(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	svc := NewService(Config{Store: store})
+	registered, err := svc.Register(ctx, RegisterRequest{Email: "avatar@example.com", Name: "Avatar User", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	avatar, err := store.GetAccountAvatar(ctx, registered.Account.UserID)
+	if err != nil || avatar.Source != AvatarSourceGenerated || avatar.ContentType != "image/svg+xml" {
+		t.Fatalf("registered avatar = %#v, %v", avatar, err)
+	}
+	if err := svc.SaveAccountAvatar(ctx, registered.Account.UserID, AccountAvatar{Data: []byte("fake"), ContentType: "image/png", Source: AvatarSourceUpload}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteAccountAvatar(ctx, registered.Account.UserID); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := svc.AccountAvatar(ctx, registered.Account.UserID)
+	if err != nil || restored.Source != AvatarSourceGenerated || restored.ContentType != "image/svg+xml" {
+		t.Fatalf("restored avatar = %#v, %v", restored, err)
+	}
+}
+
+func TestMissingAvatarIsPersistedWithoutReplacingExistingAvatar(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	account := Account{UserID: "legacy-user", Email: "legacy@example.com", Name: "Legacy User"}
+	if err := store.SaveAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Config{Store: store})
+	avatar, err := svc.AccountAvatar(ctx, account.UserID)
+	if err != nil || avatar.Source != AvatarSourceGenerated {
+		t.Fatalf("legacy avatar = %#v, %v", avatar, err)
+	}
+	if _, err := store.GetAccountAvatar(ctx, account.UserID); err != nil {
+		t.Fatalf("legacy avatar was not persisted: %v", err)
+	}
+	upload := AccountAvatar{Data: []byte("uploaded"), ContentType: "image/png", Source: AvatarSourceUpload}
+	if err := store.SaveAccountAvatar(ctx, account.UserID, upload); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatarIfMissing(ctx, account.UserID, GeneratedAvatar(account)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatar(ctx, account.UserID, AccountAvatar{Data: []byte("dingtalk"), ContentType: "image/png", Source: AvatarSourceDingTalk}); err != nil {
+		t.Fatal(err)
+	}
+	avatar, err = store.GetAccountAvatar(ctx, account.UserID)
+	if err != nil || avatar.Source != AvatarSourceUpload || string(avatar.Data) != "uploaded" {
+		t.Fatalf("backfill or DingTalk sync replaced uploaded avatar = %#v, %v", avatar, err)
+	}
+}
+
 func TestExternalIdentityProvisionAndResolve(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)

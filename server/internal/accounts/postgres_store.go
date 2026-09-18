@@ -99,6 +99,64 @@ func (s *PostgresStore) DeleteAccount(ctx context.Context, userID string) error 
 	return nil
 }
 
+func (s *PostgresStore) GetAccountAvatar(ctx context.Context, userID string) (AccountAvatar, error) {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return AccountAvatar{}, ErrPostgresStoreUnavailable
+	}
+	var avatar AccountAvatar
+	err := runner.QueryRow(ctx, `
+		SELECT avatar_data, avatar_content_type, avatar_source
+		FROM accounts WHERE user_id = $1
+	`, userID).Scan(&avatar.Data, &avatar.ContentType, &avatar.Source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AccountAvatar{}, ErrAccountNotFound
+	}
+	if err != nil {
+		return AccountAvatar{}, err
+	}
+	if len(avatar.Data) == 0 {
+		return AccountAvatar{}, ErrAccountAvatarNotFound
+	}
+	return avatar, nil
+}
+
+func (s *PostgresStore) SaveAccountAvatar(ctx context.Context, userID string, avatar AccountAvatar) error {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return ErrPostgresStoreUnavailable
+	}
+	tag, err := runner.Exec(ctx, `
+		UPDATE accounts
+		SET avatar_data = $2, avatar_content_type = $3, avatar_source = $4, updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND ($4 <> 'dingtalk' OR avatar_source <> 'upload')
+	`, userID, avatar.Data, avatar.ContentType, avatar.Source)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		if avatar.Source == AvatarSourceDingTalk {
+			_, err := s.GetAccount(ctx, userID)
+			return err
+		}
+		return ErrAccountNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) SaveAccountAvatarIfMissing(ctx context.Context, userID string, avatar AccountAvatar) error {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return ErrPostgresStoreUnavailable
+	}
+	_, err := runner.Exec(ctx, `
+		UPDATE accounts
+		SET avatar_data = $2, avatar_content_type = $3, avatar_source = $4, updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND (avatar_data IS NULL OR octet_length(avatar_data) = 0)
+	`, userID, avatar.Data, avatar.ContentType, avatar.Source)
+	return err
+}
+
 func (s *PostgresStore) GetAccount(ctx context.Context, userID string) (Account, error) {
 	return getAccount(ctx, s.runner(ctx), `WHERE user_id = $1`, userID)
 }

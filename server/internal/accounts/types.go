@@ -29,6 +29,18 @@ type Account struct {
 	UpdatedAt    time.Time
 }
 
+const (
+	AvatarSourceDingTalk  = "dingtalk"
+	AvatarSourceUpload    = "upload"
+	AvatarSourceGenerated = "generated"
+)
+
+type AccountAvatar struct {
+	Data        []byte
+	ContentType string
+	Source      string
+}
+
 func (a Account) DisplayName() string {
 	if name := strings.TrimSpace(a.Name); name != "" {
 		return name

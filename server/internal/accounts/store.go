@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrAccountNotFound                  = errors.New("account not found")
+	ErrAccountAvatarNotFound            = errors.New("account avatar not found")
 	ErrSessionNotFound                  = errors.New("account session not found")
 	ErrEmailExists                      = errors.New("account email already exists")
 	ErrAccountAgentExists               = errors.New("agent already belongs to another account")
@@ -29,6 +30,9 @@ type Store interface {
 	WithBootstrapLock(context.Context, func(context.Context) error) error
 	SaveAccount(context.Context, Account) error
 	DeleteAccount(context.Context, string) error
+	GetAccountAvatar(context.Context, string) (AccountAvatar, error)
+	SaveAccountAvatar(context.Context, string, AccountAvatar) error
+	SaveAccountAvatarIfMissing(context.Context, string, AccountAvatar) error
 	GetAccount(context.Context, string) (Account, error)
 	GetAccountByEmail(context.Context, string) (Account, error)
 	ListAccounts(context.Context) ([]Account, error)
@@ -65,6 +69,7 @@ type MemoryStore struct {
 	identities         map[string]AccountIdentity
 	oauthStates        map[string]OAuthLoginState
 	oauthCodes         map[string]OAuthAuthorizationCode
+	avatars            map[string]AccountAvatar
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -76,6 +81,7 @@ func NewMemoryStore() *MemoryStore {
 		identities:    map[string]AccountIdentity{},
 		oauthStates:   map[string]OAuthLoginState{},
 		oauthCodes:    map[string]OAuthAuthorizationCode{},
+		avatars:       map[string]AccountAvatar{},
 	}
 }
 
@@ -132,6 +138,7 @@ func (s *MemoryStore) DeleteAccount(ctx context.Context, userID string) error {
 		}
 	}
 	delete(s.accountAgents, userID)
+	delete(s.avatars, userID)
 	for key, identity := range s.identities {
 		if identity.UserID == userID {
 			delete(s.identities, key)
@@ -146,6 +153,53 @@ func (s *MemoryStore) DeleteAccount(ctx context.Context, userID string) error {
 		if code.UserID == userID {
 			delete(s.oauthCodes, key)
 		}
+	}
+	return nil
+}
+
+func (s *MemoryStore) GetAccountAvatar(ctx context.Context, userID string) (AccountAvatar, error) {
+	if err := ctx.Err(); err != nil {
+		return AccountAvatar{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	avatar, ok := s.avatars[userID]
+	if !ok || len(avatar.Data) == 0 {
+		return AccountAvatar{}, ErrAccountAvatarNotFound
+	}
+	avatar.Data = append([]byte(nil), avatar.Data...)
+	return avatar, nil
+}
+
+func (s *MemoryStore) SaveAccountAvatar(ctx context.Context, userID string, avatar AccountAvatar) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.accounts[userID]; !ok {
+		return ErrAccountNotFound
+	}
+	if avatar.Source == AvatarSourceDingTalk && s.avatars[userID].Source == AvatarSourceUpload {
+		return nil
+	}
+	avatar.Data = append([]byte(nil), avatar.Data...)
+	s.avatars[userID] = avatar
+	return nil
+}
+
+func (s *MemoryStore) SaveAccountAvatarIfMissing(ctx context.Context, userID string, avatar AccountAvatar) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.accounts[userID]; !ok {
+		return ErrAccountNotFound
+	}
+	if len(s.avatars[userID].Data) == 0 {
+		avatar.Data = append([]byte(nil), avatar.Data...)
+		s.avatars[userID] = avatar
 	}
 	return nil
 }

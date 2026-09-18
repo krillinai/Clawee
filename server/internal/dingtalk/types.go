@@ -6,10 +6,11 @@ import (
 )
 
 type Member struct {
-	UnionID string
-	UserID  string
-	Name    string
-	Email   string
+	UnionID   string
+	UserID    string
+	Name      string
+	Email     string
+	AvatarURL string
 }
 
 type APIError struct {

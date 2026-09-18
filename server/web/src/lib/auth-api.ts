@@ -11,6 +11,7 @@ export type Account = {
   dingtalkEnabled?: boolean;
   dingtalkBound?: boolean;
   localPasswordConfigured?: boolean;
+  avatarUrl?: string;
 };
 
 type AccountResponse = {
@@ -19,6 +20,7 @@ type AccountResponse = {
   email: string;
   name?: string;
   status: string;
+  avatar_url?: string;
 };
 
 type AuthResponseBody = {
@@ -46,7 +48,8 @@ function mapAccount(account: AccountResponse): Account {
     userId: account.userId ?? account.user_id ?? "",
     email: account.email,
     name: account.name ?? "",
-    status: account.status
+    status: account.status,
+    avatarUrl: account.avatar_url
   };
 }
 
@@ -99,6 +102,16 @@ export function logout() {
 
 export function unbindDingTalk(password: string) {
   return authApi.post<void>("/dingtalk/unbind", { password });
+}
+
+export function uploadAccountAvatar(file: File) {
+  const body = new FormData();
+  body.set("avatar", file);
+  return authApi.postForm<{ avatar_url?: string }>("/avatar", body);
+}
+
+export function deleteAccountAvatar() {
+  return authApi.delete("/avatar");
 }
 
 export async function currentAccount() {

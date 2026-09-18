@@ -49,6 +49,49 @@ type CreateAccountRequest struct {
 	Status   string
 }
 
+func (s *Service) AccountAvatar(ctx context.Context, userID string) (AccountAvatar, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return AccountAvatar{}, ErrInvalidAccountRequest
+	}
+	avatar, err := s.store.GetAccountAvatar(ctx, userID)
+	if !errors.Is(err, ErrAccountAvatarNotFound) {
+		return avatar, err
+	}
+	account, accountErr := s.store.GetAccount(ctx, userID)
+	if accountErr != nil {
+		return AccountAvatar{}, accountErr
+	}
+	avatar = GeneratedAvatar(account)
+	if saveErr := s.store.SaveAccountAvatarIfMissing(ctx, userID, avatar); saveErr != nil {
+		return AccountAvatar{}, saveErr
+	}
+	return s.store.GetAccountAvatar(ctx, userID)
+}
+
+func (s *Service) SaveAccountAvatar(ctx context.Context, userID string, avatar AccountAvatar) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(avatar.Data) == 0 || strings.TrimSpace(avatar.ContentType) == "" {
+		return ErrInvalidAccountRequest
+	}
+	if avatar.Source == "" {
+		avatar.Source = AvatarSourceUpload
+	}
+	return s.store.SaveAccountAvatar(ctx, userID, avatar)
+}
+
+func (s *Service) DeleteAccountAvatar(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ErrInvalidAccountRequest
+	}
+	account, err := s.store.GetAccount(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.store.SaveAccountAvatar(ctx, userID, GeneratedAvatar(account))
+}
+
 func NewService(cfg Config) *Service {
 	store := cfg.Store
 	if store == nil {
@@ -101,6 +144,9 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (Registrati
 			UpdatedAt:    now,
 		}
 		if err := s.store.SaveAccount(ctx, account); err != nil {
+			return err
+		}
+		if err := s.store.SaveAccountAvatar(ctx, account.UserID, GeneratedAvatar(account)); err != nil {
 			return err
 		}
 		result = RegistrationResult{Account: account, NeedsAdminBootstrap: count == 0}
@@ -217,6 +263,11 @@ func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, ident
 				return ErrExternalAccountConflict
 			}
 			return err
+		}
+		if err := s.store.SaveAccountAvatar(ctx, account.UserID, GeneratedAvatar(account)); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionRollbackTimeout)
+			defer cancel()
+			return errors.Join(err, s.store.DeleteAccount(cleanupCtx, account.UserID))
 		}
 		identity.UserID = account.UserID
 		identity.CreatedAt = now
@@ -485,7 +536,10 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 		UpdatedAt:    now,
 	}
 	if err := s.store.WithBootstrapLock(ctx, func(ctx context.Context) error {
-		return s.store.SaveAccount(ctx, account)
+		if err := s.store.SaveAccount(ctx, account); err != nil {
+			return err
+		}
+		return s.store.SaveAccountAvatar(ctx, account.UserID, GeneratedAvatar(account))
 	}); err != nil {
 		return Account{}, err
 	}

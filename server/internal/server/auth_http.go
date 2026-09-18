@@ -561,6 +561,7 @@ func writeWebAuthResponse(c *gin.Context, account accounts.Account, hasAdmin boo
 func accountResponse(account accounts.Account, legacy bool) gin.H {
 	return gin.H{
 		"user_id": account.UserID, "email": account.Email, "name": account.Name, "status": account.Status,
+		"avatar_url": "/api/v1/auth/avatar/" + account.UserID,
 	}
 }
 
@@ -608,5 +609,9 @@ func mountAuthRoutes(auth *gin.RouterGroup, opts Options, cookies authCookieConf
 	mountDingTalkMethodsRoute(auth, opts)
 	auth.POST("/dingtalk/clawee/token", handleDingTalkClaweeToken(opts))
 	auth.POST("/dingtalk/unbind", requireFrontend, handleDingTalkUnbind(opts))
+	auth.GET("/avatar", requireFrontend, handleGetAccountAvatar(opts.AccountService))
+	auth.GET("/avatar/:user_id", requireFrontend, handleGetAccountAvatar(opts.AccountService))
+	auth.POST("/avatar", requireFrontend, handleUploadAccountAvatar(opts.AccountService))
+	auth.DELETE("/avatar", requireFrontend, handleDeleteAccountAvatar(opts.AccountService))
 	auth.GET("/me", requireFrontend, requireClaweeAgent, me)
 }

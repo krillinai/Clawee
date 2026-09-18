@@ -2,14 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { unbindDingTalk } from "@/lib/auth-api";
+import { deleteAccountAvatar, unbindDingTalk, uploadAccountAvatar } from "@/lib/auth-api";
 
 import { ThemeProvider } from "./theme-provider";
 import { AccountPane, dingtalkBindURL, startDingTalkBinding } from "./account-pane";
 
 vi.mock("@/lib/auth-api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/auth-api")>(),
-  unbindDingTalk: vi.fn()
+  unbindDingTalk: vi.fn(),
+  uploadAccountAvatar: vi.fn(),
+  deleteAccountAvatar: vi.fn()
 }));
 
 const unbindDingTalkMock = vi.mocked(unbindDingTalk);
@@ -22,6 +24,23 @@ describe("AccountPane", () => {
   function renderPane(account: Parameters<typeof AccountPane>[0]["account"]) {
     return render(<ThemeProvider><MemoryRouter><AccountPane account={account} /></MemoryRouter></ThemeProvider>);
   }
+
+  it("图片失败后在更换头像时重新加载，并支持恢复默认头像", async () => {
+    vi.mocked(uploadAccountAvatar).mockResolvedValueOnce({});
+    vi.mocked(deleteAccountAvatar).mockResolvedValueOnce();
+    const { container } = renderPane({ ...baseAccount, avatarUrl: "/api/v1/auth/avatar/usr_1" });
+    const image = container.querySelector("img")!;
+    fireEvent.error(image);
+    expect(container.querySelector("img")).toBeNull();
+
+    const file = new File(["png"], "avatar.png", { type: "image/png" });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(uploadAccountAvatar).toHaveBeenCalledWith(file));
+    await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toContain("?v="));
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认头像" }));
+    await waitFor(() => expect(deleteAccountAvatar).toHaveBeenCalledOnce());
+  });
 
   it("hides dingtalk controls when the provider is disabled", () => {
     renderPane({ ...baseAccount, dingtalkEnabled: false });

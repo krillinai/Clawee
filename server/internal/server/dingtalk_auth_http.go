@@ -209,7 +209,7 @@ func handleDingTalkCallback(opts Options, cookies authCookieConfig) gin.HandlerF
 			ExternalUserID: member.UserID, VerifiedAt: time.Now().UTC(),
 		}
 		if loginState.Intent == intentBind {
-			handleDingTalkBindCallback(c, opts, cookies, loginState, identity)
+			handleDingTalkBindCallback(c, opts, cookies, loginState, identity, member)
 			return
 		}
 		account, _, err := resolveDingTalkAccount(c, opts, identity, member)
@@ -217,11 +217,37 @@ func handleDingTalkCallback(opts Options, cookies authCookieConfig) gin.HandlerF
 			rejectTrustedDingTalkLogin(c, opts, loginState, state, dingtalkAccountErrorCode(err), identity.ProviderSubject)
 			return
 		}
+		syncDingTalkAvatar(c, opts, account, member)
 		if loginState.Intent == intentClaweeLogin {
 			handleDingTalkClaweeCallback(c, opts, loginState, state, account, identity.ProviderSubject)
 			return
 		}
 		handleDingTalkLoginCallback(c, opts, cookies, loginState, account, identity.ProviderSubject)
+	}
+}
+
+func syncDingTalkAvatar(c *gin.Context, opts Options, account accounts.Account, member dingtalk.Member) {
+	avatarURL := strings.TrimSpace(member.AvatarURL)
+	if avatarURL == "" {
+		return
+	}
+	fetcher, ok := opts.DingTalkAuth.Client.(DingTalkAvatarFetcher)
+	if !ok {
+		return
+	}
+	current, err := opts.AccountService.AccountAvatar(c.Request.Context(), account.UserID)
+	if err == nil && current.Source == accounts.AvatarSourceUpload {
+		return
+	}
+	data, contentType, err := fetcher.FetchAvatar(c.Request.Context(), avatarURL)
+	if err != nil {
+		logDingTalkUpstreamError(opts.Logger, err)
+		return
+	}
+	if err := opts.AccountService.SaveAccountAvatar(c.Request.Context(), account.UserID, accounts.AccountAvatar{
+		Data: data, ContentType: contentType, Source: accounts.AvatarSourceDingTalk,
+	}); err != nil {
+		logDingTalkUpstreamError(opts.Logger, err)
 	}
 }
 
@@ -351,7 +377,7 @@ func handleDingTalkClaweeToken(opts Options) gin.HandlerFunc {
 	}
 }
 
-func handleDingTalkBindCallback(c *gin.Context, opts Options, cookies authCookieConfig, state accounts.OAuthLoginState, identity accounts.AccountIdentity) {
+func handleDingTalkBindCallback(c *gin.Context, opts Options, cookies authCookieConfig, state accounts.OAuthLoginState, identity accounts.AccountIdentity, member dingtalk.Member) {
 	cookie, err := c.Request.Cookie(cookies.FrontendName)
 	if err != nil {
 		rejectDingTalkLogin(c, opts, "unauthorized", identity.ProviderSubject)
@@ -365,6 +391,10 @@ func handleDingTalkBindCallback(c *gin.Context, opts Options, cookies authCookie
 	if err := opts.AccountService.BindExternalIdentity(c.Request.Context(), authenticated.Principal.UserID, identity); err != nil {
 		rejectDingTalkLogin(c, opts, dingtalkAccountErrorCode(err), identity.ProviderSubject)
 		return
+	}
+	account, err := opts.AccountService.Account(c.Request.Context(), authenticated.Principal.UserID)
+	if err == nil {
+		syncDingTalkAvatar(c, opts, account, member)
 	}
 	logDingTalkEvent(c, opts, "dingtalk_identity_bound", authenticated.Principal.UserID, identity.ProviderSubject,
 		zap.Bool("bound", true))

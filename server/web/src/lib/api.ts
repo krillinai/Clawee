@@ -5,6 +5,7 @@ const AUTH_API_BASE_PATH = "/api/v1/auth";
 type APIClient = {
   get<T>(path: string, init?: RequestInit): Promise<T>;
   post<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  postForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T>;
   patch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
   put<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
   putForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T>;
@@ -37,6 +38,7 @@ function createAPIClient(basePath: string): APIClient {
   return {
     get: <T>(path: string, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "GET", undefined, init),
     post: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "POST", body, init),
+    postForm: <T>(path: string, body: FormData, init?: RequestInit) => apiFetchForm<T>(scopedURL(basePath, path), "POST", body, init),
     patch: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "PATCH", body, init),
     put: <T>(path: string, body?: unknown, init?: RequestInit) => apiFetch<T>(scopedURL(basePath, path), "PUT", body, init),
     putForm: <T>(path: string, body: FormData, init?: RequestInit) => apiFetchForm<T>(scopedURL(basePath, path), "PUT", body, init),

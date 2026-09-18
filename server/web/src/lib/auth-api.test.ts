@@ -62,7 +62,7 @@ describe("auth-api", () => {
       .mockResolvedValueOnce(response({ data: { password: true, dingtalk: { enabled: true } } }))
       .mockResolvedValueOnce(response({
         data: {
-          account: { user_id: "usr_user", email: "user@example.com", status: "active" },
+          account: { user_id: "usr_user", email: "user@example.com", status: "active", avatar_url: "/api/v1/auth/avatar/usr_user" },
           dingtalk_enabled: true,
           dingtalk_bound: true,
           local_password_configured: true
@@ -73,7 +73,8 @@ describe("auth-api", () => {
     expect((await currentAccount()).user).toMatchObject({
       dingtalkEnabled: true,
       dingtalkBound: true,
-      localPasswordConfigured: true
+      localPasswordConfigured: true,
+      avatarUrl: "/api/v1/auth/avatar/usr_user"
     });
   });
 

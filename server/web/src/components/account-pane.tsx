@@ -1,5 +1,5 @@
-import { Check, ChevronDown, Ellipsis, LayoutDashboard, Link2, LogOut, Unlink, UserRound } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { Check, ChevronDown, Ellipsis, ImagePlus, LayoutDashboard, Link2, LogOut, RotateCcw, Unlink, UserRound } from "lucide-react";
+import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -17,7 +17,7 @@ import {
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { hasAnyAdminPermission, logout, unbindDingTalk, type Account } from "@/lib/auth-api";
+import { deleteAccountAvatar, hasAnyAdminPermission, logout, uploadAccountAvatar, unbindDingTalk, type Account } from "@/lib/auth-api";
 
 type AccountPaneProps = {
   account?: Account;
@@ -38,6 +38,11 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
   const [unbindPending, setUnbindPending] = useState(false);
   const [unbindError, setUnbindError] = useState<unknown>();
   const [unboundUserID, setUnboundUserID] = useState("");
+  const [avatarNonce, setAvatarNonce] = useState(0);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string>();
+  const [failedAvatarSrc, setFailedAvatarSrc] = useState<string>();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const isAdmin = account !== undefined && hasAnyAdminPermission(account);
   const alternatePortal = switchTo === "admin" && isAdmin
     ? { href: "/admin", icon: LayoutDashboard, label: "进入管理后台" }
@@ -78,11 +83,49 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
     logout().finally(() => window.location.assign("/login"));
   }
 
+  async function changeAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || avatarBusy) return;
+    setAvatarBusy(true);
+    setAvatarError(undefined);
+    try {
+      await uploadAccountAvatar(file);
+      setAvatarNonce(Date.now());
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "头像上传失败");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function restoreAvatar() {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    setAvatarError(undefined);
+    try {
+      await deleteAccountAvatar();
+      setAvatarNonce(Date.now());
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "头像恢复失败");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  const avatarLabel = (account?.name || account?.email || "用户").trim().slice(0, 1).toUpperCase() || "用";
+  const avatarSrc = account?.avatarUrl ? `${account.avatarUrl}${avatarNonce ? `?v=${avatarNonce}` : ""}` : undefined;
+  const showAvatar = avatarSrc !== undefined && avatarSrc !== failedAvatarSrc;
+
   return (
     <>
       <Card aria-label="账户信息" className="border-border/45 bg-muted/50 shadow-none" role="group">
         <CardContent className="grid gap-2.5 p-3">
           <div className="flex min-w-0 items-center gap-2">
+            <div className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-primary/10 text-sm font-semibold text-primary">
+              <span aria-hidden={showAvatar ? "true" : undefined}>{avatarLabel}</span>
+              {showAvatar ? <img alt="" className="absolute inset-0 size-full object-cover" onError={() => setFailedAvatarSrc(avatarSrc)} src={avatarSrc} /> : null}
+            </div>
             <strong className="min-w-0 flex-1 truncate text-sm">{account?.name || "用户"}</strong>
             <Badge className="shrink-0" variant="muted">
               {accountRole}
@@ -109,6 +152,17 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
               </Popover>
             ) : null}
           </div>
+          <input accept="image/jpeg,image/png" className="hidden" onChange={changeAvatar} ref={avatarInputRef} type="file" />
+          <div className="flex items-center gap-2">
+            <Button disabled={avatarBusy} onClick={() => avatarInputRef.current?.click()} size="sm" variant="outline">
+              <ImagePlus aria-hidden="true" data-icon="inline-start" />
+              {avatarBusy ? "处理中..." : "更换头像"}
+            </Button>
+            <Button aria-label="恢复默认头像" disabled={avatarBusy} onClick={restoreAvatar} size="icon" title="恢复默认头像" variant="ghost">
+              <RotateCcw aria-hidden="true" />
+            </Button>
+          </div>
+          {avatarError ? <p className="text-xs text-destructive" role="status">{avatarError}</p> : null}
           <span className="break-all font-mono text-xs text-muted-foreground">{account?.email}</span>
           {dingtalkBound ? (
             <div className="grid gap-2">

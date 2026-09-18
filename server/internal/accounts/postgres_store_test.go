@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,36 @@ func TestSaveAccountMapsEmailUniqueViolation(t *testing.T) {
 	err := saveAccount(context.Background(), runner, Account{UserID: "usr_1", Email: "one@example.com", Name: "Alice"})
 	if !errors.Is(err, ErrEmailExists) {
 		t.Fatalf("SaveAccount() error = %v, want %v", err, ErrEmailExists)
+	}
+}
+
+func TestPostgresStorePersistsAvatarAndDoesNotOverwriteItOnBackfill(t *testing.T) {
+	ctx := context.Background()
+	store := NewPostgresStore(openAccountsTestPool(t))
+	now := time.Now().UTC()
+	account := Account{UserID: "usr_avatar", Email: "avatar@example.com", Name: "Avatar", PasswordHash: "unused", Status: StatusActive, CreatedAt: now, UpdatedAt: now}
+	if err := store.SaveAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatarIfMissing(ctx, account.UserID, GeneratedAvatar(account)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatar(ctx, account.UserID, AccountAvatar{Data: []byte("dingtalk"), ContentType: "image/png", Source: AvatarSourceDingTalk}); err != nil {
+		t.Fatal(err)
+	}
+	avatar := AccountAvatar{Data: []byte{0, 1, 2, 255}, ContentType: "image/png", Source: AvatarSourceUpload}
+	if err := store.SaveAccountAvatar(ctx, account.UserID, avatar); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatarIfMissing(ctx, account.UserID, GeneratedAvatar(account)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveAccountAvatar(ctx, account.UserID, AccountAvatar{Data: []byte("dingtalk-new"), ContentType: "image/png", Source: AvatarSourceDingTalk}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetAccountAvatar(ctx, account.UserID)
+	if err != nil || !bytes.Equal(stored.Data, avatar.Data) || stored.Source != AvatarSourceUpload || stored.ContentType != "image/png" {
+		t.Fatalf("stored avatar = %#v, %v", stored, err)
 	}
 }
 
@@ -208,7 +239,10 @@ func openAccountsTestPool(t *testing.T) *pgxpool.Pool {
 			password_hash TEXT NOT NULL,
 			status TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL
+			updated_at TIMESTAMPTZ NOT NULL,
+			avatar_data BYTEA,
+			avatar_content_type TEXT NOT NULL DEFAULT '',
+			avatar_source TEXT NOT NULL DEFAULT 'generated'
 		);
 			CREATE TABLE account_identities (
 			provider_type TEXT NOT NULL,
