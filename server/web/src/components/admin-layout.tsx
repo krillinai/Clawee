@@ -1,12 +1,14 @@
-import type { CSSProperties } from "react";
+import { useEffect, type CSSProperties } from "react";
 import { Outlet } from "react-router-dom";
 
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { AdminSidebar } from "@/components/admin-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import type { Account } from "@/lib/auth-api";
+import { startFeedbackDiagnostics } from "@/lib/feedback-diagnostics";
 
 export function AdminLayout({ account }: { account?: Account }) {
+  useEffect(() => account ? startFeedbackDiagnostics() : undefined, [account?.userId]);
   return (
     <SidebarProvider
       className="block min-h-[100dvh] bg-background text-foreground lg:flex"

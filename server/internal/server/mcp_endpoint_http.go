@@ -40,6 +40,29 @@ func (r *upstreamMCPHandlerRegistry) handler(endpointPath, serverID string) http
 }
 
 func mountMCPEndpoints(router *gin.Engine, opts Options) {
+	feedbackOpts := opts
+	feedbackOpts.MCPAuth.Enabled = true
+	feedbackOpts.MCPAuth.DemoTokens = nil
+	feedbackHandler := newMCPHandler(feedbackOpts, "feedback", "/mcp/feedback")
+	router.Any("/mcp/feedback", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if opts.FeedbackService == nil {
+			c.Status(404)
+			return
+		}
+		if opts.AccountService == nil || opts.RBACService == nil || opts.DataAccessService == nil || opts.MCPAuth.AccountTokenStore == nil || opts.MCPAuth.AccountService == nil {
+			c.Status(503)
+			return
+		}
+		feedbackHandler.ServeHTTP(c.Writer, c.Request)
+	})
+	router.Any("/.well-known/oauth-protected-resource/mcp/feedback", func(c *gin.Context) {
+		if opts.FeedbackService == nil {
+			c.Status(404)
+			return
+		}
+		auth.ProtectedResourceMetadataHandler(mcpauth.ProtectedResourceMetadata(mcpAuthConfig(feedbackOpts, "/mcp/feedback"))).ServeHTTP(c.Writer, c.Request)
+	})
 	rootHandler := newMCPHandler(opts, "", "/mcp")
 	router.Any("/mcp", gin.WrapH(rootHandler))
 
@@ -97,7 +120,11 @@ func newMCPHandler(opts Options, upstreamServerID, endpointPath string) http.Han
 		handler = mcpauth.RequireBearerToken(mcpAuthConfig(opts, endpointPath))(handler)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache, no-transform")
+		if upstreamServerID == "feedback" || opts.FeedbackService != nil {
+			w.Header().Set("Cache-Control", "no-store")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache, no-transform")
+		}
 		w.Header().Set("X-Accel-Buffering", "no")
 		handler.ServeHTTP(w, r)
 	})

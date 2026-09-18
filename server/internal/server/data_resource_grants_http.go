@@ -660,6 +660,11 @@ func dataResourceGrantMemberCandidates(grants []dataaccess.Grant, accountItems [
 func dataResourceNames(ctx context.Context, opts Options, resourceType string) (map[string]string, error) {
 	names := map[string]string{}
 	switch resourceType {
+	case dataaccess.ResourceFeedback:
+		if opts.FeedbackService != nil {
+			names[dataaccess.AllFeedback] = "全部问题反馈"
+		}
+		return names, nil
 	case dataaccess.ResourceSharedSpace:
 		if opts.SharedFilesService == nil {
 			return names, nil

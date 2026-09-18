@@ -1,3 +1,5 @@
+import { recordFeedbackRequestFailure } from './feedback-diagnostics';
+
 const ADMIN_API_BASE_PATH = "/api/v1/admin";
 const APP_API_BASE_PATH = "/api/v1/app";
 const AUTH_API_BASE_PATH = "/api/v1/auth";
@@ -47,33 +49,47 @@ function createAPIClient(basePath: string): APIClient {
 }
 
 async function apiFetchForm<T>(url: string, method: string, body: FormData, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    method,
-    credentials: "include",
-    headers: { Accept: "application/json", ...init?.headers },
-    body
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      method,
+      credentials: "include",
+      headers: { Accept: "application/json", ...init?.headers },
+      body
+    });
+  } catch (error) {
+    recordFeedbackRequestFailure(method, url);
+    throw error;
+  }
   if (!response.ok) {
+    recordFeedbackRequestFailure(method, url, response.status);
     throw await responseAPIError(response, `${method} ${url} failed with ${response.status}`);
   }
   return unwrapAPIResponse<T>(await response.json());
 }
 
 async function apiFetch<T>(url: string, method: string, body?: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    method,
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      ...init?.headers,
-      ...(body === undefined ? {} : { "Content-Type": "application/json" })
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      method,
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...init?.headers,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" })
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  } catch (error) {
+    recordFeedbackRequestFailure(method, url);
+    throw error;
+  }
 
   if (!response.ok) {
+    recordFeedbackRequestFailure(method, url, response.status);
     throw await responseAPIError(response, `${method} ${url} failed with ${response.status}`);
   }
 

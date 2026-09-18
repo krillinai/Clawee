@@ -156,12 +156,10 @@ function appendLogWriterWarnings(
 
   try {
     const parsed = JSON.parse(diagnostics.content) as unknown;
-    if (!isRecord(parsed) || !isRecord(parsed.logWriter)) return;
-    const failureCount = parsed.logWriter.failureCount;
+    const { failureCount, backpressureRejects } = diagnosticLogWriterLoss(parsed);
     if (typeof failureCount === 'number' && failureCount > 0) {
       warnings.push(`Run log writer recorded ${failureCount} failed writes.`);
     }
-    const backpressureRejects = parsed.logWriter.backpressureRejects;
     if (typeof backpressureRejects === 'number' && backpressureRejects > 0) {
       warnings.push(
         `Run log writer rejected ${backpressureRejects} writes because the queue limit was exceeded.`
@@ -170,6 +168,14 @@ function appendLogWriterWarnings(
   } catch {
     // The diagnostics file remains available to the caller even when it is not valid JSON.
   }
+}
+
+export function diagnosticLogWriterLoss(value: unknown): { failureCount: number; backpressureRejects: number } {
+  if (!isRecord(value) || !isRecord(value.logWriter)) return { failureCount: 0, backpressureRejects: 0 };
+  return {
+    failureCount: typeof value.logWriter.failureCount === 'number' ? value.logWriter.failureCount : 0,
+    backpressureRejects: typeof value.logWriter.backpressureRejects === 'number' ? value.logWriter.backpressureRejects : 0
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

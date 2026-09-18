@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@vitejs/plugin-react", () => ({ default: () => ({ name: "react" }) }));
 vi.mock("rollup-plugin-visualizer", () => ({ visualizer: () => ({ name: "visualizer" }) }));
-vi.mock("vitest/config", () => ({ defineConfig: (config: unknown) => config }));
+vi.mock("vitest/config", () => ({
+  defineConfig: (config: unknown) => config,
+  configDefaults: { exclude: [] }
+}));
 
 describe("vite dev proxy", () => {
   it("forwards only the supported API namespaces to the backend", async () => {
@@ -14,5 +17,6 @@ describe("vite dev proxy", () => {
       "/api/v1/admin",
       "/api/v1/public"
     ]);
+    expect(config.test?.exclude).toContain("e2e/**");
   });
 });

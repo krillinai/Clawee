@@ -5,6 +5,24 @@ export function migrate(db: Database.Database): void {
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
 
+    CREATE TABLE IF NOT EXISTS feedback_queue (
+      local_feedback_id TEXT PRIMARY KEY,
+      draft_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS feedback_runtime_threads (
+      thread_id TEXT NOT NULL,
+      runtime_thread_id TEXT NOT NULL,
+      PRIMARY KEY(thread_id, runtime_thread_id)
+    );
+    CREATE TABLE IF NOT EXISTS feedback_diagnostics (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id TEXT NOT NULL,
+      record_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_feedback_diagnostics_thread ON feedback_diagnostics(thread_id,seq);
+
     CREATE TABLE IF NOT EXISTS runs (
       id TEXT PRIMARY KEY,
       thread_id TEXT,
@@ -476,6 +494,22 @@ export function migrate(db: Database.Database): void {
     END
   `).run();
   assertUniqueCodexThreadIds(db);
+  db.exec(`
+    INSERT OR IGNORE INTO feedback_runtime_threads SELECT id, codex_thread_id FROM threads WHERE codex_thread_id IS NOT NULL;
+    INSERT OR IGNORE INTO feedback_runtime_threads SELECT thread_id, codex_thread_id FROM runs WHERE thread_id IS NOT NULL AND codex_thread_id IS NOT NULL;
+    CREATE TRIGGER IF NOT EXISTS feedback_thread_mapping AFTER UPDATE OF codex_thread_id ON threads WHEN NEW.codex_thread_id IS NOT NULL BEGIN
+      INSERT OR IGNORE INTO feedback_runtime_threads VALUES(NEW.id, NEW.codex_thread_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS feedback_run_mapping AFTER UPDATE OF codex_thread_id ON runs WHEN NEW.thread_id IS NOT NULL AND NEW.codex_thread_id IS NOT NULL BEGIN
+      INSERT OR IGNORE INTO feedback_runtime_threads VALUES(NEW.thread_id, NEW.codex_thread_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS feedback_run_insert_mapping AFTER INSERT ON runs WHEN NEW.thread_id IS NOT NULL AND NEW.codex_thread_id IS NOT NULL BEGIN
+      INSERT OR IGNORE INTO feedback_runtime_threads VALUES(NEW.thread_id, NEW.codex_thread_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS feedback_thread_insert_mapping AFTER INSERT ON threads WHEN NEW.codex_thread_id IS NOT NULL BEGIN
+      INSERT OR IGNORE INTO feedback_runtime_threads VALUES(NEW.id, NEW.codex_thread_id);
+    END;
+  `);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_threads_project_id
       ON threads(project_id);

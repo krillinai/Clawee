@@ -6,6 +6,11 @@ import (
 )
 
 const (
+	PermissionFeedbackRead                    = "console:feedback:read"
+	PermissionFeedbackDownload                = "console:feedback:download"
+	PermissionFeedbackInvestigate             = "console:feedback:investigate"
+	PermissionFeedbackResolve                 = "console:feedback:resolve"
+	PermissionFeedbackReopen                  = "console:feedback:reopen"
 	PermissionAccountRead                     = "console:account:read"
 	PermissionAccountManage                   = "console:account:manage"
 	PermissionAccountCreate                   = "console:account:create"
@@ -122,6 +127,11 @@ type Permission struct {
 }
 
 var permissionCatalog = []Permission{
+	{PermissionFeedbackRead, "feedback", "read", "问题反馈查看", "查看反馈及诊断资料"},
+	{PermissionFeedbackDownload, "feedback", "download", "反馈附件下载", "导出诊断附件"},
+	{PermissionFeedbackInvestigate, "feedback", "investigate", "开始处理反馈", "记录处理身份"},
+	{PermissionFeedbackResolve, "feedback", "resolve", "完成问题处理", "记录处理结论与验证"},
+	{PermissionFeedbackReopen, "feedback", "reopen", "重新打开反馈", "记录重新打开原因"},
 	{PermissionAccountRead, "account", "read", "账号查看", "查看账号"},
 	{PermissionAccountManage, "account", "manage", "账号管理", "查看并执行账号的全部操作"},
 	{PermissionAccountCreate, "account", "create", "新增账号", "创建账号"},

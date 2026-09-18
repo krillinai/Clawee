@@ -35,7 +35,8 @@
   },
   "dependencies": {
     "@clawee/protocol": "workspace:*",
-    "@iarna/toml": "2.2.5"
+    "@iarna/toml": "2.2.5",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",

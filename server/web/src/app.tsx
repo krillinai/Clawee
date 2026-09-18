@@ -11,6 +11,8 @@ import { NotFoundPage } from "./pages/not-found";
 const AgentAccessPage = lazy(() =>
   import("./pages/agent-access").then((module) => ({ default: module.AgentAccessPage }))
 );
+const FeedbackPageView = lazy(() => import('./pages/feedback').then(module => ({ default: module.FeedbackPageView })));
+const FeedbackDetailPage = lazy(() => import('./pages/feedback').then(module => ({ default: module.FeedbackDetailPage })));
 const AppMCPCapabilitiesPage = lazy(() =>
   import("./pages/app-mcp-capabilities").then((module) => ({ default: module.AppMCPCapabilitiesPage }))
 );
@@ -124,6 +126,10 @@ export function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/downloads" element={<DownloadsPage />} />
             <Route path="/" element={<Navigate to="/app" replace />} />
+            <Route element={<AuthGate>{account => <AdminLayout account={account} />}</AuthGate>}>
+              <Route path="/admin/feedback" element={adminPage(permissions.feedbackRead, <FeedbackPageView />)} />
+              <Route path="/admin/feedback/:id" element={adminPage(permissions.feedbackRead, <FeedbackDetailPage />)} />
+            </Route>
             <Route path="/app" element={<Navigate to="/app/agents" replace />} />
             <Route
               element={

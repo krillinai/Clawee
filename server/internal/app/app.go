@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,6 +30,8 @@ import (
 	"github.com/krillinai/Clawee/server/internal/config"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/dingtalk"
+	"github.com/krillinai/Clawee/server/internal/feedback"
+	"github.com/krillinai/Clawee/server/internal/feedbackmcp"
 	"github.com/krillinai/Clawee/server/internal/knowledge"
 	knowledgeBuiltin "github.com/krillinai/Clawee/server/internal/knowledge/builtin"
 	"github.com/krillinai/Clawee/server/internal/logger"
@@ -61,6 +65,8 @@ type App struct {
 	skillSourceScheduler  interface{ Close() }
 	businessDataScheduler interface{ Close() }
 	storageMigration      interface{ Close() }
+	feedbackCancel        context.CancelFunc
+	feedbackDone          chan struct{}
 	closeDatabases        func()
 }
 
@@ -226,6 +232,56 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		rbacStore = rbac.NewPostgresStore(pool)
 	}
 	rbacSvc := rbac.NewService(rbac.Config{Store: rbacStore, Accounts: accountSvc})
+	var feedbackSvc *feedback.Service
+	if cfg.Feedback.Enabled {
+		if pool == nil {
+			return nil, errors.New("反馈中心需要持久化数据库与账号鉴权")
+		}
+		feedbackRoot, rootErr := resolvedFeedbackStoragePath(cfg.Feedback.StorageRoot)
+		sharedRoot, sharedErr := resolvedFeedbackStoragePath(cfg.SharedFiles.StorageRoot)
+		if rootErr != nil || sharedErr != nil || feedbackRoot == sharedRoot || strings.HasPrefix(feedbackRoot, sharedRoot+string(filepath.Separator)) || strings.HasPrefix(sharedRoot, feedbackRoot+string(filepath.Separator)) {
+			return nil, errors.New("反馈目录必须与共享文件目录隔离")
+		}
+		storage, err := sharedfiles.NewFileSystemStorage(feedbackRoot)
+		if err != nil {
+			return nil, err
+		}
+		if err = os.Chmod(feedbackRoot, 0700); err != nil {
+			return nil, err
+		}
+		feedbackSvc = feedback.NewService(feedback.NewPostgresStore(pool), storage, func(ctx context.Context, a feedback.Actor, action string) error {
+			account, e := accountSvc.Account(ctx, a.UserID)
+			if e != nil || account.Status != accounts.StatusActive {
+				return &feedback.Error{Status: 403, Code: "feedback_forbidden"}
+			}
+			allowed, e := rbacSvc.HasPermission(ctx, a.UserID, "console:feedback:"+action)
+			if e != nil {
+				return e
+			}
+			scope, e := dataAccessSvc.HasAction(ctx, a.UserID, dataaccess.ResourceFeedback, dataaccess.AllFeedback, dataaccess.ActionRead)
+			if e != nil {
+				return e
+			}
+			if !allowed || !scope {
+				return &feedback.Error{Status: 403, Code: "feedback_forbidden"}
+			}
+			return nil
+		}, cfg.Feedback.CapacityBytes)
+		if err = routingClient.Register(feedbackmcp.ServerID, feedbackmcp.NewClient(feedbackSvc)); err != nil {
+			return nil, err
+		}
+		if err = proxyStore.SaveUpstreamServer(ctx, mcpgateway.UpstreamServer{ID: "feedback", Name: "中心问题反馈", Domain: "feedback", Namespace: "feedback", Transport: mcpgateway.TransportBuiltin, Status: mcpgateway.StatusActive}); err != nil {
+			return nil, err
+		}
+		if err = proxyGateway.SyncTools(ctx, "feedback", ""); err != nil {
+			return nil, err
+		}
+	} else if old, e := proxyStore.GetUpstreamServer(ctx, "feedback"); e == nil {
+		old.Status = mcpgateway.StatusDisabled
+		if e = proxyStore.SaveUpstreamServer(ctx, old); e != nil {
+			return nil, e
+		}
+	}
 	if pool == nil {
 		if err := rbacSvc.Initialize(ctx); err != nil {
 			return nil, err
@@ -383,6 +439,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			ClaweeActivityReporter:     officeAPIs.activityReporter,
 			ActivityReportingEnabled:   cfg.Activity.ReportingEnabled,
 			KnowledgeService:           knowledgeSvc,
+			ExternalFeedbackAllowed:    &cfg.Feedback.ExternalAllowed,
+			FeedbackService:            feedbackSvc,
+			FeedbackTrustedProxies:     cfg.Feedback.TrustedProxies,
 			SkillHubService:            skillHubRuntime.Service,
 			SkillSourceService:         skillHubRuntime.Sources,
 			SharedFilesService:         sharedFilesSvc,
@@ -432,7 +491,54 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		sharedFileStorageMigrationSvc.Start(ctx)
 	}
 	poolsOwned = false
+	if feedbackSvc != nil {
+		cleanupCtx, cancel := context.WithCancel(context.Background())
+		application.feedbackCancel = cancel
+		application.feedbackDone = make(chan struct{})
+		go func() {
+			defer close(application.feedbackDone)
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				checkCtx, stop := context.WithTimeout(cleanupCtx, 30*time.Second)
+				_ = feedbackSvc.Cleanup(checkCtx)
+				stop()
+				select {
+				case <-cleanupCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 	return application, nil
+}
+func resolvedFeedbackStoragePath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("反馈存储目录不能为空")
+	}
+	absolute, e := filepath.Abs(path)
+	if e != nil {
+		return "", e
+	}
+	for ancestor := absolute; ; {
+		actual, e := filepath.EvalSymlinks(ancestor)
+		if e == nil {
+			suffix, e := filepath.Rel(ancestor, absolute)
+			if e != nil {
+				return "", e
+			}
+			return filepath.Join(actual, suffix), nil
+		}
+		if !errors.Is(e, os.ErrNotExist) {
+			return "", e
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return "", e
+		}
+		ancestor = parent
+	}
 }
 
 func selectSnapshotClient(cfg config.Config, clawAdminClient activity.SnapshotClient) (activity.SnapshotClient, error) {
@@ -685,6 +791,10 @@ func buildOfficeAPIs(adminDB *sql.DB, collectorDB *sql.DB, installConfig config.
 func (a *App) Close() {
 	if a == nil {
 		return
+	}
+	if a.feedbackCancel != nil {
+		a.feedbackCancel()
+		<-a.feedbackDone
 	}
 	if a.storageMigration != nil {
 		a.storageMigration.Close()

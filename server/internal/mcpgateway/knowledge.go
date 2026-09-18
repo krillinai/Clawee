@@ -38,6 +38,23 @@ func isKnowledgeSearchGate(gate GateRequest) bool {
 }
 
 func ProjectProxyAudit(record ProxyAuditRecord) ProxyAuditRecord {
+	if record.UpstreamServerID == "feedback" || strings.HasPrefix(record.ExposedName, "feedback.") {
+		request, response := JSONMap{}, JSONMap{}
+		for _, k := range []string{"report_id", "artifact_id", "cursor", "limit", "expected_version"} {
+			if v, ok := record.RequestBody[k]; ok {
+				request[k] = v
+			}
+		}
+		for _, k := range []string{"report_id", "processing_status", "version", "has_next", "scanned_records", "code"} {
+			if v, ok := record.ResponseBody[k]; ok {
+				response[k] = v
+			}
+		}
+		record.RequestBody = request
+		record.ResponseBody = response
+		record.RequestHeaders = SanitizeHeaders(record.RequestHeaders)
+		return record
+	}
 	if !isKnowledgeSearchAudit(record) {
 		return projectDataServiceAudit(record)
 	}

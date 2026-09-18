@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 export function ConversationHeader(props: {
   title: string;
   taskToolbar?: ReactNode;
+  feedback?: ReactNode;
   fileWorkspaceOpen?: boolean;
   onOpenLocation(): void;
 }) {
@@ -15,6 +16,7 @@ export function ConversationHeader(props: {
         </div>
       </div>
       <div className="conversation-actions">
+        {props.feedback}
         <button
           className="sidebar-collapse-button conversation-file-button"
           type="button"

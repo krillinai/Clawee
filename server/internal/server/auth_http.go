@@ -233,7 +233,7 @@ func handleLogout(accountSvc *accounts.Service, cookies authCookieConfig) gin.Ha
 	}
 }
 
-func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts DingTalkAuthOptions, agentActivityReportingEnabled bool) gin.HandlerFunc {
+func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts DingTalkAuthOptions, agentActivityReportingEnabled bool, externalAllowed ...*bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		account, ok := currentAccount(c)
 		if !ok {
@@ -266,6 +266,9 @@ func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts 
 		}
 		data["dingtalk_enabled"] = dingtalkOpts.Enabled
 		data["agent_activity_reporting_enabled"] = agentActivityReportingEnabled
+		if len(externalAllowed) > 0 && externalAllowed[0] != nil {
+			data["external_feedback_allowed"] = *externalAllowed[0]
+		}
 		bound := false
 		_, err = accountSvc.AccountIdentityForUser(c.Request.Context(), account.UserID, "dingtalk", dingtalkOpts.ProviderKey)
 		if err == nil {
@@ -599,7 +602,7 @@ func mountAuthRoutes(auth *gin.RouterGroup, opts Options, cookies authCookieConf
 	register := handleRegister(opts.AccountService, opts.RBACService, opts.AgentProvisioningService, cookies)
 	login := handleLogin(opts.AccountService, opts.RBACService, opts.AgentProvisioningService, cookies)
 	logout := handleLogout(opts.AccountService, cookies)
-	me := handleMe(opts.AccountService, opts.RBACService, opts.DingTalkAuth, opts.ActivityReportingEnabled)
+	me := handleMe(opts.AccountService, opts.RBACService, opts.DingTalkAuth, opts.ActivityReportingEnabled, opts.ExternalFeedbackAllowed)
 	requireFrontend := requireJWT(opts.AccountService, accounts.AudienceFrontend, cookies.FrontendName)
 	requireClaweeAgent := requireClaweeAgentBinding(opts.AccountService, opts.ProxyGateway)
 

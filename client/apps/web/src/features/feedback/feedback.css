@@ -1,0 +1,16 @@
+.feedback-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface, white); color: var(--text-primary, #222); }
+.feedback-dialog::backdrop { background: #0006; }
+.feedback-dialog header, .feedback-dialog footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.feedback-dialog header { justify-content: space-between; }
+.feedback-dialog h2 { font-size: 18px; }
+.feedback-dialog h3 { font-size: 14px; }
+.feedback-dialog-body { max-height: 60vh; overflow: auto; overflow-wrap: anywhere; }
+.feedback-dialog label { display: grid; gap: 8px; margin: 12px 0; }
+.feedback-dialog textarea { min-height: 72px; width: 100%; resize: vertical; }
+.feedback-dialog input, .feedback-dialog textarea { font: inherit; max-width: 100%; padding: 6px; border: 1px solid var(--border); background: transparent; color: inherit; }
+.feedback-dialog button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: inherit; }
+.feedback-dialog button:disabled { opacity: .45; }
+.feedback-dialog label.feedback-check { display: flex; align-items: flex-start; }
+.feedback-screenshots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.feedback-screenshots canvas { width: 100%; height: auto; touch-action: none; }
+.feedback-footnote { font-size: 12px; overflow-wrap: anywhere; }

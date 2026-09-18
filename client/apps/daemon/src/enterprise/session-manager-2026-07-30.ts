@@ -526,6 +526,7 @@ export function createEnterpriseSessionManager(input: {
       accountCache = me.account;
     }
     const next: EnterpriseSessionResponse = {
+      externalFeedbackAllowed: me.externalFeedbackAllowed,
       status: 'signed_in',
       agentId: request.expectedAgentId,
       account: me.account,

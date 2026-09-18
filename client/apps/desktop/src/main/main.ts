@@ -21,6 +21,7 @@ import {
 } from './deep-link-manager.js';
 import { isDevelopmentWebUrl } from './development-web.js';
 import { exportDesktopDiagnostics } from './diagnostics.js';
+import { collectDesktopFeedback, exportEmergencyFeedback } from './feedback.js';
 import {
   resolveDesktopEnterpriseLaunchConfig
 } from './enterprise-launch-config-2026-07-30.js';
@@ -291,6 +292,7 @@ async function launchDesktop(): Promise<void> {
     settings,
     dataDir,
     logDir,
+    logger,
     quit: () => app.quit(),
     reloadWorkspace: loadWorkspace
   });
@@ -395,6 +397,7 @@ async function launchDesktop(): Promise<void> {
 }
 
 function registerIpcHandlers(input: {
+  logger: ReturnType<typeof createDesktopLogger>;
   development: boolean;
   allowInsecureExternalUrls: boolean;
   externalUrlOpener?(url: string): Promise<void>;
@@ -490,6 +493,8 @@ function registerIpcHandlers(input: {
       logDir: input.logDir,
       daemonPid: input.daemon.pid
     }));
+  handle(desktopIpc.collectFeedback, input.development, (_event, threadId: unknown) => { if (typeof threadId !== 'string') throw new Error('Invalid thread'); return collectDesktopFeedback({ threadId, logDir: input.logDir, logger: input.logger }); });
+  handle(desktopIpc.emergencyFeedback, input.development, (_event, description: unknown, screenshots: unknown) => { if (typeof description !== 'string' || (screenshots !== undefined && (!Array.isArray(screenshots) || screenshots.length > 5 || screenshots.some(s => !isRecord(s) || typeof s.content_type !== 'string' || !(s.data instanceof Uint8Array))))) throw new Error('Invalid emergency feedback'); return exportEmergencyFeedback({ description, screenshots: screenshots as import('@clawee/protocol').EmergencyFeedbackScreenshot[] | undefined, logDir: input.logDir, logger: input.logger, state: input.bootstrap.currentState }); });
   handle(desktopIpc.quit, input.development, () => input.quit());
 }
 

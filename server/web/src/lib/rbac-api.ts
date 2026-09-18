@@ -1,6 +1,11 @@
 import { publicApi } from "./api";
 
 export const permissions = {
+  feedbackRead: 'console:feedback:read',
+  feedbackDownload: 'console:feedback:download',
+  feedbackInvestigate: 'console:feedback:investigate',
+  feedbackResolve: 'console:feedback:resolve',
+  feedbackReopen: 'console:feedback:reopen',
   accountRead: "console:account:read",
   accountManage: "console:account:manage",
   accountCreate: "console:account:create",

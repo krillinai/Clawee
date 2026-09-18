@@ -11,6 +11,17 @@ func TestKnowledgeBaseIDsFromResolvedScopeNormalizesAuditValues(t *testing.T) {
 		t.Fatalf("knowledgeBaseIDsFromResolvedScope() = %#v", got)
 	}
 }
+func TestFeedbackAuditProjectionNeverCopiesMaterialsOrCredentials(t *testing.T) {
+	projected := ProjectProxyAudit(ProxyAuditRecord{UpstreamServerID: "feedback", ExposedName: "feedback.read_logs", RequestHeaders: JSONMap{"Authorization": "Bearer upload-secret", "X-Feedback-Deployment-Token": "deployment-secret"}, RequestBody: JSONMap{"report_id": "fb_test", "resolution_summary": "private conclusion", "verification": "private verification"}, ResponseBody: JSONMap{"report_id": "fb_test", "manifest": map[string]any{"private": "material"}, "records": []any{"private conversation"}, "metadata_fragment": "private metadata", "has_next": true}})
+	if projected.RequestBody["report_id"] != "fb_test" || projected.RequestBody["resolution_summary"] != nil || projected.ResponseBody["records"] != nil || projected.ResponseBody["metadata_fragment"] != nil {
+		t.Fatal("feedback materials copied into audit")
+	}
+	for _, value := range projected.RequestHeaders {
+		if value == "Bearer upload-secret" || value == "deployment-secret" {
+			t.Fatal("feedback credential in audit")
+		}
+	}
+}
 
 func TestKnowledgeAuditProjectionRedactsQueryAndChunks(t *testing.T) {
 	audit := ProxyAuditRecord{

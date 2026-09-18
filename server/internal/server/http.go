@@ -22,6 +22,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/clientdownloads"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/dingtalk"
+	"github.com/krillinai/Clawee/server/internal/feedback"
 	"github.com/krillinai/Clawee/server/internal/knowledge"
 	"github.com/krillinai/Clawee/server/internal/mcpauth"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
@@ -34,6 +35,9 @@ import (
 )
 
 type Options struct {
+	FeedbackTrustedProxies     []string
+	ExternalFeedbackAllowed    *bool
+	FeedbackService            *feedback.Service
 	ClientDownloadsService     *clientdownloads.Service
 	ProxyGateway               *mcpgateway.Service
 	AgentProvisioningService   *agentprovisioning.Service
@@ -245,6 +249,8 @@ func NewRouter(opts Options) http.Handler {
 	mountSharedFileRoutes(appAPI, adminAPI, opts)
 	mountSharedFileStorageRoutes(adminAPI, opts)
 	mountRBACRoutes(adminAPI.Group("/rbac"), opts)
+	mountFeedbackRoutes(api, adminAPI, opts)
+	mountFeedbackCollectionRoutes(adminAPI, opts)
 
 	registerStaticFallback(router, opts.StaticDir)
 

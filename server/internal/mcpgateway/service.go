@@ -65,6 +65,7 @@ type TokenCipher interface {
 }
 
 type VisibleTool struct {
+	Annotations      JSONMap
 	ID               string
 	Name             string
 	ExposedName      string
@@ -676,6 +677,7 @@ func (s *Service) visibleTools(ctx context.Context, identity AgentIdentity, upst
 			}
 		}
 		out = append(out, VisibleTool{
+			Annotations:      capability.Annotations,
 			ID:               capability.ID,
 			Name:             name,
 			ExposedName:      capability.ExposedName,

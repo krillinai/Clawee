@@ -1,4 +1,6 @@
 export const desktopIpc = {
+  collectFeedback: 'clawee:feedback:collect',
+  emergencyFeedback: 'clawee:feedback:export',
   readConnection: 'clawee:connection:read',
   connectionChanged: 'clawee:connection:changed',
   readBootstrap: 'clawee:bootstrap:read',

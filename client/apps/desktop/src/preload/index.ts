@@ -53,6 +53,8 @@ const api: DesktopApi = {
     return subscribe(desktopIpc.navigate, listener);
   },
   exportDiagnostics: () => ipcRenderer.invoke(desktopIpc.exportDiagnostics),
+  collectFeedback: threadId => ipcRenderer.invoke(desktopIpc.collectFeedback, threadId),
+  exportEmergencyFeedback: (description, screenshots) => ipcRenderer.invoke(desktopIpc.emergencyFeedback, description, screenshots),
   quit: () => ipcRenderer.invoke(desktopIpc.quit)
 };
 

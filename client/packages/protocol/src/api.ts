@@ -877,6 +877,7 @@ export type EnterpriseAccountSummary = {
 };
 
 export type EnterpriseSessionResponse = {
+	 externalFeedbackAllowed?: boolean;
   status: EnterpriseSessionStatus;
   agentId?: string;
   account?: EnterpriseAccountSummary;

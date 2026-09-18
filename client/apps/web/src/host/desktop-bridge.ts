@@ -8,6 +8,8 @@ import type {
 } from './bridge.js';
 
 type DesktopApi = {
+  collectFeedback?(threadId: string): Promise<import('@clawee/protocol').DesktopFeedbackSnapshot>;
+  exportEmergencyFeedback?(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<HostBridgeResult>;
   kind: 'desktop';
   platform: DesktopPlatform;
   windowChrome?: {

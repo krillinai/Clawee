@@ -163,6 +163,9 @@ func validAction(resourceType, resourceID, action string) bool {
 }
 
 func validResource(resourceType, resourceID string) bool {
+	if resourceType == ResourceFeedback {
+		return resourceID == AllFeedback
+	}
 	if !validResourceType(resourceType) || strings.TrimSpace(resourceID) == "" {
 		return false
 	}

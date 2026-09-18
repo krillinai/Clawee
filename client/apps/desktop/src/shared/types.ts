@@ -127,6 +127,8 @@ export type DesktopApi = {
   configureBackgroundNotifications(configuration: { enabled: boolean }): Promise<DesktopHostResult>;
   subscribeNavigation(listener: (route: string) => void): () => void;
   exportDiagnostics(): Promise<DesktopHostResult>;
+  collectFeedback(threadId: string): Promise<import('@clawee/protocol').DesktopFeedbackSnapshot>;
+  exportEmergencyFeedback(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<DesktopHostResult>;
   quit(): Promise<void>;
 };
 

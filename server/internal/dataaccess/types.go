@@ -6,6 +6,8 @@ import (
 )
 
 const (
+	ResourceFeedback      = "feedback"
+	AllFeedback           = "all_feedback"
 	ResourceKnowledgeBase = "knowledge_base"
 	ResourceSharedSpace   = "shared_space"
 	ResourceSkillSpace    = "skill_space"
@@ -39,6 +41,7 @@ type ResourceDefinition struct {
 }
 
 var resourceCatalog = []ResourceDefinition{
+	{ResourceType: ResourceFeedback, Name: "中心问题反馈", Actions: []ActionDefinition{{Action: ActionRead, Name: "全部反馈", Required: true}}},
 	{
 		ResourceType: ResourceSharedSpace,
 		Name:         "共享空间",

@@ -39,6 +39,12 @@
             <div><dt>错误代码</dt><dd id="error-code">-</dd></div>
           </dl>
           <pre id="error-message"></pre>
+          <label for="feedback-description">问题描述</label>
+          <textarea id="feedback-description" maxlength="10000"></textarea>
+          <label for="feedback-screenshots">问题截图</label>
+          <input id="feedback-screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+          <button id="emergency-feedback" type="button">导出本地应急反馈</button>
+          <p id="feedback-result" role="status"></p>
         </details>
       </section>
     </main>

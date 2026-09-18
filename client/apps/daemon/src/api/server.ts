@@ -7,7 +7,7 @@ import type {
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { registerGatewayRoutes } from './routes.gateway.js';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
@@ -166,6 +166,8 @@ import { registerApprovalRoutes } from './routes.approvals.js';
 import { registerCodexRoutes } from './routes.codex.js';
 import { registerCleanupRoutes } from './routes.cleanup.js';
 import { registerDiagnosticsRoutes } from './routes.diagnostics.js';
+import { registerFeedbackRoutes } from './routes.feedback.js';
+import { FeedbackService } from '../feedback/service.js';
 import { registerMcpRoutes } from './routes.mcp.js';
 import { registerMemoryRoutes } from './routes.memory.js';
 import { registerModelServiceRoutes } from './routes.model-service.js';
@@ -1014,6 +1016,10 @@ export async function buildServer(input: BuildServerInput) {
         availabilityProbe: input.getCodexAvailabilityProbe?.()
       })
   });
+  await registerFeedbackRoutes(server, new FeedbackService({ db, dataDir,
+    environment: () => { let runtime; let version = 'unavailable'; try { runtime = getCodexRuntimeStatus(); version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version; } catch { /* 版本不可用会在环境中明确记录。 */ } return { app_version: version, daemon_version: version, platform: process.platform, arch: process.arch, runtime_version: runtime?.version ?? 'unavailable', electron_version: 'unavailable', build_sha: process.env.CLAWEE_BUILD_SHA ?? 'unavailable', connection_status: enterpriseSessionManager.getSnapshot().status }; },
+    policy: async (refresh) => { const current = enterpriseSessionManager.getSnapshot(); if (!refresh || current.status !== 'signed_in') return { allowed: current.externalFeedbackAllowed, expiresAt: current.expiresAt }; const me = await enterpriseHttpClient.getMe(await enterpriseSessionManager.requireAccessToken()); return { allowed: me.externalFeedbackAllowed, expiresAt: current.expiresAt }; }
+  }));
   await registerWorkspaceFileRoutes(server, workspaceFileService);
   await registerSearchRoutes(server, {
     provider: codexSessionProvider,

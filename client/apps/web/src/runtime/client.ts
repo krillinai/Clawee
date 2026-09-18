@@ -16,6 +16,14 @@ export class RuntimeClient {
   private readonly baseUrl: string;
   private readonly token: string | undefined;
   private readonly fetchImpl: typeof fetch;
+  private feedbackThreadId?: string;
+  private diagnosticCount = 0;
+
+  setFeedbackThread(threadId?: string) { this.feedbackThreadId = threadId; this.diagnosticCount = 0; }
+  recordFeedbackError(errorCode: 'network_failed' | 'http_failed' | 'browser_error' | 'unhandled_rejection', method?: string, status?: number) {
+    if (!this.feedbackThreadId || this.diagnosticCount++ >= 100) return;
+    void this.post('/feedback/diagnostics', { thread_id: this.feedbackThreadId, source: 'web', error_code: errorCode, method, status }).catch(() => {});
+  }
 
   constructor(input: RuntimeClientInput) {
     this.baseUrl = input.baseUrl.replace(/\/+$/, '');
@@ -95,16 +103,18 @@ export class RuntimeClient {
         input.binaryContentType ?? 'application/octet-stream';
     }
 
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+    let response: Response;
+    try { response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: input.method,
       headers,
       signal: input.signal,
       body: input.binaryBody ?? (
         input.body === undefined ? undefined : JSON.stringify(input.body)
       )
-    });
+    }); } catch (error) { if (!path.startsWith('/feedback') && !input.signal?.aborted) this.recordFeedbackError('network_failed', input.method); throw error; }
 
     if (!response.ok) {
+      if (!path.startsWith('/feedback')) this.recordFeedbackError('http_failed', input.method, response.status);
       const payload = await readErrorPayload(response);
       const error = parseApiError(payload);
       throw new ApiClientError({

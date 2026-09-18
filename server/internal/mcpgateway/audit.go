@@ -21,6 +21,9 @@ func SanitizeHeaders(headers JSONMap) JSONMap {
 }
 
 func isSensitiveHeader(key string) bool {
+	if strings.EqualFold(key, "X-Feedback-Deployment-Token") {
+		return true
+	}
 	return strings.EqualFold(key, "authorization") ||
 		strings.EqualFold(key, "cookie") ||
 		strings.EqualFold(key, "set-cookie")

@@ -135,6 +135,8 @@ type internalServerErrorLogWriter struct {
 	body strings.Builder
 }
 
+func (w *internalServerErrorLogWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *internalServerErrorLogWriter) Write(data []byte) (int, error) {
 	w.capture(string(data))
 	return w.ResponseWriter.Write(data)

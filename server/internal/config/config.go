@@ -19,22 +19,31 @@ const (
 )
 
 type Config struct {
-	Server          ServerConfig          `mapstructure:"server"`
-	Database        DatabaseConfig        `mapstructure:"database"`
-	Security        SecurityConfig        `mapstructure:"security"`
-	Logging         LoggingConfig         `mapstructure:"logging"`
-	Static          StaticConfig          `mapstructure:"static"`
-	MCP             MCPConfig             `mapstructure:"mcp"`
-	Office          OfficeConfig          `mapstructure:"office"`
-	Knowledge       KnowledgeConfig       `mapstructure:"knowledge"`
-	SkillHub        SkillHubConfig        `mapstructure:"skillhub"`
-	SharedFiles     SharedFilesConfig     `mapstructure:"shared_files"`
-	ClawAdmin       ClawAdminConfig       `mapstructure:"claw_admin"`
-	Sub2API         Sub2APIConfig         `mapstructure:"sub2api"`
-	DingTalk        DingTalkConfig        `mapstructure:"dingtalk"`
-	Bilibili        BilibiliConfig        `mapstructure:"bilibili"`
-	ModelAccess     ModelAccessConfig     `mapstructure:"model_access"`
-	Activity        ActivityConfig        `mapstructure:"agent_activity"`
+	Feedback    FeedbackConfig    `mapstructure:"feedback"`
+	Server      ServerConfig      `mapstructure:"server"`
+	Database    DatabaseConfig    `mapstructure:"database"`
+	Security    SecurityConfig    `mapstructure:"security"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
+	Static      StaticConfig      `mapstructure:"static"`
+	MCP         MCPConfig         `mapstructure:"mcp"`
+	Office      OfficeConfig      `mapstructure:"office"`
+	Knowledge   KnowledgeConfig   `mapstructure:"knowledge"`
+	SkillHub    SkillHubConfig    `mapstructure:"skillhub"`
+	SharedFiles SharedFilesConfig `mapstructure:"shared_files"`
+	ClawAdmin   ClawAdminConfig   `mapstructure:"claw_admin"`
+	Sub2API     Sub2APIConfig     `mapstructure:"sub2api"`
+	DingTalk    DingTalkConfig    `mapstructure:"dingtalk"`
+	Bilibili    BilibiliConfig    `mapstructure:"bilibili"`
+	ModelAccess ModelAccessConfig `mapstructure:"model_access"`
+	Activity    ActivityConfig    `mapstructure:"agent_activity"`
+}
+
+type FeedbackConfig struct {
+	TrustedProxies  []string `mapstructure:"trusted_proxies"`
+	Enabled         bool     `mapstructure:"enabled"`
+	StorageRoot     string   `mapstructure:"storage_root"`
+	CapacityBytes   int64    `mapstructure:"capacity_bytes"`
+	ExternalAllowed bool     `mapstructure:"external_feedback_allowed"`
 }
 
 type ActivityConfig struct {
@@ -430,6 +439,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("skillhub.github_sync_enabled", true)
 	v.SetDefault("skillhub.repository_root", "data/skillhub/repositories")
 	v.SetDefault("shared_files.storage_root", "data/shared-files")
+	v.SetDefault("feedback.enabled", false)
+	v.SetDefault("feedback.storage_root", "data/feedback-private")
+	v.SetDefault("feedback.capacity_bytes", int64(20<<30))
+	v.SetDefault("feedback.external_feedback_allowed", true)
+	v.SetDefault("feedback.trusted_proxies", []string{})
 	v.SetDefault("shared_files.oss.allowed_endpoint_hosts", []string{})
 	v.SetDefault("claw_admin.base_url", "")
 	v.SetDefault("claw_admin.deployment_credential", "")
@@ -485,6 +499,7 @@ func bindEnv(v *viper.Viper) {
 		"skillhub.enabled",
 		"skillhub.package_root",
 		"shared_files.storage_root",
+		"feedback.enabled", "feedback.storage_root", "feedback.capacity_bytes", "feedback.external_feedback_allowed", "feedback.trusted_proxies",
 		"shared_files.oss.allowed_endpoint_hosts",
 		"claw_admin.base_url",
 		"claw_admin.deployment_credential",

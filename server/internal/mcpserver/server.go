@@ -160,7 +160,14 @@ func addProxyTools(server *mcp.Server, opts Options, r *http.Request) {
 	}
 	for _, tool := range tools {
 		tool := tool
+		var annotations *mcp.ToolAnnotations
+		if tool.UpstreamServerID == "feedback" {
+			annotations = &mcp.ToolAnnotations{}
+			raw, _ := json.Marshal(tool.Annotations)
+			_ = json.Unmarshal(raw, annotations)
+		}
 		server.AddTool(&mcp.Tool{
+			Annotations:  annotations,
 			Name:         tool.Name,
 			Title:        tool.Title,
 			Description:  tool.Description,

@@ -2,6 +2,7 @@ import "@/styles/admin-font.css";
 
 import {
   Boxes,
+  Bug,
   BookOpenText,
   CheckSquare,
   ChevronRight,
@@ -26,6 +27,7 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import { AccountPane } from "@/components/account-pane";
 import { AdminBrand } from "@/components/admin-brand";
+import { FeedbackCollector } from "@/components/feedback-collector";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -89,6 +91,7 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "系统管理",
     items: [
+      { label: '问题反馈', href: '/admin/feedback', icon: Bug, permission: permissions.feedbackRead },
       { label: "账号管理", href: "/admin/accounts", icon: Users, permission: permissions.accountRead },
       { label: "角色管理", href: "/admin/rbac/roles", icon: Shield, permission: permissions.rbacRead },
       { label: "权限目录", href: "/admin/rbac/permissions", icon: ListChecks, permission: permissions.rbacRead },
@@ -224,6 +227,7 @@ export function AdminSidebar({ account }: { account?: Account }) {
         </div>
       </SidebarFooter>
       <SidebarFooter className="p-4 pt-2">
+        {account ? <FeedbackCollector /> : null}
         <Button asChild className="w-full justify-start" size="sm" variant="ghost">
           <NavLink to="/downloads">
             <Download aria-hidden="true" data-icon="inline-start" />

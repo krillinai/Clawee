@@ -40,10 +40,10 @@ func TestSummarizeDataResourceGrantsUsesGrantDimensions(t *testing.T) {
 		},
 	}
 	types := summarizeDataResourceTypes(grants, resourceNames)
-	if len(types) != 4 || types[0].ResourceType != dataaccess.ResourceSharedSpace || types[0].ResourceCount != 2 || types[0].ActionCount != 2 || types[0].UserCount != 2 {
+	if len(types) != 5 || types[1].ResourceType != dataaccess.ResourceSharedSpace || types[1].ResourceCount != 2 || types[1].ActionCount != 2 || types[1].UserCount != 2 {
 		t.Fatalf("resource types = %#v", types)
 	}
-	if types[3].ResourceType != dataaccess.ResourceDataView || types[3].ResourceCount != 4 || types[3].ActionCount != 3 || types[3].UserCount != 0 {
+	if types[4].ResourceType != dataaccess.ResourceDataView || types[4].ResourceCount != 4 || types[4].ActionCount != 3 || types[4].UserCount != 0 {
 		t.Fatalf("data view type = %#v", types[3])
 	}
 	resources := summarizeDataResources(dataaccess.ResourceSharedSpace, grants, resourceNames[dataaccess.ResourceSharedSpace], "市场")

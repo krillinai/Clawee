@@ -40,6 +40,8 @@ func run(ctx context.Context, args []string) error {
 func runWithDeps(ctx context.Context, args []string, deps commandDeps) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "feedback-credential":
+			return runFeedbackCredentialCommand(ctx, args[1:], deps)
 		case "serve":
 			return runServeCommand(ctx, args[1:], deps)
 		case "migrate":

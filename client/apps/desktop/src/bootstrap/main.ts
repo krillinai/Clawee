@@ -31,6 +31,7 @@ type BootstrapApi = {
   reloadWorkspace(): Promise<unknown>;
   restartRuntime(): Promise<unknown>;
   exportDiagnostics(): Promise<unknown>;
+  exportEmergencyFeedback(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<{ ok: boolean; message?: string }>;
   quit(): Promise<void>;
 };
 
@@ -89,6 +90,11 @@ api.subscribeBootstrapState(render);
 
 element('retry').addEventListener('click', () => void api.retryBootstrap());
 element('diagnostics').addEventListener('click', () => void api.exportDiagnostics());
+element('emergency-feedback').addEventListener('click', () => void (async () => {
+  const result = element('feedback-result');
+  try { const description = (element('feedback-description') as HTMLTextAreaElement).value; const files = Array.from((element('feedback-screenshots') as HTMLInputElement).files ?? []); if (files.length > 5 || files.some(file => file.size > 10 * 1024 * 1024)) throw new Error('问题截图超限'); const screenshots = await Promise.all(files.map(async file => ({ content_type: file.type, data: new Uint8Array(await file.arrayBuffer()) }))); const exported = await api.exportEmergencyFeedback(description, screenshots); result.textContent = exported.ok ? '已导出部分资料，未发送到中心。' : exported.message ?? '导出未完成'; }
+  catch { result.textContent = '导出失败，请检查描述与截图。'; }
+})());
 element('quit').addEventListener('click', () => void api.quit());
 element('reload-workspace').addEventListener('click', () => void api.reloadWorkspace());
 element('restart-runtime').addEventListener('click', () => void api.restartRuntime());
