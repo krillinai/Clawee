@@ -19,6 +19,7 @@ export type FeedbackArtifact = {
 };
 export type FeedbackManifest = {
   schema_version: 1;
+  collection_scope?: 'basic' | 'diagnostics';
   snapshot_at: string;
   thread_id: string;
   run_ids: string[];
@@ -35,6 +36,7 @@ export type FeedbackDraft = {
   local_feedback_id: string;
   thread_id: string;
   description: string;
+  preview?: { description: string; reproduction_steps: string; diagnostics: unknown[] };
   state: FeedbackDraftState;
   origin: string;
   manifest?: FeedbackManifest;
@@ -47,6 +49,7 @@ export type FeedbackDraft = {
   retry_count: number;
   next_retry_at?: string;
   expires_at: string;
+  materials_expires_at?: string;
   external_feedback_allowed: boolean;
   centre_status?: string;
   public_resolution_summary?: string;

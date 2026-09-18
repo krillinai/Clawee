@@ -23,7 +23,7 @@ export async function registerFeedbackRoutes(server: FastifyInstance, service: F
   });
   server.post('/feedback/drafts', { bodyLimit: 100000 }, action(request => service.create(draft.parse(request.body)), 201));
   server.get('/feedback/drafts/:id', action(request => service.get(request.params.id)));
-  server.post('/feedback/drafts/:id/collect', { bodyLimit: 256 * 1024 }, action(async request => { const body = z.object({ native: native.optional() }).strict().parse(request.body ?? {}); await service.collect(request.params.id, body.native); return { collecting: true }; }, 202));
+  server.post('/feedback/drafts/:id/collect', { bodyLimit: 256 * 1024 }, action(async request => { const body = z.object({ native: native.optional(), include_diagnostics: z.boolean().optional() }).strict().parse(request.body ?? {}); await service.collect(request.params.id, body.native, body.include_diagnostics); return { collecting: true }; }, 202));
   server.post('/feedback/drafts/:id/send', action(async request => { const body = z.object({ confirmed: z.literal(true), manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/), accept_partial: z.boolean() }).strict().parse(request.body); await service.send(request.params.id, body); return { queued: true }; }, 202));
   server.post('/feedback/drafts/:id/retry', action(async request => { await service.retry(request.params.id); return { queued: true }; }, 202));
   server.post('/feedback/drafts/:id/cancel', action(request => service.cancel(request.params.id)));

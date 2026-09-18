@@ -5,10 +5,10 @@ import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'no
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { canonicalFeedbackJSON, FEEDBACK_ORIGIN, type FeedbackDraft, type FeedbackManifest } from '@clawee/protocol';
-import { collectFeedback, type NativeFeedback } from './collector.js';
+import { collectFeedback, feedbackEnvironment, type NativeFeedback } from './collector.js';
 import { redactFeedback } from './redactor.js';
 
-type StoredDraft = Omit<FeedbackDraft, 'external_feedback_allowed'> & { client_feedback_id: string; occurred_at: string; reproduction_steps: string; consent_at?: string; accept_partial?: boolean; created_at: string; uploaded_artifact_ids: string[]; environment?: Record<string, string>; redacted_description?: string; redacted_steps?: string };
+type StoredDraft = Omit<FeedbackDraft, 'external_feedback_allowed'> & { client_feedback_id: string; occurred_at: string; reproduction_steps: string; include_diagnostics?: boolean; consent_at?: string; accept_partial?: boolean; created_at: string; uploaded_artifact_ids: string[]; environment?: Record<string, string>; redacted_description?: string; redacted_steps?: string };
 type Secrets = { recovery_token: string; status_token: string; upload_token?: string; upload_expires_at?: string; recovery_expires_at?: string };
 type Progress = { report_id: string; upload_token?: string; upload_expires_at?: string; recovery_expires_at: string; received_artifact_ids: string[]; upload_state: string; expires_at: string };
 class UploadError extends Error { constructor(readonly status: number, readonly retryAfter: number) { super(`FEEDBACK_HTTP_${status}`); } }
@@ -19,6 +19,8 @@ async function atomicJSON(path: string, value: unknown) {
 }
 export class FeedbackService {
   private controllers = new Map<string, AbortController>();
+  private statusControllers = new Map<string, AbortController>();
+  private statusCheckedAt = new Map<string, number>();
   private running = false;
   private timer?: NodeJS.Timeout;
   private closed = false;
@@ -59,9 +61,22 @@ export class FeedbackService {
   async get(id: string): Promise<FeedbackDraft> {
     const d = this.load(id);
     const allowed = await this.allowed(false);
-    let centreStatus: { processing_status?: string; public_resolution_summary?: string } = {};
-    if (d.report_id && d.state === 'submitted' && allowed) { try { const secrets = await this.secrets(id); centreStatus = await this.request(`/reports/${d.report_id}/status`, 'GET', new AbortController(), undefined, secrets.status_token); } catch { /* 离线仍可读取本地回执。 */ } }
-    return { local_feedback_id: id, thread_id: d.thread_id, description: d.description, state: d.state, origin: d.origin, manifest: d.manifest, manifest_sha256: d.manifest_sha256, size_bytes: d.size_bytes, screenshots: d.screenshots, report_id: d.report_id, error_code: d.error_code, consent_at: d.consent_at, retry_count: d.retry_count, next_retry_at: d.next_retry_at, expires_at: d.expires_at, external_feedback_allowed: allowed, centre_status: centreStatus.processing_status, public_resolution_summary: centreStatus.public_resolution_summary };
+    let preview: FeedbackDraft['preview'];
+    const summary = d.manifest?.collection_scope ? d.manifest.artifacts.find(a => a.source === 'lightweight') : undefined;
+    if (summary && d.state !== 'collecting') { const text = await readFile(join(this.directory(id), summary.artifact_id), 'utf8'); preview = { description: d.redacted_description ?? '', reproduction_steps: d.redacted_steps ?? '', diagnostics: text.trim().split('\n').map(line => JSON.parse(line) as unknown) }; }
+    if (!this.closed && d.report_id && d.state === 'submitted' && allowed && !this.statusControllers.has(id) && Date.now() - (this.statusCheckedAt.get(id) ?? 0) >= 30000) void this.refreshStatus(d);
+    return { local_feedback_id: id, thread_id: d.thread_id, description: d.description, preview, state: d.state, origin: d.origin, manifest: d.manifest, manifest_sha256: d.manifest_sha256, size_bytes: d.size_bytes, screenshots: d.screenshots, report_id: d.report_id, error_code: d.error_code, consent_at: d.consent_at, retry_count: d.retry_count, next_retry_at: d.next_retry_at, expires_at: d.expires_at, materials_expires_at: d.materials_expires_at, external_feedback_allowed: allowed, centre_status: d.centre_status, public_resolution_summary: d.public_resolution_summary };
+  }
+  private async refreshStatus(d: StoredDraft) {
+    const id = d.local_feedback_id; const controller = new AbortController();
+    this.statusControllers.set(id, controller); this.statusCheckedAt.set(id, Date.now());
+    try {
+      const secrets = await this.secrets(id);
+      const next = await this.request<{ processing_status?: string; public_resolution_summary?: string }>(`/reports/${d.report_id}/status`, 'GET', controller, undefined, secrets.status_token);
+      if (this.closed) return;
+      const current = this.load(id); current.centre_status = next.processing_status; current.public_resolution_summary = next.public_resolution_summary; this.save(current);
+    } catch { /* 远端查询失败不影响本地成功回执。 */ }
+    finally { this.statusControllers.delete(id); }
   }
   private editable(d: StoredDraft) { if (d.consent_at || d.report_id || d.state === 'collecting' || d.state === 'cancelled') throw new Error('FEEDBACK_SNAPSHOT_FROZEN'); }
   async screenshot(id: string, data: Buffer, mime: string) {
@@ -73,17 +88,17 @@ export class FeedbackService {
     const screenshot_id = randomUUID(); await writeFile(join(this.directory(id), screenshot_id), data, { mode: 0o600, flag: 'wx' }); d.screenshots.push({ screenshot_id, content_type: mime, size_bytes: data.length }); d.manifest = undefined; d.manifest_sha256 = undefined; this.save(d); return { screenshot_id };
   }
   async removeScreenshot(id: string, screenshotId: string) { const d = this.load(id); this.editable(d); const found = d.screenshots.find(s => s.screenshot_id === screenshotId); if (!found) throw new Error('FEEDBACK_NOT_FOUND'); await rm(join(this.directory(id), found.screenshot_id)); d.screenshots = d.screenshots.filter(s => s !== found); d.manifest = undefined; d.manifest_sha256 = undefined; this.save(d); }
-  async collect(id: string, native?: NativeFeedback) {
+  async collect(id: string, native?: NativeFeedback, includeDiagnostics?: boolean) {
     await this.requireAllowed(); const d = this.load(id); this.editable(d); d.state = 'collecting'; d.error_code = undefined; d.manifest = undefined; d.manifest_sha256 = undefined; d.size_bytes = 0; this.save(d);
+    d.include_diagnostics = includeDiagnostics ?? d.include_diagnostics ?? false;
     const controller = new AbortController(); this.controllers.set(id, controller);
     void (async () => {
       try {
         for (const name of await readdir(this.directory(id))) if (/^[0-9a-f-]{36}$/.test(name) && !d.screenshots.some(s => s.screenshot_id === name)) await rm(join(this.directory(id), name), { force: true });
-        const latest = this.input.db.prepare('SELECT model FROM runs WHERE thread_id=? ORDER BY created_at DESC,id DESC LIMIT 1').get(d.thread_id) as { model?: string } | undefined;
-        d.environment = { ...this.input.environment(), ...native?.environment, model: latest?.model ?? 'unavailable' }; d.redacted_description = String(redactFeedback(d.description)); d.redacted_steps = String(redactFeedback(d.reproduction_steps));
+        d.environment = feedbackEnvironment({ ...this.input.environment(), ...native?.environment }); d.redacted_description = String(redactFeedback(d.description)); d.redacted_steps = String(redactFeedback(d.reproduction_steps));
         const screenshots: FeedbackManifest['artifacts'] = [];
         for (const screenshot of d.screenshots) { const data = await readFile(join(this.directory(id), screenshot.screenshot_id)); screenshots.push({ artifact_id: screenshot.screenshot_id, kind: 'screenshot', name: `screenshot-${screenshots.length + 1}`, content_type: screenshot.content_type, size_bytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), record_count: 0, source: `screenshot:${screenshot.screenshot_id}`, part_index: 1 }); }
-        const m = await collectFeedback({ db: this.input.db, dataDir: this.input.dataDir, directory: this.directory(id), threadId: d.thread_id, environment: d.environment, native, signal: controller.signal, onProgress: manifest => { d.manifest = { ...manifest, completeness: 'partial', missing_items: [...manifest.missing_items, 'collection:in_progress'], artifacts: [...manifest.artifacts, ...screenshots] }; d.size_bytes = d.manifest.artifacts.reduce((n, a) => n + a.size_bytes, 0); this.save(d); } });
+        const m = await collectFeedback({ db: this.input.db, dataDir: this.input.dataDir, directory: this.directory(id), threadId: d.thread_id, environment: d.environment, native, includeDiagnostics: d.include_diagnostics, signal: controller.signal, onProgress: manifest => { d.manifest = { ...manifest, completeness: 'partial', missing_items: [...manifest.missing_items, 'collection:in_progress'], artifacts: [...manifest.artifacts, ...screenshots] }; d.size_bytes = d.manifest.artifacts.reduce((n, a) => n + a.size_bytes, 0); this.save(d); } });
         m.artifacts.push(...screenshots);
         controller.signal.throwIfAborted(); d.manifest = m; d.manifest_sha256 = createHash('sha256').update(canonicalFeedbackJSON(m)).digest('hex'); d.size_bytes = m.artifacts.reduce((n, a) => n + a.size_bytes, 0); if (m.artifacts.length > 256 || d.size_bytes > 200 * 1024 * 1024) throw new Error('FEEDBACK_QUOTA_EXCEEDED'); d.state = 'awaiting_consent'; this.save(d);
       } catch (error) { if (!this.closed && this.load(id).state !== 'cancelled') { d.state = 'failed'; d.error_code = (error as Error).message === 'FEEDBACK_QUOTA_EXCEEDED' ? 'FEEDBACK_QUOTA_EXCEEDED' : 'FEEDBACK_COLLECTION_FAILED'; d.manifest_sha256 = undefined; if (d.manifest) { d.manifest.completeness = 'partial'; d.manifest.missing_items = d.manifest.missing_items.filter(item => item !== 'collection:in_progress'); d.manifest.missing_items.push(d.error_code === 'FEEDBACK_QUOTA_EXCEEDED' ? 'collection:quota_exceeded' : 'collection:interrupted'); } this.save(d); } }
@@ -92,6 +107,7 @@ export class FeedbackService {
   }
   async send(id: string, input: { confirmed: boolean; manifest_sha256: string; accept_partial: boolean }) {
     await this.requireAllowed(); const d = this.load(id);
+    if (!d.manifest?.collection_scope) throw new Error('FEEDBACK_RECOLLECTION_REQUIRED');
     if (!input.confirmed || !d.manifest || input.manifest_sha256 !== d.manifest_sha256 || d.state !== 'awaiting_consent' || (d.manifest.completeness === 'partial' && !input.accept_partial) || Date.parse(d.expires_at) <= Date.now()) throw new Error('FEEDBACK_CONSENT_REQUIRED');
     d.consent_at = new Date().toISOString(); d.accept_partial = input.accept_partial; d.state = 'queued'; this.save(d); this.start();
   }
@@ -122,7 +138,7 @@ export class FeedbackService {
     let p: Progress;
     if (!d.report_id) p = await update(await this.request<Progress>('/reports', 'POST', controller, { client_feedback_id: d.client_feedback_id, recovery_token: secrets.recovery_token, status_token: secrets.status_token, description: d.redacted_description, occurred_at: d.occurred_at, reproduction_steps: d.redacted_steps, environment: d.environment, source_claim: {}, consent: { policy_version: 1, confirmed_at: d.consent_at }, manifest: m }));
     else p = await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token));
-    if (p.upload_state === 'ready') { d.state = 'submitted'; d.expires_at = new Date(Date.now() + 7 * 86400000).toISOString(); this.save(d); return; }
+    if (p.upload_state === 'ready') { this.submitted(d); return; }
     for (const artifact of m.artifacts) {
       if (d.uploaded_artifact_ids.includes(artifact.artifact_id)) continue;
       // 顺序上传自然满足最多两个并发，恢复时无在途请求。
@@ -133,8 +149,9 @@ export class FeedbackService {
     }
     const submit = () => this.request(`/reports/${d.report_id}/submit`, 'POST', controller, { manifest_sha256: d.manifest_sha256, accept_partial: d.accept_partial }, secrets.upload_token);
     try { await submit(); } catch (error) { if (!(error instanceof UploadError) || error.status !== 401 || Date.parse(secrets.recovery_expires_at ?? '') <= Date.now()) throw error; const recovered = await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token)); if (recovered.upload_state !== 'ready') await submit(); }
-    controller.signal.throwIfAborted(); d.state = 'submitted'; d.error_code = undefined; d.expires_at = new Date(Date.now() + 7 * 86400000).toISOString(); this.save(d);
+    controller.signal.throwIfAborted(); this.submitted(d);
   }
+  private submitted(d: StoredDraft) { d.state = 'submitted'; d.error_code = undefined; d.expires_at = new Date(Date.now() + 7 * 86400000).toISOString(); d.materials_expires_at = new Date(Date.now() + 86400000).toISOString(); this.save(d); }
   start() { if (this.closed || this.running || this.timer) return; this.timer = setTimeout(() => { this.timer = undefined; void this.work(); }, 100); this.timer.unref(); }
   private async work() {
     if (this.running || this.closed) return; this.running = true;
@@ -143,8 +160,14 @@ export class FeedbackService {
       let uploadAllowed: boolean | undefined;
       for (const d of drafts) {
         if (Date.parse(d.expires_at) <= Date.now()) { await rm(this.directory(d.local_feedback_id), { recursive: true, force: true }); this.input.db.prepare('DELETE FROM feedback_queue WHERE local_feedback_id=?').run(d.local_feedback_id); continue; }
+        if (d.state === 'submitted' && d.materials_expires_at && Date.parse(d.materials_expires_at) <= Date.now()) {
+          for (const artifact of d.manifest?.artifacts ?? []) { if (!/^[0-9a-f-]{36}$/.test(artifact.artifact_id)) throw new Error('FEEDBACK_INVALID_ARTIFACT'); await rm(join(this.directory(d.local_feedback_id), artifact.artifact_id), { force: true }); }
+          d.manifest = undefined; d.manifest_sha256 = undefined; d.screenshots = []; d.materials_expires_at = undefined; this.save(d);
+        }
         if (d.state === 'collecting' && !this.controllers.has(d.local_feedback_id)) { d.state = 'failed'; d.error_code = 'FEEDBACK_COLLECTION_INTERRUPTED'; d.manifest_sha256 = undefined; if (d.manifest) { d.manifest.completeness = 'partial'; d.manifest.missing_items = d.manifest.missing_items.filter(item => item !== 'collection:in_progress'); d.manifest.missing_items.push('collection:interrupted'); } this.save(d); }
-        if (!['queued', 'uploading'].includes(d.state) || Date.parse(d.next_retry_at ?? '') > Date.now()) continue;
+        if (!['queued', 'uploading'].includes(d.state)) continue;
+        if (!d.manifest?.collection_scope) { d.state = 'failed'; d.error_code = 'FEEDBACK_RECOLLECTION_REQUIRED'; this.save(d); continue; }
+        if (Date.parse(d.next_retry_at ?? '') > Date.now()) continue;
         uploadAllowed ??= await this.allowed();
         if (!uploadAllowed) continue;
         if (this.closed) break;
@@ -164,5 +187,5 @@ export class FeedbackService {
   }
   async export(id: string) { const d = this.load(id); if (!d.manifest) throw new Error('FEEDBACK_NOT_READY'); return d.manifest; }
   async artifact(id: string, aid: string) { const d = this.load(id); if (!d.manifest?.artifacts.some(a => a.artifact_id === aid)) throw new Error('FEEDBACK_NOT_FOUND'); return createReadStream(join(this.directory(id), aid)); }
-  close() { this.closed = true; if (this.timer) clearTimeout(this.timer); for (const controller of this.controllers.values()) controller.abort(); }
+  close() { this.closed = true; if (this.timer) clearTimeout(this.timer); for (const controller of [...this.controllers.values(), ...this.statusControllers.values()]) controller.abort(); }
 }

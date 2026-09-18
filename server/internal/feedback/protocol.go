@@ -57,6 +57,7 @@ type Watermark struct {
 }
 type Manifest struct {
 	SchemaVersion          int         `json:"schema_version"`
+	CollectionScope        string      `json:"collection_scope,omitempty"`
 	SnapshotAt             string      `json:"snapshot_at"`
 	ThreadID               string      `json:"thread_id"`
 	RunIDs                 []string    `json:"run_ids"`
@@ -118,6 +119,13 @@ func validate(in CreateInput) (Manifest, int64, string, string, error) {
 		return m, 0, "", "", fail(400, "feedback_invalid_manifest")
 	}
 	invalid := !IDPattern.MatchString(in.ClientID) || !validToken(in.RecoveryToken) || !validToken(in.StatusToken) || in.RecoveryToken == in.StatusToken || strings.TrimSpace(in.Description) == "" || utf8.RuneCountInString(in.Description) > 10000 || utf8.RuneCountInString(in.ReproductionSteps) > 10000 || in.Consent.PolicyVersion != 1 || m.SchemaVersion != 1 || m.RedactionPolicyVersion != 1 || !IDPattern.MatchString(m.ThreadID) || (m.Completeness != "complete" && m.Completeness != "partial") || len(m.Artifacts) == 0 || len(m.Artifacts) > 256
+	lightweight := m.CollectionScope == "basic" || m.CollectionScope == "diagnostics"
+	if m.CollectionScope != "" && !lightweight {
+		invalid = true
+	}
+	if lightweight && (len(m.RunIDs) > 0 || len(m.RuntimeThreadIDs) > 0 || len(m.Watermarks) > 0) {
+		invalid = true
+	}
 	for _, t := range []string{in.OccurredAt, in.Consent.ConfirmedAt, m.SnapshotAt} {
 		if _, err := time.Parse(time.RFC3339Nano, t); err != nil {
 			invalid = true
@@ -158,6 +166,9 @@ func validate(in CreateInput) (Manifest, int64, string, string, error) {
 		}
 		total += a.Size
 		kinds[a.Kind] = true
+		if lightweight && a.Kind != "diagnostics" && a.Kind != "screenshot" {
+			invalid = true
+		}
 		switch a.Kind {
 		case "screenshot":
 			screenshots++
@@ -190,7 +201,7 @@ func validate(in CreateInput) (Manifest, int64, string, string, error) {
 			invalid = true
 		}
 	}
-	if m.Completeness == "complete" && (!kinds["conversation"] || !kinds["environment"] || !kinds["diagnostics"] || len(m.MissingItems) > 0) {
+	if m.Completeness == "complete" && ((!lightweight && (!kinds["conversation"] || !kinds["environment"])) || !kinds["diagnostics"] || len(m.MissingItems) > 0) {
 		invalid = true
 	}
 	if invalid {

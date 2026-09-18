@@ -148,6 +148,26 @@ func TestListUnavailableDoesNotExposeQuarantineDescription(t *testing.T) {
 		t.Fatal("expired metadata unavailable or body exposed", err)
 	}
 }
+func TestLightweightManifest(t *testing.T) {
+	in := inputFor([]byte("{}\n"))
+	var m Manifest
+	_ = json.Unmarshal(in.Manifest, &m)
+	m.CollectionScope = "basic"
+	m.Completeness = "complete"
+	m.MissingItems = nil
+	m.Artifacts[0].Kind = "diagnostics"
+	in.Manifest, _ = json.Marshal(m)
+	if _, _, _, _, err := validate(in); err != nil {
+		t.Fatal("lightweight feedback incorrectly requires full conversation", err)
+	}
+	for _, kind := range []string{"conversation", "logs", "attachments", "environment"} {
+		m.Artifacts[0].Kind = kind
+		in.Manifest, _ = json.Marshal(m)
+		if _, _, _, _, err := validate(in); err == nil {
+			t.Fatal("lightweight manifest accepts out-of-scope artifact", kind)
+		}
+	}
+}
 func TestCompleteManifestRejectsKnownSourceTruncation(t *testing.T) {
 	in := inputFor([]byte("{}\n"))
 	var manifest Manifest

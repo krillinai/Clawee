@@ -9,10 +9,12 @@ for (const theme of ['light', 'dark']) {
     let description = '';
     let steps = '';
     let submitted = false;
+    let includeDiagnostics: boolean | undefined;
     const draft = (): FeedbackDraft => ({
       local_feedback_id: '00000000-0000-0000-0000-000000000001',
       thread_id: runtime.ordinaryThreadId,
       description,
+      preview: { description, reproduction_steps: steps, diagnostics: [{ environment: { app_version: '1.0.0' } }] },
       state: submitted ? 'submitted' : 'awaiting_consent',
       origin: 'https://gateway.clawee.work',
       size_bytes: 81920,
@@ -23,11 +25,12 @@ for (const theme of ['light', 'dark']) {
       manifest_sha256: 'a'.repeat(64),
       manifest: {
         schema_version: 1,
+        collection_scope: theme === 'dark' ? 'diagnostics' : 'basic',
         snapshot_at: '2026-09-18T08:49:32Z',
         thread_id: runtime.ordinaryThreadId,
         run_ids: [], runtime_thread_ids: [], watermarks: [],
-        completeness: 'partial', redaction_policy_version: 1,
-        artifacts: [], missing_items: ['desktop:unavailable'], warnings: []
+        completeness: 'complete', redaction_policy_version: 1,
+        artifacts: [], missing_items: [], warnings: []
       },
       ...(submitted ? { report_id: 'fb_test_receipt', centre_status: 'open' } : {})
     });
@@ -47,6 +50,7 @@ for (const theme of ['light', 'dark']) {
         steps = body.reproduction_steps;
       }
       if (path.endsWith('/send')) submitted = true;
+      if (path.endsWith('/collect')) includeDiagnostics = route.request().postDataJSON().include_diagnostics;
       await route.fulfill({ json: draft() });
     });
     await page.addInitScript(value => localStorage.setItem('clawee.preferences.colorMode', value), theme);
@@ -57,6 +61,8 @@ for (const theme of ['light', 'dark']) {
     const dialog = page.getByRole('dialog');
     const problem = dialog.getByLabel('问题描述', { exact: true });
     const reproduction = dialog.getByLabel('复现步骤', { exact: true });
+    await expect(dialog.getByRole('checkbox', { name: /附加诊断信息/ })).not.toBeChecked();
+    if (theme === 'dark') await dialog.getByRole('checkbox', { name: /附加诊断信息/ }).check();
     await problem.fill('输入中文描述\n第二行内容');
     await reproduction.fill('第一步\n第二步');
     await reproduction.press('Enter');
@@ -78,8 +84,12 @@ for (const theme of ['light', 'dark']) {
       expect(layout.fits).toBe(true);
     }
     await dialog.getByRole('button', { name: '采集并预览' }).click();
+    await expect(dialog.getByRole('checkbox')).toHaveCount(1);
+    await expect.poll(() => includeDiagnostics).toBe(theme === 'dark');
+    await dialog.getByText('查看发送内容', { exact: true }).click();
+    await expect(dialog.locator('pre')).toContainText('1.0.0');
+    await testInfo.attach('轻量反馈确认', { body: await dialog.screenshot({ path: testInfo.outputPath('feedback-confirm.png') }), contentType: 'image/png' });
     await dialog.getByRole('checkbox').first().check();
-    await dialog.getByRole('checkbox').nth(1).check();
     await dialog.getByRole('button', { name: '确认发送' }).click();
     const receipt = dialog.getByRole('status');
     await expect(receipt).toContainText('反馈提交成功');

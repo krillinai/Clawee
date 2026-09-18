@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openRuntimeDatabase } from '../../src/storage/database.js';
 import { FeedbackService } from '../../src/feedback/service.js';
 import { redactFeedback } from '../../src/feedback/redactor.js';
-import { boundedLines, collectFeedback } from '../../src/feedback/collector.js';
+import { collectFeedback } from '../../src/feedback/collector.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const fn of cleanup.splice(0)) await fn(); });
@@ -19,7 +19,7 @@ describe('会话反馈', () => {
     db.prepare(`INSERT INTO runs(id,thread_id,public_prompt,public_status,internal_status,created_by,profile,cwd,canonical_cwd,workspace_mode,sandbox,codex_version,codex_bin,codex_home,normalizer_version) VALUES(?,'thread_test',?,'failed','failed','user','test','/test','/test','project','read-only','test','test','/runtime',1)`).run(id, prompt);
     db.prepare('INSERT INTO run_events(id,run_id,seq,type,payload_json) VALUES(?,?,1,?,?)').run(`event_${id}`, id, 'status', '{}');
   }
-  it('超限保存可导出的失败清单，不发送、不导出凭证', async () => {
+  it('大量历史运行不扩大反馈材料，不采集或导出凭证', async () => {
     const { dir, db } = await fixture();
     for (let i = 0; i < 260; i++) addRun(db, `run_quota_${i}`);
     let requests = 0;
@@ -27,39 +27,38 @@ describe('会话反馈', () => {
     cleanup.unshift(async () => service.close());
     const draft = await service.create({ thread_id: 'thread_test', description: '超限', occurred_at: new Date().toISOString() });
     await service.collect(draft.local_feedback_id);
-    await expect.poll(async () => (await service.get(draft.local_feedback_id)).state, { timeout: 5000 }).toBe('failed');
+    await expect.poll(async () => (await service.get(draft.local_feedback_id)).state, { timeout: 5000 }).toBe('awaiting_consent');
     const failed = await service.get(draft.local_feedback_id);
-    expect(failed.error_code).toBe('FEEDBACK_QUOTA_EXCEEDED');
+    expect(failed.error_code).toBeUndefined();
     const manifest = await service.export(draft.local_feedback_id);
-    expect(manifest.completeness).toBe('partial');
-    expect(manifest.missing_items).toContain('collection:quota_exceeded');
-    expect(manifest.artifacts.length).toBeGreaterThan(0);
+    expect(manifest.completeness).toBe('complete');
+    expect(manifest.missing_items).toEqual([]);
+    expect(manifest.artifacts).toHaveLength(1);
+    expect(failed.preview?.diagnostics).toHaveLength(1);
+    expect(failed.size_bytes).toBeLessThan(4096);
     expect(failed.size_bytes).toBe(manifest.artifacts.reduce((n, a) => n + a.size_bytes, 0));
     for (const artifact of manifest.artifacts) expect((await readFile(join(dir, 'feedback', draft.local_feedback_id, artifact.artifact_id))).length).toBe(artifact.size_bytes);
     await expect(service.artifact(draft.local_feedback_id, 'credentials.json')).rejects.toThrow('FEEDBACK_NOT_FOUND');
-    await expect(service.send(draft.local_feedback_id, { confirmed: true, manifest_sha256: failed.manifest_sha256 ?? '', accept_partial: true })).rejects.toThrow('FEEDBACK_CONSENT_REQUIRED');
+    await expect(service.send(draft.local_feedback_id, { confirmed: false, manifest_sha256: failed.manifest_sha256 ?? '', accept_partial: false })).rejects.toThrow('FEEDBACK_CONSENT_REQUIRED');
     await expect(service.retry(draft.local_feedback_id)).rejects.toThrow('FEEDBACK_RETRY_NOT_ALLOWED');
     expect(requests).toBe(0);
   });
-  it('失败和取消 Run 的公开输入进入会话材料，同文输入不去重', async () => {
+  it('失败和取消 Run 的公开输入不进入轻量材料', async () => {
     const { dir, db } = await fixture(); addRun(db, 'run_prompt_1'); addRun(db, 'run_prompt_2');
     db.prepare("UPDATE runs SET public_status='canceled' WHERE id='run_prompt_2'").run();
     const directory = join(dir, 'snapshot');
     const manifest = await collectFeedback({ db, dataDir: dir, directory, threadId: 'thread_test', environment: {}, signal: new AbortController().signal });
-    const artifacts = manifest.artifacts.filter(a => a.source === 'run_prompts');
+    const artifacts = manifest.artifacts;
     const text = (await Promise.all(artifacts.map(a => readFile(join(directory, a.artifact_id), 'utf8')))).join('');
-    const records = text.trim().split('\n').map(line => JSON.parse(line));
-    expect(records.map(record => record.run_id)).toEqual(['run_prompt_1', 'run_prompt_2']);
-    expect(records.map(record => record.item.text)).toEqual(['用户输入', '用户输入']);
+    expect(text).not.toContain('用户输入');
+    expect(text).not.toContain('run_prompt_1');
+    expect(manifest.completeness).toBe('complete');
   });
-  it('日志写入失败和截断进入明确缺失项及 watermark', async () => {
+  it('未采集的历史日志不被算作缺失项', async () => {
     const { dir, db } = await fixture(); addRun(db, 'run_logs');
-    await mkdir(join(dir, 'runs', 'run_logs'), { recursive: true });
-    await writeFile(join(dir, 'runs', 'run_logs', 'diagnostics.json'), JSON.stringify({ logWriter: { failureCount: 1, backpressureRejects: 2 } }, null, 2));
     const manifest = await collectFeedback({ db, dataDir: dir, directory: join(dir, 'snapshot'), threadId: 'thread_test', environment: {}, signal: new AbortController().signal });
-    expect(manifest.missing_items).toContain('run:run_logs:log_write_failed');
-    expect(manifest.missing_items).toContain('run:run_logs:log_backpressure_rejected');
-    expect(manifest.watermarks.find(w => w.run_id === 'run_logs' && w.source === 'diagnostics.json')).toMatchObject({ source_truncated: true });
+    expect(manifest.missing_items).toEqual([]);
+    expect(manifest.watermarks).toEqual([]);
   });
   it('本地进度和同轮上传复用策略，每轮重新检查禁用', async () => {
     const { dir, db } = await fixture(); let checks = 0; let allowed = true;
@@ -87,7 +86,7 @@ describe('会话反馈', () => {
     await service.collect(draft.local_feedback_id);
     await expect.poll(async () => (await service.get(draft.local_feedback_id)).state).toBe('awaiting_consent');
     const ready = await service.get(draft.local_feedback_id);
-    expect(ready.manifest!.artifacts.length).toBeGreaterThan(1);
+    expect(ready.manifest!.artifacts).toHaveLength(1);
     await service.send(draft.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true });
     const before = checks;
     await (service as unknown as { work(): Promise<void> }).work();
@@ -98,12 +97,6 @@ describe('会话反馈', () => {
     await (service as unknown as { work(): Promise<void> }).work();
     expect(await service.get(draft.local_feedback_id)).toMatchObject({ state: 'submitted', retry_count: 0 });
     expect(puts).toBe(ready.manifest!.artifacts.length); expect(submits).toBe(1); expect(checks).toBe(before + 2);
-  });
-  it('日志超大单行在读取阶段拒绝，分块UTF8不丢字', async () => {
-    async function* chunks() { const data = Buffer.from('正文\n下一行'); yield data.subarray(0, 2); yield data.subarray(2); }
-    const lines = []; for await (const line of boundedLines(chunks(), new AbortController().signal)) lines.push(line); expect(lines).toEqual(['正文', '下一行']);
-    async function* huge() { for (let i = 0; i < 17; i++) yield Buffer.alloc(1024 * 1024, 65); }
-    await expect(async () => { for await (const _line of boundedLines(huge(), new AbortController().signal)) { /* 超限应在生成完整行前失败。 */ } }).rejects.toThrow('FEEDBACK_SOURCE_LINE_TOO_LARGE');
   });
   for (const mode of ['create_lost', 'submit_lost', 'submit_expired'] as const) it(`可靠上传：${mode} 与重启续传`, async () => {
     const { dir, db } = await fixture(); let first = true; let submitted = false; let creationBody: string | undefined; let creations = 0; let submits = 0; let recoveries = 0; const received = new Set<string>();
@@ -128,6 +121,17 @@ describe('会话反馈', () => {
       service = new FeedbackService(options); await (service as unknown as { work(): Promise<void> }).work();
     }
     expect((await service.get(d.local_feedback_id)).state).toBe('submitted'); expect(received.size).toBe(ready.manifest!.artifacts.length); expect(creations).toBe(mode === 'create_lost' ? 2 : 1); expect(submits).toBe(mode === 'submit_expired' ? 2 : 1); if (mode !== 'create_lost') expect(recoveries).toBe(1);
+    service.close(); service = new FeedbackService(options);
+    const saved = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+    const stored = JSON.parse(saved.draft_json);
+    expect(Date.parse(stored.materials_expires_at) - Date.now()).toBeGreaterThan(23 * 3600000);
+    stored.materials_expires_at = new Date(Date.now() - 1000).toISOString();
+    db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+    await (service as unknown as { work(): Promise<void> }).work();
+    expect(await service.get(d.local_feedback_id)).toMatchObject({ state: 'submitted', report_id: 'fb_test0001', screenshots: [] });
+    expect((await service.get(d.local_feedback_id)).manifest).toBeUndefined();
+    for (const a of ready.manifest!.artifacts) await expect(readFile(join(dir, 'feedback', d.local_feedback_id, a.artifact_id))).rejects.toThrow();
+    expect(db.prepare('SELECT id FROM threads WHERE id=?').get('thread_test')).toBeDefined();
   });
   it('策略检查等待期间取消，不发送旧队列副本', async () => {
     const { dir, db } = await fixture(); let block = false; let release!: () => void; let started!: () => void; const pending = new Promise<void>(resolve => { release = resolve; }); const checking = new Promise<void>(resolve => { started = resolve; }); let requests = 0;
@@ -136,7 +140,54 @@ describe('会话反馈', () => {
     const work = (service as unknown as { work(): Promise<void> }).work(); await checking; await service.cancel(d.local_feedback_id); release(); await work; expect(requests).toBe(0); expect((await service.get(d.local_feedback_id)).state).toBe('cancelled');
   });
   it('保留 prompt 正文，遮盖秘密和路径', () => { expect(redactFeedback({ prompt: '正文 sk-testsecretvalue', api_key: 'private', path: '/test/a.ts' }, ['/test'])).toEqual({ prompt: '正文 [REDACTED]', api_key: '[REDACTED]', path: '[PATH_1]/a.ts' }); expect(redactFeedback('"token": "private_value"')).toBe('"token": "[REDACTED]"'); });
-  it('草稿和采集不联网，禁用策略拒绝采集发送', async () => { const { dir, db } = await fixture(); let network = 0; let allowed = true; const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed }), fetchImpl: async () => { network++; throw new Error('offline'); } }); cleanup.unshift(async () => service.close()); const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.collect(d.local_feedback_id); await expect.poll(async () => (await service.get(d.local_feedback_id)).state).toBe('awaiting_consent'); expect(network).toBe(0); const ready = await service.get(d.local_feedback_id); expect(ready.manifest?.completeness).toBe('partial'); const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string }; expect(row.draft_json).not.toContain('recovery_token'); const secrets = JSON.parse(await readFile(join(dir, 'feedback', d.local_feedback_id, 'credentials.json'), 'utf8')); expect(Buffer.from(secrets.recovery_token, 'base64url')).toHaveLength(32); allowed = false; await expect(service.send(d.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true })).rejects.toThrow('FEEDBACK_POLICY_DISABLED'); });
-  it('固定事件边界，超过 50 条仍完整遍历，保留相同真实事件', async () => { const { dir, db } = await fixture(); db.prepare(`INSERT INTO runs(id,thread_id,public_status,internal_status,created_by,profile,cwd,canonical_cwd,workspace_mode,sandbox,codex_version,codex_bin,codex_home,normalizer_version) VALUES('run_test','thread_test','succeeded','done','user','test','/test','/test','project','read-only','test','test','/runtime',1)`).run(); for (let seq = 1; seq <= 600; seq++) db.prepare('INSERT INTO run_events(id,run_id,seq,type,payload_json) VALUES(?,?,?,?,?)').run(`event_${seq}`, 'run_test', seq, 'tool_result', '{"output":"same"}'); const m = await collectFeedback({ db, dataDir: dir, directory: join(dir, 'snapshot'), threadId: 'thread_test', environment: { app_version: 'test' }, signal: new AbortController().signal }); const events = m.artifacts.filter(a => a.source === 'run_events:run_test'); expect(events.reduce((n, a) => n + a.record_count, 0)).toBe(600); expect(m.watermarks[0]).toMatchObject({ max_event_seq: 600, expected_count: 600, exported_count: 600 }); });
+  it('草稿和采集不联网，禁用策略拒绝采集发送', async () => {
+    const { dir, db } = await fixture(); let network = 0; let allowed = true;
+    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: '1.0.0' }), policy: async () => ({ allowed }), fetchImpl: async () => { network++; throw new Error('offline'); } });
+    cleanup.unshift(async () => service.close());
+    const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() });
+    await service.collect(d.local_feedback_id);
+    await expect.poll(async () => (await service.get(d.local_feedback_id)).state).toBe('awaiting_consent');
+    expect(network).toBe(0);
+    const ready = await service.get(d.local_feedback_id);
+    expect(ready.manifest?.completeness).toBe('complete');
+    const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+    expect(row.draft_json).not.toContain('recovery_token');
+    const secrets = JSON.parse(await readFile(join(dir, 'feedback', d.local_feedback_id, 'credentials.json'), 'utf8'));
+    expect(Buffer.from(secrets.recovery_token, 'base64url')).toHaveLength(32);
+    allowed = false;
+    await expect(service.send(d.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: false })).rejects.toThrow('FEEDBACK_POLICY_DISABLED');
+  });
+  it('旧版完整草稿不能发送或自动续传', async () => {
+    const { dir, db } = await fixture(); let requests = 0;
+    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must not send'); } });
+    cleanup.unshift(async () => service.close());
+    const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() });
+    await service.collect(d.local_feedback_id);
+    await expect.poll(async () => (await service.get(d.local_feedback_id)).state).toBe('awaiting_consent');
+    const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+    const stored = JSON.parse(row.draft_json); delete stored.manifest.collection_scope;
+    db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+    await expect(service.send(d.local_feedback_id, { confirmed: true, manifest_sha256: stored.manifest_sha256, accept_partial: true })).rejects.toThrow('FEEDBACK_RECOLLECTION_REQUIRED');
+    stored.state = 'uploading'; stored.consent_at = new Date().toISOString();
+    db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+    await (service as unknown as { work(): Promise<void> }).work();
+    expect((await service.get(d.local_feedback_id)).error_code).toBe('FEEDBACK_RECOLLECTION_REQUIRED');
+    expect(requests).toBe(0);
+  });
+  it('远端状态查询等待时，本地成功回执仍立即可读', async () => {
+    const { dir, db } = await fixture(); let querying = false;
+    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async (_url, input) => {
+      querying = true;
+      return new Promise((_resolve, reject) => input?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    } });
+    cleanup.unshift(async () => service.close());
+    const draft = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() });
+    const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+    const stored = JSON.parse(row.draft_json); stored.state = 'submitted'; stored.report_id = 'fb_test0001';
+    db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+    expect(await service.get(draft.local_feedback_id)).toMatchObject({ state: 'submitted', report_id: 'fb_test0001' });
+    await expect.poll(() => querying).toBe(true);
+    expect((await service.get(draft.local_feedback_id)).state).toBe('submitted');
+  });
   it('取消阻止队列继续发送且允许本地回执读取', async () => { const { dir, db } = await fixture(); const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }) }); cleanup.unshift(async () => service.close()); const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.cancel(d.local_feedback_id); expect((await service.get(d.local_feedback_id)).state).toBe('cancelled'); await expect(service.collect(d.local_feedback_id)).rejects.toThrow('FEEDBACK_SNAPSHOT_FROZEN'); });
 });

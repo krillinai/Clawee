@@ -29,4 +29,8 @@
 .feedback-dialog label.feedback-check { display: flex; align-items: flex-start; }
 .feedback-screenshots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .feedback-screenshots canvas { width: 100%; height: auto; touch-action: none; }
+.feedback-screenshots img { width: 100%; height: auto; }
 .feedback-footnote { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.feedback-dialog details { margin: 12px 0; }
+.feedback-dialog summary { cursor: pointer; }
+.feedback-preview pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-input); font-size: 12px; }
