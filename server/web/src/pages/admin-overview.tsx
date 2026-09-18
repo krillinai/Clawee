@@ -71,6 +71,8 @@ import type { AgentListItem } from "@/lib/office-api";
 import { permissions } from "@/lib/rbac-api";
 import { listSharedSpaces } from "@/lib/shared-files-api";
 import { listSkills } from "@/lib/skillhub-api";
+import { useAdminFeatures } from "@/hooks/useAdminFeatures";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { truncateMiddle } from "@/lib/text";
 import { cn } from "@/lib/utils";
 
@@ -105,16 +107,34 @@ const enterpriseChartConfig = {
 } satisfies ChartConfig;
 
 export function AdminOverviewPage() {
-  const canReadUpstreams = useAdminPermission(permissions.mcpUpstreamRead);
-  const canReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead);
-  const canReadAgents = useAdminPermission(permissions.agentRead);
-  const canReadGrants = useAdminPermission(permissions.mcpGrantRead);
-  const canReadGates = useAdminPermission(permissions.mcpGateRead);
-  const canReadAudits = useAdminPermission(permissions.mcpAuditRead);
-  const canReadActivity = useAdminPermission(permissions.activityRead);
-  const canReadKnowledge = useAdminPermission(permissions.knowledgeRead);
-  const canReadSkills = useAdminPermission(permissions.skillRead);
-  const canReadSharedFiles = useAdminPermission(permissions.sharedFilesRead);
+  const features = useAdminFeatures();
+  const hasReadUpstreams = useAdminPermission(permissions.mcpUpstreamRead);
+  const hasReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead);
+  const hasReadAgents = useAdminPermission(permissions.agentRead);
+  const hasReadGrants = useAdminPermission(permissions.mcpGrantRead);
+  const hasReadGates = useAdminPermission(permissions.mcpGateRead);
+  const hasReadAudits = useAdminPermission(permissions.mcpAuditRead);
+  const hasReadActivity = useAdminPermission(permissions.activityRead);
+  const hasReadKnowledge = useAdminPermission(permissions.knowledgeRead);
+  const hasReadSkills = useAdminPermission(permissions.skillRead);
+  const hasReadSharedFiles = useAdminPermission(permissions.sharedFilesRead);
+  const canReadUpstreams = hasReadUpstreams && features.isEnabled("mcp");
+  const canReadCapabilities = hasReadCapabilities && features.isEnabled("mcp");
+  const canReadAgents = hasReadAgents && features.isEnabled("mcp");
+  const canReadGrants = hasReadGrants && features.isEnabled("mcp");
+  const canReadGates = hasReadGates && features.isEnabled("mcp");
+  const canReadAudits = hasReadAudits && features.isEnabled("mcp");
+  const canReadActivity = hasReadActivity && features.isEnabled("activity");
+  const canReadKnowledge = hasReadKnowledge && features.isEnabled("knowledge");
+  const canReadSkills = hasReadSkills && features.isEnabled("skills");
+  const canReadSharedFiles = hasReadSharedFiles && features.isEnabled("shared_files");
+  const disabledFeatures = features.isSuccess ? [
+    hasReadKnowledge && !features.isEnabled("knowledge") ? "知识库" : null,
+    hasReadSkills && !features.isEnabled("skills") ? "技能管理" : null,
+    hasReadSharedFiles && !features.isEnabled("shared_files") ? "网盘" : null,
+    hasReadActivity && !features.isEnabled("activity") ? "智能体活动" : null,
+    (hasReadUpstreams || hasReadCapabilities || hasReadAgents || hasReadGrants || hasReadGates || hasReadAudits) && !features.isEnabled("mcp") ? "MCP 网关" : null
+  ].filter(Boolean) : [];
   const [range, setRange] = useState<DashboardRange>("24h");
   const [trendSeries, setTrendSeries] = useState<TrendSeries>("requests");
   const [activityMode, setActivityMode] = useState<ActivityMode>("users");
@@ -325,6 +345,9 @@ export function AdminOverviewPage() {
           <OverviewSectionNavigation items={overviewNavigationItems} />
         ) : null}
 
+        {features.isPending ? <LoadingState label="正在检查功能状态" /> : null}
+        {features.isError ? <ErrorAlert>功能状态暂时不可用，请稍后重试。 <Button variant="outline" onClick={() => void features.refetch()}>重试</Button></ErrorAlert> : null}
+        {disabledFeatures.length > 0 ? <Alert><AlertDescription>{disabledFeatures.map(name => `${name}：功能未开启`).join("；")}</AlertDescription></Alert> : null}
         {mcpSummaryQuery.isError ? (
           <ErrorAlert>MCP 治理数据加载失败：无法加载上游服务、能力、Agent、授权或代理审计。</ErrorAlert>
         ) : null}

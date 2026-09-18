@@ -228,6 +228,24 @@ func NewRouter(opts Options) http.Handler {
 			"service":              "clawee-gateway",
 			"status":               "ok",
 			"skill_source_enabled": opts.SkillSourceService != nil,
+			"features": gin.H{
+				"accounts":               opts.AccountService != nil,
+				"account_governance":     opts.AccountGovernanceService != nil,
+				"rbac":                   opts.RBACService != nil,
+				"data_permissions":       opts.DataAccessService != nil && opts.AccountService != nil,
+				"platform_branding":      opts.PlatformBrandingService != nil,
+				"client_downloads":       opts.ClientDownloadsService != nil,
+				"mcp":                    opts.ProxyGateway != nil,
+				"activity":               opts.OfficeDashboardAPI != nil,
+				"agent_management":       opts.OfficeManagementAPI != nil,
+				"knowledge":              opts.KnowledgeService != nil,
+				"skills":                 opts.SkillHubService != nil && opts.AccountService != nil,
+				"skill_sources":          opts.SkillHubService != nil && opts.AccountService != nil && opts.SkillSourceService != nil,
+				"shared_files":           opts.SharedFilesService != nil,
+				"shared_file_storage":    opts.SharedFileStorageService != nil,
+				"shared_file_migrations": opts.SharedFileStorageService != nil && opts.SharedFileMigrationService != nil,
+				"feedback":               opts.FeedbackService != nil && opts.AccountService != nil && opts.RBACService != nil && opts.DataAccessService != nil,
+			},
 		})
 	}
 	adminAPI.GET("/status", requireAdminAccess(opts.RBACService), status)

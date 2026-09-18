@@ -3,8 +3,12 @@ import { ArrowLeft, Check, Download, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAdminPermission } from '@/components/admin-permissions';
+import { DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSearchField, LoadingState, PageHeader, PageShell, TableStateRow } from '@/components/governance-ui';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,13 +24,64 @@ export function FeedbackPageView() {
   const change = (key: string, value: string) => { const next = new URLSearchParams(params); next.delete('cursor'); if (value) next.set(key, value); else next.delete(key); setParams(next); };
   const position = useRef(Number(sessionStorage.getItem(`feedback-scroll:${params}`) ?? 0));
   useEffect(() => { if (query.data) window.scrollTo(0, position.current); }, [Boolean(query.data)]);
-  return <main className="min-w-0 space-y-5"><h1 className="text-xl font-semibold">问题反馈</h1>
-    <div className="flex flex-wrap gap-2">{Object.entries(statuses).map(([key, text]) => <Button key={key} variant={params.get('status') === key || (!params.get('status') && key === 'open') ? 'default' : 'outline'} onClick={() => change('status', key)}>{text}</Button>)}</div>
-    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={params.get('include_unavailable') === 'true'} onChange={e => change('include_unavailable', e.target.checked ? 'true' : '')} />包含异常材料</label>
-    <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5"><Input aria-label="编号或描述" placeholder="编号或描述" value={params.get('keyword') ?? ''} onChange={e => change('keyword', e.target.value)} /><Input aria-label="来源" placeholder="来源" value={params.get('source') ?? ''} onChange={e => change('source', e.target.value)} /><Input aria-label="App 版本" placeholder="App 版本" value={params.get('version') ?? ''} onChange={e => change('version', e.target.value)} />{['from', 'to'].map(key => <Input key={key} aria-label={key === 'from' ? '开始时间' : '结束时间'} type="date" value={params.get(key)?.slice(0, 10) ?? ''} onChange={e => change(key, e.target.value ? `${e.target.value}T${key === 'to' ? '23:59:59' : '00:00:00'}Z` : '')} />)}</div>
-    {query.isPending ? <p>正在加载…</p> : query.isError ? <p role="alert">反馈列表加载失败 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></p> : !query.data?.items.length ? <p>没有符合条件的反馈</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{['编号 / 描述', '来源', 'App 版本', '创建时间', '完整性', '材料状态', '状态 / 处理人', '完成时间'].map(text => <th key={text} className="p-2">{text}</th>)}</tr></thead><tbody>{query.data.items.map(r => <tr key={r.report_id} className="border-t"><td className="max-w-80 p-2"><Link className="text-primary underline" to={`/admin/feedback/${r.report_id}?${params}`} onClick={() => sessionStorage.setItem(`feedback-scroll:${params}`, String(window.scrollY))}>{r.display_number}</Link><p className="line-clamp-2 break-all">{r.description}</p></td><td className="p-2">{r.trusted_source ? `${r.trusted_source}（可信）` : `${r.source_claim?.customer_label ?? '匿名'}（自报）`}</td><td className="p-2">{r.environment?.app_version ?? '未知'}</td><td className="whitespace-nowrap p-2">{new Date(r.created_at).toLocaleString()}</td><td className="p-2">{r.completeness}</td><td className="p-2">{`${r.upload_state} / ${r.security_state}`}</td><td className="p-2">{statuses[r.processing_status]}<br />{r.assigned_to}</td><td className="whitespace-nowrap p-2">{r.resolved_at ? new Date(r.resolved_at).toLocaleString() : ''}</td></tr>)}</tbody></table></div>}
-    {query.data?.meta.has_next ? <Button variant="outline" onClick={() => { const next = new URLSearchParams(params); next.set('cursor', query.data!.meta.next_cursor); setParams(next); window.scrollTo(0, 0); }}>下一页</Button> : null}
-  </main>;
+  return (
+    <PageShell>
+      <PageHeader title="问题反馈" />
+      <Tabs value={params.get('status') ?? 'open'} onValueChange={value => change('status', value)}>
+        <TabsList aria-label="反馈状态" className="h-auto justify-start">
+          {Object.entries(statuses).map(([key, text]) => <TabsTrigger key={key} value={key}>{text}</TabsTrigger>)}
+        </TabsList>
+        <TabsContent value={params.get('status') ?? 'open'} aria-label="反馈列表" className="mt-6 grid gap-4">
+          <FilterRow compact>
+            <FilterSearchField aria-label="编号或描述" placeholder="编号或描述" value={params.get('keyword') ?? ''} onChange={e => change('keyword', e.target.value)} />
+            <Input className="w-full sm:w-40" aria-label="来源" placeholder="来源" value={params.get('source') ?? ''} onChange={e => change('source', e.target.value)} />
+            <Input className="w-full sm:w-40" aria-label="App 版本" placeholder="App 版本" value={params.get('version') ?? ''} onChange={e => change('version', e.target.value)} />
+            {['from', 'to'].map(key => (
+              <Input key={key} className="w-full sm:w-40" aria-label={key === 'from' ? '开始时间' : '结束时间'} type="date" value={params.get(key)?.slice(0, 10) ?? ''} onChange={e => change(key, e.target.value ? `${e.target.value}T${key === 'to' ? '23:59:59' : '00:00:00'}Z` : '')} />
+            ))}
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox aria-label="包含异常材料" checked={params.get('include_unavailable') === 'true'} onCheckedChange={checked => change('include_unavailable', checked === true ? 'true' : '')} />
+              包含异常材料
+            </label>
+          </FilterRow>
+          <DataTableShell dense minWidth={1120}>
+            <TableHeader>
+              <TableRow>
+                {['编号 / 描述', '来源', 'App 版本', '创建时间', '完整性', '材料状态', '状态 / 处理人', '完成时间'].map(text => <TableHead key={text}>{text}</TableHead>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {query.isPending ? <TableStateRow colSpan={8}><LoadingState label="正在加载反馈" /></TableStateRow> : query.isError ? (
+                <TableStateRow colSpan={8} tone="danger">
+                  <ErrorAlert>反馈列表加载失败 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></ErrorAlert>
+                </TableStateRow>
+              ) : !query.data?.items.length ? (
+                <TableStateRow colSpan={8}><EmptyState title="没有符合条件的反馈" /></TableStateRow>
+              ) : query.data.items.map(r => (
+                <TableRow key={r.report_id}>
+                  <TableCell className="max-w-80">
+                    <Link className="font-medium hover:underline" to={`/admin/feedback/${r.report_id}?${params}`} onClick={() => sessionStorage.setItem(`feedback-scroll:${params}`, String(window.scrollY))}>{r.display_number}</Link>
+                    <p className="line-clamp-2 break-all text-muted-foreground">{r.description}</p>
+                  </TableCell>
+                  <TableCell className="max-w-48 break-all">{r.trusted_source ? `${r.trusted_source}（可信）` : `${r.source_claim?.customer_label ?? '匿名'}（自报）`}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.environment?.app_version ?? '未知'}</TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">{new Date(r.created_at).toLocaleString()}</TableCell>
+                  <TableCell><Badge variant={r.completeness === 'complete' ? 'success' : 'warning'}>{r.completeness}</Badge></TableCell>
+                  <TableCell className="text-muted-foreground">{`${r.upload_state} / ${r.security_state}`}</TableCell>
+                  <TableCell>
+                    <Badge variant={r.processing_status === 'resolved' ? 'success' : r.processing_status === 'investigating' ? 'warning' : 'muted'}>{statuses[r.processing_status]}</Badge>
+                    {r.assigned_to ? <p className="mt-1 break-all text-muted-foreground">{r.assigned_to}</p> : null}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">{r.resolved_at ? new Date(r.resolved_at).toLocaleString() : '-'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </DataTableShell>
+          {query.data?.meta.has_next ? <div className="flex justify-end"><Button variant="outline" onClick={() => { const next = new URLSearchParams(params); next.set('cursor', query.data!.meta.next_cursor); setParams(next); window.scrollTo(0, 0); }}>下一页</Button></div> : null}
+        </TabsContent>
+      </Tabs>
+    </PageShell>
+  );
 }
 export function FeedbackDetailPage() {
   const { id = '' } = useParams(); const [params] = useSearchParams(); const focused = useFocused(); const cache = useQueryClient();

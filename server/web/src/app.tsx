@@ -8,6 +8,10 @@ import { AuthGate } from "./components/auth-gate";
 import { permissions } from "./lib/rbac-api";
 import { NotFoundPage } from "./pages/not-found";
 
+const AdminFeatureGate = lazy(() =>
+  import("./components/admin-feature-gate").then((module) => ({ default: module.AdminFeatureGate }))
+);
+
 const AgentAccessPage = lazy(() =>
   import("./pages/agent-access").then((module) => ({ default: module.AgentAccessPage }))
 );
@@ -97,11 +101,11 @@ const ClientDownloadsPage = lazy(() => import("./pages/client-downloads").then((
 const DownloadsPage = lazy(() => import("./pages/downloads").then((module) => ({ default: module.DownloadsPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
-  return <AuthGate requiredPermission={permission}>{element}</AuthGate>;
+  return <AuthGate requiredPermission={permission}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
 }
 
 function adminPageAny(requiredPermissions: string[], element: React.ReactNode) {
-  return <AuthGate requiredAnyPermissions={requiredPermissions}>{element}</AuthGate>;
+  return <AuthGate requiredAnyPermissions={requiredPermissions}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
 }
 
 export function App() {

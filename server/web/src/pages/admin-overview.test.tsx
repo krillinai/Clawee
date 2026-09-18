@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { permissions } from "@/lib/rbac-api";
+import { getAdminFeatureStatus } from "@/lib/admin-feature-api";
 import {
   listMCPAgents,
   listMCPAudits,
@@ -20,6 +21,8 @@ import { listSharedSpaces } from "@/lib/shared-files-api";
 import { listSkills } from "@/lib/skillhub-api";
 
 import { AdminOverviewPage } from "./admin-overview";
+
+vi.mock("@/lib/admin-feature-api", () => ({ getAdminFeatureStatus: vi.fn() }));
 
 vi.mock("@/lib/mcp-admin-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/mcp-admin-api")>("@/lib/mcp-admin-api");
@@ -291,6 +294,7 @@ function mockGate(index: number) {
 describe("AdminOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features: {} });
     listMCPAgentsMock.mockResolvedValue([]);
     listMCPAuditsMock.mockResolvedValue([]);
     listMCPCapabilitiesMock.mockResolvedValue([]);
@@ -682,5 +686,19 @@ describe("AdminOverviewPage", () => {
     expect(screen.queryByRole("heading", { level: 2, name: "接入与资源" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Agent 接入治理链路" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "企业资源状态" })).not.toBeInTheDocument();
+  });
+
+  it("未启用模块显示友好提示，总览和手动刷新均不请求关闭的模块", async () => {
+    vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features: {
+      knowledge: false, skills: false, shared_files: false, activity: false, mcp: false
+    } });
+    renderAdminOverviewPage();
+    expect(await screen.findByText(/知识库：功能未开启/)).toHaveTextContent("MCP 网关：功能未开启");
+    fireEvent.click(screen.getByRole("button", { name: /刷新/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /刷新/ })).toBeEnabled());
+    for (const request of [listKnowledgeBasesMock, listSkillsMock, listSharedSpacesMock, getAgentActivityListMock, listMCPAgentsMock, listMCPAuditsMock, listMCPCapabilitiesMock, listMCPGatesMock, listMCPGrantsMock, listMCPUpstreamServersMock]) {
+      expect(request).not.toHaveBeenCalled();
+    }
+    expect(screen.queryByRole("alert")).not.toHaveTextContent("加载失败");
   });
 });

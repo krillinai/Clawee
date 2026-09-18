@@ -26,6 +26,7 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import {
   addSharedSpaceMember,
   createSharedSpace,
@@ -42,8 +43,9 @@ import {
 type SpaceForm = { mode: "create" | "edit"; spaceId: string; name: string; description: string };
 
 export function SharedFilesPage() {
+  const storageEnabled = useAdminFeatureEnabled("shared_file_storage");
   const canCreate = useAdminPermission(permissions.sharedFilesSpaceCreate);
-  const canReadStorage = useAdminPermission(permissions.sharedFilesStorageRead);
+  const canReadStorage = useAdminPermission(permissions.sharedFilesStorageRead) && storageEnabled;
   const canUpdate = useAdminPermission(permissions.sharedFilesSpaceUpdate);
   const canCreateMembers = useAdminPermission(permissions.sharedFilesMemberCreate);
   const canUpdateMembers = useAdminPermission(permissions.sharedFilesMemberUpdate);

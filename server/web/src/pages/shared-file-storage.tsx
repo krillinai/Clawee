@@ -4,6 +4,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { useAdminPermission } from "@/components/admin-permissions";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   DataTableShell,
   EmptyState,
@@ -58,8 +60,10 @@ const emptyForm: ProfileForm = {
 };
 
 export function SharedFileStoragePage() {
+  const migrationsEnabled = useAdminFeatureEnabled("shared_file_migrations");
   const canManage = useAdminPermission(permissions.sharedFilesStorageManage);
-  const canMigrate = useAdminPermission(permissions.sharedFilesStorageMigrate);
+  const hasMigratePermission = useAdminPermission(permissions.sharedFilesStorageMigrate);
+  const canMigrate = hasMigratePermission && migrationsEnabled;
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [tested, setTested] = useState(false);
@@ -201,6 +205,7 @@ export function SharedFileStoragePage() {
       >
         管理后续文件写入位置与存量迁移。
       </PageHeader>
+      {hasMigratePermission && !migrationsEnabled ? <Alert><AlertDescription>存量迁移：功能未开启</AlertDescription></Alert> : null}
 
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
       {operationError ? <ErrorAlert>{operationError.message}</ErrorAlert> : null}

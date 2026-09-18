@@ -16,17 +16,20 @@ import type { Account, AccountStatus } from "@/lib/accounts-api";
 import { createAccount, listAccounts, mergeAccounts, resetAccountPassword, updateAccountName, updateAccountStatus } from "@/lib/accounts-api";
 import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { assignAccountRole, listAccountRoles, listRoles, permissions, removeAccountRole } from "@/lib/rbac-api";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 
 const accountsKey = ["accounts"] as const;
 
 export function UsersPage() {
+  const accountGovernanceEnabled = useAdminFeatureEnabled("account_governance");
+  const rbacEnabled = useAdminFeatureEnabled("rbac");
   const canCreateAccount = useAdminPermission(permissions.accountCreate);
   const canUpdateAccountName = useAdminPermission(permissions.accountUpdateName);
   const canUpdateAccountStatus = useAdminPermission(permissions.accountUpdateStatus);
   const canResetAccountPassword = useAdminPermission(permissions.accountResetPassword);
-  const canMergeAccounts = useAdminPermission(permissions.accountMerge);
-  const canReadRoles = useAdminPermission(permissions.rbacRead);
-  const canUpdateAccountRoles = useAdminPermission(permissions.rbacAccountRoleUpdate);
+  const canMergeAccounts = useAdminPermission(permissions.accountMerge) && accountGovernanceEnabled;
+  const canReadRoles = useAdminPermission(permissions.rbacRead) && rbacEnabled;
+  const canUpdateAccountRoles = useAdminPermission(permissions.rbacAccountRoleUpdate) && rbacEnabled;
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ email: "", name: "", password: "", status: "active" as AccountStatus });

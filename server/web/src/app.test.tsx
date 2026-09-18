@@ -16,6 +16,7 @@ import { getAgentActivityList, getAgentDetail, getOfficeSnapshot } from "@/lib/o
 import { fixtureAgentDetail, fixtureOffice } from "@/test/office-fixtures";
 import { ThemeProvider } from "@/components/theme-provider";
 import { permissions } from "@/lib/rbac-api";
+import { APIError } from "@/lib/api";
 import { getSharedSpace, listSharedFiles } from "@/lib/shared-files-api";
 
 import { App } from "./app";
@@ -269,6 +270,27 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "返回应用" })).toHaveAttribute("href", "/app");
     expect(window.location.pathname).toBe("/unknown-admin-route");
     expect(screen.queryByRole("heading", { name: "我的 Agent 接入" })).not.toBeInTheDocument();
+  });
+
+  it.each(["/admin/knowledge-bases", "/admin/knowledge-bases/documents?knowledge_base_id=missing", "/admin/feedback"])("%s 未开启时展示统一提示，不加载业务接口", async (path) => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: {
+      service: "clawee-gateway", status: "ok", features: { knowledge: false, feedback: false }
+    } }), { status: 200 }));
+    window.history.pushState({}, "", path);
+    renderApp();
+    expect(await screen.findByText("功能未开启")).toBeInTheDocument();
+    expect(listKnowledgeBasesMock).not.toHaveBeenCalled();
+    expect(listKnowledgeDocumentsMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/feedback/reports"))).toBe(false);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("已开启模块的资源 404 不误判为功能未开启", async () => {
+    listKnowledgeDocumentsMock.mockRejectedValue(new APIError("知识库不存在", 404, "knowledge_base_not_found"));
+    window.history.pushState({}, "", "/admin/knowledge-bases/documents?knowledge_base_id=missing");
+    renderApp();
+    expect(await screen.findByRole("alert")).toHaveTextContent("未找到知识库");
+    expect(screen.queryByText("功能未开启")).not.toBeInTheDocument();
   });
 
   it.each([

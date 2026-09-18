@@ -6,6 +6,7 @@ import { useLocation } from "react-router-dom";
 
 import {
   ConfirmDialog,
+  EmptyState,
   ErrorAlert,
   FilterRow,
   FilterSearchField,
@@ -59,6 +60,7 @@ import {
 import { cn } from "@/lib/utils";
 import { listAccounts, type Account } from "@/lib/accounts-api";
 import { mergeAgentGovernanceRows } from "@/lib/agent-governance";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import { APIError } from "@/lib/api";
 import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
@@ -109,21 +111,26 @@ type ConfirmState =
   | { kind: "deleteGrant"; grant: MCPGrant };
 
 export function MCPAgentsGrantsPage() {
+  const activityEnabled = useAdminFeatureEnabled("activity");
+  const managementEnabled = useAdminFeatureEnabled("agent_management");
+  const accountGovernanceEnabled = useAdminFeatureEnabled("account_governance");
+  const accountsEnabled = useAdminFeatureEnabled("accounts");
   const canCreateAgent = useAdminPermission(permissions.agentCreate);
   const canDeleteAgent = useAdminPermission(permissions.agentDelete);
   const canRevealToken = useAdminPermission(permissions.agentTokenReveal);
   const canRotateToken = useAdminPermission(permissions.agentTokenRotate);
   const canRevokeToken = useAdminPermission(permissions.agentTokenRevoke);
-  const canBindAgent = useAdminPermission(permissions.agentBind);
-  const canUnbindAgent = useAdminPermission(permissions.agentUnbind);
-  const canTransferAgents = useAdminPermission(permissions.agentTransfer);
+  const canBindAgent = useAdminPermission(permissions.agentBind) && managementEnabled;
+  const canUnbindAgent = useAdminPermission(permissions.agentUnbind) && managementEnabled;
+  const canTransferAgents = useAdminPermission(permissions.agentTransfer) && accountGovernanceEnabled;
   const canReadGrants = useAdminPermission(permissions.mcpGrantRead);
   const canCreateGrant = useAdminPermission(permissions.mcpGrantCreate);
   const canRevokeGrant = useAdminPermission(permissions.mcpGrantRevoke);
   const canReadCapabilities = useAdminPermission(permissions.mcpCapabilityRead) || canCreateGrant;
   const canReadUpstreams = useAdminPermission(permissions.mcpUpstreamRead);
-  const canReadAccounts = useAdminPermission(permissions.accountRead);
-  const canReadActivity = useAdminPermission(permissions.activityRead);
+  const canReadAccounts = useAdminPermission(permissions.accountRead) && accountsEnabled;
+  const hasReadActivity = useAdminPermission(permissions.activityRead);
+  const canReadActivity = hasReadActivity && activityEnabled;
   const location = useLocation();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -497,6 +504,7 @@ export function MCPAgentsGrantsPage() {
         </ErrorBlock>
       ) : null}
       {unbindAgentMutation.isError ? <ErrorBlock>解除关联失败：{unbindAgentMutation.error.message}</ErrorBlock> : null}
+      {hasReadActivity && !activityEnabled ? <EmptyState title="功能未开启" description="智能体活动功能未开启。" /> : null}
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
 
       <Card>

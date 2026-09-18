@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminFeaturesContext } from "@/hooks/useAdminFeatures";
+import type { AdminFeature } from "@/lib/admin-feature-api";
 
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { APIError } from "@/lib/api";
@@ -222,6 +224,14 @@ describe("MCPAgentsGrantsPage", () => {
       action: "agent_transfer", agent_ids: ["agent_sales"], source_user_id: "usr_1", target_user_id: "usr_2",
       tokens_preserved: true, grants_preserved: true, token_count: 1, grant_count: 2, completed_at: "2026-08-18T03:00:00Z"
     });
+  });
+
+  it("活动模块未启用时保留 MCP 列表，不读取活动或提供迁移操作", async () => {
+    renderPage(undefined, "/admin/mcp/agents", { activity: false, account_governance: false });
+    expect(await screen.findByText("智能体活动功能未开启。")).toBeInTheDocument();
+    expect(await screen.findByText(agents[0].name)).toBeInTheDocument();
+    expect(getAgentActivityListMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "迁移" })).not.toBeInTheDocument();
   });
 
   it("restores the selected agent from the detail route query", async () => {
@@ -827,7 +837,7 @@ describe("MCPAgentsGrantsPage", () => {
   });
 });
 
-function renderPage(account?: Account, initialEntry = "/admin/mcp/agents") {
+function renderPage(account?: Account, initialEntry = "/admin/mcp/agents", features?: Partial<Record<AdminFeature, boolean>>) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -838,6 +848,7 @@ function renderPage(account?: Account, initialEntry = "/admin/mcp/agents") {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
+        <AdminFeaturesContext.Provider value={features}>
         {account ? (
           <AdminPermissionsProvider account={account}>
             <MCPAgentsGrantsPage />
@@ -845,6 +856,7 @@ function renderPage(account?: Account, initialEntry = "/admin/mcp/agents") {
         ) : (
           <MCPAgentsGrantsPage />
         )}
+        </AdminFeaturesContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>
   );

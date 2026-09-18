@@ -22,6 +22,8 @@ import {
   TableStateRow
 } from "@/components/governance-ui";
 import { useAdminPermission } from "@/components/admin-permissions";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { MemberAuthorizationDrawer, type MemberAuthorizationAdapter } from "@/components/member-authorization";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,7 @@ type KnowledgeBaseEditForm = {
 };
 
 export function KnowledgeBasesPage() {
+  const membersEnabled = useAdminFeatureEnabled("data_permissions");
   const canCreate = useAdminPermission(permissions.knowledgeCreate);
   const canUpdate = useAdminPermission(permissions.knowledgeUpdate);
   const canDelete = useAdminPermission(permissions.knowledgeDelete);
@@ -236,6 +239,8 @@ export function KnowledgeBasesPage() {
         统一管理企业知识库、文档状态和 Agent 授权范围。Gateway 负责身份、权限和审计，文档解析与索引由底层知识库服务完成。
       </PageHeader>
 
+      {!membersEnabled ? <Alert><AlertDescription>成员授权：功能未开启</AlertDescription></Alert> : null}
+
       {pageNotice ? <SuccessAlert>{pageNotice}</SuccessAlert> : null}
 
       <section className="grid gap-3" aria-labelledby="knowledge-base-list-title">
@@ -319,14 +324,14 @@ export function KnowledgeBasesPage() {
                             管理文档
                           </Link>
                         </Button>
-                        <Button
+                        {membersEnabled ? <Button
                           aria-label={`管理${item.name}成员授权`}
                           onClick={() => setAuthorizationId(item.knowledgeBaseId)}
                           size="sm"
                           variant="secondary"
                         >
                           成员授权
-                        </Button>
+                        </Button> : null}
                         <Button
                           aria-label={`查看${item.name}详情`}
                           onClick={() => openDetails(item)}

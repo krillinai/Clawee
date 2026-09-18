@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { permissions } from "@/lib/rbac-api";
+import { AdminFeaturesContext } from "@/hooks/useAdminFeatures";
+import type { AdminFeature } from "@/lib/admin-feature-api";
 import {
   activateStorageProfile,
   createOSSProfile,
@@ -78,6 +80,15 @@ describe("SharedFileStoragePage", () => {
     vi.mocked(testOSSProfile).mockResolvedValue({ result: "success", tested_at: "2026-09-12T00:00:00Z" });
     vi.mocked(createOSSProfile).mockResolvedValue(ossProfile);
     vi.mocked(activateStorageProfile).mockResolvedValue({ active_profile_id: ossProfile.profileId, revision: 2 });
+  });
+
+  it("迁移未启用时不读取历史迁移任务，显示友好提示", async () => {
+    sessionStorage.setItem("shared-file-storage-migration", "old-migration");
+    renderPage(undefined, { shared_file_migrations: false });
+    expect(await screen.findByText("存量迁移：功能未开启")).toBeInTheDocument();
+    expect(await screen.findByText("生产 OSS")).toBeInTheDocument();
+    expect(getStorageMigration).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /开始迁移/ })).not.toBeInTheDocument();
   });
 
   it("tests before saving a new OSS profile", async () => {
@@ -179,13 +190,15 @@ describe("SharedFileStoragePage", () => {
   });
 });
 
-function renderPage(adminPermissions?: string[]) {
+function renderPage(adminPermissions?: string[], features?: Partial<Record<AdminFeature, boolean>>) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const page = <MemoryRouter><SharedFileStoragePage /></MemoryRouter>;
   const account = { userId: "admin", email: "admin@example.com", name: "管理员", status: "active", adminPermissions };
   return render(
     <QueryClientProvider client={queryClient}>
-      {adminPermissions ? <AdminPermissionsProvider account={account}>{page}</AdminPermissionsProvider> : page}
+      <AdminFeaturesContext.Provider value={features}>
+        {adminPermissions ? <AdminPermissionsProvider account={account}>{page}</AdminPermissionsProvider> : page}
+      </AdminFeaturesContext.Provider>
     </QueryClientProvider>
   );
 }

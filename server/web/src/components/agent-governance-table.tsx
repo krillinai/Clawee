@@ -11,6 +11,7 @@ import type { MCPAgent, MCPGrant } from "@/lib/mcp-admin-api";
 import { formatDateTime, mcpStatusLabel, mcpStatusVariant } from "@/lib/mcp-admin-ui";
 import type { AgentListItem } from "@/lib/office-api";
 import { agentCreationSourceLabel } from "@/lib/agent-source";
+import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 
 type Props = {
   canBindAgents: boolean;
@@ -49,6 +50,7 @@ export function AgentGovernanceTable({
   onDelete,
   onTransfer,
 }: Props) {
+  const managementEnabled = useAdminFeatureEnabled("agent_management");
   function stopAndRun(event: MouseEvent<HTMLButtonElement>, action: () => void) {
     event.stopPropagation();
     action();
@@ -201,7 +203,7 @@ export function AgentGovernanceTable({
                           {canBindAgents ? <Button onClick={(event) => stopAndRun(event, () => onBind(office))} size="sm" variant="primary">
                             接入 MCP
                           </Button> : null}
-                          {canDeleteAgents ? <Button
+                          {canDeleteAgents && managementEnabled ? <Button
                             aria-label={`清理运行实例 ${row.displayName}`}
                             onClick={(event) => stopAndRun(event, () => onDeleteOfficeAgent(office))}
                             size="sm"

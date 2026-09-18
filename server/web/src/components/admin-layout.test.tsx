@@ -91,6 +91,9 @@ describe("AdminLayout", () => {
     expect(screen.getByRole("link", { name: "角色管理" })).toHaveAttribute("href", "/admin/rbac/roles");
     expect(screen.getByRole("link", { name: "权限目录" })).toHaveAttribute("href", "/admin/rbac/permissions");
     expect(screen.getByRole("link", { name: "数据权限" })).toHaveAttribute("href", "/admin/data-permissions");
+    expect(within(navigation).getAllByRole("link").map((link) => link.textContent).slice(-3)).toEqual([
+      "平台外观", "问题反馈", "客户端下载"
+    ]);
     expect(screen.queryByRole("link", { name: "智能体活动列表" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "智能体活动详情" })).not.toBeInTheDocument();
     expect(screen.getByText("管理员")).toBeInTheDocument();

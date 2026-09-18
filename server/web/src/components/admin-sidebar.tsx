@@ -91,12 +91,12 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "系统管理",
     items: [
-      { label: '问题反馈', href: '/admin/feedback', icon: Bug, permission: permissions.feedbackRead },
       { label: "账号管理", href: "/admin/accounts", icon: Users, permission: permissions.accountRead },
       { label: "角色管理", href: "/admin/rbac/roles", icon: Shield, permission: permissions.rbacRead },
       { label: "权限目录", href: "/admin/rbac/permissions", icon: ListChecks, permission: permissions.rbacRead },
       { label: "数据权限", href: "/admin/data-permissions", icon: Database, permission: permissions.dataResourceGrantRead },
       { label: "平台外观", href: "/admin/platform-branding", icon: Palette, permission: permissions.platformBrandingRead },
+      { label: "问题反馈", href: "/admin/feedback", icon: Bug, permission: permissions.feedbackRead },
       { label: "客户端下载", href: "/admin/client-downloads", icon: Download, permission: permissions.clientDownloadsRead }
     ]
   }
