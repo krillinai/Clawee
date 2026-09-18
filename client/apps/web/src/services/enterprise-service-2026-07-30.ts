@@ -28,7 +28,9 @@ import type {
   EnterpriseSharedSpaceListResponse,
   EnterpriseSkillDetailResponse,
   EnterpriseSkillListResponse,
-  EnterpriseSkillMutationResponse
+  EnterpriseSkillMutationResponse,
+  EnterpriseSkillSpaceListResponse,
+  EnterpriseSkillUploadResponse
 } from '@clawee/protocol';
 import type { RuntimeClient } from '../runtime/client.js';
 
@@ -44,6 +46,17 @@ const SHARED_FILE_CONTENT_TYPE =
 
 export function createEnterpriseService(client: ClientLike) {
   return {
+    listSkillSpaces(): Promise<EnterpriseSkillSpaceListResponse> {
+      return client.get('/enterprise/skill-spaces');
+    },
+    uploadSkill(input: { spaceId: string; version: string; changelog: string; file: File }): Promise<EnterpriseSkillUploadResponse> {
+      const body = new FormData();
+      body.append('spaceId', input.spaceId);
+      body.append('version', input.version);
+      body.append('changelog', input.changelog);
+      body.append('package', input.file);
+      return client.postBinary('/enterprise/skills/versions', body);
+    },
     getGateway(): Promise<{ gateway: string; configurable: boolean }> {
       return client.get('/enterprise/gateway');
     },

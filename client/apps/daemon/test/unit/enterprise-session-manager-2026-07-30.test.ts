@@ -1106,6 +1106,8 @@ function createClient(
     downloadSharedFileContent: vi.fn(),
     uploadSharedFileContent: vi.fn(),
     listSkills: vi.fn(async () => []),
+    listSkillSpaces: vi.fn(),
+    uploadSkillVersion: vi.fn(),
     getSkillDetail: vi.fn(async () => {
       throw new Error('not implemented');
     }),

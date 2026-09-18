@@ -17,6 +17,13 @@ import { EnterpriseSkillManagerError } from '../enterprise/skill-manager-2026-07
 import type { EnterpriseMcpManager } from '../enterprise/mcp-manager-2026-08-07.js';
 import { EnterpriseMcpManagerError } from '../enterprise/mcp-manager-2026-08-07.js';
 import { apiError } from './errors.js';
+import { ENTERPRISE_PACKAGE_MAX_BYTES } from '../enterprise/config-2026-07-30.js';
+
+const skillUploadSchema = z.object({
+  spaceId: z.string().trim().min(1).max(256),
+  version: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  changelog: z.string().refine(value => Array.from(value).length <= 2000).default('')
+}).strict();
 
 const loginSchema = z.object({
   email: z.string().trim().email(),
@@ -57,6 +64,45 @@ export async function registerEnterpriseRoutes(
     mcpManager: EnterpriseMcpManager;
   }
 ): Promise<void> {
+  server.addContentTypeParser(
+    'multipart/form-data',
+    { parseAs: 'buffer', bodyLimit: ENTERPRISE_PACKAGE_MAX_BYTES + 1024 * 1024 },
+    (_request, body, done) => done(null, body)
+  );
+  server.get('/enterprise/skill-spaces', async (_request, reply) => {
+    try {
+      return await input.skillManager.listSpaces();
+    } catch (error) {
+      return sendEnterpriseError(reply, error);
+    }
+  });
+  server.post<{ Body: Buffer }>(
+    '/enterprise/skills/versions', { bodyLimit: ENTERPRISE_PACKAGE_MAX_BYTES + 1024 * 1024 }, async (request, reply) => {
+      let form: FormData;
+      try {
+        if (!Buffer.isBuffer(request.body)) throw new Error('Invalid body');
+        form = await new Response(new Uint8Array(request.body).buffer, {
+          headers: { 'Content-Type': request.headers['content-type'] ?? '' }
+        }).formData();
+      } catch {
+        return reply.code(400).send(apiError('ENTERPRISE_INVALID_REQUEST', 'Skill upload form is invalid'));
+      }
+      const values = Object.fromEntries(form.entries());
+      const { package: packageFile, ...metadata } = values;
+      const parsed = skillUploadSchema.safeParse(metadata);
+      if (!parsed.success || !(packageFile instanceof File) || !/\.zip$/i.test(packageFile.name) || packageFile.size === 0 || Object.keys(values).some(key => form.getAll(key).length !== 1)) {
+        return reply.code(400).send(apiError('ENTERPRISE_INVALID_REQUEST', 'Skill upload is invalid'));
+      }
+      if (packageFile.size > ENTERPRISE_PACKAGE_MAX_BYTES) {
+        return reply.code(413).send(apiError('ENTERPRISE_SKILL_PACKAGE_TOO_LARGE', 'Enterprise skill package is too large'));
+      }
+      try {
+        return reply.code(201).send(await input.skillManager.uploadSkill({ ...parsed.data, package: new Uint8Array(await packageFile.arrayBuffer()) }));
+      } catch (error) {
+        return sendEnterpriseError(reply, error);
+      }
+    }
+  );
   server.post('/enterprise/dingtalk/login/prepare', async (request, reply) => {
     const prepare = input.sessionManager.prepareDingTalkLogin;
     if (prepare === undefined) {

@@ -42,6 +42,42 @@ afterEach(async () => {
 });
 
 describe('enterprise runtime API', () => {
+  it('uploads enterprise skill ZIP bytes without installing locally and rejects invalid metadata', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-upload-'));
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore(),
+      enterpriseHttpClient: createClient(), enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+    expect((await server.inject({ method: 'GET', url: '/enterprise/skill-spaces' })).statusCode).toBe(401);
+    expect((await authRequest('GET', '/enterprise/skill-spaces')).json()).toMatchObject({ spaces: [{ spaceId: 'skillspace_1', actions: ['read', 'write'] }] });
+    const upload = async (fields: Record<string, string>, payload = Buffer.from('ZIP'), duplicate = false) => {
+      const body = new FormData();
+      for (const [key, value] of Object.entries(fields)) body.append(key, value);
+      if (duplicate) body.append('spaceId', 'another-space');
+      body.append('package', new Blob([new Uint8Array(payload).buffer]), 'review.zip');
+      const encoded = new Request('http://runtime/upload', { method: 'POST', body });
+      return server!.inject({ method: 'POST', url: '/enterprise/skills/versions',
+        headers: { authorization: 'Bearer secret', 'content-type': encoded.headers.get('content-type')! },
+        payload: Buffer.from(await encoded.arrayBuffer())
+      });
+    };
+    const fields = { spaceId: 'space/一', version: '1.0.0', changelog: '更新' };
+    expect((await upload(fields)).statusCode).toBe(201);
+    expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledWith({ ...fields, package: new Uint8Array(Buffer.from('ZIP')) });
+    expect(enterpriseSkillManager.installSkill).not.toHaveBeenCalled();
+    for (const invalid of [{ version: '1' }, { ...fields, version: 'bad version' }, { ...fields, unknown: '1' }]) {
+      expect((await upload(invalid)).statusCode).toBe(400);
+    }
+    expect((await upload(fields, Buffer.alloc(0))).statusCode).toBe(400);
+    expect((await upload(fields, Buffer.from('ZIP'), true)).statusCode).toBe(400);
+    const oversized = await upload(fields, Buffer.alloc(50 * 1024 * 1024 + 1));
+    expect(oversized.statusCode).toBe(413);
+    expect(oversized.json().error.code).toBe('ENTERPRISE_SKILL_PACKAGE_TOO_LARGE');
+    expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledOnce();
+    expect((await upload({ ...fields, changelog: '字'.repeat(2000) })).statusCode).toBe(201);
+  });
   it('authenticates gateway configuration and never restores credentials from another gateway', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-gateway-api-'));
     const configPath = join(tempDir, 'config.toml');
@@ -827,6 +863,8 @@ function createClient(
     downloadSharedFileContent: vi.fn(),
     uploadSharedFileContent: vi.fn(),
     listSkills: vi.fn(async () => []),
+    listSkillSpaces: vi.fn(async () => ({ spaces: [] })),
+    uploadSkillVersion: vi.fn(),
     getSkillDetail: vi.fn(async () => {
       throw new Error('not implemented');
     }),
@@ -935,6 +973,8 @@ function createEnterpriseSkillManager(): EnterpriseSkillManager {
     createdAt: '2026-07-30T10:00:00.000Z'
   };
   return {
+    listSpaces: vi.fn(async () => ({ spaces: [{ spaceId: 'skillspace_1', name: '团队技能', description: '', actions: ['read', 'write'] as Array<'read' | 'write'> }] })),
+    uploadSkill: vi.fn(async () => ({ skillId: 'skill_1', spaceId: 'skillspace_1', name: 'review', version: '1.0.0' })),
     listSkills: vi.fn(async () => ({
       skills: [],
       refreshedAt: '2026-07-30T10:00:00.000Z'

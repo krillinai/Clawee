@@ -61,6 +61,53 @@ function App(props: AppProps = {}) {
 }
 
 describe('App', () => {
+  it.each(['browser', 'desktop'] as const)('%s host uploads an enterprise skill to its space and refreshes the enterprise directory', async hostKind => {
+    window.location.hash = '#/plugins?source=enterprise';
+    const user = userEvent.setup();
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.selectProjectDirectory = vi.fn();
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    let uploaded = false;
+    const fallback = createKnowledgeRuntimeFetch((url, init) => {
+      if (url.endsWith('/enterprise/skills')) return jsonResponse(createEnterpriseSkillListResponse(uploaded ? [createEnterpriseSkillResponse({ skillId: 'uploaded-skill', name: 'uploaded-skill', status: 'not_installed', actions: ['install'] })] : []));
+      if (url.endsWith('/codex/skills')) return jsonResponse(createSkillListResponse([]));
+      if (url.endsWith('/enterprise/skill-spaces')) return jsonResponse({ spaces: [
+        { spaceId: 'read-only', name: '只读空间', description: '', actions: ['read'] },
+        { spaceId: 'team', name: '团队技能', description: '', actions: ['read', 'write'] }
+      ] });
+      if (new URL(url).pathname === '/enterprise/skills/versions' && init?.method === 'POST') {
+        uploaded = true;
+        return jsonResponse({ skillId: 'uploaded-skill', spaceId: 'team', name: 'uploaded-skill', version: '1.0.0' });
+      }
+      return undefined;
+    });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await screen.findByRole('tab', { name: '企业Skills', selected: true });
+    await waitFor(() => expect(fetchCalls.some(call => call.url.endsWith('/enterprise/skills'))).toBe(true));
+    await user.click(screen.getByRole('button', { name: '添加技能' }));
+    await user.click(await screen.findByRole('menuitem', { name: /上传技能/ }));
+    const dialog = await screen.findByRole('dialog', { name: '上传企业 Skill' });
+    await within(dialog).findByRole('option', { name: '团队技能' });
+    expect(within(dialog).queryByRole('option', { name: '只读空间' })).not.toBeInTheDocument();
+    const file = new File(['ZIP'], 'review.zip', { type: 'application/zip' });
+    await user.upload(within(dialog).getByLabelText('ZIP 技能包'), file);
+    await user.click(within(dialog).getByRole('button', { name: '上传' }));
+    await screen.findByTestId('enterprise-skill-uploaded-skill');
+    expect(screen.queryByRole('dialog', { name: '上传企业 Skill' })).not.toBeInTheDocument();
+    const upload = fetchCalls.find(call => new URL(call.url).pathname === '/enterprise/skills/versions');
+    const form = upload?.init?.body as FormData;
+    expect(form.get('spaceId')).toBe('team');
+    expect(form.get('version')).toBe('1.0.0');
+    expect((form.get('package') as File).name).toBe(file.name);
+    expect(upload?.init?.headers).not.toHaveProperty('Content-Type');
+    expect(hostBridge.selectProjectDirectory).not.toHaveBeenCalled();
+    expect(fetchCalls.some(call => call.url.endsWith('/codex/skills/install'))).toBe(false);
+  });
   it.each(['browser', 'desktop'] as const)('%s host loads menu names and clears them on sign-out', async hostKind => {
     const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -131,6 +178,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '企业Skill' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '旧名称' })).not.toBeInTheDocument();
   });
+
   it('shows the enterprise model configuration gate when login is not required', async () => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({
@@ -1271,8 +1319,10 @@ describe('App', () => {
       .toBeInTheDocument();
     expect(await screen.findByText('design.md')).toBeInTheDocument();
     expect(screen.getByText(`当前项目：${project.name}`)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '上传文件' }))
-      .not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '上传文件' }));
+    const spacePicker = screen.getByRole('dialog', { name: '选择上传空间' });
+    expect(within(spacePicker).getByText('当前账号没有可上传文件的共享空间。')).toBeInTheDocument();
+    await user.click(within(spacePicker).getByRole('button', { name: '关闭上传空间选择' }));
 
     await user.click(
       screen.getByRole('button', { name: '保存 design.md 到当前项目' })

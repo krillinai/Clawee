@@ -70,6 +70,7 @@ import {
   ModelServiceSetupPage
 } from '../features/setup/ModelServiceSetupPage.js';
 import { getSkillMarketDisplayTitle } from '../features/plugins/skill-market-model.js';
+import { EnterpriseSkillUploadDialog } from '../features/plugins/EnterpriseSkillUploadDialog.js';
 import {
   collectTaskTransitions,
   createTaskNotification,
@@ -412,6 +413,7 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseSkillUseError, setEnterpriseSkillUseError] =
     useState<EnterpriseSkillUseError>();
   const [enterpriseSkillsReloadKey, setEnterpriseSkillsReloadKey] = useState(0);
+  const [enterpriseSkillUploadOpen, setEnterpriseSkillUploadOpen] = useState(false);
   const [enterpriseKnowledgeBases, setEnterpriseKnowledgeBases] =
     useState<EnterpriseKnowledgeBaseResponse[]>();
   const [enterpriseKnowledgeBasesLoading, setEnterpriseKnowledgeBasesLoading] =
@@ -1674,6 +1676,7 @@ export function AppController(props: AppControllerProps) {
     enterpriseSharedFilesLoadInFlightRef.current = false;
     enterpriseSharedMutationInFlightRef.current = false;
     setEnterpriseSkillOperation(undefined);
+    setEnterpriseSkillUploadOpen(false);
     setEnterpriseSkillUseError(undefined);
     setEnterpriseKnowledgeUpload(undefined);
     setEnterpriseKnowledgeUploadNotice(undefined);
@@ -4883,34 +4886,40 @@ export function AppController(props: AppControllerProps) {
     }
   }
 
-  async function uploadLocalSkill() {
-    const selectDirectory = hostBridge.selectProjectDirectory;
-    const activeRuntimeClient = runtimeClient;
-    const activeCapabilityService = capabilityService;
-    const activeSkillMarketService = skillMarketService;
-    if (selectDirectory === undefined) return;
-    if (activeRuntimeClient === null || activeCapabilityService === null || activeSkillMarketService === null) {
-      setSkillMarketLoadError('本地服务暂不可用，无法上传技能');
-      return;
-    }
-
+  async function loadEnterpriseSkillSpaces() {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (activeEnterpriseService === null) throw new Error('本地服务暂不可用');
+    const generation = enterpriseHubGenerationRef.current;
     try {
-      const sourcePath = await selectDirectory();
-      if (sourcePath === null) return;
-      setSkillMarketLoadError(undefined);
-      await activeRuntimeClient.post('/codex/skills/install', {
-        sourcePath,
-        confirmWriteToCodexHome: true
-      });
-      await refreshSkillMarketState(
-        skillMarketRuntimeGenerationRef.current,
-        activeCapabilityService,
-        activeSkillMarketService
-      );
+      return await activeEnterpriseService.listSkillSpaces();
     } catch (error) {
-      if (mountedRef.current) {
-        setSkillMarketLoadError(getRuntimeErrorMessage(error, '上传技能失败，请重试'));
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService) && isEnterpriseUnauthorized(error)) handleEnterpriseSessionExpired();
+      throw new Error(formatEnterpriseSkillError(error, '技能空间加载失败'));
+    }
+  }
+
+  async function uploadEnterpriseSkill(input: { spaceId: string; version: string; changelog: string; file: File }) {
+    const activeEnterpriseService = enterpriseServiceRef.current;
+    if (activeEnterpriseService === null) throw new Error('本地服务暂不可用');
+    const generation = enterpriseHubGenerationRef.current;
+    try {
+      await activeEnterpriseService.uploadSkill(input);
+      if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) throw new Error('企业会话已变化，请重新登录后检查上传结果');
+      setEnterpriseSkillsReloadKey(key => key + 1);
+    } catch (error) {
+      if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService) && isEnterpriseUnauthorized(error)) handleEnterpriseSessionExpired();
+      if (error instanceof ApiClientError) {
+        if (error.code === 'ENTERPRISE_SERVICE_UNAVAILABLE' || error.code === 'ENTERPRISE_PROTOCOL_ERROR') {
+          throw new Error('上传结果未知，请刷新企业 Skill 目录后确认，避免重复上传');
+        }
+        if (error.code === 'ENTERPRISE_SKILL_NOT_FOUND' || error.code === 'ENTERPRISE_FORBIDDEN') {
+          throw new Error('技能空间已不可访问或没有写权限，请刷新空间列表');
+        }
+        if (error.code === 'ENTERPRISE_SKILL_SOURCE_CONFLICT') {
+          throw new Error('技能名称或版本冲突，请检查已有技能的空间和版本');
+        }
       }
+      throw new Error(formatEnterpriseSkillError(error, '企业 Skill 上传失败'));
     }
   }
 
@@ -6435,6 +6444,7 @@ export function AppController(props: AppControllerProps) {
       onRefresh={refreshEnterpriseSession}
     />
   ) : state.activeView === 'plugins' ? (
+    <>
     <PluginsPage
       connected={connectionState.status === 'connected'}
       source={activePluginSource}
@@ -6481,11 +6491,19 @@ export function AppController(props: AppControllerProps) {
         onUpdate: skillId => void updateEnterpriseSkill(skillId),
         onUse: (skill, projectId) => void useEnterpriseSkill(skill, projectId),
         onCreateSkill: () => void useMarketSkill('skill-creator', currentProject?.id ?? ''),
-        onUploadSkill: hostBridge.selectProjectDirectory === undefined
-          ? undefined
-          : () => void uploadLocalSkill()
+        onUploadSkill: connectionState.status === 'connected' && enterpriseSession.status === 'signed_in'
+          ? () => setEnterpriseSkillUploadOpen(true)
+          : undefined
       }}
     />
+    {enterpriseSkillUploadOpen && activePluginSource === 'enterprise' ? (
+      <EnterpriseSkillUploadDialog
+        onLoadSpaces={loadEnterpriseSkillSpaces}
+        onUpload={uploadEnterpriseSkill}
+        onClose={() => setEnterpriseSkillUploadOpen(false)}
+      />
+    ) : null}
+    </>
   ) : state.activeView === 'conversation' ? (
     conversationWorkspace
   ) : (

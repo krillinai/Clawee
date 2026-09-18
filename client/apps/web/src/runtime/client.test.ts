@@ -211,4 +211,13 @@ describe('RuntimeClient', () => {
       })
     );
   });
+
+  it('leaves multipart boundaries to fetch when posting FormData', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}'));
+    const client = new RuntimeClient({ baseUrl: 'http://127.0.0.1:60855', token: 'tok', fetchImpl: fetchMock });
+    const body = new FormData();
+    body.append('version', '1');
+    await client.postBinary('/enterprise/skills/versions', body);
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:60855/enterprise/skills/versions', expect.objectContaining({ body, headers: { Authorization: 'Bearer tok' } }));
+  });
 });

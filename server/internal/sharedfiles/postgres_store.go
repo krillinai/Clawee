@@ -67,12 +67,13 @@ ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $4`, filter.Query, nullableTime(
 }
 
 func (s *PostgresStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilter) ([]Space, error) {
-	rows, err := s.pool.Query(ctx, `SELECT s.space_id,s.name,s.description,s.updated_at
+	rows, err := s.pool.Query(ctx, `SELECT s.space_id,s.name,s.description,s.updated_at,
+EXISTS (SELECT 1 FROM data_resource_grants w WHERE w.resource_type=$1 AND w.resource_id=s.space_id AND w.action=$7 AND w.user_id=$3)
 FROM shared_spaces s
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=s.space_id AND g.action=$2 AND g.user_id=$3
 WHERE ($4::timestamptz IS NULL OR s.updated_at<$4 OR (s.updated_at=$4 AND s.space_id>$5))
 ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, ActionRead, filter.UserID,
-		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit)
+		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, ActionWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -80,9 +81,11 @@ ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, Ac
 	items := []Space{}
 	for rows.Next() {
 		var item Space
-		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt); err != nil {
+		permissions := &SpacePermissions{Read: true}
+		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &permissions.Write); err != nil {
 			return nil, err
 		}
+		item.Permissions = permissions
 		items = append(items, item)
 	}
 	return items, rows.Err()

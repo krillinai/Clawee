@@ -90,7 +90,7 @@ export class RuntimeClient {
       headers.Authorization = `Bearer ${this.token}`;
     }
     if (input.body !== undefined) headers['Content-Type'] = 'application/json';
-    if (input.binaryBody !== undefined) {
+    if (input.binaryBody !== undefined && !(input.binaryBody instanceof FormData)) {
       headers['Content-Type'] =
         input.binaryContentType ?? 'application/octet-stream';
     }

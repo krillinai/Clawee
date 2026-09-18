@@ -3,6 +3,23 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createEnterpriseService } from './enterprise-service-2026-07-30.js';
 
 describe('enterprise service', () => {
+  it('lists skill spaces and uploads ZIP bytes with enterprise metadata', async () => {
+    const get = vi.fn(async () => ({ spaces: [] }));
+    const postBinary = vi.fn(async () => ({}));
+    const service = createEnterpriseService(createClient({ get, postBinary }));
+    await service.listSkillSpaces();
+    const file = new File(['ZIP'], 'review.zip', { type: 'application/zip' });
+    await service.uploadSkill({ spaceId: 'space/一', version: '1.0.0', changelog: '更新', file });
+    expect(get).toHaveBeenCalledWith('/enterprise/skill-spaces');
+    const [path, body] = postBinary.mock.calls[0] as unknown as [string, FormData];
+    const url = new URL(path, 'http://runtime');
+    expect(url.pathname).toBe('/enterprise/skills/versions');
+    expect(body.get('spaceId')).toBe('space/一');
+    expect(body.get('version')).toBe('1.0.0');
+    expect(body.get('changelog')).toBe('更新');
+    expect((body.get('package') as File).name).toBe(file.name);
+    expect((body.get('package') as File).size).toBe(file.size);
+  });
   it('uses exact platform branding routes including raw images', async () => {
     const get = vi.fn(async (_path: string) => ({}));
     const response = new Response(new Blob(['logo'], { type: 'image/png' }));

@@ -4,6 +4,8 @@ import type {
   EnterpriseSkillListResponse,
   EnterpriseSkillMutationResponse,
   EnterpriseSkillResponse,
+  EnterpriseSkillSpaceListResponse,
+  EnterpriseSkillUploadResponse,
   RuntimeErrorCode
 } from '@clawee/protocol';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -29,9 +31,12 @@ import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 import { extractEnterpriseSkillPackage } from './skill-package-2026-07-30.js';
 import { computeEnterpriseSkillContentDigest } from './skill-content-digest-2026-07-30.js';
+import { ENTERPRISE_PACKAGE_MAX_BYTES } from './config-2026-07-30.js';
 
 export type EnterpriseSkillManager = {
   listSkills(): Promise<EnterpriseSkillListResponse>;
+  listSpaces(): Promise<EnterpriseSkillSpaceListResponse>;
+  uploadSkill(input: { spaceId: string; version: string; changelog: string; package: Uint8Array }): Promise<EnterpriseSkillUploadResponse>;
   getSkillDetail(skillId: string): Promise<EnterpriseSkillDetailResponse>;
   installSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;
   updateSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;
@@ -542,6 +547,29 @@ export function createEnterpriseSkillManager(input: {
 
   return {
     listSkills,
+    async listSpaces() {
+      const accessToken = await requireToken();
+      return retryRead(() => input.httpClient.listSkillSpaces(accessToken));
+    },
+    async uploadSkill(request) {
+      if (!request.spaceId.trim() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(request.version) || Array.from(request.changelog).length > 2000 || request.package.byteLength === 0) {
+        throw new EnterpriseSkillManagerError('ENTERPRISE_INVALID_REQUEST', 400);
+      }
+      if (request.package.byteLength > ENTERPRISE_PACKAGE_MAX_BYTES) {
+        throw new EnterpriseSkillManagerError('ENTERPRISE_SKILL_PACKAGE_TOO_LARGE', 413);
+      }
+      const accessToken = await requireToken();
+      try {
+        return await input.httpClient.uploadSkillVersion({ ...request, accessToken });
+      } catch (error) {
+        if (!(error instanceof EnterpriseHttpError)) throw error;
+        if (error.code === 'ENTERPRISE_UNAUTHORIZED') {
+          await input.sessionManager.invalidateUnauthorized();
+          throw new EnterpriseSkillManagerError('ENTERPRISE_SESSION_EXPIRED', 401);
+        }
+        throw error;
+      }
+    },
     getSkillDetail,
     getParticipantAvatar,
     installSkill(skillId) {

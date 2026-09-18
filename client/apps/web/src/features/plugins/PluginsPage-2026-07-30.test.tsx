@@ -4,6 +4,16 @@ import { describe, expect, it, vi } from 'vitest';
 import PluginsPage, { type PluginsPageProps } from './PluginsPage.js';
 
 describe('PluginsPage', () => {
+  it('describes enterprise upload as a ZIP package containing SKILL.md', async () => {
+    const user = userEvent.setup();
+    const onUploadSkill = vi.fn();
+    render(<PluginsPage {...createProps({ enterprise: { ...createProps().enterprise, onUploadSkill } })} />);
+    await user.click(screen.getByRole('button', { name: '添加技能' }));
+    const upload = screen.getByRole('menuitem', { name: '上传技能 选择包含 SKILL.md 的 ZIP 压缩包' });
+    expect(upload).not.toHaveTextContent('文件夹');
+    await user.click(upload);
+    expect(onUploadSkill).toHaveBeenCalledOnce();
+  });
   it('defaults to enterprise skills and keeps the skill market second', async () => {
     const user = userEvent.setup();
     const onSourceChange = vi.fn();

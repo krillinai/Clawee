@@ -7,6 +7,8 @@ import type {
   EnterpriseBilibiliDashboardResponse,
   EnterpriseBillingOverviewResponse,
   EnterpriseListMeta,
+  EnterpriseSkillSpaceListResponse,
+  EnterpriseSkillUploadResponse,
   EnterpriseLoginRequest,
   EnterprisePlatformBrandingResponse,
   EnterpriseQrLoginStartRequest,
@@ -292,6 +294,18 @@ const remoteSkillSchema = z.object({
 });
 const skillListResponseSchema = z.object({
   data: z.array(remoteSkillSchema)
+});
+const skillSpaceListResponseSchema = z.object({
+  data: z.array(z.object({
+    space_id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string(),
+    actions: z.array(z.enum(['read', 'write']))
+  }))
+});
+const skillUploadResponseSchema = z.object({
+  skill: z.object({ skill_id: z.string().min(1), space_id: z.string().min(1), name: z.string().min(1) }),
+  version: z.object({ version: z.string().min(1) })
 });
 const skillDetailResponseSchema = z.object({
   data: remoteSkillSchema.extend({
@@ -968,6 +982,14 @@ export type EnterpriseHttpClient = {
     page: number
   ): Promise<EnterpriseRechargeOrderPageResponse>;
   listSkills(accessToken: string): Promise<EnterpriseRemoteSkill[]>;
+  listSkillSpaces(accessToken: string): Promise<EnterpriseSkillSpaceListResponse>;
+  uploadSkillVersion(input: {
+    accessToken: string;
+    spaceId: string;
+    version: string;
+    changelog: string;
+    package: Uint8Array;
+  }): Promise<EnterpriseSkillUploadResponse>;
   getSkillDetail(
     accessToken: string,
     skillId: string
@@ -1054,19 +1076,21 @@ export function createEnterpriseHttpClient(input: {
     domain?: EnterpriseHttpDomain;
     retryTransportFailure?: boolean;
     emptyBody?: boolean;
+    formBody?: FormData;
+    timeoutMs?: number;
   }): Promise<T> {
     let response!: Response;
     const maxAttempts = request.retryTransportFailure === true ? 2 : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
         response = await fetchImpl(new URL(request.path, origin), {
-          body: request.body === undefined ? undefined : JSON.stringify(request.body),
+          body: request.formBody ?? (request.body === undefined ? undefined : JSON.stringify(request.body)),
           headers: {
             ...jsonHeaders(request.accessToken, request.body !== undefined),
             ...(request.emptyBody === true ? { 'Content-Length': '0' } : {})
           },
           method: request.method,
-          signal: AbortSignal.timeout(jsonTimeoutMs)
+          signal: AbortSignal.timeout(request.timeoutMs ?? jsonTimeoutMs)
         });
         break;
       } catch {
@@ -1434,6 +1458,30 @@ export function createEnterpriseHttpClient(input: {
       return {
         upstreams: response.data.upstreams.map(mapRemoteMcpUpstream)
       };
+    },
+
+    async listSkillSpaces(accessToken) {
+      const response = await requestJson({
+        accessToken, domain: 'skill', method: 'GET',
+        path: '/api/v1/app/skill-spaces', schema: skillSpaceListResponseSchema
+      });
+      return { spaces: response.data.map(space => ({
+        spaceId: space.space_id, name: space.name, description: space.description, actions: space.actions
+      })) };
+    },
+
+    async uploadSkillVersion(request) {
+      const formBody = new FormData();
+      formBody.append('space_id', request.spaceId);
+      formBody.append('version', request.version);
+      if (request.changelog) formBody.append('changelog', request.changelog);
+      formBody.append('package', new Blob([new Uint8Array(request.package).buffer], { type: 'application/zip' }), 'skill.zip');
+      const response = await requestJson({
+        accessToken: request.accessToken, domain: 'skill-upload', method: 'POST',
+        path: '/api/v1/app/skills/versions', formBody,
+        timeoutMs: documentUploadTimeoutMs, schema: skillUploadResponseSchema
+      });
+      return { skillId: response.skill.skill_id, spaceId: response.skill.space_id, name: response.skill.name, version: response.version.version };
     },
 
     async listSkills(accessToken) {
@@ -2543,6 +2591,7 @@ type EnterpriseHttpDomain =
   | 'billing'
   | 'business-data'
   | 'skill'
+  | 'skill-upload'
   | 'knowledge'
   | 'shared-file'
   | 'mcp'
@@ -2586,8 +2635,11 @@ function mapResponseCode(
   upstreamCode: string | undefined,
   domain: EnterpriseHttpDomain
 ): RuntimeErrorCode {
+  if (domain === 'skill-upload' && statusCode === 400 && upstreamCode === 'package_invalid') return 'ENTERPRISE_SKILL_PACKAGE_INVALID';
   if (statusCode === 400) return 'ENTERPRISE_INVALID_REQUEST';
   if (statusCode === 401) return 'ENTERPRISE_UNAUTHORIZED';
+  if (domain === 'skill-upload' && statusCode === 409) return 'ENTERPRISE_SKILL_SOURCE_CONFLICT';
+  if (domain === 'skill-upload' && statusCode === 422) return 'ENTERPRISE_SKILL_PACKAGE_INVALID';
   if (
     domain === 'business-data'
     && statusCode === 403

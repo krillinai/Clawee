@@ -1459,6 +1459,26 @@ export type EnterpriseSkillListResponse = {
   refreshedAt: string;
 };
 
+export const ENTERPRISE_SKILL_PACKAGE_MAX_BYTES = 50 * 1024 * 1024;
+
+export type EnterpriseSkillSpaceResponse = {
+  spaceId: string;
+  name: string;
+  description: string;
+  actions: Array<'read' | 'write'>;
+};
+
+export type EnterpriseSkillSpaceListResponse = {
+  spaces: EnterpriseSkillSpaceResponse[];
+};
+
+export type EnterpriseSkillUploadResponse = {
+  skillId: string;
+  spaceId: string;
+  name: string;
+  version: string;
+};
+
 export type EnterpriseSkillDetailResponse = EnterpriseSkillResponse & {
   changelog?: string;
 };

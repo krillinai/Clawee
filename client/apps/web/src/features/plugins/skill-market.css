@@ -1286,6 +1286,37 @@
   box-shadow: var(--shadow);
 }
 
+.enterprise-skill-upload-form {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.enterprise-skill-upload-form > label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.enterprise-skill-upload-form input,
+.enterprise-skill-upload-form select,
+.enterprise-skill-upload-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.enterprise-skill-upload-form textarea { resize: vertical; }
+.enterprise-skill-upload-form .skill-market-inline-error { overflow-wrap: anywhere; }
+
 .skill-market-use-dialog__header,
 .skill-market-use-dialog__footer {
   display: flex;

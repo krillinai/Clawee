@@ -25,6 +25,47 @@ afterEach(() => {
 });
 
 describe('enterprise HTTP client', () => {
+  it('maps writable skill spaces and uploads multipart to the selected space', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'GET') return jsonResponse({ data: [
+        { space_id: 'space/一', name: '团队技能', description: '', actions: ['read', 'write'] },
+        { space_id: 'readonly', name: '只读技能', description: '', actions: ['read'] }
+      ] });
+      expect(init?.headers).toMatchObject({ Authorization: 'Bearer enterprise-token' });
+      expect(init?.headers).not.toHaveProperty('Content-Type');
+      const form = init?.body as FormData;
+      expect(form.get('space_id')).toBe('space/一');
+      expect(form.get('version')).toBe('1.0.0');
+      expect(form.get('changelog')).toBe('更新');
+      expect(await (form.get('package') as Blob).text()).toBe('ZIP bytes');
+      return jsonResponse({ skill: { skill_id: 'skill_1', space_id: 'space/一', name: 'review' }, version: { version: '1.0.0' } });
+    });
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    expect(await client.listSkillSpaces('enterprise-token')).toMatchObject({ spaces: [
+      { spaceId: 'space/一', actions: ['read', 'write'] }, { spaceId: 'readonly', actions: ['read'] }
+    ] });
+    expect(await client.uploadSkillVersion({ accessToken: 'enterprise-token', spaceId: 'space/一', version: '1.0.0', changelog: '更新', package: Buffer.from('ZIP bytes') })).toEqual({ skillId: 'skill_1', spaceId: 'space/一', name: 'review', version: '1.0.0' });
+    expect(String(fetch.mock.calls[1]?.[0])).toBe(`${ORIGIN}/api/v1/app/skills/versions`);
+  });
+
+  it.each([
+    [409, 'conflict', 'ENTERPRISE_SKILL_SOURCE_CONFLICT'],
+    [400, 'package_invalid', 'ENTERPRISE_SKILL_PACKAGE_INVALID'],
+    [404, 'skill_space_not_found', 'ENTERPRISE_SKILL_NOT_FOUND'],
+    [413, 'package_too_large', 'ENTERPRISE_SKILL_PACKAGE_TOO_LARGE']
+  ])('maps skill upload failure %s without treating it as a knowledge conflict', async (status, code, expected) => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code } }), { status }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.uploadSkillVersion({ accessToken: 'token', spaceId: 'space_1', version: '1', changelog: '', package: Buffer.from('ZIP') })).rejects.toMatchObject({ code: expected });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('preserves shared space write permissions returned by the gateway', async () => {
+    const fetch = vi.fn(async () => jsonResponse({ data: [{
+      space_id: 'space_1', name: '团队文件', description: '', updated_at: '2026-09-18T00:00:00Z', permissions: { read: true, write: true }
+    }], meta: { next_cursor: '', has_next: false, max_file_size_bytes: 1073741824 } }));
+    expect(await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).listSharedSpaces('token')).toMatchObject({ spaces: [{ permissions: { read: true, write: true } }] });
+  });
   it('preserves skill space and participant summaries from the gateway', async () => {
     const fetch = vi.fn(async () => jsonResponse({ data: [{
       skill_id: 'skill-1', name: 'participants', description: '技能', version_id: 'version-1', version: '1',

@@ -159,6 +159,8 @@ function enterpriseClient(subject: () => string): EnterpriseHttpClient {
     downloadSharedFileContent: vi.fn(),
     uploadSharedFileContent: vi.fn(),
     listSkills: vi.fn(),
+    listSkillSpaces: vi.fn(),
+    uploadSkillVersion: vi.fn(),
     getSkillDetail: vi.fn(),
     downloadSkillPackage: vi.fn()
   };

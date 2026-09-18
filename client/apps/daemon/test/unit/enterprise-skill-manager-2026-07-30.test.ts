@@ -167,6 +167,42 @@ describe('enterprise skill manager', () => {
     expect(client.listSkills).toHaveBeenCalledOnce();
   });
 
+  it('uploads with the enterprise token without any local installation or automatic retry', async () => {
+    const client = createHttpClient();
+    const skillManager = createSkillManager(createTransaction());
+    const manager = createManager({ client, skillManager });
+    const request = { spaceId: 'space_1', version: '1', changelog: '', package: Buffer.from('ZIP') };
+    const response = { skillId: 'skill_1', spaceId: 'space_1', name: 'review', version: '1' };
+    vi.mocked(client.uploadSkillVersion).mockResolvedValueOnce(response);
+    await expect(manager.uploadSkill(request)).resolves.toEqual(response);
+    expect(client.uploadSkillVersion).toHaveBeenCalledWith({ ...request, accessToken: 'enterprise-token' });
+    expect(skillManager.installSkill).not.toHaveBeenCalled();
+    vi.mocked(client.uploadSkillVersion).mockClear().mockRejectedValue(new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request'));
+    await expect(manager.uploadSkill(request)).rejects.toMatchObject({ code: 'ENTERPRISE_SERVICE_UNAVAILABLE' });
+    expect(client.uploadSkillVersion).toHaveBeenCalledOnce();
+  });
+
+  it('rejects missing spaces, invalid versions and oversized skill packages before upload', async () => {
+    const client = createHttpClient();
+    const manager = createManager({ client });
+    const request = { spaceId: 'space_1', version: '1', changelog: '', package: Buffer.from('ZIP') };
+    for (const invalid of [{ spaceId: '' }, { version: 'bad version' }, { changelog: '字'.repeat(2001) }, { package: Buffer.alloc(0) }]) {
+      await expect(manager.uploadSkill({ ...request, ...invalid })).rejects.toMatchObject({ code: 'ENTERPRISE_INVALID_REQUEST' });
+    }
+    await expect(manager.uploadSkill({ ...request, package: new Uint8Array(50 * 1024 * 1024 + 1) })).rejects.toMatchObject({ code: 'ENTERPRISE_SKILL_PACKAGE_TOO_LARGE' });
+    expect(client.uploadSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an expired enterprise session on upload without retrying', async () => {
+    const client = createHttpClient();
+    const sessionManager = createSessionManager();
+    vi.mocked(client.uploadSkillVersion).mockRejectedValue(new EnterpriseHttpError('ENTERPRISE_UNAUTHORIZED', 'response', 401));
+    const manager = createManager({ client, sessionManager });
+    await expect(manager.uploadSkill({ spaceId: 'space_1', version: '1', changelog: '', package: Buffer.from('ZIP') })).rejects.toMatchObject({ code: 'ENTERPRISE_SESSION_EXPIRED' });
+    expect(sessionManager.invalidateUnauthorized).toHaveBeenCalledOnce();
+    expect(client.uploadSkillVersion).toHaveBeenCalledOnce();
+  });
+
   it('rechecks source ownership inside the write lock before installing', async () => {
     const installSkill = vi.fn();
     const transaction = createTransaction({
@@ -259,6 +295,7 @@ describe('enterprise skill manager', () => {
 
 function createManager(overrides: {
   client?: EnterpriseHttpClient;
+  sessionManager?: EnterpriseSessionManager;
   records?: EnterpriseInstallRecordRepository;
   skillManager?: SkillManager;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -268,7 +305,7 @@ function createManager(overrides: {
   tempDirectories.push(dataDir);
   return createEnterpriseSkillManager({
     dataDir,
-    sessionManager: createSessionManager(),
+    sessionManager: overrides.sessionManager ?? createSessionManager(),
     httpClient: overrides.client ?? createHttpClient(),
     skillManager:
       overrides.skillManager ??
@@ -332,6 +369,8 @@ function createHttpClient(): EnterpriseHttpClient {
     downloadSharedFileContent: vi.fn(),
     uploadSharedFileContent: vi.fn(),
     listSkills: vi.fn(async () => [remoteSkill()]),
+    listSkillSpaces: vi.fn(async () => ({ spaces: [] })),
+    uploadSkillVersion: vi.fn(),
     getSkillDetail: vi.fn(async () => remoteDetail()),
     downloadSkillPackage: vi.fn(async () => ({
       bytes: 10,

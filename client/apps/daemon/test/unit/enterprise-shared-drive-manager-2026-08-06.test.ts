@@ -397,6 +397,8 @@ function createHttpClient(
     downloadSharedFileContent: vi.fn(),
     uploadSharedFileContent: vi.fn(),
     listSkills: vi.fn(async () => []),
+    listSkillSpaces: vi.fn(),
+    uploadSkillVersion: vi.fn(),
     getSkillDetail: vi.fn(),
     downloadSkillPackage: vi.fn(),
     ...overrides

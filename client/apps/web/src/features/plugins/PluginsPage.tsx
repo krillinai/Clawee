@@ -117,7 +117,7 @@ export default function PluginsPage(props: PluginsPageProps) {
                         <Upload size={16} />
                         <span>
                           <strong>上传技能</strong>
-                          <small>选择包含 SKILL.md 的文件夹</small>
+                          <small>选择包含 SKILL.md 的 ZIP 压缩包</small>
                         </span>
                       </button>
                     ) : null}

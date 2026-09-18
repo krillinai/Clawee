@@ -121,6 +121,7 @@ func (s *MemoryStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilt
 		if !s.grants[id][filter.UserID].Read || !afterTimeCursor(space.UpdatedAt, id, filter.Cursor) {
 			continue
 		}
+		space.Permissions = &SpacePermissions{Read: true, Write: s.grants[id][filter.UserID].Write}
 		items = append(items, space)
 	}
 	sort.Slice(items, func(i, j int) bool {

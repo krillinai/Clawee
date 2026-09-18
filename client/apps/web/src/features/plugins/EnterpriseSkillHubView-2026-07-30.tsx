@@ -246,7 +246,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
             <label className="skill-market-search"><Search size={17} aria-hidden="true" /><input aria-label="搜索企业 Skill" onChange={event => setQuery(event.target.value)} placeholder="搜索技能" type="search" value={query} /></label>
             <div className="skill-market-add">
               <button aria-expanded={addMenuOpen} aria-haspopup="menu" className="skill-market-add__trigger" onClick={() => setAddMenuOpen(!addMenuOpen)} type="button"><Plus size={15}/><span>添加技能</span><ChevronDown size={13}/></button>
-              {addMenuOpen ? <div className="skill-market-add__menu" role="menu"><button disabled={props.onCreateSkill === undefined} onClick={() => { setAddMenuOpen(false); props.onCreateSkill?.(); }} role="menuitem"><WandSparkles size={16}/><span><strong>创建技能</strong><small>通过对话生成新的技能</small></span></button>{props.onUploadSkill ? <button onClick={() => { setAddMenuOpen(false); props.onUploadSkill?.(); }} role="menuitem"><Upload size={16}/><span><strong>上传技能</strong><small>选择包含 SKILL.md 的文件夹</small></span></button> : null}</div> : null}
+              {addMenuOpen ? <div className="skill-market-add__menu" role="menu"><button disabled={props.onCreateSkill === undefined} onClick={() => { setAddMenuOpen(false); props.onCreateSkill?.(); }} role="menuitem"><WandSparkles size={16}/><span><strong>创建技能</strong><small>通过对话生成新的技能</small></span></button>{props.onUploadSkill ? <button onClick={() => { setAddMenuOpen(false); props.onUploadSkill?.(); }} role="menuitem"><Upload size={16}/><span><strong>上传技能</strong><small>选择包含 SKILL.md 的 ZIP 压缩包</small></span></button> : null}</div> : null}
             </div>
           </div>
         </header>

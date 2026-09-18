@@ -126,6 +126,43 @@ func TestSharedFileHTTPUploadDownloadContract(t *testing.T) {
 	}
 }
 
+func TestSharedSpacesReturnCurrentAccountPermissions(t *testing.T) {
+	service, spaceID := newSharedFileHTTPService(t)
+	router := sharedFileHandlerRouter(service)
+	router.(*gin.Engine).GET("/spaces", handleAppSharedSpaces(service))
+	assertPermissions := func(wantWrite bool) {
+		t.Helper()
+		recorder := sharedFileRequest(router, http.MethodGet, "/spaces", nil, 0, "")
+		var response struct {
+			Data []struct {
+				SpaceID     string `json:"space_id"`
+				Permissions struct {
+					Read  bool `json:"read"`
+					Write bool `json:"write"`
+				} `json:"permissions"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK || len(response.Data) != 1 || response.Data[0].SpaceID != spaceID || !response.Data[0].Permissions.Read || response.Data[0].Permissions.Write != wantWrite {
+			t.Fatalf("spaces status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	assertPermissions(true)
+	if _, err := service.UpdateMember(context.Background(), spaceID, "user_1", []string{sharedfiles.ActionRead}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	assertPermissions(false)
+	if err := service.RemoveMember(context.Background(), spaceID, "user_1"); err != nil {
+		t.Fatal(err)
+	}
+	recorder := sharedFileRequest(router, http.MethodGet, "/spaces", nil, 0, "")
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"data":[]`) {
+		t.Fatalf("ungranted spaces status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestSharedFileHTTPRejectsShortRequestBody(t *testing.T) {
 	service, spaceID := newSharedFileHTTPService(t)
 	router := sharedFileHandlerRouter(service)

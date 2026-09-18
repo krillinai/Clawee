@@ -42,13 +42,19 @@ var (
 )
 
 type Space struct {
-	SpaceID     string    `json:"space_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedBy   string    `json:"created_by,omitempty"`
-	UpdatedBy   string    `json:"updated_by,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	SpaceID     string            `json:"space_id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	CreatedBy   string            `json:"created_by,omitempty"`
+	UpdatedBy   string            `json:"updated_by,omitempty"`
+	CreatedAt   time.Time         `json:"created_at,omitempty"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	Permissions *SpacePermissions `json:"permissions,omitempty"`
+}
+
+type SpacePermissions struct {
+	Read  bool `json:"read"`
+	Write bool `json:"write"`
 }
 
 type SpaceSummary struct {

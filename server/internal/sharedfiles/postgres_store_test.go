@@ -119,6 +119,47 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 	}
 }
 
+func TestPostgresAuthorizedSpacesIncludeCurrentAccountWritePermissions(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,status) VALUES ('reader','reader@test.local','active'),('writer','writer@test.local','active')`); err != nil {
+		t.Fatal(err)
+	}
+	storage, err := NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, storage, nil)
+	space, err := service.CreateSpace(ctx, "权限测试空间", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for userID, actions := range map[string][]string{"reader": {ActionRead}, "writer": {ActionRead, ActionWrite}} {
+		if _, err := service.AddMemberWithActions(ctx, space.SpaceID, userID, actions, "admin"); err != nil {
+			t.Fatal(err)
+		}
+		page, err := service.ListSpaces(ctx, userID, 50, "")
+		if err != nil || len(page.Items) != 1 || page.Items[0].Permissions == nil || !page.Items[0].Permissions.Read || page.Items[0].Permissions.Write != (userID == "writer") {
+			t.Fatalf("%s spaces=%#v err=%v", userID, page, err)
+		}
+	}
+	if _, err := service.UpdateMember(ctx, space.SpaceID, "writer", []string{ActionRead}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListSpaces(ctx, "writer", 50, "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].Permissions.Write {
+		t.Fatalf("downgraded spaces=%#v err=%v", page, err)
+	}
+	if err := service.RemoveMember(ctx, space.SpaceID, "writer"); err != nil {
+		t.Fatal(err)
+	}
+	page, err = service.ListSpaces(ctx, "writer", 50, "")
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("ungranted spaces=%#v err=%v", page, err)
+	}
+}
+
 func TestPostgresStorageMigrationStateTransitions(t *testing.T) {
 	pool := openSharedFilesTestPool(t)
 	ctx := context.Background()
