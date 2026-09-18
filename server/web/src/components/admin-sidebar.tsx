@@ -46,6 +46,7 @@ import {
 import { hasAdminPermission, type Account } from "@/lib/auth-api";
 import { appIconPaths } from "@/lib/app-icons";
 import { permissions } from "@/lib/rbac-api";
+import { useAdminFeatures } from "@/hooks/useAdminFeatures";
 import { cn } from "@/lib/utils";
 
 type AdminNavItem = {
@@ -108,18 +109,19 @@ function matchesPath(pathname: string, href: string, end = false) {
 
 export function AdminSidebar({ account }: { account?: Account }) {
   const location = useLocation();
+  const features = useAdminFeatures();
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
       items: group.items.filter((item) =>
-        !account || (item.permissions
+        (item.href !== "/admin/feedback" || features.isEnabled("feedback")) && (!account || (item.permissions
           ? item.permissions.some((permission) => hasAdminPermission(account, permission))
-          : Boolean(item.permission && hasAdminPermission(account, item.permission)))
+          : Boolean(item.permission && hasAdminPermission(account, item.permission))))
       )
     }))
     .filter((group) => group.items.length > 0);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() =>
-    visibleGroups.find((group) =>
+    navGroups.find((group) =>
       group.items.some((item) => matchesPath(location.pathname, item.href))
     )?.label ?? null
   );

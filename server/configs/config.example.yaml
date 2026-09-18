@@ -69,6 +69,11 @@ model_access:
 agent_activity:
   reporting_enabled: false
 
+feedback:
+  enabled: false
+  # 是否展示管理台的问题反馈菜单和页面；开启后仍需对应权限和数据授权。
+  admin_ui_enabled: false
+
 sub2api:
   base_url: ""
   admin_api_key: ""

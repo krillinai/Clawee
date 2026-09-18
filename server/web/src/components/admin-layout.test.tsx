@@ -1,10 +1,30 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render as testingRender, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminLayout } from "./admin-layout";
 import { ThemeProvider } from "./theme-provider";
 import { permissions } from "@/lib/rbac-api";
+import { getAdminFeatureStatus } from "@/lib/admin-feature-api";
+
+vi.mock("@/lib/admin-feature-api", () => ({ getAdminFeatureStatus: vi.fn() }));
+
+function render(element: ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = testingRender(
+    <QueryClientProvider client={queryClient}>
+      {element}
+    </QueryClientProvider>
+  );
+  return { ...view, queryClient };
+}
+
+beforeEach(() => {
+  vi.mocked(getAdminFeatureStatus).mockReset();
+  vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features: { feedback: false } });
+});
 
 describe("AdminLayout", () => {
   it("renders Chinese admin navigation labels and pins account pane below the scrollable navigation", () => {
@@ -92,8 +112,9 @@ describe("AdminLayout", () => {
     expect(screen.getByRole("link", { name: "权限目录" })).toHaveAttribute("href", "/admin/rbac/permissions");
     expect(screen.getByRole("link", { name: "数据权限" })).toHaveAttribute("href", "/admin/data-permissions");
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent).slice(-3)).toEqual([
-      "平台外观", "问题反馈", "客户端下载"
+      "数据权限", "平台外观", "客户端下载"
     ]);
+    expect(screen.queryByRole("link", { name: "问题反馈" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "智能体活动列表" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "智能体活动详情" })).not.toBeInTheDocument();
     expect(screen.getByText("管理员")).toBeInTheDocument();
@@ -182,5 +203,31 @@ describe("AdminLayout", () => {
 
     expect(screen.getByRole("button", { name: "智能体活动" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "智能体管理" })).toHaveAttribute("href", "/admin/mcp/agents");
+  });
+
+  it.each([
+    { features: undefined, granted: true, visible: false },
+    { features: { feedback: false }, granted: true, visible: false },
+    { features: { feedback: true }, granted: true, visible: true },
+    { features: { feedback: true }, granted: false, visible: false }
+  ])("问题反馈菜单按展示配置和权限过滤：%j", async ({ features, granted, visible }) => {
+    vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features });
+    const { queryClient } = render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[visible ? "/admin/feedback" : "/admin/accounts"]}>
+          <AdminLayout account={{
+            userId: "usr_admin", email: "admin@example.com", name: "管理员", status: "active",
+            adminPermissions: [permissions.accountRead, ...(granted ? [permissions.feedbackRead] : [])]
+          }} />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await waitFor(() => expect(queryClient.getQueryState(["admin-features"])?.status).toBe("success"));
+    expect(await screen.findByRole("link", { name: "账号管理" })).toBeInTheDocument();
+    if (visible) {
+      expect(await screen.findByRole("link", { name: "问题反馈" })).toHaveAttribute("href", "/admin/feedback");
+    } else {
+      expect(screen.queryByRole("link", { name: "问题反馈" })).not.toBeInTheDocument();
+    }
   });
 });

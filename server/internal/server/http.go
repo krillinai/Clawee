@@ -36,6 +36,7 @@ import (
 
 type Options struct {
 	FeedbackTrustedProxies     []string
+	FeedbackAdminUIEnabled     bool
 	ExternalFeedbackAllowed    *bool
 	FeedbackService            *feedback.Service
 	ClientDownloadsService     *clientdownloads.Service
@@ -244,7 +245,7 @@ func NewRouter(opts Options) http.Handler {
 				"shared_files":           opts.SharedFilesService != nil,
 				"shared_file_storage":    opts.SharedFileStorageService != nil,
 				"shared_file_migrations": opts.SharedFileStorageService != nil && opts.SharedFileMigrationService != nil,
-				"feedback":               opts.FeedbackService != nil && opts.AccountService != nil && opts.RBACService != nil && opts.DataAccessService != nil,
+				"feedback":               opts.FeedbackAdminUIEnabled && opts.FeedbackService != nil && opts.AccountService != nil && opts.RBACService != nil && opts.DataAccessService != nil,
 			},
 		})
 	}

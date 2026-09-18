@@ -41,6 +41,7 @@ type Config struct {
 type FeedbackConfig struct {
 	TrustedProxies  []string `mapstructure:"trusted_proxies"`
 	Enabled         bool     `mapstructure:"enabled"`
+	AdminUIEnabled  bool     `mapstructure:"admin_ui_enabled"`
 	StorageRoot     string   `mapstructure:"storage_root"`
 	CapacityBytes   int64    `mapstructure:"capacity_bytes"`
 	ExternalAllowed bool     `mapstructure:"external_feedback_allowed"`
@@ -440,6 +441,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("skillhub.repository_root", "data/skillhub/repositories")
 	v.SetDefault("shared_files.storage_root", "data/shared-files")
 	v.SetDefault("feedback.enabled", false)
+	v.SetDefault("feedback.admin_ui_enabled", false)
 	v.SetDefault("feedback.storage_root", "data/feedback-private")
 	v.SetDefault("feedback.capacity_bytes", int64(20<<30))
 	v.SetDefault("feedback.external_feedback_allowed", true)
@@ -499,7 +501,7 @@ func bindEnv(v *viper.Viper) {
 		"skillhub.enabled",
 		"skillhub.package_root",
 		"shared_files.storage_root",
-		"feedback.enabled", "feedback.storage_root", "feedback.capacity_bytes", "feedback.external_feedback_allowed", "feedback.trusted_proxies",
+		"feedback.enabled", "feedback.admin_ui_enabled", "feedback.storage_root", "feedback.capacity_bytes", "feedback.external_feedback_allowed", "feedback.trusted_proxies",
 		"shared_files.oss.allowed_endpoint_hosts",
 		"claw_admin.base_url",
 		"claw_admin.deployment_credential",

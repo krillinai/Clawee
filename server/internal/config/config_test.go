@@ -322,6 +322,34 @@ func TestLoadAgentActivityReportingFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadFeedbackAdminUI(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Feedback.AdminUIEnabled {
+		t.Fatal("问题反馈管理页面应默认隐藏")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("feedback:\n  admin_ui_enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil || !cfg.Feedback.AdminUIEnabled {
+		t.Fatalf("YAML 展示开关未生效: enabled=%v, err=%v", cfg.Feedback.AdminUIEnabled, err)
+	}
+	t.Setenv("CLAW_GATEWAY_FEEDBACK_ADMIN_UI_ENABLED", "false")
+	cfg, err = Load(path)
+	if err != nil || cfg.Feedback.AdminUIEnabled {
+		t.Fatalf("环境变量关闭展示未生效: enabled=%v, err=%v", cfg.Feedback.AdminUIEnabled, err)
+	}
+	t.Setenv("CLAW_GATEWAY_FEEDBACK_ADMIN_UI_ENABLED", "true")
+	cfg, err = Load("")
+	if err != nil || !cfg.Feedback.AdminUIEnabled {
+		t.Fatalf("环境变量开启展示未生效: enabled=%v, err=%v", cfg.Feedback.AdminUIEnabled, err)
+	}
+}
+
 func TestLoadModelAccessMode(t *testing.T) {
 	for _, mode := range []string{"platform_managed", "enterprise_managed"} {
 		t.Run(mode, func(t *testing.T) {

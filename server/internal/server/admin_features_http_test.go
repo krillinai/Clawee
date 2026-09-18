@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/krillinai/Clawee/server/internal/dataaccess"
+	"github.com/krillinai/Clawee/server/internal/feedback"
 	"github.com/krillinai/Clawee/server/internal/knowledge"
 	"github.com/krillinai/Clawee/server/internal/server"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
@@ -70,5 +72,45 @@ func TestAdminStatusStillRequiresAuthentication(t *testing.T) {
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestAdminStatusFeedbackUIRequiresOptInAndService(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		showUI  bool
+		service bool
+		want    bool
+	}{
+		{name: "默认隐藏", service: true},
+		{name: "显式开启", showUI: true, service: true, want: true},
+		{name: "服务未开启", showUI: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := server.Options{
+				FeedbackAdminUIEnabled: tc.showUI,
+				DataAccessService:      dataaccess.NewService(dataaccess.NewMemoryStore()),
+			}
+			if tc.service {
+				opts.FeedbackService = feedback.NewService(feedback.NewMemoryStore(), nil, nil, 0)
+			}
+			router := newTestRouter(t, opts)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			var response struct {
+				Data struct {
+					Features map[string]bool `json:"features"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if got := response.Data.Features["feedback"]; got != tc.want {
+				t.Fatalf("feedback = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -441,6 +441,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			KnowledgeService:           knowledgeSvc,
 			ExternalFeedbackAllowed:    &cfg.Feedback.ExternalAllowed,
 			FeedbackService:            feedbackSvc,
+			FeedbackAdminUIEnabled:     cfg.Feedback.AdminUIEnabled,
 			FeedbackTrustedProxies:     cfg.Feedback.TrustedProxies,
 			SkillHubService:            skillHubRuntime.Service,
 			SkillSourceService:         skillHubRuntime.Sources,

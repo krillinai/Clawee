@@ -60,6 +60,19 @@ it("已启用时正常加载页面，资源 404 仍由业务页处理", async ()
   expect(screen.queryByText("功能未开启")).not.toBeInTheDocument();
 });
 
+it.each(["/admin/feedback", "/admin/feedback/fb_missing"])("%s 缺少展示配置时默认不挂载页面", async path => {
+  vi.mocked(getAdminFeatureStatus).mockResolvedValue({});
+  show(path);
+  expect(await screen.findByText("功能未开启")).toBeInTheDocument();
+  expect(mountPage).not.toHaveBeenCalled();
+});
+
+it("显式开启问题反馈时加载页面", async () => {
+  vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features: { feedback: true } });
+  show("/admin/feedback");
+  expect(await screen.findByText("业务页面")).toBeInTheDocument();
+});
+
 it("状态请求失败显示友好提示并可重试，不暴露错误正文", async () => {
   vi.mocked(getAdminFeatureStatus).mockRejectedValueOnce(new Error("GET /api/v1/admin/status failed with 500"));
   vi.mocked(getAdminFeatureStatus).mockResolvedValueOnce({ features: { feedback: false } });

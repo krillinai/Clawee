@@ -52,6 +52,7 @@ mcp.public_base_url             -> CLAW_GATEWAY_MCP_PUBLIC_BASE_URL
 | `dingtalk`、`bilibili` | 可选外部身份和数据集成 |
 | `claw_admin`、`sub2api`、`model_access` | 可选模型配置和计费集成 |
 | `agent_activity` | Agent 活动直报开关 |
+| `feedback` | 反馈收集服务及管理台页面展示开关 |
 
 ## Secret 管理
 
@@ -82,6 +83,18 @@ shared_files:
 ```
 
 允许列表只接受主机名，不填写 Scheme、路径或端口。管理台不能放行任意 Endpoint。
+
+## 问题反馈管理页面
+
+问题反馈管理菜单和页面默认不展示。需要展示时，在仓库外配置中设置：
+
+```yaml
+feedback:
+  enabled: true
+  admin_ui_enabled: true
+```
+
+也可通过 `CLAW_GATEWAY_FEEDBACK_ADMIN_UI_ENABLED=true` 覆盖展示开关，修改后重启 Gateway。展示还要求反馈服务可用且账号具有 `console:feedback:read` 权限；读取反馈仍需「中心问题反馈 → 全部反馈」数据授权。`admin_ui_enabled` 仅控制管理台展示，不改变反馈提交、收集策略或接口权限。
 
 ## 生产校验
 

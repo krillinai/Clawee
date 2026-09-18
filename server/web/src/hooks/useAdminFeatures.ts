@@ -16,7 +16,9 @@ export function useAdminFeatures() {
     staleTime: 30000,
     retry: false
   });
-  // 旧版本状态接口没有 features 字段，保持原有行为。
-  const isEnabled = (feature: AdminFeature) => query.isSuccess && query.data.features?.[feature] !== false;
+  // 问题反馈需显式开启；旧版本未提供状态的其他功能保持原有行为。
+  const isEnabled = (feature: AdminFeature) => query.isSuccess && (feature === "feedback"
+    ? query.data.features?.feedback === true
+    : query.data.features?.[feature] !== false);
   return { ...query, isEnabled };
 }
