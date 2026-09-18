@@ -12,7 +12,8 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  removeWorkspaceSelfReference
+  removeWorkspaceSelfReference,
+  pruneDaemonBuildArtifacts
 } from './daemon-deployment-contract.mjs';
 import { runStage } from './script-utils.mjs';
 
@@ -96,6 +97,7 @@ await runStage('重建 Electron 原生 SQLite', process.execPath, [
     npm_config_update_notifier: 'false'
   }
 });
+pruneDaemonBuildArtifacts(targetDir);
 pruneDevelopmentArtifacts(targetDir);
 applyProductVersion();
 
