@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, FileUp, Upload } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { ArrowLeft, Download, Eye, FileUp, Upload } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useAdminPermission } from "@/components/admin-permissions";
@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { SharedFilePreview } from "./shared-file-preview";
 import {
   getSharedSpace,
   listSharedFiles,
@@ -52,6 +53,9 @@ export function SharedSpaceFilesPage() {
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [uploadForm, setUploadForm] = useState<UploadForm | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<SharedFile | null>(null);
+
+  useEffect(() => { setPreviewFile(null); }, [spaceId, canDownload]);
 
   const spaceQuery = useQuery({
     queryKey: ["shared-space", spaceId],
@@ -206,6 +210,7 @@ export function SharedSpaceFilesPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {canDownload || canUpload ? <div className="flex justify-end gap-1">
+                        {canDownload ? <Button aria-label={`预览文件 ${file.fileName}`} title="预览" size="icon" variant="ghost" onClick={() => setPreviewFile(file)}><Eye aria-hidden="true" /></Button> : null}
                         {canDownload ? <Button asChild size="sm" variant="ghost">
                           <a aria-label={`下载文件 ${file.fileName}`} href={sharedFileDownloadURL(file.fileId)}>
                             <Download data-icon="inline-start" aria-hidden="true" />
@@ -231,6 +236,7 @@ export function SharedSpaceFilesPage() {
         </div>
       ) : null}
 
+      {previewFile && canDownload && previewFile.spaceId === spaceId ? <SharedFilePreview key={previewFile.fileId} file={previewFile} onClose={() => setPreviewFile(null)} /> : null}
       <ModalShell
         open={Boolean(uploadForm)}
         title={uploadForm?.mode === "replace" ? "上传文件新版本" : "上传文件"}

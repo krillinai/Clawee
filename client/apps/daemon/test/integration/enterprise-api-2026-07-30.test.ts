@@ -42,6 +42,40 @@ afterEach(async () => {
 });
 
 describe('enterprise runtime API', () => {
+  it('propagates a disconnected preview request to the manager', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-preview-cancel-'));
+    const manager = createSharedDriveManager();
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    let markAborted!: () => void;
+    const aborted = new Promise<void>(resolve => { markAborted = resolve; });
+    manager.getFilePreview = vi.fn(async (_fileId: string, signal?: AbortSignal) => {
+      markStarted();
+      return new Promise<never>((_resolve, reject) => {
+        signal!.addEventListener('abort', () => {
+          markAborted();
+          reject(signal!.reason);
+        }, { once: true });
+      });
+    });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore(),
+      enterpriseHttpClient: createClient(), enterpriseSharedDriveManager: manager,
+      enterpriseOrigin: 'https://enterprise.example'
+    });
+    const origin = await server.listen({ host: '127.0.0.1', port: 0 });
+    const controller = new AbortController();
+    const response = fetch(`${origin}/enterprise/shared-files/file_1/preview`, {
+      headers: { Authorization: 'Bearer secret' }, signal: controller.signal
+    });
+    const rejection = expect(response).rejects.toMatchObject({ name: 'AbortError' });
+    await started;
+    controller.abort();
+    await rejection;
+    await aborted;
+  });
+
   it('uploads enterprise skill ZIP bytes without installing locally and rejects invalid metadata', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-upload-'));
     const enterpriseSkillManager = createEnterpriseSkillManager();
@@ -697,6 +731,14 @@ describe('enterprise runtime API', () => {
     expect(enterpriseSharedDriveManager.getFileDetail)
       .toHaveBeenCalledWith('file/design');
 
+    expect((await server.inject({ method: 'GET', url: '/enterprise/shared-files/file%2Fdesign/preview' })).statusCode).toBe(401);
+    const preview = await authRequest('GET', '/enterprise/shared-files/file%2Fdesign/preview');
+    expect(preview.statusCode).toBe(200);
+    expect(preview.body).toBe('# design');
+    expect(preview.headers['cache-control']).toBe('no-store');
+    expect(enterpriseSharedDriveManager.getFilePreview).toHaveBeenCalledWith('file/design', expect.any(AbortSignal));
+    expect(vi.mocked(enterpriseSharedDriveManager.getFilePreview).mock.calls[0]?.[1]?.aborted).toBe(false);
+
     const content = Buffer.from('shared design');
     const uploadQuery = new URLSearchParams({
       logicalPath: 'docs/design.md',
@@ -1084,6 +1126,7 @@ function createSharedDriveManager(): EnterpriseSharedDriveManager {
       refreshedAt: '2026-08-06T08:00:00.000Z'
     })),
     getFileDetail: vi.fn(async () => ({ file })),
+    getFilePreview: vi.fn(async () => ({ content: Buffer.from('# design'), contentType: 'text/plain; charset=utf-8' })),
     uploadFile: vi.fn(async input => {
       const chunks: Buffer[] = [];
       for await (const chunk of input.content) {

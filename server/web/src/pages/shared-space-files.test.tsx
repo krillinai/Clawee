@@ -7,6 +7,7 @@ import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { permissions } from "@/lib/rbac-api";
 import {
   getSharedSpace,
+  getSharedFilePreview,
   listSharedFiles,
   uploadSharedFile
 } from "@/lib/shared-files-api";
@@ -15,7 +16,7 @@ import { SharedSpaceFilesPage } from "./shared-space-files";
 
 vi.mock("@/lib/shared-files-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/shared-files-api")>("@/lib/shared-files-api");
-  return { ...actual, getSharedSpace: vi.fn(), listSharedFiles: vi.fn(), uploadSharedFile: vi.fn() };
+  return { ...actual, getSharedSpace: vi.fn(), getSharedFilePreview: vi.fn(), listSharedFiles: vi.fn(), uploadSharedFile: vi.fn() };
 });
 
 const space = { spaceId: "space_1", name: "季度空间", description: "协作文件", memberCount: 1, fileCount: 1, sizeBytes: 5, createdBy: "admin", createdAt: "2026-08-01T00:00:00Z", updatedBy: "admin", updatedAt: "2026-08-05T00:00:00Z" };
@@ -67,6 +68,29 @@ describe("SharedSpaceFilesPage", () => {
     expect(screen.queryByRole("button", { name: "上传文件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载文件 guide.txt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "上传新版本 guide.txt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "预览文件 guide.txt" })).not.toBeInTheDocument();
+  });
+
+  it("previews safe text in a dialog and keeps the download link", async () => {
+    vi.mocked(getSharedFilePreview).mockResolvedValue(new Response("<script>alert(1)</script>", { headers: { "Content-Type": "text/plain; charset=utf-8" } }));
+    const view = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "预览文件 guide.txt" }));
+    const dialog = await screen.findByRole("dialog", { name: "预览 guide.txt" });
+    expect(await within(dialog).findByText("<script>alert(1)</script>")).toBeInTheDocument();
+    expect(dialog.querySelector("script")).toBeNull();
+    expect(within(dialog).getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/v1/admin/shared-files/content?file_id=file_1");
+    expect(getSharedFilePreview).toHaveBeenCalledWith("file_1", expect.any(AbortSignal));
+    view.unmount();
+    expect(vi.mocked(getSharedFilePreview).mock.calls[0]?.[1]?.aborted).toBe(true);
+  });
+
+  it("shows unsupported preview failures without removing download", async () => {
+    vi.mocked(getSharedFilePreview).mockRejectedValue(new Error("暂不支持预览此文件，请下载后查看"));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "预览文件 guide.txt" }));
+    const dialog = await screen.findByRole("dialog", { name: "预览 guide.txt" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("暂不支持预览此文件");
+    expect(within(dialog).getByRole("link", { name: "下载" })).toBeInTheDocument();
   });
 });
 

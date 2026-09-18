@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { BrowserWindow } from 'electron';
 import {
   DebouncedWindowStateWriter,
   nativePageZoomFactor,
@@ -38,6 +39,24 @@ describe('窗口退出', () => {
     await manager.loadBootstrap();
     expect(windowMocks.show).not.toHaveBeenCalled();
     expect(windowMocks.loadURL).not.toHaveBeenCalled();
+  });
+});
+
+describe('PDF 预览窗口', () => {
+  it('开启内置查看器并保留渲染进程隔离', () => {
+    const manager = new WindowManager({
+      preloadPath: '', development: false, appEntryAt: 0, requestQuit: vi.fn(),
+      settings: {
+        read: () => ({ closeBehavior: 'hide', notificationsEnabled: true }),
+        update: vi.fn(), flush: vi.fn()
+      }
+    });
+    manager.create();
+    expect(BrowserWindow).toHaveBeenLastCalledWith(expect.objectContaining({
+      webPreferences: expect.objectContaining({
+        plugins: true, nodeIntegration: false, contextIsolation: true, sandbox: true
+      })
+    }));
   });
 });
 

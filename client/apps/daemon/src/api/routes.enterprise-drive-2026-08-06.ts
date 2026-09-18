@@ -102,6 +102,31 @@ export async function registerEnterpriseDriveRoutes(
     }
   );
 
+  server.get<{ Params: { fileId: string } }>(
+    '/enterprise/shared-files/:fileId/preview',
+    async (request, reply) => {
+      const controller = new AbortController();
+      const onClose = () => {
+        if (!reply.raw.writableFinished) controller.abort();
+      };
+      reply.raw.on('close', onClose);
+      try {
+        const preview = await manager.getFilePreview(request.params.fileId, controller.signal);
+        return reply
+          .header('Cache-Control', 'no-store')
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Content-Disposition', 'attachment')
+          .type(preview.contentType)
+          .send(Buffer.from(preview.content));
+      } catch (error) {
+        if (controller.signal.aborted) return reply;
+        return sendDriveError(reply, error);
+      } finally {
+        reply.raw.off('close', onClose);
+      }
+    }
+  );
+
   server.post<{
     Params: { spaceId: string };
     Querystring: unknown;

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import {
   existsSync,
   mkdtempSync,
@@ -25,6 +26,81 @@ afterEach(() => {
 });
 
 describe('enterprise HTTP client', () => {
+  it.each(['headers', 'body'])('cancels the upstream preview while waiting for %s', async (phase) => {
+    const controller = new AbortController();
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    let markClosed!: () => void;
+    const closed = new Promise<void>(resolve => { markClosed = resolve; });
+    const upstream = createServer((_request, response) => {
+      response.on('close', markClosed);
+      if (phase === 'body') {
+        response.writeHead(200, { 'Content-Type': 'application/pdf' });
+        response.write('%PDF-1.4\n');
+      }
+      markStarted();
+    });
+    await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    const address = upstream.address() as { port: number };
+    try {
+      const client = createEnterpriseHttpClient({ origin: `http://127.0.0.1:${address.port}` });
+      const preview = client.getSharedFilePreview!('token', 'file', controller.signal);
+      const rejection = expect(preview).rejects.toMatchObject({ name: 'AbortError' });
+      await started;
+      controller.abort();
+      await rejection;
+      await closed;
+    } finally {
+      upstream.closeAllConnections();
+      await new Promise<void>(resolve => upstream.close(() => resolve()));
+    }
+  });
+
+  it('uses a fixed short preview timeout and maps body timeout to service unavailable', async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => new Response(new ReadableStream({
+      start(stream) {
+        init!.signal!.addEventListener('abort', () => stream.error(init!.signal!.reason), { once: true });
+      }
+    }), { headers: { 'Content-Type': 'application/pdf' } }));
+    try {
+      const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN, sharedFileTransferTimeoutMs: 30 * 60_000 });
+      const preview = client.getSharedFilePreview!('token', 'file');
+      const rejection = expect(preview).rejects.toMatchObject({ code: 'ENTERPRISE_SERVICE_UNAVAILABLE' });
+      controller.abort(new DOMException('Timed out', 'TimeoutError'));
+      await rejection;
+      expect(timeout).toHaveBeenCalledWith(30_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('reads bounded preview content with the enterprise credential', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('# design', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    const preview = await client.getSharedFilePreview!('enterprise-token', 'file/一');
+    expect(Buffer.from(preview.content).toString()).toBe('# design');
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.searchParams.get('file_id')).toBe('file/一');
+    expect(url.searchParams.get('preview')).toBe('1');
+    expect(fetch.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: 'Bearer enterprise-token' });
+  });
+
+  it('rejects executable content types and oversized text previews', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('<script/>', { headers: { 'Content-Type': 'text/html' } }))
+      .mockResolvedValueOnce(new Response('a'.repeat(1024 * 1024 + 1), { headers: { 'Content-Type': 'text/plain' } }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getSharedFilePreview!('token', 'file')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+    await expect(client.getSharedFilePreview!('token', 'file')).rejects.toMatchObject({ code: 'ENTERPRISE_SHARED_FILE_TOO_LARGE' });
+  });
+
+  it.each([[415, 'preview_not_supported', 'ENTERPRISE_INVALID_REQUEST'], [413, 'preview_too_large', 'ENTERPRISE_SHARED_FILE_TOO_LARGE'], [403, 'forbidden', 'ENTERPRISE_FORBIDDEN']])('preserves preview failure status %s', async (status, code, expected) => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code } }), { status: Number(status) }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getSharedFilePreview!('token', 'file')).rejects.toMatchObject({ code: expected, statusCode: status });
+  });
   it('maps writable skill spaces and uploads multipart to the selected space', async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       if (init?.method === 'GET') return jsonResponse({ data: [

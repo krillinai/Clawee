@@ -225,7 +225,8 @@ const meResponseSchema = z.object({
     applications: z.object({
       frontend: z.boolean()
     }),
-    agent_activity_reporting_enabled: z.boolean().optional().default(false)
+    agent_activity_reporting_enabled: z.boolean().optional().default(false),
+    external_feedback_allowed: z.boolean().optional()
   })
 });
 const accountMcpTokenResponseSchema = z.object({
@@ -836,6 +837,7 @@ export type EnterpriseQrLoginPollResult = {
 };
 
 export type EnterpriseMeResult = {
+  externalFeedbackAllowed?: boolean;
   account: EnterpriseAccountSummary;
   agentId: string;
   status: string;
@@ -864,6 +866,11 @@ export type EnterpriseSharedFileDownloadInput = {
   accessToken: string;
   fileId: string;
   destinationPath: string;
+};
+
+export type EnterpriseSharedFilePreview = {
+  content: Uint8Array;
+  contentType: string;
 };
 
 export type EnterpriseSharedFileUploadInput = {
@@ -945,6 +952,11 @@ export type EnterpriseHttpClient = {
     accessToken: string,
     fileId: string
   ): Promise<EnterpriseRemoteSharedFile>;
+  getSharedFilePreview?(
+    accessToken: string,
+    fileId: string,
+    signal?: AbortSignal
+  ): Promise<EnterpriseSharedFilePreview>;
   downloadSharedFileContent(
     input: EnterpriseSharedFileDownloadInput
   ): Promise<{
@@ -1351,6 +1363,7 @@ export function createEnterpriseHttpClient(input: {
         agentId: response.data.agent.agent_id,
         status: response.data.account.status,
         frontendAllowed: response.data.applications.frontend,
+        externalFeedbackAllowed: response.data.external_feedback_allowed,
         activityReportingEnabled:
           response.data.agent_activity_reporting_enabled
       };
@@ -1656,6 +1669,54 @@ export function createEnterpriseHttpClient(input: {
         schema: sharedFileDetailResponseSchema
       });
       return mapRemoteSharedFile(response.data);
+    },
+
+    async getSharedFilePreview(accessToken, fileId, signal) {
+      const query = new URLSearchParams({ file_id: fileId, preview: '1' });
+      const timeout = AbortSignal.timeout(30_000);
+      const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+      let response: Response;
+      try {
+        response = await fetchImpl(new URL(`/api/v1/app/shared-files/content?${query}`, origin), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: requestSignal
+        });
+      } catch {
+        signal?.throwIfAborted();
+        throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
+      }
+      if (!response.ok) throw await createResponseError(response, 'shared-file');
+      const contentType = response.headers.get('content-type') ?? '';
+      const mime = contentType.split(';', 1)[0] ?? '';
+      if (!['text/plain', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime) || !response.body) {
+        await response.body?.cancel();
+        throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
+      }
+      const limit = mime === 'text/plain' ? 1024 * 1024 : 20 * 1024 * 1024;
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (result.done) break;
+          bytes += result.value.byteLength;
+          if (bytes > limit) {
+            throw new EnterpriseHttpError('ENTERPRISE_SHARED_FILE_TOO_LARGE', 'download', 413);
+          }
+          chunks.push(result.value);
+        }
+        return { content: Buffer.concat(chunks), contentType };
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (requestSignal.aborted) {
+          throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
+        }
+        throw error;
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
     },
 
     async downloadSharedFileContent(request) {
@@ -2635,6 +2696,7 @@ function mapResponseCode(
   upstreamCode: string | undefined,
   domain: EnterpriseHttpDomain
 ): RuntimeErrorCode {
+  if (domain === 'shared-file' && statusCode === 415 && upstreamCode === 'preview_not_supported') return 'ENTERPRISE_INVALID_REQUEST';
   if (domain === 'skill-upload' && statusCode === 400 && upstreamCode === 'package_invalid') return 'ENTERPRISE_SKILL_PACKAGE_INVALID';
   if (statusCode === 400) return 'ENTERPRISE_INVALID_REQUEST';
   if (statusCode === 401) return 'ENTERPRISE_UNAUTHORIZED';

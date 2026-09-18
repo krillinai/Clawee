@@ -36,6 +36,16 @@ afterEach(() => {
 });
 
 describe('enterprise shared drive manager', () => {
+  it('reads preview using the enterprise session without writing project files', async () => {
+    tempDir = createTempDirectory();
+    const content = Buffer.from('# design');
+    const getSharedFilePreview = vi.fn(async () => ({ content, contentType: 'text/plain' }));
+    const manager = createManager({ getSharedFilePreview });
+    const signal = new AbortController().signal;
+    await expect(manager.getFilePreview('file_1', signal)).resolves.toEqual({ content, contentType: 'text/plain' });
+    expect(getSharedFilePreview).toHaveBeenCalledWith('enterprise-token', 'file_1', signal);
+    expect(existsSync(join(tempDir, 'enterprise-shared-drive'))).toBe(false);
+  });
   it('returns paginated spaces and files with refresh metadata', async () => {
     tempDir = createTempDirectory();
     const listSharedSpaces = vi.fn(async () => ({

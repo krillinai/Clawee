@@ -252,6 +252,10 @@ func parseSharedFileUpload(c *gin.Context) (*int64, bool) {
 
 func writeSharedFileContent(c *gin.Context, item sharedfiles.File, reader io.ReadCloser) {
 	defer reader.Close()
+	if c.Query("preview") == "1" {
+		writeSharedFilePreview(c, item, reader)
+		return
+	}
 	contentDisposition := mime.FormatMediaType("attachment", map[string]string{"filename": item.FileName})
 	c.Header("Content-Type", item.ContentType)
 	c.Header("Content-Length", strconv.FormatInt(item.SizeBytes, 10))

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   addSharedSpaceMember,
   createSharedSpace,
+  getSharedFilePreview,
   listSharedFiles,
   listSharedSpaceCandidates,
   listSharedSpaceMembers,
@@ -16,6 +17,22 @@ import {
 
 describe("shared files api", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("reads preview using the existing login cookie without caching", async () => {
+    const response = new Response("preview", { headers: { "Content-Type": "text/plain" } });
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await expect(getSharedFilePreview("file/1", controller.signal)).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/admin/shared-files/content?file_id=file%2F1&preview=1", {
+      credentials: "include", signal: controller.signal, cache: "no-store"
+    });
+  });
+
+  it("preserves preview rejection reasons", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: { code: "preview_too_large", message: "文件超过预览大小限制" } }, 413)));
+    await expect(getSharedFilePreview("file")).rejects.toMatchObject({ code: "preview_too_large", message: "文件超过预览大小限制" });
+  });
 
   it("maps paged spaces and uses the documented admin routes", async () => {
     const fetchMock = vi.fn()

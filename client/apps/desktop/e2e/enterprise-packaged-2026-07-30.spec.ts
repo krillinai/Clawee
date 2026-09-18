@@ -38,6 +38,7 @@ import {
   ControlledModelServer
 } from './controlled-model-server.js';
 import { writeControlledRuntimeConfig } from './embedded-runtime-fixture.js';
+import { expectPdfPreviewLoaded, previewPdfFixture } from '../../web/e2e/support/shared-file-preview.js';
 import {
   packagedExecutable,
   readDesktopBuildManifest
@@ -62,7 +63,11 @@ const agentIdPattern =
 
 test.describe.configure({ mode: 'serial' });
 
-test('实际打包 App 可登录、查看账单与充值记录、管理连接器、使用企业知识库并安装 Skill', async () => {
+// 两个规格复用同一隔离启动环境，PDF 验收不依赖后续企业业务流程。
+for (const previewOnly of [true, false]) {
+test(previewOnly
+  ? '实际打包 App 可预览共享网盘 PDF 并关闭预览'
+  : '实际打包 App 可登录、查看账单与充值记录、管理连接器、使用企业知识库并安装 Skill', async ({}, testInfo) => {
   test.setTimeout(240_000);
 
   const runId = randomUUID();
@@ -168,6 +173,15 @@ test('实际打包 App 可登录、查看账单与充值记录、管理连接器
     }
     await app.page.reload();
     await waitForWorkspace(app.page);
+    if (previewOnly) {
+      await app.page.getByRole('button', { name: '共享网盘', exact: true }).click();
+      await app.page.getByRole('button', { name: '预览 preview.pdf', exact: true }).click();
+      await expectPdfPreviewLoaded(app.page);
+      await testInfo.attach('packaged-pdf-preview', { body: await app.page.screenshot(), contentType: 'image/png' });
+      await app.page.getByRole('button', { name: '关闭文件预览' }).click();
+      await expect(app.page.getByRole('dialog')).toHaveCount(0);
+      return;
+    }
     const runtimeCodexHome = await readRuntimeCodexHome(app.page);
     expect(runtimeCodexHome).not.toBe(codexHome);
 
@@ -634,6 +648,7 @@ test('实际打包 App 可登录、查看账单与充值记录、管理连接器
     }
   }
 });
+}
 
 function cleanupEnterpriseFixtureRoot(root: string): void {
   try {
@@ -801,6 +816,20 @@ class FakeEnterpriseServer {
       sendJson(response, 200, {
         data: { password: true, dingtalk: { enabled: true } }
       });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/v1/app/shared-spaces') {
+      sendJson(response, 200, { data: [{ space_id: 'preview-space', name: '预览测试', description: '', updated_at: '2026-08-06T08:00:00Z', permissions: { read: true, write: false } }], meta: { next_cursor: '', has_next: false, max_file_size_bytes: 1024 * 1024 * 1024 } });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/v1/app/shared-files') {
+      sendJson(response, 200, { data: [{ file_id: 'preview-file', space_id: 'preview-space', space_name: '预览测试', logical_path: 'preview.pdf', file_name: 'preview.pdf', size_bytes: previewPdfFixture().length, content_type: 'application/pdf', revision: 1, sha256: 'a'.repeat(64), updated_by_user_id: 'test', updated_by_agent_id: '', updated_at: '2026-08-06T08:00:00Z' }], meta: { next_cursor: '', has_next: false } });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/v1/app/shared-files/content' && url.searchParams.get('preview') === '1') {
+      response.writeHead(200, { 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store' });
+      response.end(previewPdfFixture());
       return;
     }
 

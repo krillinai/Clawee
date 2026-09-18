@@ -102,6 +102,7 @@ export class WindowManager {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        plugins: true,
         preload: this.input.preloadPath
       }
     });

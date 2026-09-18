@@ -104,6 +104,10 @@ func TestSharedFileHTTPUploadDownloadContract(t *testing.T) {
 	if response.Data.FileID == "" || response.Data.Revision != 1 || !response.Data.Created {
 		t.Fatalf("upload response = %#v", response.Data)
 	}
+	recorder = sharedFileRequest(router, http.MethodGet, "/content?preview=1&file_id="+url.QueryEscape(response.Data.FileID), nil, 0, "")
+	if recorder.Code != http.StatusOK || recorder.Body.String() != contents || recorder.Header().Get("X-Preview-Kind") != "text" {
+		t.Fatalf("preview status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
 
 	recorder = sharedFileRequest(router, http.MethodGet, "/content?file_id="+url.QueryEscape(response.Data.FileID), nil, 0, "")
 	if recorder.Code != http.StatusOK || recorder.Body.String() != contents {
@@ -311,6 +315,12 @@ func TestSharedFileAdminRoutesEnforceReadAndManagePermissions(t *testing.T) {
 		t.Fatalf("reader file list status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	downloadPath := "/admin/shared-files/content?file_id=" + url.QueryEscape(created.FileID)
+	if recorder := request(http.MethodGet, downloadPath+"&preview=1", "reader", ""); recorder.Code != http.StatusForbidden {
+		t.Fatalf("reader preview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodGet, downloadPath+"&preview=1", "manager", ""); recorder.Code != http.StatusOK || recorder.Body.String() != "first" || recorder.Header().Get("X-Preview-Kind") != "text" {
+		t.Fatalf("manager preview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 	if recorder := request(http.MethodGet, downloadPath, "reader", ""); recorder.Code != http.StatusForbidden {
 		t.Fatalf("reader download status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

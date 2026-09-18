@@ -213,6 +213,16 @@ export function sharedFileDownloadURL(fileId: string) {
   return `/api/v1/admin/shared-files/content?file_id=${encodeURIComponent(fileId)}`;
 }
 
+export async function getSharedFilePreview(fileId: string, signal?: AbortSignal) {
+  const response = await fetch(`${sharedFileDownloadURL(fileId)}&preview=1`, {
+    credentials: "include",
+    signal,
+    cache: "no-store"
+  });
+  if (!response.ok) throw await sharedFileError(response);
+  return response;
+}
+
 function mapSpace(item: SharedSpaceResponse): SharedSpace {
   return {
     spaceId: item.space_id,

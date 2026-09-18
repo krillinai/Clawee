@@ -21,6 +21,7 @@ import type { ProjectManager } from '../projects/types.js';
 import { isIgnoredDir } from '../workspace-files/paths.js';
 import type {
   EnterpriseHttpClient,
+  EnterpriseSharedFilePreview,
   EnterpriseRemoteSharedFile
 } from './http-client-2026-07-30.js';
 import { EnterpriseHttpError } from './http-client-2026-07-30.js';
@@ -41,6 +42,7 @@ export type EnterpriseSharedDriveManager = {
     cursor?: string;
   }): Promise<EnterpriseSharedFileListResponse>;
   getFileDetail(fileId: string): Promise<EnterpriseSharedFileDetailResponse>;
+  getFilePreview(fileId: string, signal?: AbortSignal): Promise<EnterpriseSharedFilePreview>;
   uploadFile(input: {
     spaceId: string;
     logicalPath: string;
@@ -178,6 +180,17 @@ export function createEnterpriseSharedDriveManager(input: {
       () => input.httpClient.getSharedFileDetail(accessToken, fileId)
     );
     return { file };
+  }
+
+  async function getFilePreview(fileId: string, signal?: AbortSignal): Promise<EnterpriseSharedFilePreview> {
+    validateIdentifier(fileId);
+    const accessToken = await requireToken();
+    const readPreview = input.httpClient.getSharedFilePreview;
+    if (!readPreview) {
+      throw new EnterpriseSharedDriveManagerError('ENTERPRISE_SERVICE_UNAVAILABLE', 503);
+    }
+    signal?.throwIfAborted();
+    return runRemote(() => readPreview(accessToken, fileId, signal));
   }
 
   async function uploadFile(request: {
@@ -381,6 +394,7 @@ export function createEnterpriseSharedDriveManager(input: {
     listSpaces,
     listFiles,
     getFileDetail,
+    getFilePreview,
     uploadFile,
     downloadToProject
   };

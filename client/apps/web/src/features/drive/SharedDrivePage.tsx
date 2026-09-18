@@ -5,6 +5,7 @@ import type {
 } from '@clawee/protocol';
 import {
   Download,
+  Eye,
   File,
   FileSpreadsheet,
   FileText,
@@ -28,6 +29,7 @@ import {
   type ReactNode
 } from 'react';
 import './shared-drive.css';
+import { SharedFilePreviewDialog } from './SharedFilePreviewDialog.js';
 
 export type SharedDriveOperationState = {
   kind: 'download' | 'upload' | 'replace';
@@ -64,6 +66,7 @@ export type SharedDrivePageProps = {
   onUpload(spaceId: string, file: File): void;
   onReplace(target: EnterpriseSharedFileResponse, file: File): void;
   onDownload(target: EnterpriseSharedFileResponse, overwrite: boolean): void;
+  readPreview?(fileId: string, signal?: AbortSignal): Promise<Response>;
 };
 
 export function SharedDrivePage(props: SharedDrivePageProps) {
@@ -74,6 +77,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
   const [searchValue, setSearchValue] = useState(props.query);
   const [selectionError, setSelectionError] = useState<string>();
   const [spacePickerOpen, setSpacePickerOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<EnterpriseSharedFileResponse>();
   const selectedSpace = props.spaces?.find(
     space => space.spaceId === props.selectedSpaceId
   );
@@ -83,6 +87,10 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
   useEffect(() => {
     setSearchValue(props.query);
   }, [props.query]);
+
+  useEffect(() => {
+    setPreviewFile(undefined);
+  }, [props.selectedSpaceId, props.session.status, props.session.account?.subjectId]);
 
   useEffect(() => {
     setSelectionError(undefined);
@@ -425,6 +433,11 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                               <td>{formatBytes(file.sizeBytes)}</td>
                               <td>
                                 <span className="shared-drive-row-actions">
+                                  {props.readPreview ? (
+                                    <button type="button" aria-label={`预览 ${file.fileName}`} title="预览" onClick={() => setPreviewFile(file)}>
+                                      <Eye size={14} aria-hidden="true" />
+                                    </button>
+                                  ) : null}
                                   {space?.permissions.write ? (
                                     <button
                                       type="button"
@@ -493,6 +506,15 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
           </section>
         </div>
       </div>
+      {previewFile && props.readPreview ? (
+        <SharedFilePreviewDialog
+          file={previewFile}
+          readPreview={props.readPreview}
+          canDownload={props.currentProjectId !== undefined && !operationWorking}
+          onDownload={() => { props.onDownload(previewFile, false); setPreviewFile(undefined); }}
+          onClose={() => setPreviewFile(undefined)}
+        />
+      ) : null}
       {spacePickerOpen ? (
         <div
           className="shared-drive-space-picker-backdrop"

@@ -60,6 +60,7 @@ import {
   useEnterpriseBilling
 } from '../features/activity/useEnterpriseBilling-2026-08-28.js';
 import { ConversationHeader } from '../features/conversation/ConversationHeader.js';
+import { FeedbackButton } from '../features/feedback/FeedbackButton.js';
 import { MemorySuggestion } from '../features/conversation/MemorySuggestion.js';
 import { ApprovalPanel } from '../features/approvals/ApprovalPanel.js';
 import { shouldShowComposerProjectSelector } from '../features/conversation/composer-visibility.js';
@@ -5931,6 +5932,7 @@ export function AppController(props: AppControllerProps) {
   const conversationHeader = showConversationHeader ? (
     <ConversationHeader
       title={conversationTitle}
+      feedback={selectedThread ? <FeedbackButton client={runtimeClient} threadId={selectedThread.id} /> : undefined}
       taskToolbar={
         useIntegratedConversationTitleBar ? undefined : conversationTaskToolbar
       }
@@ -6349,6 +6351,7 @@ export function AppController(props: AppControllerProps) {
       onSelectSpace={selectEnterpriseSharedSpace}
       onSearch={searchEnterpriseSharedFiles}
       onLoadMoreFiles={() => void loadMoreEnterpriseSharedFiles()}
+      readPreview={enterpriseService?.getSharedFilePreview}
       onUpload={(spaceId, file) => void uploadEnterpriseSharedFile(spaceId, file)}
       onReplace={(target, file) => void replaceEnterpriseSharedFile(target, file)}
       onDownload={(target, overwrite) => {

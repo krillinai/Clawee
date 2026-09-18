@@ -3,6 +3,13 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createEnterpriseService } from './enterprise-service-2026-07-30.js';
 
 describe('enterprise service', () => {
+  it('requests authenticated preview bytes with cancellation', async () => {
+    const rawGet = vi.fn(async () => new Response('content'));
+    const service = createEnterpriseService(createClient({ rawGet }));
+    const controller = new AbortController();
+    await service.getSharedFilePreview('file/一', controller.signal);
+    expect(rawGet).toHaveBeenCalledWith('/enterprise/shared-files/file%2F%E4%B8%80/preview', { signal: controller.signal });
+  });
   it('lists skill spaces and uploads ZIP bytes with enterprise metadata', async () => {
     const get = vi.fn(async () => ({ spaces: [] }));
     const postBinary = vi.fn(async () => ({}));

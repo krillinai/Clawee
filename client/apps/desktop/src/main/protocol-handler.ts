@@ -181,7 +181,8 @@ export async function staticResponse(
         "connect-src 'self' blob:",
         "worker-src 'self' blob:",
         "media-src 'self' blob:",
-        "object-src 'none'",
+        "object-src blob:",
+        "frame-src 'self' blob:",
         "base-uri 'none'",
         "frame-ancestors 'none'",
         "form-action 'none'"

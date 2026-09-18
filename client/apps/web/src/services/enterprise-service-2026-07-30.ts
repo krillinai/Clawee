@@ -216,6 +216,10 @@ export function createEnterpriseService(client: ClientLike) {
       });
       return client.get(`/enterprise/shared-files${query}`);
     },
+    getSharedFilePreview(fileId: string, signal?: AbortSignal): Promise<Response> {
+      if (!client.rawGet) return Promise.reject(new Error('文件预览不可用'));
+      return client.rawGet(`/enterprise/shared-files/${encodeURIComponent(fileId)}/preview`, { signal });
+    },
     getSharedFileDetail(
       fileId: string
     ): Promise<EnterpriseSharedFileDetailResponse> {

@@ -59,4 +59,15 @@ describe('Desktop static response', () => {
     expect(response.headers.get('content-security-policy'))
       .toContain("connect-src 'self' blob:");
   });
+
+  it('only allows locally created blob objects for PDF preview', async () => {
+    root = mkdtempSync(join(tmpdir(), 'clawee-static-'));
+    writeFileSync(join(root, 'index.html'), '<main>workspace</main>');
+    const response = await staticResponse(root, '/', true);
+    const policy = response.headers.get('content-security-policy')!;
+    expect(policy.split('; ').find(rule => rule.startsWith('object-src'))).toBe('object-src blob:');
+    expect(policy.split('; ').find(rule => rule.startsWith('frame-src'))).toBe("frame-src 'self' blob:");
+    expect(policy).toContain("script-src 'self'");
+    expect(policy).toContain("base-uri 'none'");
+  });
 });
