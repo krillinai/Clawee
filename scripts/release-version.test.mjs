@@ -18,12 +18,23 @@ import {
 } from './release-version.mjs';
 
 test('读取统一产品版本并校验内嵌 Runtime 下限', () => {
-  assert.deepEqual(inspectReleaseVersion(), {
-    version: '0.1.10',
-    tag: 'v0.1.10',
-    prerelease: false,
-    channel: 'stable'
-  });
+  const root = mkdtempSync(join(tmpdir(), 'clawee-release-version-'));
+  try {
+    writeFixture(root, 'VERSION', '0.1.10\n');
+    writeFixture(
+      root,
+      'client/config/codex-runtime.json',
+      '{"minimumClaweeVersion":"0.1.0"}\n'
+    );
+    assert.deepEqual(inspectReleaseVersion(root, { env: {} }), {
+      version: '0.1.10',
+      tag: 'v0.1.10',
+      prerelease: false,
+      channel: 'stable'
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('区分稳定版本和候选版本', () => {
