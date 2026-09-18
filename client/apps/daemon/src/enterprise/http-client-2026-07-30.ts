@@ -305,8 +305,10 @@ const skillSpaceListResponseSchema = z.object({
   }))
 });
 const skillUploadResponseSchema = z.object({
-  skill: z.object({ skill_id: z.string().min(1), space_id: z.string().min(1), name: z.string().min(1) }),
-  version: z.object({ version: z.string().min(1) })
+  data: z.object({
+    skill: z.object({ skill_id: z.string().min(1), space_id: z.string().min(1), name: z.string().min(1) }),
+    version: z.object({ version: z.string().min(1) })
+  })
 });
 const skillDetailResponseSchema = z.object({
   data: remoteSkillSchema.extend({
@@ -1494,7 +1496,7 @@ export function createEnterpriseHttpClient(input: {
         path: '/api/v1/app/skills/versions', formBody,
         timeoutMs: documentUploadTimeoutMs, schema: skillUploadResponseSchema
       });
-      return { skillId: response.skill.skill_id, spaceId: response.skill.space_id, name: response.skill.name, version: response.version.version };
+      return { skillId: response.data.skill.skill_id, spaceId: response.data.skill.space_id, name: response.data.skill.name, version: response.data.version.version };
     },
 
     async listSkills(accessToken) {

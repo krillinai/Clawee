@@ -114,7 +114,7 @@ describe('enterprise HTTP client', () => {
       expect(form.get('version')).toBe('1.0.0');
       expect(form.get('changelog')).toBe('更新');
       expect(await (form.get('package') as Blob).text()).toBe('ZIP bytes');
-      return jsonResponse({ skill: { skill_id: 'skill_1', space_id: 'space/一', name: 'review' }, version: { version: '1.0.0' } });
+      return jsonResponse({ data: { skill: { skill_id: 'skill_1', space_id: 'space/一', name: 'review' }, version: { version: '1.0.0' } } }, 201);
     });
     const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
     expect(await client.listSkillSpaces('enterprise-token')).toMatchObject({ spaces: [
@@ -122,6 +122,23 @@ describe('enterprise HTTP client', () => {
     ] });
     expect(await client.uploadSkillVersion({ accessToken: 'enterprise-token', spaceId: 'space/一', version: '1.0.0', changelog: '更新', package: Buffer.from('ZIP bytes') })).toEqual({ skillId: 'skill_1', spaceId: 'space/一', name: 'review', version: '1.0.0' });
     expect(String(fetch.mock.calls[1]?.[0])).toBe(`${ORIGIN}/api/v1/app/skills/versions`);
+  });
+
+  it.each([
+    { data: { skill: { skill_id: '', space_id: 'space_1', name: 'review' }, version: { version: '1.0.0' } } },
+    { data: { skill: { skill_id: 'skill_1', space_id: 'space_1', name: 'review' } } }
+  ])('rejects malformed skill upload success responses %# without retrying', async response => {
+    const fetch = vi.fn(async () => jsonResponse(response, 201));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.uploadSkillVersion({ accessToken: 'token', spaceId: 'space_1', version: '1.0.0', changelog: '', package: Buffer.from('ZIP') })).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR', stage: 'decode', statusCode: 201 });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('does not retry skill uploads after a transport failure', async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error('connection lost'));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.uploadSkillVersion({ accessToken: 'token', spaceId: 'space_1', version: '1.0.0', changelog: '', package: Buffer.from('ZIP') })).rejects.toMatchObject({ code: 'ENTERPRISE_SERVICE_UNAVAILABLE', stage: 'request' });
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it.each([
