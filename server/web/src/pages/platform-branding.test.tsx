@@ -122,6 +122,45 @@ describe("PlatformBrandingPage", () => {
     expect(await screen.findByText("平台外观保存失败，请稍后重试。")).toBeInTheDocument();
     expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "blob:expanded.png");
   });
+
+  it("validates custom names, trims them, and saves only edited fields", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    const input = screen.getByLabelText("企业 Skill 名称");
+    for (const value of ["", "   ", "一二三四五", "a\u200bb"]) {
+      fireEvent.change(input, { target: { value: value || " " } });
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    }
+    for (const value of ["字", "𠮷𠮷𠮷𠮷", " 企业技能 "]) {
+      fireEvent.change(input, { target: { value } });
+      expect(input).toHaveAttribute("aria-invalid", "false");
+      expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith({
+      sidebarLogoAction: "keep", sidebarLogo: undefined,
+      sidebarCompactLogoAction: "keep", sidebarCompactLogo: undefined,
+      sidebarMenuLabels: { skills: "企业技能" }
+    }));
+  });
+
+  it("loads stored names and restores one without changing others", async () => {
+    getBrandingMock.mockResolvedValue({
+      sidebarLogoConfigured: false, sidebarLogoUrl: null,
+      sidebarCompactLogoConfigured: false, sidebarCompactLogoUrl: null,
+      sidebarMenuLabels: { skills: "技能", knowledge: "知识" }
+    });
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    expect(screen.getByLabelText("企业 Skill 名称")).toHaveValue("技能");
+    fireEvent.click(screen.getByRole("button", { name: "恢复企业 Skill 名称默认值" }));
+    expect(screen.getByLabelText("企业 Skill 名称")).toHaveValue("");
+    expect(screen.getByLabelText("企业 Skill 名称")).toHaveAttribute("placeholder", "企业Skill");
+    expect(screen.getByLabelText("企业知识库名称")).toHaveValue("知识");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ sidebarMenuLabels: { skills: null } })));
+  });
 });
 
 function renderPage() {

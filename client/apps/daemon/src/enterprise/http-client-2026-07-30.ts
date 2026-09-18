@@ -8,6 +8,7 @@ import type {
   EnterpriseBillingOverviewResponse,
   EnterpriseListMeta,
   EnterpriseLoginRequest,
+  EnterprisePlatformBrandingResponse,
   EnterpriseQrLoginStartRequest,
   EnterpriseQrLoginStartResponse,
   EnterpriseQrProvider,
@@ -86,10 +87,22 @@ const modelConfigurationSchema = z.object({
     })
   ])
 });
+const sidebarMenuLabelSchema = z.string().refine(value =>
+  value === value.trim()
+  && Array.from(value).length >= 1
+  && Array.from(value).length <= 4
+  && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)
+);
 const platformBrandingSchema = z.object({
   data: z.object({
     sidebar_logo_configured: z.boolean(),
-    sidebar_compact_logo_configured: z.boolean()
+    sidebar_compact_logo_configured: z.boolean(),
+    sidebar_menu_labels: z.object({
+      skills: sidebarMenuLabelSchema.optional(),
+      knowledge: sidebarMenuLabelSchema.optional(),
+      drive: sidebarMenuLabelSchema.optional(),
+      dashboard: sidebarMenuLabelSchema.optional()
+    }).strict().optional()
   }).strict()
 }).strict();
 const authMethodsResponseSchema = z.object({
@@ -770,10 +783,7 @@ export type EnterpriseModelConfiguration =
     }
   | { mode: 'enterprise_managed' };
 
-export type EnterprisePlatformBranding = {
-  sidebarLogoConfigured: boolean;
-  sidebarCompactLogoConfigured: boolean;
-};
+export type EnterprisePlatformBranding = EnterprisePlatformBrandingResponse;
 
 export type EnterprisePlatformBrandingImage = {
   content: Uint8Array;
@@ -1370,7 +1380,10 @@ export function createEnterpriseHttpClient(input: {
       });
       return {
         sidebarLogoConfigured: response.data.sidebar_logo_configured,
-        sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured
+        sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured,
+        ...(response.data.sidebar_menu_labels === undefined
+          ? {}
+          : { sidebarMenuLabels: response.data.sidebar_menu_labels })
       };
     },
 

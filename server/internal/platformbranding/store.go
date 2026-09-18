@@ -36,6 +36,19 @@ func (s *MemoryStore) Update(ctx context.Context, input UpdateInput) (Configurat
 	configuration.SidebarLogo = applyAction(configuration.SidebarLogo, input.SidebarLogoAction, input.SidebarLogo)
 	configuration.SidebarCompactLogo = applyAction(configuration.SidebarCompactLogo, input.SidebarCompactLogoAction, input.SidebarCompactLogo)
 	configuration.UpdatedBy = input.UpdatedBy
+	for key, target := range map[string]*string{
+		"skills":    &configuration.SidebarMenuLabels.Skills,
+		"knowledge": &configuration.SidebarMenuLabels.Knowledge,
+		"drive":     &configuration.SidebarMenuLabels.Drive,
+		"dashboard": &configuration.SidebarMenuLabels.Dashboard,
+	} {
+		if value, exists := input.SidebarMenuLabels[key]; exists {
+			*target = ""
+			if value != nil {
+				*target = *value
+			}
+		}
+	}
 	configuration.UpdatedAt = input.UpdatedAt
 	if configuration.CreatedAt.IsZero() {
 		configuration.CreatedAt = input.UpdatedAt

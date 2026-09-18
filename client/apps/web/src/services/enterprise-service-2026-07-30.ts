@@ -11,6 +11,7 @@ import type {
   EnterpriseKnowledgeDocumentUploadResponse,
   EnterpriseDingTalkLoginPrepareResponse,
   EnterpriseLoginRequest,
+  EnterprisePlatformBrandingResponse,
   EnterpriseMcpCatalogResponse,
   EnterpriseMcpPreferenceUpdateRequest,
   EnterpriseQrLoginStartRequest,
@@ -34,10 +35,7 @@ import type { RuntimeClient } from '../runtime/client.js';
 type ClientLike = Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'>
   & Partial<Pick<RuntimeClient, 'rawGet'>>;
 
-export type EnterprisePlatformBrandingResponse = {
-  sidebarLogoConfigured: boolean;
-  sidebarCompactLogoConfigured: boolean;
-};
+export type { EnterprisePlatformBrandingResponse } from '@clawee/protocol';
 
 const KNOWLEDGE_DOCUMENT_CONTENT_TYPE =
   'application/vnd.clawee.knowledge-document';

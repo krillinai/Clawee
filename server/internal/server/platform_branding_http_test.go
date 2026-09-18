@@ -80,6 +80,40 @@ func TestPlatformBrandingAdminPermissionAndClientRead(t *testing.T) {
 
 	doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", userCookies, http.StatusOK)
 	doJSON(t, router, http.MethodGet, "/api/v1/admin/platform-branding", "", userCookies, http.StatusForbidden)
+	brandingMultipartRequest(t, router, map[string]string{
+		"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep",
+		"sidebar_menu_labels": `{"skills":"技能"}`,
+	}, nil, userCookies, http.StatusForbidden)
+}
+
+func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
+	service := platformbranding.NewService(platformbranding.NewMemoryStore())
+	router := newTestRouter(t, server.Options{PlatformBrandingService: service})
+	fields := map[string]string{
+		"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep",
+		"sidebar_menu_labels": `{"skills":" 企业技能 ","knowledge":"知识库","drive":"网盘","dashboard":"数据"}`,
+	}
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	detail := doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", nil, http.StatusOK)
+	if nestedString(t, detail, "data", "sidebar_menu_labels", "skills") != "企业技能" {
+		t.Fatalf("client detail=%#v", detail)
+	}
+	delete(fields, "sidebar_menu_labels")
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	current, _ := service.Get(context.Background())
+	if current.SidebarMenuLabels.Skills != "企业技能" {
+		t.Fatal("legacy update erased menu labels")
+	}
+	for _, value := range []string{`{"skills":""}`, `{"skills":"一二三四五"}`, `{"drive":42}`, `{"unknown":"字"}`, `null`, `[]`, `invalid`} {
+		fields["sidebar_menu_labels"] = value
+		brandingMultipartRequest(t, router, fields, nil, nil, http.StatusBadRequest)
+	}
+	fields["sidebar_menu_labels"] = `{"skills":null}`
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	current, _ = service.Get(context.Background())
+	if current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Knowledge != "知识库" {
+		t.Fatalf("reset labels=%#v", current.SidebarMenuLabels)
+	}
 }
 
 func brandingMultipartRequest(t *testing.T, handler http.Handler, fields map[string]string, files map[string][]byte, cookies []*http.Cookie, wantStatus int) *httptest.ResponseRecorder {

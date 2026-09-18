@@ -20,10 +20,11 @@ const (
 )
 
 var (
-	ErrInvalidAction = errors.New("invalid platform branding action")
-	ErrInvalidImage  = errors.New("invalid platform branding image")
-	ErrImageTooLarge = errors.New("platform branding image is too large")
-	ErrImageNotFound = errors.New("platform branding image not found")
+	ErrInvalidAction    = errors.New("invalid platform branding action")
+	ErrInvalidImage     = errors.New("invalid platform branding image")
+	ErrImageTooLarge    = errors.New("platform branding image is too large")
+	ErrImageNotFound    = errors.New("platform branding image not found")
+	ErrInvalidMenuLabel = errors.New("invalid sidebar menu label")
 )
 
 type Image struct {
@@ -34,6 +35,7 @@ type Image struct {
 type Configuration struct {
 	SidebarLogo        *Image
 	SidebarCompactLogo *Image
+	SidebarMenuLabels  MenuLabels
 	UpdatedBy          string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -44,6 +46,14 @@ type UpdateInput struct {
 	SidebarLogo              []byte
 	SidebarCompactLogoAction Action
 	SidebarCompactLogo       []byte
+	SidebarMenuLabels        map[string]*string
 	UpdatedBy                string
 	UpdatedAt                time.Time
+}
+
+type MenuLabels struct {
+	Skills    string `json:"skills,omitempty"`
+	Knowledge string `json:"knowledge,omitempty"`
+	Drive     string `json:"drive,omitempty"`
+	Dashboard string `json:"dashboard,omitempty"`
 }

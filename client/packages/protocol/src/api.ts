@@ -885,6 +885,16 @@ export type EnterpriseSessionResponse = {
   transportSecurity: EnterpriseTransportSecurity;
 };
 
+export type EnterpriseSidebarMenuLabels = Partial<Record<
+  'skills' | 'knowledge' | 'drive' | 'dashboard', string
+>>;
+
+export type EnterprisePlatformBrandingResponse = {
+  sidebarLogoConfigured: boolean;
+  sidebarCompactLogoConfigured: boolean;
+  sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
+};
+
 export type EnterpriseLoginRequest = {
   email: string;
   password: string;

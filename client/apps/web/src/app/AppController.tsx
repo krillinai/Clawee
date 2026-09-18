@@ -17,6 +17,7 @@ import type {
   EnterpriseMcpCatalogResponse,
   EnterpriseRegisterRequest,
   EnterpriseSessionResponse,
+  EnterpriseSidebarMenuLabels,
   EnterpriseSharedFileResponse,
   EnterpriseSharedSpaceResponse,
   EnterpriseSkillDetailResponse,
@@ -402,6 +403,7 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
   const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
   const [platformBrandingUrls, setPlatformBrandingUrls] = useState<PlatformBrandingUrls>({});
+  const [sidebarMenuLabels, setSidebarMenuLabels] = useState<EnterpriseSidebarMenuLabels>({});
   const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
   const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
   const [enterpriseSkillsLoadError, setEnterpriseSkillsLoadError] = useState<string>();
@@ -961,6 +963,7 @@ export function AppController(props: AppControllerProps) {
     }
     platformBrandingObjectUrlsRef.current = [];
     setPlatformBrandingUrls({});
+    setSidebarMenuLabels({});
 
     if (enterpriseService === null || enterpriseSession.status !== 'signed_in') {
       return;
@@ -986,6 +989,8 @@ export function AppController(props: AppControllerProps) {
 
     void enterpriseService.getPlatformBranding()
       .then(async branding => {
+        if (canceled) return;
+        setSidebarMenuLabels(branding.sidebarMenuLabels ?? {});
         const [sidebarLogoUrl, sidebarCompactLogoUrl] = await Promise.all([
           loadImage(branding.sidebarLogoConfigured, 'sidebar-logo'),
           loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo')
@@ -1006,7 +1011,7 @@ export function AppController(props: AppControllerProps) {
       }
       platformBrandingObjectUrlsRef.current = [];
     };
-  }, [enterpriseService, enterpriseSession.account?.subjectId, enterpriseSession.status]);
+  }, [enterpriseService, enterpriseSession.account?.subjectId, enterpriseSession.status, enterpriseSessionProbeKey]);
 
   useEffect(() => {
     function handleBrowserBack() {
@@ -3094,8 +3099,9 @@ export function AppController(props: AppControllerProps) {
     const service = enterpriseServiceRef.current;
     if (service === null) throw new Error('本地服务未连接');
     await service.setGateway(gateway);
-    setEnterpriseSession(await service.getSession());
+    setSidebarMenuLabels({});
     setEnterpriseSessionProbeKey(current => current + 1);
+    setEnterpriseSession(await service.getSession());
   }
 
   async function registerEnterprise(
@@ -6625,6 +6631,7 @@ export function AppController(props: AppControllerProps) {
           enterpriseSession={enterpriseSession}
           sidebarLogoUrl={platformBrandingUrls.sidebarLogoUrl}
           sidebarCompactLogoUrl={platformBrandingUrls.sidebarCompactLogoUrl}
+          sidebarMenuLabels={sidebarMenuLabels}
           activityAllowed={enterpriseActivity.capability === 'allowed'}
           onNewConversation={projectId => startNewConversation({ projectId })}
           onSelectProject={selectProject}

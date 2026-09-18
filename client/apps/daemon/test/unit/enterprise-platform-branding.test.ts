@@ -10,6 +10,24 @@ import type { EnterpriseSessionManager } from '../../src/enterprise/session-mana
 const ORIGIN = 'https://enterprise.example';
 
 describe('enterprise platform branding', () => {
+  it('maps configured menu labels and rejects invalid names', async () => {
+    const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      data: { ...data, sidebar_menu_labels: { skills: '企业技能', drive: '𠮷𠮷𠮷𠮷' } }
+    })));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getPlatformBranding!('token')).resolves.toEqual({
+      sidebarLogoConfigured: false,
+      sidebarCompactLogoConfigured: false,
+      sidebarMenuLabels: { skills: '企业技能', drive: '𠮷𠮷𠮷𠮷' }
+    });
+    for (const value of ['', '一二三四五', 'a\nb', 'a\u200bb', ' 字 ']) {
+      fetch.mockImplementationOnce(async () => new Response(JSON.stringify({
+        data: { ...data, sidebar_menu_labels: { skills: value } }
+      })));
+      await expect(client.getPlatformBranding!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+    }
+  });
   it('validates configuration and proxies image content', async () => {
     const fetch = vi.fn(async (url: string | URL | Request) => {
       const path = new URL(String(url)).pathname;
@@ -71,7 +89,8 @@ describe('enterprise platform branding', () => {
     const httpClient = {
       getPlatformBranding: vi.fn(async () => ({
         sidebarLogoConfigured: true,
-        sidebarCompactLogoConfigured: false
+        sidebarCompactLogoConfigured: false,
+        sidebarMenuLabels: { skills: '技能' }
       })),
       getPlatformBrandingImage: vi.fn(async () => ({
         content: new Uint8Array([1, 2, 3]),
@@ -85,7 +104,8 @@ describe('enterprise platform branding', () => {
     expect(configuration.headers['cache-control']).toBe('no-store');
     expect(configuration.json()).toEqual({
       sidebarLogoConfigured: true,
-      sidebarCompactLogoConfigured: false
+      sidebarCompactLogoConfigured: false,
+      sidebarMenuLabels: { skills: '技能' }
     });
 
     const image = await server.inject('/enterprise/platform-branding/sidebar-logo');

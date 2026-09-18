@@ -1,4 +1,4 @@
-import type { EnterpriseSessionResponse } from '@clawee/protocol';
+import type { EnterpriseSessionResponse, EnterpriseSidebarMenuLabels } from '@clawee/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -66,6 +66,7 @@ export function ClaweeSidebar(props: {
   enterpriseSession?: EnterpriseSessionResponse;
   sidebarLogoUrl?: string;
   sidebarCompactLogoUrl?: string;
+  sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
   activityAllowed?: boolean;
   onNewConversation(projectId?: string): void;
   onSelectProject(projectId: string): void;
@@ -150,14 +151,14 @@ export function ClaweeSidebar(props: {
     onClick(): void;
   }> = [
     { label: '新建会话', icon: SquarePen, onClick: () => props.onNewConversation() },
-    { label: '数据看板', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
+    { label: props.sidebarMenuLabels?.dashboard ?? '数据看板', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
     ...(props.activityAllowed === true
       ? [{ label: 'Agent动态', icon: Activity, view: 'activity' as const, onClick: () => props.onOpenView('activity') }]
       : []),
-    { label: '企业Skill', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
+    { label: props.sidebarMenuLabels?.skills ?? '企业Skill', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
-    { label: '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
-    { label: '共享网盘', icon: HardDrive, view: 'drive', onClick: () => props.onOpenView('drive') },
+    { label: props.sidebarMenuLabels?.knowledge ?? '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
+    { label: props.sidebarMenuLabels?.drive ?? '共享网盘', icon: HardDrive, view: 'drive', onClick: () => props.onOpenView('drive') },
     { label: '定时任务', icon: Clock3, view: 'schedules', onClick: () => props.onOpenView('schedules') }
   ];
   const selectedTaskThread = props.tasks.some(

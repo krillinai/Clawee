@@ -6,17 +6,33 @@ import { ErrorAlert, LoadingState, PageHeader, PageShell } from "@/components/go
 import { useAdminPermission } from "@/components/admin-permissions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { APIError } from "@/lib/api";
 import {
   getPlatformBranding,
   updatePlatformBranding,
-  type PlatformBrandingAction
+  type PlatformBrandingAction,
+  type SidebarMenuKey
 } from "@/lib/platform-branding-api";
 import { cn } from "@/lib/utils";
 import { permissions } from "@/lib/rbac-api";
 
 const MAX_IMAGE_BYTES = 1024 * 1024;
+const sidebarMenus: Array<{ key: SidebarMenuKey; label: string; defaultName: string }> = [
+  { key: "skills", label: "企业 Skill 名称", defaultName: "企业Skill" },
+  { key: "knowledge", label: "企业知识库名称", defaultName: "企业知识库" },
+  { key: "drive", label: "共享网盘名称", defaultName: "共享网盘" },
+  { key: "dashboard", label: "数据看板名称", defaultName: "数据看板" }
+];
+
+function menuLabelError(value: string | null | undefined): string | undefined {
+  if (value == null) return undefined;
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return "不能包含换行或控制字符";
+  const length = Array.from(value.trim()).length;
+  return length < 1 || length > 4 ? "名称必须为 1～4 个字符" : undefined;
+}
 
 type LogoDraft = {
   action: PlatformBrandingAction;
@@ -31,6 +47,7 @@ export function PlatformBrandingPage() {
   const [background, setBackground] = useState<"light" | "dark">("light");
   const [sidebarLogo, setSidebarLogo] = useState<LogoDraft>({ action: "keep" });
   const [compactLogo, setCompactLogo] = useState<LogoDraft>({ action: "keep" });
+  const [menuDraft, setMenuDraft] = useState<Partial<Record<SidebarMenuKey, string | null>>>({});
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string }>();
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -47,9 +64,11 @@ export function PlatformBrandingPage() {
   }
 
   const branding = query.data;
-  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep";
+  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0;
+  const hasInvalidMenu = Object.values(menuDraft).some(value => menuLabelError(value) !== undefined);
   const hasCustomBranding = hasCustomLogo(sidebarLogo, branding.sidebarLogoConfigured)
-    || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured);
+    || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured)
+    || sidebarMenus.some(({ key }) => (menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key]) != null);
 
   function replaceDraft(current: LogoDraft, file: File, update: (draft: LogoDraft) => void) {
     if (!isSupportedImage(file)) {
@@ -72,9 +91,13 @@ export function PlatformBrandingPage() {
   function restoreDefaults() {
     resetDraft(sidebarLogo, setSidebarLogo);
     resetDraft(compactLogo, setCompactLogo);
+    setMenuDraft(current => Object.fromEntries(sidebarMenus
+      .filter(({ key }) => current[key] !== undefined || branding.sidebarMenuLabels?.[key] !== undefined)
+      .map(({ key }) => [key, null])));
   }
 
   async function save() {
+    if (hasInvalidMenu) return;
     setSaving(true);
     setNotice(undefined);
     try {
@@ -82,12 +105,16 @@ export function PlatformBrandingPage() {
         sidebarLogoAction: sidebarLogo.action,
         sidebarLogo: sidebarLogo.file,
         sidebarCompactLogoAction: compactLogo.action,
-        sidebarCompactLogo: compactLogo.file
+        sidebarCompactLogo: compactLogo.file,
+        ...(Object.keys(menuDraft).length === 0 ? {} : {
+          sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value?.trim() ?? null]))
+        })
       });
       releaseObjectUrl(sidebarLogo.objectUrl);
       releaseObjectUrl(compactLogo.objectUrl);
       setSidebarLogo({ action: "keep" });
       setCompactLogo({ action: "keep" });
+      setMenuDraft({});
       queryClient.setQueryData(["platform-branding"], updated);
       setPreviewRevision((value) => value + 1);
       setNotice({ kind: "success", message: "平台外观已保存。" });
@@ -111,7 +138,7 @@ export function PlatformBrandingPage() {
               <RotateCcw aria-hidden="true" />
               恢复默认配置
             </Button>
-            <Button disabled={!hasChanges || saving} onClick={() => void save()}>
+            <Button disabled={!hasChanges || saving || hasInvalidMenu} onClick={() => void save()}>
               <Save aria-hidden="true" />
               {saving ? "保存中" : "保存"}
             </Button>
@@ -167,6 +194,43 @@ export function PlatformBrandingPage() {
           savedUrl={branding.sidebarCompactLogoUrl}
         />
       </div>
+      <section className="mt-6 border-t pt-5" aria-labelledby="sidebar-menu-names-title">
+        <h2 id="sidebar-menu-names-title" className="mb-4 text-sm font-semibold">侧边栏菜单名称</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {sidebarMenus.map(({ key, label, defaultName }) => {
+            const value = menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key];
+            const error = menuLabelError(menuDraft[key]);
+            return (
+              <div key={key}>
+                <Label htmlFor={`sidebar-menu-${key}`}>{label}</Label>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    className="min-w-0 flex-1"
+                    id={`sidebar-menu-${key}`}
+                    disabled={!canUpdate || saving}
+                    value={value ?? ""}
+                    placeholder={defaultName}
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? `sidebar-menu-${key}-error` : undefined}
+                    onChange={event => setMenuDraft(current => ({ ...current, [key]: event.target.value }))}
+                  />
+                  {canUpdate ? <Button
+                    className="shrink-0"
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    title={`恢复${label}默认值`}
+                    aria-label={`恢复${label}默认值`}
+                    disabled={value == null || saving}
+                    onClick={() => setMenuDraft(current => ({ ...current, [key]: null }))}
+                  ><RotateCcw aria-hidden="true" /></Button> : null}
+                </div>
+                {error ? <p id={`sidebar-menu-${key}-error`} className="mt-1 text-xs text-destructive">{error}</p> : null}
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </PageShell>
   );
 

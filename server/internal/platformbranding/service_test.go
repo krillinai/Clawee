@@ -44,6 +44,56 @@ func TestServiceUpdatesLogosIndependently(t *testing.T) {
 	}
 }
 
+func TestServiceMenuLabelsValidationAndReset(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	label := "  企业技能  "
+	configuration, err := service.Update(context.Background(), UpdateInput{
+		SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+		SidebarMenuLabels: map[string]*string{"skills": &label},
+	})
+	if err != nil || configuration.SidebarMenuLabels.Skills != "企业技能" {
+		t.Fatalf("configuration=%#v error=%v", configuration, err)
+	}
+	for _, value := range []string{"", "   ", "一二三四五", "a\nb", "a\tb", "a\u200bb"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := service.Update(context.Background(), UpdateInput{
+				SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+				SidebarMenuLabels: map[string]*string{"skills": &value},
+			})
+			if !errors.Is(err, ErrInvalidMenuLabel) {
+				t.Fatalf("error=%v", err)
+			}
+			current, _ := service.Get(context.Background())
+			if current.SidebarMenuLabels.Skills != "企业技能" {
+				t.Fatal("rejected update changed configuration")
+			}
+		})
+	}
+	for _, value := range []string{"字", "Ab12", "𠮷𠮷𠮷𠮷"} {
+		_, err := service.Update(context.Background(), UpdateInput{
+			SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+			SidebarMenuLabels: map[string]*string{"drive": &value},
+		})
+		if err != nil {
+			t.Fatalf("valid value %q error=%v", value, err)
+		}
+	}
+	configuration, err = service.Update(context.Background(), UpdateInput{
+		SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+		SidebarMenuLabels: map[string]*string{"drive": nil},
+	})
+	if err != nil || configuration.SidebarMenuLabels.Drive != "" || configuration.SidebarMenuLabels.Skills != "企业技能" {
+		t.Fatalf("reset configuration=%#v error=%v", configuration, err)
+	}
+	_, err = service.Update(context.Background(), UpdateInput{
+		SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+		SidebarMenuLabels: map[string]*string{"unknown": nil},
+	})
+	if !errors.Is(err, ErrInvalidMenuLabel) {
+		t.Fatalf("unknown field error=%v", err)
+	}
+}
+
 func TestServiceRejectsInvalidImagesWithoutChangingConfiguration(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	original := encodePNG(t, 10, 10)

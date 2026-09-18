@@ -61,6 +61,76 @@ function App(props: AppProps = {}) {
 }
 
 describe('App', () => {
+  it.each(['browser', 'desktop'] as const)('%s host loads menu names and clears them on sign-out', async hostKind => {
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fallback = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/knowledge-bases')) return jsonResponse(createKnowledgeBaseListResponse());
+      return undefined;
+    });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/enterprise/platform-branding')) return jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false,
+        sidebarMenuLabels: { skills: '技能', knowledge: '知识', drive: '网盘', dashboard: '数据' }
+      });
+      if (url.endsWith('/enterprise/logout')) return jsonResponse(createEnterpriseSessionResponse({ status: 'signed_out', account: undefined }));
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    for (const name of ['技能', '知识', '网盘', '数据']) {
+      expect(await screen.findByRole('button', { name })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '知识' }));
+    expect(await screen.findByRole('heading', { name: '企业知识库' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Member' }));
+    fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
+      expect(await screen.findByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: '技能' })).not.toBeInTheDocument();
+  });
+
+  it.each(['legacy', 'unavailable'])('keeps default names when branding is %s', async mode => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (!url.endsWith('/enterprise/platform-branding')) return undefined;
+      return mode === 'legacy'
+        ? jsonResponse({ sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false })
+        : jsonResponse({ error: { code: 'ENTERPRISE_SERVICE_UNAVAILABLE' } }, { status: 503 });
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await screen.findByRole('button', { name: 'Member' });
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('ignores a branding response arriving after sign-out', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    let resolveBranding!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { resolveBranding = resolve; });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const loadBranding = vi.fn(() => pending);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/enterprise/platform-branding')) return loadBranding();
+      if (url.endsWith('/enterprise/logout')) return jsonResponse(createEnterpriseSessionResponse({ status: 'signed_out', account: undefined }));
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Member' }));
+    await waitFor(() => expect(loadBranding).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+    await screen.findByRole('heading', { name: '欢迎使用 Clawee' });
+    await act(async () => resolveBranding(jsonResponse({
+      sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, sidebarMenuLabels: { skills: '旧名称' }
+    })));
+    expect(screen.getByRole('button', { name: '企业Skill' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '旧名称' })).not.toBeInTheDocument();
+  });
   it('shows the enterprise model configuration gate when login is not required', async () => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({

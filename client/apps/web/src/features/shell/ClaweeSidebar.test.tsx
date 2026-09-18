@@ -66,6 +66,29 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ClaweeSidebar>> 
 }
 
 describe('ClaweeSidebar', () => {
+  it.each([false, true])('uses configured menu names and unchanged routes when collapsed=%s', collapsed => {
+    const onOpenView = vi.fn();
+    renderSidebar({
+      collapsed,
+      onOpenView,
+      sidebarMenuLabels: { skills: '技能', knowledge: '知识', drive: '网盘', dashboard: '数据' }
+    });
+    for (const [name, route] of [['技能', 'plugins'], ['知识', 'knowledge'], ['网盘', 'drive'], ['数据', 'dashboard']]) {
+      const button = screen.getByRole('button', { name });
+      if (collapsed) expect(button).toHaveAttribute('title', name);
+      fireEvent.click(button);
+      expect(onOpenView).toHaveBeenLastCalledWith(route);
+    }
+    expect(screen.queryByRole('button', { name: '企业Skill' })).not.toBeInTheDocument();
+  });
+
+  it('falls back independently for unconfigured menu names', () => {
+    renderSidebar({ sidebarMenuLabels: { skills: '技能' } });
+    for (const name of ['技能', '企业知识库', '共享网盘', '数据看板']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+  });
+
   it('uses custom expanded and compact logos without changing their image frames', () => {
     const { rerender } = renderSidebar({ sidebarLogoUrl: 'blob:expanded' });
     const expandedLogo = screen.getByRole('img', { name: 'KrillinAI' });
