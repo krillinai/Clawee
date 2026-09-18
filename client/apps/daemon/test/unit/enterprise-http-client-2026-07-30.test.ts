@@ -111,6 +111,7 @@ describe('enterprise HTTP client', () => {
       expect(init?.headers).not.toHaveProperty('Content-Type');
       const form = init?.body as FormData;
       expect(form.get('space_id')).toBe('space/一');
+      expect(form.get('skill_id')).toBe('original-id');
       expect(form.get('version')).toBe('1.0.0');
       expect(form.get('changelog')).toBe('更新');
       expect(await (form.get('package') as Blob).text()).toBe('ZIP bytes');
@@ -120,7 +121,7 @@ describe('enterprise HTTP client', () => {
     expect(await client.listSkillSpaces('enterprise-token')).toMatchObject({ spaces: [
       { spaceId: 'space/一', actions: ['read', 'write'] }, { spaceId: 'readonly', actions: ['read'] }
     ] });
-    expect(await client.uploadSkillVersion({ accessToken: 'enterprise-token', spaceId: 'space/一', version: '1.0.0', changelog: '更新', package: Buffer.from('ZIP bytes') })).toEqual({ skillId: 'skill_1', spaceId: 'space/一', name: 'review', version: '1.0.0' });
+    expect(await client.uploadSkillVersion({ skillId: 'original-id', accessToken: 'enterprise-token', spaceId: 'space/一', version: '1.0.0', changelog: '更新', package: Buffer.from('ZIP bytes') })).toEqual({ skillId: 'skill_1', spaceId: 'space/一', name: 'review', version: '1.0.0' });
     expect(String(fetch.mock.calls[1]?.[0])).toBe(`${ORIGIN}/api/v1/app/skills/versions`);
   });
 

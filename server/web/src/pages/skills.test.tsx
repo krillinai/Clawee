@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import {
   enableGitHubSource,
+  deleteUnpublishedSkill,
   getGitHubSourceToken,
   listGitHubSources,
 	listSkillSpaces,
@@ -33,6 +34,7 @@ vi.mock("@/lib/skillhub-api", async () => {
     ...actual,
     getSkillSourceAvailability: skillSourceAvailabilityMock,
     enableGitHubSource: vi.fn(),
+    deleteUnpublishedSkill: vi.fn(),
     getGitHubSourceToken: vi.fn(),
     listGitHubSources: vi.fn(),
 		listSkillSpaces: vi.fn(),
@@ -66,6 +68,40 @@ const sourceSummary: GitHubSourceSummary = {
 };
 
 describe("SkillsPage", () => {
+  it("replaces the selected Skill even when the uploaded name changes", async () => {
+    listSkillsMock.mockResolvedValue([published, unpublished]);
+    uploadSkillVersionMock.mockResolvedValue({ skill: { ...published, name: "renamed" }, version: uploadedVersion });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: `替换上传 ${published.name}` }));
+    expect(within(screen.getByRole("dialog")).getByLabelText("技能空间")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("版本号"), { target: { value: "1.3.0" } });
+    const file = new File(["ZIP"], "renamed.zip");
+    fireEvent.change(screen.getByLabelText("Skill ZIP 包"), { target: { files: [file] } });
+    expect(screen.getByRole("button", { name: "确认替换" })).toBeEnabled();
+    fireEvent.submit(screen.getByRole("dialog").querySelector("form") as HTMLFormElement);
+    await waitFor(() => expect(uploadSkillVersionMock).toHaveBeenCalledWith({ skillId: published.skillId, spaceId: published.spaceId, version: "1.3.0", changelog: "", packageFile: file }));
+    expect(await screen.findByText(/renamed.*已上传并发布/)).toBeInTheDocument();
+  });
+
+  it("deletes only unpublished Skills after confirmation", async () => {
+    listSkillsMock.mockResolvedValue([published, unpublished]);
+    vi.mocked(deleteUnpublishedSkill).mockResolvedValue(undefined);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: `删除 ${unpublished.name}` }));
+    expect(screen.queryByRole("button", { name: `删除 ${published.name}` })).not.toBeInTheDocument();
+    expect(deleteUnpublishedSkill).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(deleteUnpublishedSkill).toHaveBeenCalledWith(unpublished.skillId));
+  });
+
+  it("hides replacement and deletion when the permissions are missing", async () => {
+    listSkillsMock.mockResolvedValue([published, unpublished]);
+    renderPage([permissions.skillRead]);
+    await screen.findByText(published.name);
+    expect(screen.queryByRole("button", { name: /^替换上传/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `删除 ${unpublished.name}` })).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     skillSourceAvailabilityMock.mockResolvedValue(true);

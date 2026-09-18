@@ -122,6 +122,28 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 		t.Fatalf("original skill changed after cross-space conflict: %#v, %v", detail, err)
 	}
 
+	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"skill_id": seeded.Skill.SkillID, "space_id": secondary.SpaceID, "version": "3"}, skillPackageNamed(t, "cross-space-rename"))
+	recorder = request(http.MethodPost, "/api/v1/app/skills/versions", login.AccessToken, body, contentType)
+	assertSkillError(t, recorder, http.StatusConflict, "conflict")
+	if _, err := service.SetSpaceMember(ctx, primary.SpaceID, user.Account.UserID, []string{skillhub.SpaceActionRead}, "技能管理员", true); err != nil {
+		t.Fatal(err)
+	}
+	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"skill_id": seeded.Skill.SkillID, "space_id": secondary.SpaceID, "version": "3"}, skillPackageNamed(t, "forbidden-rename"))
+	recorder = request(http.MethodPost, "/api/v1/app/skills/versions", login.AccessToken, body, contentType)
+	assertSkillError(t, recorder, http.StatusNotFound, "not_found")
+	if _, err := service.SetSpaceMember(ctx, primary.SpaceID, user.Account.UserID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, "技能管理员", true); err != nil {
+		t.Fatal(err)
+	}
+	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"skill_id": seeded.Skill.SkillID, "space_id": primary.SpaceID, "version": "3"}, skillPackageNamed(t, "client-renamed"))
+	recorder = request(http.MethodPost, "/api/v1/app/skills/versions", login.AccessToken, body, contentType)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("client replacement: %d %s", recorder.Code, recorder.Body.String())
+	}
+	replacement := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
+	if replacement.Skill.SkillID != seeded.Skill.SkillID || replacement.Skill.Name != "client-renamed" {
+		t.Fatalf("replacement = %#v", replacement)
+	}
+
 	webTokens, err := accountService.IssueTokens(ctx, user.Account, []accounts.TokenRequest{{Audience: accounts.AudienceFrontend, ClientID: accounts.ClientWeb}})
 	if err != nil {
 		t.Fatal(err)

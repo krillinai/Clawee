@@ -415,6 +415,7 @@ export function AppController(props: AppControllerProps) {
     useState<EnterpriseSkillUseError>();
   const [enterpriseSkillsReloadKey, setEnterpriseSkillsReloadKey] = useState(0);
   const [enterpriseSkillUploadOpen, setEnterpriseSkillUploadOpen] = useState(false);
+  const [enterpriseSkillUploadTarget, setEnterpriseSkillUploadTarget] = useState<EnterpriseSkillResponse>();
   const [enterpriseKnowledgeBases, setEnterpriseKnowledgeBases] =
     useState<EnterpriseKnowledgeBaseResponse[]>();
   const [enterpriseKnowledgeBasesLoading, setEnterpriseKnowledgeBasesLoading] =
@@ -4899,7 +4900,7 @@ export function AppController(props: AppControllerProps) {
     }
   }
 
-  async function uploadEnterpriseSkill(input: { spaceId: string; version: string; changelog: string; file: File }) {
+  async function uploadEnterpriseSkill(input: { skillId?: string; spaceId: string; version: string; changelog: string; file: File }) {
     const activeEnterpriseService = enterpriseServiceRef.current;
     if (activeEnterpriseService === null) throw new Error('本地服务暂不可用');
     const generation = enterpriseHubGenerationRef.current;
@@ -6495,12 +6496,16 @@ export function AppController(props: AppControllerProps) {
         onUse: (skill, projectId) => void useEnterpriseSkill(skill, projectId),
         onCreateSkill: () => void useMarketSkill('skill-creator', currentProject?.id ?? ''),
         onUploadSkill: connectionState.status === 'connected' && enterpriseSession.status === 'signed_in'
-          ? () => setEnterpriseSkillUploadOpen(true)
+          ? () => { setEnterpriseSkillUploadTarget(undefined); setEnterpriseSkillUploadOpen(true); }
+          : undefined,
+        onReplaceSkill: connectionState.status === 'connected' && enterpriseSession.status === 'signed_in'
+          ? skill => { setEnterpriseSkillUploadTarget(skill); setEnterpriseSkillUploadOpen(true); }
           : undefined
       }}
     />
     {enterpriseSkillUploadOpen && activePluginSource === 'enterprise' ? (
       <EnterpriseSkillUploadDialog
+        target={enterpriseSkillUploadTarget}
         onLoadSpaces={loadEnterpriseSkillSpaces}
         onUpload={uploadEnterpriseSkill}
         onClose={() => setEnterpriseSkillUploadOpen(false)}

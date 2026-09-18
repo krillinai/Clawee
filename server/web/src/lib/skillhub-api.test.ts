@@ -67,6 +67,7 @@ describe("skillhub api", () => {
     })));
 
     await uploadSkillVersion({
+			skillId: "original-id",
 			spaceId: "skillspace_default",
       version: "1.2.0",
       changelog: "修复说明",
@@ -76,6 +77,7 @@ describe("skillhub api", () => {
     const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
     expect(init.body).toBeInstanceOf(FormData);
 		expect((init.body as FormData).get("space_id")).toBe("skillspace_default");
+    expect((init.body as FormData).get("skill_id")).toBe("original-id");
     expect(init.headers).toEqual({ Accept: "application/json" });
   });
 

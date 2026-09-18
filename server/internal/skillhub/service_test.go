@@ -74,6 +74,77 @@ func TestServiceUploadVersionStoresImmutablePackage(t *testing.T) {
 	}
 }
 
+func TestServiceReplacementRenamesOriginalAndPreservesHistory(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
+	upload := func(name, version, target string) (MutationResult, error) {
+		return service.UploadVersion(ctx, UploadVersionInput{TargetSkillID: target, Version: version, CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD(name)}}))})
+	}
+	original, err := upload("original", "1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := upload("renamed", "2", original.Skill.SkillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.Skill.SkillID != original.Skill.SkillID || replacement.Skill.Name != "renamed" || *replacement.Skill.CurrentVersionID != replacement.Version.VersionID {
+		t.Fatalf("replacement = %#v", replacement)
+	}
+	detail, err := service.GetAdmin(ctx, original.Skill.SkillID)
+	if err != nil || len(detail.Versions) != 2 {
+		t.Fatalf("detail = %#v, %v", detail, err)
+	}
+	if _, err := upload("duplicate-rename", "2", original.Skill.SkillID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate = %v", err)
+	}
+	if _, err := upload("occupied", "1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upload("occupied", "3", original.Skill.SkillID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("name conflict = %v", err)
+	}
+	if _, err := upload("missing", "3", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing = %v", err)
+	}
+	detail, err = service.GetAdmin(ctx, original.Skill.SkillID)
+	if err != nil || detail.Skill.Name != "renamed" || len(detail.Versions) != 2 {
+		t.Fatalf("conflict changed original: %#v, %v", detail, err)
+	}
+	if _, err := upload("original", "1", ""); err != nil {
+		t.Fatalf("old name not released: %v", err)
+	}
+}
+
+func TestServiceDeletesOnlyUnpublishedSkillsAndPackages(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})
+	result, err := service.UploadVersion(ctx, UploadVersionInput{Version: "1", CreatedBy: "admin", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("delete-me")}}))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteUnpublished(ctx, result.Skill.SkillID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("published delete = %v", err)
+	}
+	if _, err := service.ClearCurrentVersion(ctx, result.Skill.SkillID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteUnpublished(ctx, result.Skill.SkillID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetAdmin(ctx, result.Skill.SkillID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted detail = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, result.Version.PackagePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("package remains: %v", err)
+	}
+	if err := service.DeleteUnpublished(ctx, result.Skill.SkillID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("repeated delete = %v", err)
+	}
+}
+
 func TestServiceUploadVersionStoresNormalizedPackage(t *testing.T) {
 	root := t.TempDir()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})

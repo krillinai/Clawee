@@ -79,6 +79,7 @@ const (
 	PermissionSkillMove                       = "console:skill:move"
 	PermissionSkillPublish                    = "console:skill:publish"
 	PermissionSkillUnpublish                  = "console:skill:unpublish"
+	PermissionSkillDelete                     = "console:skill:delete"
 	PermissionSkillSpaceCreate                = "console:skill:space_create"
 	PermissionSkillSpaceUpdate                = "console:skill:space_update"
 	PermissionSkillSpaceMemberCreate          = "console:skill:space_member_create"
@@ -200,6 +201,7 @@ var permissionCatalog = []Permission{
 	{PermissionSkillMove, "skill", "move", "移动技能", "将技能移动到其他空间"},
 	{PermissionSkillPublish, "skill", "publish", "发布技能版本", "将技能版本设为当前版本"},
 	{PermissionSkillUnpublish, "skill", "unpublish", "取消技能发布", "取消技能当前发布版本"},
+	{PermissionSkillDelete, "skill", "delete", "删除未发布技能", "删除未发布技能及其全部版本"},
 	{PermissionSkillSpaceCreate, "skill", "space_create", "新增技能空间", "创建技能空间"},
 	{PermissionSkillSpaceUpdate, "skill", "space_update", "编辑技能空间", "修改技能空间信息"},
 	{PermissionSkillSpaceMemberCreate, "skill", "space_member_create", "新增技能空间成员", "新增技能空间成员授权"},

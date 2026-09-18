@@ -998,6 +998,7 @@ export type EnterpriseHttpClient = {
   listSkills(accessToken: string): Promise<EnterpriseRemoteSkill[]>;
   listSkillSpaces(accessToken: string): Promise<EnterpriseSkillSpaceListResponse>;
   uploadSkillVersion(input: {
+    skillId?: string;
     accessToken: string;
     spaceId: string;
     version: string;
@@ -1487,6 +1488,7 @@ export function createEnterpriseHttpClient(input: {
 
     async uploadSkillVersion(request) {
       const formBody = new FormData();
+      if (request.skillId) formBody.append('skill_id', request.skillId);
       formBody.append('space_id', request.spaceId);
       formBody.append('version', request.version);
       if (request.changelog) formBody.append('changelog', request.changelog);

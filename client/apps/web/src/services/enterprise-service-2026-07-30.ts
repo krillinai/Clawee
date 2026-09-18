@@ -49,8 +49,9 @@ export function createEnterpriseService(client: ClientLike) {
     listSkillSpaces(): Promise<EnterpriseSkillSpaceListResponse> {
       return client.get('/enterprise/skill-spaces');
     },
-    uploadSkill(input: { spaceId: string; version: string; changelog: string; file: File }): Promise<EnterpriseSkillUploadResponse> {
+    uploadSkill(input: { skillId?: string; spaceId: string; version: string; changelog: string; file: File }): Promise<EnterpriseSkillUploadResponse> {
       const body = new FormData();
+      if (input.skillId) body.append('skillId', input.skillId);
       body.append('spaceId', input.spaceId);
       body.append('version', input.version);
       body.append('changelog', input.changelog);

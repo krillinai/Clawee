@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -656,6 +657,59 @@ func TestSkillHubUploadRejectsUnexpectedMultipartFields(t *testing.T) {
 	request.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(recorder, request)
 	assertSkillError(t, recorder, http.StatusBadRequest, "invalid_request")
+}
+
+func TestSkillHubReplacementAndUnpublishedDeletion(t *testing.T) {
+	ctx := context.Background()
+	accountService := newTestAccountService(accounts.NewMemoryStore())
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountService})
+	if err := rbacService.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, RBACService: rbacService, SkillHubService: service})
+	cookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
+	original := uploadSkillVersion(t, router, adminCookie(t, cookies), "1", skillPackageNamed(t, "original"))
+	body, contentType := skillUploadBodyWithPackage(t, map[string]string{"skill_id": original.Skill.SkillID, "version": "2"}, skillPackageNamed(t, "renamed"))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/skills/versions", body)
+	request.Header.Set("Content-Type", contentType)
+	request.AddCookie(adminCookie(t, cookies))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("replace: %d %s", recorder.Code, recorder.Body.String())
+	}
+	replaced := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
+	if replaced.Skill.SkillID != original.Skill.SkillID || replaced.Skill.Name != "renamed" {
+		t.Fatalf("replaced = %#v", replaced)
+	}
+	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"skill_id": " ", "version": "3"}, skillPackageNamed(t, "invalid-target"))
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/skills/versions", body)
+	request.Header.Set("Content-Type", contentType)
+	request.AddCookie(adminCookie(t, cookies))
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	assertSkillError(t, recorder, http.StatusBadRequest, "invalid_request")
+	path := "/api/v1/admin/skills?skill_id=" + original.Skill.SkillID
+	readerCookies := register(t, router, `{"email":"reader@example.com","password":"passw0rd!"}`)
+	role := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"skill_reader","name":"技能查看员","permission_codes":["console:skill:read"]}`, cookies, http.StatusCreated)
+	readerMe := doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", readerCookies, http.StatusOK)
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+nestedString(t, readerMe, "data", "account", "user_id")+`","role_id":"`+nestedString(t, role, "data", "role_id")+`"}`, cookies, http.StatusCreated)
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodDelete, path, "", nil), http.StatusUnauthorized, "unauthorized")
+	readerCookies = loginCookies(t, router, `{"email":"reader@example.com","password":"passw0rd!"}`)
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodDelete, path, "", readerCookies), http.StatusForbidden, "forbidden")
+	recorder = sourceJSONRequest(t, router, http.MethodDelete, path, "", cookies)
+	assertSkillError(t, recorder, http.StatusConflict, "conflict")
+	if _, err := service.ClearCurrentVersion(ctx, original.Skill.SkillID); err != nil {
+		t.Fatal(err)
+	}
+	recorder = sourceJSONRequest(t, router, http.MethodDelete, path, "", cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := service.GetAdmin(ctx, original.Skill.SkillID); !errors.Is(err, skillhub.ErrNotFound) {
+		t.Fatalf("deleted = %v", err)
+	}
 }
 
 func TestSkillHubUploadAcceptsSingleWrapperDirectory(t *testing.T) {

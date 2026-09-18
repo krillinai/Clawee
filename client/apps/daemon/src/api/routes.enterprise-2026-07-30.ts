@@ -20,6 +20,7 @@ import { apiError } from './errors.js';
 import { ENTERPRISE_PACKAGE_MAX_BYTES } from '../enterprise/config-2026-07-30.js';
 
 const skillUploadSchema = z.object({
+  skillId: z.string().trim().min(1).max(256).optional(),
   spaceId: z.string().trim().min(1).max(256),
   version: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
   changelog: z.string().refine(value => Array.from(value).length <= 2000).default('')

@@ -411,7 +411,11 @@ export async function getSkill(skillId: string) {
   return { skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
 }
 
-type SkillVersionUploadInput = { spaceId?: string; version: string; changelog: string; packageFile: File };
+type SkillVersionUploadInput = { skillId?: string; spaceId?: string; version: string; changelog: string; packageFile: File };
+
+export function deleteUnpublishedSkill(skillId: string) {
+  return adminApi.delete(`/skills?skill_id=${encodeURIComponent(skillId)}`);
+}
 
 export function uploadSkillVersion(input: SkillVersionUploadInput) {
   return uploadSkillVersionTo("/api/v1/admin/skills/versions", input);
@@ -423,6 +427,7 @@ export function uploadAppSkillVersion(input: SkillVersionUploadInput) {
 
 async function uploadSkillVersionTo(url: string, input: SkillVersionUploadInput) {
   const body = new FormData();
+  if (input.skillId) body.append("skill_id", input.skillId);
   if (input.spaceId) body.append("space_id", input.spaceId);
   body.append("version", input.version);
   if (input.changelog) body.append("changelog", input.changelog);

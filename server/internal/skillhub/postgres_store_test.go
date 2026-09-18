@@ -3,6 +3,7 @@ package skillhub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -38,6 +39,69 @@ func TestPostgresStoreCreateVersionAndLoadAdminDetail(t *testing.T) {
 	}
 	if gotSkill.Description != version.Description || gotSkill.CurrentVersionID == nil || *gotSkill.CurrentVersionID != version.VersionID || gotVersion.SkillID != skill.SkillID {
 		t.Fatalf("result = %#v %#v", gotSkill, gotVersion)
+	}
+}
+
+func TestPostgresStoreReplacementRenameIsTransactional(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("version-conflict-%t", conflict), func(t *testing.T) {
+			mock := newPGXMock(t)
+			store := NewPostgresStore(mock)
+			now := time.Now().UTC()
+			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=\$1 FOR UPDATE`).WithArgs("original").WillReturnRows(skillRows().AddRow("original", DefaultSpaceID, "old-name", "v1", "creator", now, now))
+			mock.ExpectExec(`UPDATE skills SET name=\$2 WHERE skill_id=\$1`).WithArgs("original", "new-name").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+			insert := mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs("v2", "original", "2", "", "", "v2.zip", "hash", now, nil, nil, nil, nil, nil, nil, "")
+			if conflict {
+				insert.WillReturnError(&pgconn.PgError{Code: "23505"})
+				mock.ExpectRollback()
+			} else {
+				insert.WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectExec(`UPDATE skills SET current_version_id`).WithArgs("original", "v2", now).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				mock.ExpectCommit()
+			}
+			skill, _, err := store.CreateVersion(context.Background(), Skill{Name: "new-name", SpaceID: DefaultSpaceID}, Version{VersionID: "v2", Version: "2", PackagePath: "v2.zip", PackageSHA256: "hash", CreatedAt: now}, CreateVersionOptions{Resolution: VersionResolutionReplace, TargetSkillID: "original", Publish: true})
+			if conflict {
+				if !errors.Is(err, ErrConflict) {
+					t.Fatalf("conflict = %v", err)
+				}
+			} else if err != nil || skill.SkillID != "original" || skill.Name != "new-name" || skill.CreatedBy != "creator" {
+				t.Fatalf("result = %#v, %v", skill, err)
+			}
+		})
+	}
+}
+
+func TestPostgresStoreDeleteUnpublishedLocksStateAndClearsReferences(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		t.Run(fmt.Sprintf("published-%t", published), func(t *testing.T) {
+			mock := newPGXMock(t)
+			store := NewPostgresStore(mock)
+			mock.ExpectBegin()
+			rows := pgxmock.NewRows([]string{"current_version_id"})
+			if published {
+				rows.AddRow("v1")
+			} else {
+				rows.AddRow(nil)
+			}
+			mock.ExpectQuery(`SELECT current_version_id FROM skills WHERE skill_id=\$1 FOR UPDATE`).WithArgs("original").WillReturnRows(rows)
+			if published {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectExec(`UPDATE skill_source_items SET skill_id=NULL,last_version_id=NULL`).WithArgs("original").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				mock.ExpectQuery(`DELETE FROM skill_versions WHERE skill_id=\$1 RETURNING package_path`).WithArgs("original").WillReturnRows(pgxmock.NewRows([]string{"package_path"}).AddRow("v1.zip").AddRow("v2.zip"))
+				mock.ExpectExec(`DELETE FROM skills WHERE skill_id=\$1`).WithArgs("original").WillReturnResult(pgxmock.NewResult("DELETE", 1))
+				mock.ExpectCommit()
+			}
+			versions, err := store.DeleteUnpublished(context.Background(), "original")
+			if published {
+				if !errors.Is(err, ErrConflict) {
+					t.Fatalf("published deletion = %v", err)
+				}
+			} else if err != nil || len(versions) != 2 {
+				t.Fatalf("result = %#v, %v", versions, err)
+			}
+		})
 	}
 }
 

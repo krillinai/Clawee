@@ -120,6 +120,11 @@ func (s *Service) UploadVersionForUser(ctx context.Context, userID, agentID stri
 	if err := s.spaces.CheckSpaceAccess(ctx, userID, input.SpaceID, SpaceActionWrite); err != nil {
 		return MutationResult{}, err
 	}
+	if strings.TrimSpace(input.TargetSkillID) != "" {
+		if err := s.spaces.CheckSkillAccess(ctx, userID, input.TargetSkillID, SpaceActionWrite); err != nil {
+			return MutationResult{}, err
+		}
+	}
 	input.UploadedByUserID = userID
 	input.UploadedByAgentID = strings.TrimSpace(agentID)
 	return s.UploadVersion(ctx, input)

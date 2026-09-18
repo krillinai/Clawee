@@ -77,6 +77,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/skills/version-file", read, handleAdminSkillVersionFile(opts.SkillHubService))
 	admin.GET("/skills/version-package", skillOperationLog(opts.Logger, skillActionDownload), read, handleAdminSkillVersionPackage(opts.SkillHubService))
 	admin.POST("/skills/versions", skillOperationLog(opts.Logger, skillActionUpload), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSkillUpload(opts.SkillHubService, false))
+	admin.DELETE("/skills", skillOperationLog(opts.Logger, "skill_delete"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillDelete), handleSkillDelete(opts.SkillHubService))
 	admin.PATCH("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
 	admin.POST("/skills/current-version/remove", skillOperationLog(opts.Logger, skillActionClear), skillRequirePermission(opts.RBACService, rbac.PermissionSkillUnpublish), handleSkillClearCurrent(opts.SkillHubService))
@@ -560,7 +561,8 @@ func handleSkillUpload(service *skillhub.Service, client bool) gin.HandlerFunc {
 			changelog = values[0]
 		}
 		input := skillhub.UploadVersionInput{
-			SpaceID: firstSkillFormValue(form.Value, "space_id"), Version: form.Value["version"][0], Changelog: changelog,
+			TargetSkillID: firstSkillFormValue(form.Value, "skill_id"),
+			SpaceID:       firstSkillFormValue(form.Value, "space_id"), Version: form.Value["version"][0], Changelog: changelog,
 			Package: file, CreatedBy: account.DisplayName(), UploadedByUserID: account.UserID,
 		}
 		var result skillhub.MutationResult
@@ -582,8 +584,11 @@ func handleSkillUpload(service *skillhub.Service, client bool) gin.HandlerFunc {
 }
 
 func validSkillUploadForm(values map[string][]string, files map[string][]*multipart.FileHeader) bool {
+	if ids, present := values["skill_id"]; present && (len(ids) != 1 || strings.TrimSpace(ids[0]) == "") {
+		return false
+	}
 	for key := range values {
-		if key != "space_id" && key != "version" && key != "changelog" {
+		if key != "space_id" && key != "skill_id" && key != "version" && key != "changelog" {
 			return false
 		}
 	}
@@ -592,7 +597,19 @@ func validSkillUploadForm(values map[string][]string, files map[string][]*multip
 			return false
 		}
 	}
-	return len(values["space_id"]) <= 1 && len(values["version"]) == 1 && len(values["changelog"]) <= 1 && len(files["package"]) == 1
+	return len(values["skill_id"]) <= 1 && len(values["space_id"]) <= 1 && len(values["version"]) == 1 && len(values["changelog"]) <= 1 && len(files["package"]) == 1
+}
+
+func handleSkillDelete(service *skillhub.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := skillID(c)
+		c.Set(skillIDKey, id)
+		if err := service.DeleteUnpublished(c.Request.Context(), id); err != nil {
+			skillError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"deleted": true})
+	}
 }
 
 func firstSkillFormValue(values map[string][]string, key string) string {

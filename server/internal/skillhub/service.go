@@ -87,11 +87,32 @@ func PreparePackageRoot(root string) (string, error) {
 }
 
 func (s *Service) UploadVersion(ctx context.Context, input UploadVersionInput) (MutationResult, error) {
+	resolution := VersionResolutionByName
+	if strings.TrimSpace(input.TargetSkillID) != "" {
+		resolution = VersionResolutionReplace
+	}
 	return s.CreateVersionFromPackage(ctx, CreateVersionInput{
 		SpaceID: input.SpaceID, Version: input.Version, Changelog: input.Changelog, Package: input.Package,
-		CreatedBy: input.CreatedBy, Publish: true, Resolution: VersionResolutionByName,
+		CreatedBy: input.CreatedBy, Publish: true, Resolution: resolution, TargetSkillID: input.TargetSkillID,
 		UploadedByUserID: input.UploadedByUserID, UploadedByAgentID: input.UploadedByAgentID,
 	})
+}
+
+func (s *Service) DeleteUnpublished(ctx context.Context, skillID string) error {
+	skillID = strings.TrimSpace(skillID)
+	if skillID == "" {
+		return ErrInvalidRequest
+	}
+	versions, err := s.store.DeleteUnpublished(ctx, skillID)
+	if err != nil {
+		return err
+	}
+	for _, version := range versions {
+		if version.PackagePath != "" && filepath.Base(version.PackagePath) == version.PackagePath {
+			_ = os.Remove(filepath.Join(s.packageRoot, version.PackagePath))
+		}
+	}
+	return nil
 }
 
 func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVersionInput) (MutationResult, error) {
@@ -103,8 +124,8 @@ func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVers
 	input.TargetSkillID = strings.TrimSpace(input.TargetSkillID)
 	if s == nil || s.store == nil || s.packageRoot == "" || input.Package == nil || input.CreatedBy == "" ||
 		!versionPattern.MatchString(input.Version) || len([]rune(input.Changelog)) > MaxChangelogRunes ||
-		(input.Resolution != VersionResolutionByName && input.Resolution != VersionResolutionCreateOnly && input.Resolution != VersionResolutionTarget) ||
-		(input.Resolution == VersionResolutionTarget && input.TargetSkillID == "") || !validVersionSourceEvidence(input.Source) {
+		(input.Resolution != VersionResolutionByName && input.Resolution != VersionResolutionCreateOnly && input.Resolution != VersionResolutionTarget && input.Resolution != VersionResolutionReplace) ||
+		((input.Resolution == VersionResolutionTarget || input.Resolution == VersionResolutionReplace) && input.TargetSkillID == "") || !validVersionSourceEvidence(input.Source) {
 		return MutationResult{}, ErrInvalidRequest
 	}
 

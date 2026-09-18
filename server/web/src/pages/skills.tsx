@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw } from "lucide-react";
+import { Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw, Trash2, Upload } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   createGitHubSource,
+  deleteUnpublishedSkill,
   disableGitHubSource,
   enableGitHubSource,
   getGitHubSourceToken,
@@ -45,6 +46,7 @@ import {
   queueGitHubSourceSync,
   updateGitHubSource,
   type GitHubSource,
+  type AdminSkill,
   uploadSkillVersion
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
@@ -56,6 +58,7 @@ const skillSourceAvailabilityKey = ["skill-source-availability"] as const;
 
 export function SkillsPage() {
   const canUpload = useAdminPermission(permissions.skillVersionUpload);
+  const canDelete = useAdminPermission(permissions.skillDelete);
   const canMove = useAdminPermission(permissions.skillMove);
   const canPublish = useAdminPermission(permissions.skillPublish);
   const canCreateSpace = useAdminPermission(permissions.skillSpaceCreate);
@@ -75,6 +78,8 @@ export function SkillsPage() {
   const [publication, setPublication] = useState("all");
   const [spaceFilter, setSpaceFilter] = useState("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<AdminSkill | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminSkill | null>(null);
   const [version, setVersion] = useState("");
   const [uploadSpaceId, setUploadSpaceId] = useState("");
   const [changelog, setChangelog] = useState("");
@@ -136,13 +141,25 @@ export function SkillsPage() {
   }, [spacesQuery.data, uploadOpen, uploadSpaceId]);
 
   const uploadMutation = useMutation({
-    mutationFn: () => uploadSkillVersion({ spaceId: uploadSpaceId, version, changelog, packageFile: packageFile as File }),
+    mutationFn: () => uploadSkillVersion({ ...(uploadTarget ? { skillId: uploadTarget.skillId } : {}), spaceId: uploadSpaceId, version, changelog, packageFile: packageFile as File }),
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();
       setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传并发布`);
       void queryClient.invalidateQueries({ queryKey: skillsKey });
       void queryClient.invalidateQueries({ queryKey: ["skill", result.skill.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (skill: AdminSkill) => deleteUnpublishedSkill(skill.skillId),
+    onSuccess: (_, skill) => {
+      setDeleteTarget(null);
+      setNotice(`未发布 Skill“${skill.name}”已删除`);
+      void queryClient.invalidateQueries({ queryKey: skillsKey });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
+      queryClient.removeQueries({ queryKey: ["skill", skill.skillId] });
     }
   });
 
@@ -241,6 +258,7 @@ export function SkillsPage() {
   });
 
   function resetUploadForm() {
+    setUploadTarget(null);
     setVersion("");
     setUploadSpaceId("");
     setChangelog("");
@@ -248,10 +266,11 @@ export function SkillsPage() {
     uploadMutation.reset();
   }
 
-  function openUpload() {
+  function openUpload(target?: AdminSkill) {
     resetUploadForm();
     setNotice(null);
-    setUploadSpaceId(spacesQuery.data?.[0]?.spaceId ?? "");
+    setUploadTarget(target ?? null);
+    setUploadSpaceId(target?.spaceId ?? spacesQuery.data?.[0]?.spaceId ?? "");
     setUploadOpen(true);
   }
 
@@ -409,7 +428,7 @@ export function SkillsPage() {
                 </Button> : null}
               </>
             ) : null}
-            {canUpload ? <Button onClick={openUpload} variant="primary">
+            {canUpload ? <Button onClick={() => openUpload()} variant="primary">
               <PackagePlus data-icon="inline-start" aria-hidden="true" />
               上传版本
             </Button> : null}
@@ -503,6 +522,8 @@ export function SkillsPage() {
                     <TableCell className="font-mono text-xs">{item.createdBy}</TableCell>
                     <TableCell className="font-mono text-xs">{formatDateTime(item.updatedAt)}</TableCell>
                     <TableCell className="text-right">
+                      {canUpload ? <Button aria-label={`替换上传 ${item.name}`} title="替换上传" size="icon" variant="ghost" onClick={() => openUpload(item)}><Upload /></Button> : null}
+                      {canDelete && item.currentVersionId === null ? <Button aria-label={`删除 ${item.name}`} title="删除未发布 Skill" size="icon" variant="ghost" onClick={() => { deleteMutation.reset(); setDeleteTarget(item); }}><Trash2 className="text-destructive" /></Button> : null}
                       <Button asChild size="sm" variant="secondary">
                         <Link aria-label={`查看 ${item.name} 详情`} to={`/admin/skills/detail?skill_id=${encodeURIComponent(item.skillId)}`}>查看详情</Link>
                       </Button>
@@ -550,37 +571,37 @@ export function SkillsPage() {
         contextLabel="技能中心"
         open={uploadOpen}
         onClose={closeUpload}
-        title="上传 Skill 版本"
+        title={uploadTarget ? `替换上传 Skill：${uploadTarget.name}` : "上传 Skill 版本"}
         subtitle="ZIP 可直接包含 SKILL.md，也可将全部内容放在单一顶层目录中；上传成功后将自动发布该版本，并替换当前发布版本。"
       >
         <form onSubmit={submitUpload}>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="skill-upload-space">技能空间</FieldLabel>
-              <FilterSelect ariaLabel="技能空间" value={uploadSpaceId} onChange={setUploadSpaceId}>
+              {uploadTarget ? <Input aria-label="技能空间" value={uploadTarget.spaceName} disabled /> : <FilterSelect ariaLabel="技能空间" value={uploadSpaceId} onChange={setUploadSpaceId}>
                 {(spacesQuery.data ?? []).map((space) => <option key={space.spaceId} value={space.spaceId}>{space.name}</option>)}
-              </FilterSelect>
+              </FilterSelect>}
             </Field>
             <Field>
               <FieldLabel htmlFor="skill-version">版本号</FieldLabel>
-              <Input id="skill-version" aria-label="版本号" maxLength={64} required value={version} onChange={(event) => setVersion(event.target.value)} />
+              <Input id="skill-version" aria-label="版本号" disabled={uploadMutation.isPending} maxLength={64} required value={version} onChange={(event) => setVersion(event.target.value)} />
               <FieldDescription>必填，支持字母、数字、点、下划线和连字符</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="skill-changelog">更新说明</FieldLabel>
-              <Textarea id="skill-changelog" aria-label="更新说明" maxLength={2000} value={changelog} onChange={(event) => setChangelog(event.target.value)} />
+              <Textarea id="skill-changelog" aria-label="更新说明" disabled={uploadMutation.isPending} maxLength={2000} value={changelog} onChange={(event) => setChangelog(event.target.value)} />
               <FieldDescription>可选，最多 2000 字</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="skill-package">Skill ZIP 包</FieldLabel>
-              <Input id="skill-package" aria-label="Skill ZIP 包" accept=".zip,application/zip" required type="file" onChange={selectPackage} />
+              <Input id="skill-package" aria-label="Skill ZIP 包" disabled={uploadMutation.isPending} accept=".zip,application/zip" required type="file" onChange={selectPackage} />
               <FieldDescription>原始文件最大 50 MiB</FieldDescription>
             </Field>
             {uploadMutation.isError ? <ErrorAlert>上传失败：{errorMessage(uploadMutation.error)}。请检查版本号和 ZIP 包后重试。</ErrorAlert> : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={uploadMutation.isPending} onClick={closeUpload} type="button" variant="outline">取消</Button>
               <Button disabled={uploadMutation.isPending || !uploadSpaceId || !version || !packageFile} type="submit" variant="primary">
-                {uploadMutation.isPending ? "上传中..." : "确认上传"}
+                {uploadMutation.isPending ? "上传中..." : uploadTarget ? "确认替换" : "确认上传"}
               </Button>
             </Field>
           </FieldGroup>
@@ -654,6 +675,17 @@ export function SkillsPage() {
         open={Boolean(disableTarget)}
         pending={statusMutation.isPending}
         title="停用 GitHub 来源"
+        variant="destructive"
+      />
+      <ConfirmDialog
+        title="删除未发布 Skill"
+        description={deleteTarget ? `确认删除“${deleteTarget.name}”及其全部历史版本和上传包？此操作不可恢复。` : ""}
+        confirmLabel={deleteMutation.isPending ? "删除中..." : "确认删除"}
+        error={deleteMutation.isError ? `删除失败：${errorMessage(deleteMutation.error)}` : undefined}
+        open={deleteTarget !== null}
+        pending={deleteMutation.isPending}
+        onClose={() => { if (!deleteMutation.isPending) setDeleteTarget(null); }}
+        onConfirm={() => { if (deleteTarget && !deleteMutation.isPending) deleteMutation.mutate(deleteTarget); }}
         variant="destructive"
       />
 

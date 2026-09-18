@@ -18,6 +18,14 @@ const signedInSession: EnterpriseSessionResponse = {
 };
 
 describe('EnterpriseSkillHubView', () => {
+  it('opens replacement upload from the skill card with the original identity', async () => {
+    const skill = createSkill('replace-me', 'installed', 'verified', ['use']);
+    const onReplaceSkill = vi.fn();
+    renderHub({ skills: [skill], onReplaceSkill });
+    await userEvent.setup().click(screen.getByRole('button', { name: `替换上传 ${skill.name}` }));
+    expect(onReplaceSkill).toHaveBeenCalledWith(skill);
+  });
+
   it('shows real participant names, avatar overflow and space information', () => {
     const skill = {
       ...createSkill('participants', 'installed', 'verified', ['use']),

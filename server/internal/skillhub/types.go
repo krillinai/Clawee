@@ -112,6 +112,7 @@ type PackageMetadata struct {
 }
 
 type UploadVersionInput struct {
+	TargetSkillID     string
 	SpaceID           string
 	Version           string
 	Changelog         string
@@ -165,6 +166,7 @@ const (
 	VersionResolutionByName     = "by_name"
 	VersionResolutionCreateOnly = "create_only"
 	VersionResolutionTarget     = "target"
+	VersionResolutionReplace    = "replace"
 )
 
 type PackageDownload struct {

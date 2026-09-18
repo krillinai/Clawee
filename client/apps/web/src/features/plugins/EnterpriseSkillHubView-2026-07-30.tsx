@@ -58,6 +58,7 @@ export type EnterpriseSkillHubViewProps = {
   onUse(skill: EnterpriseSkillResponse, projectId: string): void;
   onCreateSkill?(): void;
   onUploadSkill?(): void;
+  onReplaceSkill?(skill: EnterpriseSkillResponse): void;
 };
 
 const mockEnterpriseSkillInputs: Array<[string, string, string, EnterpriseSkillStatus, string]> = [
@@ -313,6 +314,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
               onLoadParticipantAvatar={props.onLoadParticipantAvatar}
               onOpen={trigger => openDetail(skill, trigger)}
               onUpdate={props.onUpdate}
+              onReplace={props.onReplaceSkill}
               onUse={() => requestUse(skill)}
             />
           ))}
@@ -378,6 +380,7 @@ function EnterpriseSkillRow(props: {
   onInstall(skillId: string): void;
   onUpdate(skillId: string): void;
   onUse(): void;
+  onReplace?(skill: EnterpriseSkillResponse): void;
   onLoadParticipantAvatar?(skillId: string, userId: string): Promise<Response>;
 }) {
   const creator = props.skill.creator;
@@ -440,6 +443,7 @@ function EnterpriseSkillRow(props: {
           onUse={props.onUse}
         />
       ))}
+      {props.onReplace ? <button type="button" className="skill-market-icon-button enterprise-skill-replace" aria-label={`替换上传 ${props.skill.name}`} title="替换上传" disabled={!props.connected || props.mutationLocked} onClick={() => props.onReplace?.(props.skill)}><Upload size={16} /></button> : null}
       {props.operation?.skillId === props.skill.skillId && props.operation.error !== undefined ? (
         <p className="enterprise-skill-row-error" role="alert">{props.operation.error}</p>
       ) : null}

@@ -14,6 +14,27 @@ function renderDialog(onUpload = vi.fn(async () => undefined), onLoadSpaces = vi
 }
 
 describe('EnterpriseSkillUploadDialog', () => {
+  it('locks replacement to its writable space and submits the original skill ID', async () => {
+    const onUpload = vi.fn(async () => undefined);
+    const target = { skillId: 'original-id', name: '原 Skill', spaceId: 'writable', status: 'not_installed' as const, integrity: 'not_applicable' as const, actions: [] };
+    render(<EnterpriseSkillUploadDialog target={target} onUpload={onUpload} onClose={vi.fn()} onLoadSpaces={async () => ({ spaces: [{ spaceId: 'writable', name: '团队技能', description: '', actions: ['read', 'write'] }] })} />);
+    await screen.findByRole('option', { name: '团队技能' });
+    expect(screen.getByLabelText('技能空间')).toBeDisabled();
+    expect(screen.getByLabelText('版本号')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('版本号'), { target: { value: '2.0.0' } });
+    const file = new File(['ZIP'], 'renamed.zip');
+    fireEvent.change(screen.getByLabelText('ZIP 技能包'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '替换上传' }));
+    await waitFor(() => expect(onUpload).toHaveBeenCalledWith({ skillId: 'original-id', spaceId: 'writable', version: '2.0.0', changelog: '', file }));
+  });
+
+  it('does not substitute another writable space when replacement access is lost', async () => {
+    render(<EnterpriseSkillUploadDialog target={{ skillId: 'original', name: '原 Skill', spaceId: 'readonly', status: 'not_installed', integrity: 'not_applicable', actions: [] }} onUpload={vi.fn()} onClose={vi.fn()} onLoadSpaces={async () => ({ spaces: [{ spaceId: 'other', name: '其他空间', description: '', actions: ['read', 'write'] }] })} />);
+    await screen.findByRole('option', { name: '当前技能空间不可写' });
+    expect(screen.getByLabelText('技能空间')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '替换上传' })).toBeDisabled();
+  });
+
   it('shows only writable spaces and submits a ZIP with version and changelog', async () => {
     const user = userEvent.setup();
     const { onUpload, onClose } = renderDialog();

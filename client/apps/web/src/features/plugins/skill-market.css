@@ -1288,16 +1288,100 @@
 
 .enterprise-skill-upload-form {
   display: grid;
-  gap: 16px;
-  padding: 20px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.enterprise-skill-upload-fields {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
   overflow-y: auto;
   min-height: 0;
 }
 
-.enterprise-skill-upload-form > label {
+.enterprise-skill-upload-fields label {
   display: grid;
   gap: 8px;
   font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+.enterprise-skill-upload-dialog {
+  width: min(520px, 100%);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.enterprise-skill-upload-space {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: end;
+  gap: 10px;
+}
+
+.enterprise-skill-upload-target {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.enterprise-skill-upload-target > span {
+  color: var(--muted);
+}
+
+.enterprise-skill-upload-package {
+  position: relative;
+}
+
+.enterprise-skill-upload-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.enterprise-skill-upload-file > span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.enterprise-skill-upload-file strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.enterprise-skill-upload-file small {
+  font-size: 12px;
+}
+
+.enterprise-skill-upload-package input[type="file"] {
+  position: absolute;
+  inset: 24px 0 0;
+  height: calc(100% - 24px);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.enterprise-skill-upload-package:focus-within .enterprise-skill-upload-file {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.enterprise-skill-replace {
+  position: absolute;
+  z-index: 2;
+  right: 18px;
+  bottom: 14px;
 }
 
 .enterprise-skill-upload-form input,
@@ -1306,7 +1390,7 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 8px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
@@ -1315,6 +1399,19 @@
 }
 
 .enterprise-skill-upload-form textarea { resize: vertical; }
+.enterprise-skill-upload-form input:focus-visible,
+.enterprise-skill-upload-form select:focus-visible,
+.enterprise-skill-upload-form textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.enterprise-skill-upload-form :disabled { cursor: not-allowed; opacity: 0.6; }
+.enterprise-skill-upload-form .skill-market-use-dialog__footer {
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+}
 .enterprise-skill-upload-form .skill-market-inline-error { overflow-wrap: anywhere; }
 
 .skill-market-use-dialog__header,

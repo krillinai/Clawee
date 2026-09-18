@@ -36,7 +36,7 @@ import { ENTERPRISE_PACKAGE_MAX_BYTES } from './config-2026-07-30.js';
 export type EnterpriseSkillManager = {
   listSkills(): Promise<EnterpriseSkillListResponse>;
   listSpaces(): Promise<EnterpriseSkillSpaceListResponse>;
-  uploadSkill(input: { spaceId: string; version: string; changelog: string; package: Uint8Array }): Promise<EnterpriseSkillUploadResponse>;
+  uploadSkill(input: { skillId?: string; spaceId: string; version: string; changelog: string; package: Uint8Array }): Promise<EnterpriseSkillUploadResponse>;
   getSkillDetail(skillId: string): Promise<EnterpriseSkillDetailResponse>;
   installSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;
   updateSkill(skillId: string): Promise<EnterpriseSkillMutationResponse>;

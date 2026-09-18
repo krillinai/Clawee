@@ -18,6 +18,7 @@ type Store interface {
 	MoveSkillsToSpace(context.Context, []string, string, time.Time) (SkillSpaceMoveResult, error)
 	SetCurrentVersion(context.Context, string, string, time.Time) (Skill, Version, error)
 	ClearCurrentVersion(context.Context, string, time.Time) (*Version, error)
+	DeleteUnpublished(context.Context, string) ([]Version, error)
 }
 
 type SpaceStore interface {
@@ -83,14 +84,19 @@ func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version V
 		}
 		skill = proposed
 		newSkill = true
-	case VersionResolutionTarget:
+	case VersionResolutionTarget, VersionResolutionReplace:
 		var exists bool
 		skill, exists = s.skills[options.TargetSkillID]
 		if !exists {
 			return Skill{}, Version{}, ErrNotFound
 		}
-		if skill.Name != proposed.Name {
+		if options.Resolution == VersionResolutionTarget && skill.Name != proposed.Name {
 			return Skill{}, Version{}, ErrConflict
+		}
+		if options.Resolution == VersionResolutionReplace {
+			if skill.SpaceID != proposed.SpaceID || (s.byName[proposed.Name] != "" && s.byName[proposed.Name] != skill.SkillID) {
+				return Skill{}, Version{}, ErrConflict
+			}
 		}
 	default:
 		return Skill{}, Version{}, ErrInvalidRequest
@@ -114,6 +120,11 @@ func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version V
 		s.skills[skill.SkillID] = skill
 		s.byName[skill.Name] = skill.SkillID
 	}
+	if options.Resolution == VersionResolutionReplace {
+		delete(s.byName, skill.Name)
+		skill.Name = proposed.Name
+		s.byName[skill.Name] = skill.SkillID
+	}
 	version.SkillID = skill.SkillID
 	s.versions[skill.SkillID] = append([]Version{version}, s.versions[skill.SkillID]...)
 	if options.Publish {
@@ -134,6 +145,23 @@ func (s *MemoryStore) ListAdmin(_ context.Context) ([]Skill, error) {
 	}
 	sortSkills(items)
 	return items, nil
+}
+
+func (s *MemoryStore) DeleteUnpublished(_ context.Context, id string) ([]Version, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	skill, exists := s.skills[id]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	if skill.CurrentVersionID != nil {
+		return nil, ErrConflict
+	}
+	versions := s.versions[id]
+	delete(s.byName, skill.Name)
+	delete(s.versions, id)
+	delete(s.skills, id)
+	return versions, nil
 }
 
 func (s *MemoryStore) GetAdmin(_ context.Context, id string) (AdminDetail, error) {

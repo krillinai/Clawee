@@ -59,13 +59,22 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 			return Skill{}, Version{}, mapSkillCreateError(err)
 		}
 		skill = proposed
-	case VersionResolutionTarget:
+	case VersionResolutionTarget, VersionResolutionReplace:
 		err = scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=$1 FOR UPDATE`, options.TargetSkillID), &skill)
 		if err != nil {
 			return Skill{}, Version{}, mapNotFound(err)
 		}
-		if skill.Name != proposed.Name {
+		if options.Resolution == VersionResolutionTarget && skill.Name != proposed.Name {
 			return Skill{}, Version{}, ErrConflict
+		}
+		if options.Resolution == VersionResolutionReplace {
+			if skill.SpaceID != proposed.SpaceID {
+				return Skill{}, Version{}, ErrConflict
+			}
+			if _, err = tx.Exec(ctx, `UPDATE skills SET name=$2 WHERE skill_id=$1`, skill.SkillID, proposed.Name); err != nil {
+				return Skill{}, Version{}, mapStoreError(err)
+			}
+			skill.Name = proposed.Name
 		}
 	default:
 		return Skill{}, Version{}, ErrInvalidRequest
@@ -118,6 +127,48 @@ func (s *PostgresStore) ListAdmin(ctx context.Context) ([]Skill, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *PostgresStore) DeleteUnpublished(ctx context.Context, id string) ([]Version, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var current pgtype.Text
+	if err := tx.QueryRow(ctx, `SELECT current_version_id FROM skills WHERE skill_id=$1 FOR UPDATE`, id).Scan(&current); err != nil {
+		return nil, mapNotFound(err)
+	}
+	if current.Valid {
+		return nil, ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE skill_source_items SET skill_id=NULL,last_version_id=NULL WHERE skill_id=$1`, id); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `DELETE FROM skill_versions WHERE skill_id=$1 RETURNING package_path`, id)
+	if err != nil {
+		return nil, err
+	}
+	versions := []Version{}
+	for rows.Next() {
+		var version Version
+		if err := rows.Scan(&version.PackagePath); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		versions = append(versions, version)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM skills WHERE skill_id=$1`, id); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return versions, nil
 }
 
 func (s *PostgresStore) GetAdmin(ctx context.Context, skillID string) (AdminDetail, error) {

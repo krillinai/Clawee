@@ -26,6 +26,8 @@ describe('enterprise service', () => {
     expect(body.get('changelog')).toBe('更新');
     expect((body.get('package') as File).name).toBe(file.name);
     expect((body.get('package') as File).size).toBe(file.size);
+    await service.uploadSkill({ skillId: 'original-id', spaceId: 'space/一', version: '2', changelog: '', file });
+    expect((postBinary.mock.calls[1] as unknown as [string, FormData])[1].get('skillId')).toBe('original-id');
   });
   it('uses exact platform branding routes including raw images', async () => {
     const get = vi.fn(async (_path: string) => ({}));

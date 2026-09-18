@@ -74,6 +74,7 @@ export const permissions = {
   skillMove: "console:skill:move",
   skillPublish: "console:skill:publish",
   skillUnpublish: "console:skill:unpublish",
+  skillDelete: "console:skill:delete",
   skillSpaceCreate: "console:skill:space_create",
   skillSpaceUpdate: "console:skill:space_update",
   skillSpaceMemberCreate: "console:skill:space_member_create",

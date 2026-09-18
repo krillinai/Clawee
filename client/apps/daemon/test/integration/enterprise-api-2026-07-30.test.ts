@@ -101,6 +101,8 @@ describe('enterprise runtime API', () => {
     expect((await upload(fields)).statusCode).toBe(201);
     expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledWith({ ...fields, package: new Uint8Array(Buffer.from('ZIP')) });
     expect(enterpriseSkillManager.installSkill).not.toHaveBeenCalled();
+    expect((await upload({ ...fields, skillId: 'original-id' })).statusCode).toBe(201);
+    expect(enterpriseSkillManager.uploadSkill).toHaveBeenLastCalledWith({ ...fields, skillId: 'original-id', package: new Uint8Array(Buffer.from('ZIP')) });
     for (const invalid of [{ version: '1' }, { ...fields, version: 'bad version' }, { ...fields, unknown: '1' }]) {
       expect((await upload(invalid)).statusCode).toBe(400);
     }
@@ -109,7 +111,7 @@ describe('enterprise runtime API', () => {
     const oversized = await upload(fields, Buffer.alloc(50 * 1024 * 1024 + 1));
     expect(oversized.statusCode).toBe(413);
     expect(oversized.json().error.code).toBe('ENTERPRISE_SKILL_PACKAGE_TOO_LARGE');
-    expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledOnce();
+    expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledTimes(2);
     expect((await upload({ ...fields, changelog: '字'.repeat(2000) })).statusCode).toBe(201);
   });
   it('authenticates gateway configuration and never restores credentials from another gateway', async () => {
