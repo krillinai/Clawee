@@ -381,10 +381,15 @@ function EnterpriseSkillRow(props: {
   onLoadParticipantAvatar?(skillId: string, userId: string): Promise<Response>;
 }) {
   const creator = props.skill.creator;
-  const author = creator?.name ?? '企业成员';
-  const participants = creator === undefined
+  const participants = (creator === undefined
     ? props.skill.contributors ?? []
-    : [creator, ...(props.skill.contributors ?? [])];
+    : [creator, ...(props.skill.contributors ?? [])])
+    .filter((participant, index, items) => items.findIndex(item => (
+      participant.userId !== undefined && item.userId !== undefined
+        ? participant.userId === item.userId
+        : participant.name === item.name
+    )) === index);
+  const author = participants.map(item => item.name).join('、') || '企业成员';
   const visibleParticipants = participants.slice(0, 3);
   const extraParticipantCount = Math.max(0, participants.length - visibleParticipants.length);
   return (
@@ -410,14 +415,13 @@ function EnterpriseSkillRow(props: {
             </span>
             <span className="skill-market-card__identity-copy">
               <span className="skill-market-card__title">{props.skill.name}</span>
-              <span className="skill-market-card__author">{author}{props.skill.spaceName ? ` · ${props.skill.spaceName}` : ''}</span>
+              <span className="skill-market-card__author" title={`${author}${props.skill.spaceName ? ` · ${props.skill.spaceName}` : ''}`}>{author}{props.skill.spaceName ? ` · ${props.skill.spaceName}` : ''}</span>
             </span>
           </span>
           <span className="skill-market-card__tagline" title={props.skill.description}>
             {props.skill.description ?? props.skill.skillId}
           </span>
           <span className="skill-market-card__tags">
-            {participants.length > 1 || (creator === undefined && participants.length > 0) ? <span title={participants.map(item => item.name).join('、')}>{participants.map(item => item.name).join('、')}</span> : null}
             <span>使用 {formatUsageCount(getEnterpriseSkillUsage(props.skill.skillId))} 次</span>
           </span>
         </span>

@@ -32,11 +32,63 @@ describe('EnterpriseSkillHubView', () => {
     };
     renderHub({ skills: [skill] });
     const row = screen.getByTestId('enterprise-skill-participants');
-    expect(within(row).getByText('张三 · 产品技能空间')).toBeInTheDocument();
+    expect(within(row).getByText('张三、李四、王五、赵六、钱七 · 产品技能空间')).toBeInTheDocument();
+    expect(within(row).getByText('张三、李四、王五、赵六、钱七 · 产品技能空间')).toHaveAttribute('title', '张三、李四、王五、赵六、钱七 · 产品技能空间');
     expect(within(row).getByLabelText('张三')).toHaveClass('skill-market-avatar');
     expect(within(row).getByLabelText('李四')).toHaveClass('skill-market-avatar');
     expect(within(row).getByText('+2')).toBeInTheDocument();
-    expect(within(row).getByText('张三、李四、王五、赵六、钱七')).toBeInTheDocument();
+    expect(row.querySelector('.skill-market-card__tags')).not.toHaveTextContent('张三');
+  });
+
+  it('deduplicates creator and contributor avatars, names and overflow together', () => {
+    renderHub({ skills: [{
+      ...createSkill('duplicate-participants', 'installed', 'verified', ['use']),
+      creator: { userId: 'creator', name: '张三' },
+      contributors: [
+        { userId: 'creator', name: '张三旧名称' },
+        { userId: 'user-2', name: '李四' },
+        { userId: 'user-2', name: '李四旧名称' },
+        { userId: 'user-3', name: '王五' },
+        { userId: 'user-4', name: '赵六' }
+      ]
+    }] });
+    const row = screen.getByTestId('enterprise-skill-duplicate-participants');
+    expect(within(row).getAllByLabelText('张三')).toHaveLength(1);
+    expect(within(row).queryByLabelText('张三旧名称')).not.toBeInTheDocument();
+    expect(within(row).getAllByLabelText('李四')).toHaveLength(1);
+    expect(within(row).queryByLabelText('李四旧名称')).not.toBeInTheDocument();
+    expect(within(row).getByText('+1')).toBeInTheDocument();
+    expect(row.querySelector('.skill-market-card__author')).toHaveTextContent('张三、李四、王五、赵六');
+    expect(row.querySelector('.skill-market-card__tags')).not.toHaveTextContent('张三');
+  });
+
+  it('deduplicates legacy creators without an ID by name', () => {
+    renderHub({ skills: [{
+      ...createSkill('legacy-duplicate', 'installed', 'verified', ['use']),
+      creator: { name: '张三' },
+      contributors: [{ userId: 'creator', name: '张三' }]
+    }] });
+    const row = screen.getByTestId('enterprise-skill-legacy-duplicate');
+    expect(within(row).getAllByLabelText('张三')).toHaveLength(1);
+    expect(within(row).getAllByText('张三')).toHaveLength(1);
+  });
+
+  it('keeps different users with the same name and deduplicates contributors without a creator', () => {
+    renderHub({ skills: [
+      {
+        ...createSkill('same-name', 'installed', 'verified', ['use']),
+        creator: { userId: 'creator', name: '张三' },
+        contributors: [{ userId: 'other-user', name: '张三' }]
+      },
+      {
+        ...createSkill('no-creator', 'installed', 'verified', ['use']),
+        contributors: [{ userId: 'updater', name: '李四' }, { userId: 'updater', name: '李四' }]
+      }
+    ] });
+    expect(within(screen.getByTestId('enterprise-skill-same-name')).getAllByLabelText('张三')).toHaveLength(2);
+    const row = screen.getByTestId('enterprise-skill-no-creator');
+    expect(within(row).getAllByLabelText('李四')).toHaveLength(1);
+    expect(within(row).getAllByText('李四')).toHaveLength(1);
   });
 
   it('combines space, status and participant name search filters', async () => {
@@ -53,7 +105,7 @@ describe('EnterpriseSkillHubView', () => {
     await user.type(screen.getByRole('searchbox', { name: '搜索企业 Skill' }), '李四');
     const row = screen.getByTestId('enterprise-skill-product-new');
     expect(row).toBeInTheDocument();
-    expect(within(row).getByText('李四')).toBeInTheDocument();
+    expect(within(row).getByText('李四 · 产品空间')).toBeInTheDocument();
   });
   it('renders all enterprise statuses with the exact allowed actions', () => {
     renderHub({
