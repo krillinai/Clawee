@@ -41,6 +41,10 @@ export type EnterpriseSkillHubViewProps = {
   skills?: EnterpriseSkillResponse[];
   loading: boolean;
   loadError?: string;
+  search?: string;
+  onSearchChange?(value: string): void;
+  addMenuOpen?: boolean;
+  onAddMenuOpenChange?(open: boolean): void;
   operation?: EnterpriseSkillOperation;
   useError?: EnterpriseSkillUseError;
   projects: readonly SkillMarketProjectOption[];
@@ -95,12 +99,22 @@ type ActiveDetail = {
 };
 
 export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
-  const [query, setQuery] = useState('');
+  const [internalQuery, setInternalQuery] = useState('');
+  const query = props.search ?? internalQuery;
+  function setQuery(value: string) {
+    if (props.onSearchChange !== undefined) props.onSearchChange(value);
+    else setInternalQuery(value);
+  }
   const [statusFilter, setStatusFilter] = useState<EnterpriseStatusFilter>('all');
   const [spaceFilter, setSpaceFilter] = useState('all');
   const [activeDetail, setActiveDetail] = useState<ActiveDetail>();
   const [pendingUseSkill, setPendingUseSkill] = useState<EnterpriseSkillResponse>();
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [internalAddMenuOpen, setInternalAddMenuOpen] = useState(false);
+  const addMenuOpen = props.addMenuOpen ?? internalAddMenuOpen;
+  function setAddMenuOpen(open: boolean) {
+    if (props.onAddMenuOpenChange !== undefined) props.onAddMenuOpenChange(open);
+    else setInternalAddMenuOpen(open);
+  }
   const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailRequestRef = useRef(0);
   const mutationLocked = props.operation !== undefined && props.operation.error === undefined;
@@ -226,15 +240,17 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
 
   return (
     <section className="enterprise-skill-hub" aria-label="企业Skills">
-      <header className="skill-market-heading">
-        <div className="skill-market__toolbar">
-          <label className="skill-market-search"><Search size={17} aria-hidden="true" /><input aria-label="搜索企业 Skill" onChange={event => setQuery(event.target.value)} placeholder="搜索技能" type="search" value={query} /></label>
-          <div className="skill-market-add">
-            <button aria-expanded={addMenuOpen} aria-haspopup="menu" className="skill-market-add__trigger" onClick={() => setAddMenuOpen(open => !open)} type="button"><Plus size={15}/><span>添加技能</span><ChevronDown size={13}/></button>
-            {addMenuOpen ? <div className="skill-market-add__menu" role="menu"><button disabled={props.onCreateSkill === undefined} onClick={() => { setAddMenuOpen(false); props.onCreateSkill?.(); }} role="menuitem"><WandSparkles size={16}/><span><strong>创建技能</strong><small>通过对话生成新的技能</small></span></button>{props.onUploadSkill ? <button onClick={() => { setAddMenuOpen(false); props.onUploadSkill?.(); }} role="menuitem"><Upload size={16}/><span><strong>上传技能</strong><small>选择包含 SKILL.md 的文件夹</small></span></button> : null}</div> : null}
+      {props.onSearchChange === undefined ? (
+        <header className="skill-market-heading">
+          <div className="skill-market__toolbar">
+            <label className="skill-market-search"><Search size={17} aria-hidden="true" /><input aria-label="搜索企业 Skill" onChange={event => setQuery(event.target.value)} placeholder="搜索技能" type="search" value={query} /></label>
+            <div className="skill-market-add">
+              <button aria-expanded={addMenuOpen} aria-haspopup="menu" className="skill-market-add__trigger" onClick={() => setAddMenuOpen(!addMenuOpen)} type="button"><Plus size={15}/><span>添加技能</span><ChevronDown size={13}/></button>
+              {addMenuOpen ? <div className="skill-market-add__menu" role="menu"><button disabled={props.onCreateSkill === undefined} onClick={() => { setAddMenuOpen(false); props.onCreateSkill?.(); }} role="menuitem"><WandSparkles size={16}/><span><strong>创建技能</strong><small>通过对话生成新的技能</small></span></button>{props.onUploadSkill ? <button onClick={() => { setAddMenuOpen(false); props.onUploadSkill?.(); }} role="menuitem"><Upload size={16}/><span><strong>上传技能</strong><small>选择包含 SKILL.md 的文件夹</small></span></button> : null}</div> : null}
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      ) : null}
 
       <div className="skill-market-navigation">
         <div className="skill-market-category-line">

@@ -44,6 +44,8 @@ export type SkillMarketViewProps = {
   installRecords?: CodexSkillMarketInstallRecordResponse[];
   loading: boolean;
   loadError?: string;
+  search?: string;
+  onSearchChange?(value: string): void;
   operation?: SkillMarketOperation;
   useError?: SkillMarketUseError;
   projects: readonly SkillMarketProjectOption[];
@@ -63,6 +65,8 @@ export function SkillMarketView({
   installRecords,
   loading,
   loadError,
+  search,
+  onSearchChange,
   operation,
   useError,
   projects,
@@ -73,7 +77,12 @@ export function SkillMarketView({
   catalogOverride,
 }: SkillMarketViewInternalProps) {
   const catalog = catalogOverride ?? skillMarketCatalog;
-  const [query, setQuery] = useState('');
+  const [internalQuery, setInternalQuery] = useState('');
+  const query = search ?? internalQuery;
+  function setQuery(value: string) {
+    if (onSearchChange !== undefined) onSearchChange(value);
+    else setInternalQuery(value);
+  }
   const [status, setStatus] = useState<SkillMarketFilterStatus>('all');
   const [category, setCategory] = useState<string | null>(null);
   const [activeEntry, setActiveEntry] = useState<SkillMarketViewEntry | null>(null);
@@ -167,25 +176,6 @@ export function SkillMarketView({
 
   return (
     <section className="skill-market" aria-label="Skill 功能目录">
-      <header className="skill-market-heading">
-        <div className="skill-market__toolbar">
-          <label className="skill-market-search">
-            <Search size={17} aria-hidden="true" />
-            <input
-              aria-label="搜索 Skill"
-              onChange={(event) => {
-                setQuery(event.target.value);
-                resetVisibleCount();
-              }}
-              placeholder="搜索技能"
-              type="search"
-              value={query}
-            />
-          </label>
-
-        </div>
-      </header>
-
       <div className="skill-market-navigation">
         <div className="skill-market-category-line">
           <div
@@ -238,6 +228,21 @@ export function SkillMarketView({
             ))}
           </div>
 
+          {onSearchChange === undefined ? (
+            <label className="skill-market-search">
+              <Search size={17} aria-hidden="true" />
+              <input
+                aria-label="搜索 Skill"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  resetVisibleCount();
+                }}
+                placeholder="搜索技能"
+                type="search"
+                value={query}
+              />
+            </label>
+          ) : null}
         </div>
 
       </div>

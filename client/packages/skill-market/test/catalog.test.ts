@@ -7,9 +7,9 @@ import {
 } from '../src/index.js';
 
 describe('skill market catalog', () => {
-  it('contains the reviewed 53-entry snapshot with unique ids', () => {
-    expect(skillMarketCatalog).toHaveLength(53);
-    expect(new Set(skillMarketCatalog.map((entry) => entry.id)).size).toBe(53);
+  it('contains the reviewed 31-entry snapshot with unique ids', () => {
+    expect(skillMarketCatalog).toHaveLength(31);
+    expect(new Set(skillMarketCatalog.map((entry) => entry.id)).size).toBe(31);
     expect(skillMarketCatalog.every((entry) => /^[\w.-]+\/[\w.-]+$/.test(entry.githubRepository))).toBe(true);
     expect(getSkillMarketEntry('invokeai')?.githubRepository).toBe('invoke-ai/InvokeAI');
   });

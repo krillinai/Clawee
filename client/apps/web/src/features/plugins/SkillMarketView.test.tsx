@@ -47,22 +47,22 @@ describe('SkillMarketView', () => {
     renderSkillMarket();
 
     expect(screen.queryByRole('heading', { level: 1, name: '插件' })).not.toBeInTheDocument();
-    expect(screen.queryByText('53 个 Skill')).not.toBeInTheDocument();
+    expect(screen.queryByText('31 个 Skill')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('skill-market-card')).toHaveLength(12);
-    expect(screen.getByText('已显示 12 / 53')).toBeInTheDocument();
+    expect(screen.getByText('已显示 12 / 31')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '加载更多 Skill' })).not.toBeInTheDocument();
 
     await intersectSkillMarketSentinel();
 
     expect(screen.getAllByTestId('skill-market-card')).toHaveLength(24);
-    expect(screen.getByText('已显示 24 / 53')).toBeInTheDocument();
+    expect(screen.getByText('已显示 24 / 31')).toBeInTheDocument();
 
     const videoCategory = skillMarketCatalog.filter(
-      (entry) => entry.category === 'video-subtitle'
+      (entry) => entry.category === 'content-creation'
     ).length;
     expect(
       within(screen.getByRole('group', { name: '分类' })).getByRole('button', {
-        name: `做视频与字幕 ${videoCategory}`,
+        name: `内容创作 ${videoCategory}`,
       })
     ).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: '场景' })).not.toBeInTheDocument();
@@ -117,9 +117,9 @@ describe('SkillMarketView', () => {
     renderSkillMarket();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('skill-market-card')).toHaveLength(53);
+      expect(screen.getAllByTestId('skill-market-card')).toHaveLength(31);
     });
-    expect(screen.getByText('已显示 53 / 53')).toBeInTheDocument();
+    expect(screen.getByText('已显示 31 / 31')).toBeInTheDocument();
     expect(screen.queryByTestId('skill-market-scroll-sentinel')).not.toBeInTheDocument();
   });
 
@@ -131,18 +131,18 @@ describe('SkillMarketView', () => {
       entries: skillMarketCatalog,
       skills: createSkillsResponse([]),
       records: [],
-      category: 'video-subtitle',
+      category: 'content-creation',
     });
     await user.click(screen.getByRole('button', {
-      name: `做视频与字幕 ${categoryResult.entries.length}`,
+      name: `内容创作 ${categoryResult.entries.length}`,
     }));
     expect(screen.getAllByTestId('skill-market-card')).toHaveLength(
       Math.min(categoryResult.entries.length, 12)
     );
     expect(screen.queryByRole('group', { name: '场景' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '全部 53' }));
-    expect(screen.getByRole('button', { name: '全部 53' })).toHaveAttribute(
+    await user.click(screen.getByRole('button', { name: '全部 31' }));
+    expect(screen.getByRole('button', { name: '全部 31' })).toHaveAttribute(
       'aria-pressed',
       'true'
     );
@@ -407,18 +407,18 @@ describe('SkillMarketView', () => {
     expect(onInstall).toHaveBeenCalledWith('garrytan-gstack');
 
     await user.clear(screen.getByRole('searchbox', { name: '搜索 Skill' }));
-    await user.type(screen.getByRole('searchbox', { name: '搜索 Skill' }), '卡卡字幕助手');
-    const captionAction = within(getSkillCard('videocaptioner')).getByRole('button', {
+    await user.type(screen.getByRole('searchbox', { name: '搜索 Skill' }), 'invokeai');
+    const captionAction = within(getSkillCard('invokeai')).getByRole('button', {
       name: '安装',
     });
     expect(captionAction).toBeEnabled();
     await user.click(captionAction);
-    expect(onInstall).toHaveBeenCalledWith('videocaptioner');
+    expect(onInstall).toHaveBeenCalledWith('invokeai');
   });
 
   it('卡片显示名称、作者昵称、用途和主操作，完整标签留在详情中', () => {
     const entry = createMarketEntry({
-      category: 'video-subtitle',
+      category: 'content-creation',
       subcategory: '字幕生成',
       platforms: ['YouTube', 'B站'],
       tasks: ['字幕生成', '转录', 'YouTube'],
@@ -691,13 +691,13 @@ describe('SkillMarketView', () => {
       onInstall,
     });
 
-    await user.type(screen.getByRole('searchbox', { name: '搜索 Skill' }), 'AI Builders 动态摘要');
-    const installButton = within(getSkillCard('follow-builders')).getByRole('button', { name: '安装' });
+    await user.type(screen.getByRole('searchbox', { name: '搜索 Skill' }), 'invokeai');
+    const installButton = within(getSkillCard('invokeai')).getByRole('button', { name: '安装' });
     expect(installButton).toBeEnabled();
     expect(installButton).not.toHaveAttribute('title', '请等待当前操作完成');
 
     await user.click(installButton);
-    expect(onInstall).toHaveBeenCalledWith('follow-builders');
+    expect(onInstall).toHaveBeenCalledWith('invokeai');
   });
 
   it('非法图片和头像 URL 不会进入 img src，合法 https 与同源路径可使用', () => {
@@ -950,7 +950,7 @@ function createMarketEntry(overrides: Partial<SkillMarketEntry> = {}): SkillMark
     githubRepository: 'test/test-skill',
     tagline: '用于测试市场卡片',
     summary: '用于测试市场卡片。',
-    category: 'content-planning',
+    category: 'content-creation',
     subcategory: '测试场景',
     platforms: ['Web'],
     tasks: ['测试任务'],

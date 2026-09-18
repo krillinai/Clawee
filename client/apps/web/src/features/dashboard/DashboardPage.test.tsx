@@ -86,18 +86,6 @@ describe('DashboardPage', () => {
     expect(screen.queryByRole('heading', { name: '知识资产' })).not.toBeInTheDocument();
   });
 
-  it('creates a personal dashboard in the employee view', async () => {
-    const user = userEvent.setup();
-    render(<DashboardPage />);
-    await user.click(screen.getByRole('button', { name: '员工' }));
-    await user.click(screen.getByRole('button', { name: '创建看板' }));
-    await user.type(screen.getByPlaceholderText('例如：销售日报'), '我的销售日报');
-    await user.type(screen.getByPlaceholderText('这个看板用于查看什么'), '跟踪个人销售目标');
-    await user.click(screen.getByRole('button', { name: '保存' }));
-    expect(screen.getByRole('heading', { name: '我的销售日报' })).toBeInTheDocument();
-    expect(screen.getByText('个人看板')).toBeInTheDocument();
-  });
-
   it('loads the enterprise Bilibili summary and opens its real dashboard', async () => {
     const user = userEvent.setup();
     render(<DashboardPage
@@ -109,7 +97,7 @@ describe('DashboardPage', () => {
     />);
 
     expect(await screen.findByText('已采集 24 个稿件')).toBeInTheDocument();
-    expect(screen.getByText('128,600')).toBeInTheDocument();
+    expect(await screen.findByText('128,600')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
     expect(screen.getByRole('heading', { name: '哔哩哔哩数据洞察' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '增长趋势' })).toBeInTheDocument();

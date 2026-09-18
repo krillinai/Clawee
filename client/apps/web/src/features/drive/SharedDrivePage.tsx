@@ -317,27 +317,23 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                     onChange={event => setSearchValue(event.target.value)}
                   />
                 </form>
-                {writableSpaces.length > 0 ? (
-                  <>
-                    <input
-                      ref={uploadInputRef}
-                      className="shared-drive-file-input"
-                      type="file"
-                      aria-label="选择上传到共享网盘的文件"
-                      disabled={operationWorking}
-                      onChange={handleUploadSelection}
-                    />
-                    <button
-                      className="shared-drive-primary-button"
-                      type="button"
-                      disabled={operationWorking}
-                      onClick={chooseUpload}
-                    >
-                      <Upload size={15} aria-hidden="true" />
-                      <span>{operationWorking ? '处理中' : '上传文件'}</span>
-                    </button>
-                  </>
-                ) : null}
+                <input
+                  ref={uploadInputRef}
+                  className="shared-drive-file-input"
+                  type="file"
+                  aria-label="选择上传到共享网盘的文件"
+                  disabled={operationWorking}
+                  onChange={handleUploadSelection}
+                />
+                <button
+                  className="shared-drive-primary-button"
+                  type="button"
+                  disabled={operationWorking}
+                  onClick={chooseUpload}
+                >
+                  <Upload size={15} aria-hidden="true" />
+                  <span>{operationWorking ? '处理中' : '上传文件'}</span>
+                </button>
                 <input
                   ref={replaceInputRef}
                   className="shared-drive-file-input"
@@ -522,16 +518,20 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
               </button>
             </header>
             <p>请选择要把文件上传到哪个共享空间。</p>
-            <ul>
-              {writableSpaces.map(space => (
-                <li key={space.spaceId}>
-                  <button type="button" onClick={() => chooseUploadSpace(space)}>
-                    <strong>{space.name}</strong>
-                    <span>{space.description || '暂无说明'}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {writableSpaces.length === 0 ? (
+              <p>当前账号没有可上传文件的共享空间。</p>
+            ) : (
+              <ul>
+                {writableSpaces.map(space => (
+                  <li key={space.spaceId}>
+                    <button type="button" onClick={() => chooseUploadSpace(space)}>
+                      <strong>{space.name}</strong>
+                      <span>{space.description || '暂无说明'}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
       ) : null}
