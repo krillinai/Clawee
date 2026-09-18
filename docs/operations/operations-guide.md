@@ -2,7 +2,7 @@
 
 本文面向负责企业私有化部署的运维人员，目标是在具备主机、数据库和网络访问条件后，完成 Gateway 的首次部署、管理员注册和基本可用性验证。
 
-本文只覆盖基础部署和服务操作，不介绍业务能力的配置和运营。
+本文覆盖基础部署、服务操作和客户端 Server 模式的 MCP 接入，不介绍其他业务能力的配置和运营。
 
 ## 1. 部署组成
 
@@ -368,6 +368,79 @@ ssh <SSH 用户>@<服务器地址> \
 ```
 
 客户端访问地址为 `http://<服务器地址>:19860`。正式对外提供服务时，应通过 HTTPS 反向代理访问，并按企业防火墙策略限制 `19860` 端口。已有客户端运行数据时，迁移前应先停止服务并备份 `/home/<SSH 用户>/data/clawee-agent`。
+
+### 6.5 将客户端 Server 模式接入 Gateway MCP 上游
+
+完成 6.4 的部署后，可以将该远程 Agent 注册为现有 Go Gateway 的 MCP 上游，让已授权用户通过 Gateway 提交远程任务并查询结果。此操作需要 Gateway 已部署且操作者具备 MCP 上游、能力和授权管理权限；源码部署命令不会自动完成后台配置。
+
+#### 6.5.1 确认地址和访问 Token
+
+`server:deploy:source` 的 `--host` 是 SSH 目标，`--port` 是 SSH 端口，`--dir` 是源码目录；Agent 的监听端口和数据目录以 systemd unit 的 `ExecStart` 为准：
+
+```bash
+ssh <SSH 用户>@<服务器地址> \
+  'sudo systemctl cat clawee-server.service'
+```
+
+核对 `--port` 和 `--data-dir`。本指南示例分别为 `19860` 和 `/home/<SSH 用户>/data/clawee-agent`。按实际数据目录读取 `server-token`：
+
+```bash
+ssh <SSH 用户>@<服务器地址> \
+  'cat /home/<SSH 用户>/data/clawee-agent/server-token'
+```
+
+该 Token 是远程 Agent 的访问凭据，不是 Gateway 的账号 MCP Token。只在受控终端读取并填入后台，不写入文档、Git、普通日志或工单。
+
+上游地址必须从 Gateway 的运行环境可达，而不只是运维人员的电脑可达。同主机且同网络命名空间时可使用 `http://127.0.0.1:19860/mcp`，跨主机优先使用内网地址；容器中的 `127.0.0.1` 不指向宿主机。跨公网接入应使用 HTTPS 反向代理，并限制 Agent 原始端口的访问来源，不直接公开整个 Agent Web/API。反向代理需透传 `Authorization`、允许 MCP POST 请求，并禁用缓存和流式响应缓冲。
+
+#### 6.5.2 新增 MCP 上游服务
+
+在 Gateway 管理后台进入「MCP 上游服务」，点击「新增上游服务」，填写以下配置。名称、团队和分类按企业实际情况调整：
+
+| 字段 | 示例或说明 |
+| --- | --- |
+| `server_id` | `remote-agent`；使用唯一 ID，支持字母、数字、点、下划线和连字符 |
+| 名称 | `远程任务 Agent` |
+| `domain` | `agent`，用于分类 |
+| `transport` | `streamable_http`，不选择 `stdio`、`sse` 或 `collector_pull` |
+| `endpoint` | `https://<Agent 域名>/mcp`；受信内网可使用 `http://<Agent 内网地址>:19860/mcp`，端口以实际配置为准 |
+| `token` | `server-token` 文件中的原文，不添加 `Bearer ` 前缀 |
+| `namespace` | `remote_agent`；不同上游使用不同命名空间，避免同名工具冲突 |
+| `owner_team` | `<负责团队>` |
+| 负责内容 | 按实际用途描述，例如「负责服务端项目任务执行与结果查询」 |
+
+保存后点击「同步工具」，预期同步出以下三个工具，而不是 `codex.ask`：
+
+| 上游工具 | 用途 |
+| --- | --- |
+| `clawee_submit_task` | 提交任务，立即返回任务 ID |
+| `clawee_get_task` | 查询任务状态和持久化事件 |
+| `clawee_get_task_result` | 查询任务终态结果 |
+
+上述命名空间下，能力目录中的暴露名称类似 `remote_agent.clawee_submit_task`。新同步能力默认处于待审核状态；进入「MCP 能力目录」审核 Schema 和风险，配置门禁并启用能力，确认上游处于启用状态，再通过 MCP 授权入口显式授权给需要使用的用户账号。同步或启用能力不会自动授予调用权限。
+
+`clawee_submit_task` 会实际启动远程执行，应按业务风险配置用户确认或管理员审批。所有获授权调用均使用同一远程 Agent 的运行环境；Gateway 的账号授权不等于远程工作区或任务数据的账号级隔离，不应将该服务直接作为不互信用户的共享执行环境。
+
+#### 6.5.3 验证调用和排查故障
+
+用已授权账号通过 Gateway 调用提交工具，先使用不修改文件的测试请求：
+
+```json
+{
+  "prompt": "仅回复：远程 Agent MCP 接入成功，不修改任何文件。"
+}
+```
+
+不指定项目时使用远程 Agent 的默认项目；也可以提交 `project_id` 或 `project_name`，但对应项目必须已存在、处于活动状态且目录可访问。提交后用返回的 `task_id` 调用状态查询工具，再查询终态结果，并检查后台代理审计。工具同步成功只说明 MCP 发现可用，不代表模型配置、Runtime 和实际任务执行均正常。
+
+终端 MCP Client 应使用后台上游详情提供的 Gateway MCP 地址，例如 `https://<Gateway 域名>/mcp/servers/remote-agent`，并携带 Gateway 账号 MCP Token（`Authorization: Bearer <账号 MCP Token>`）和属于该账号且已启用的 `X-Claw-Agent-ID: <agent_id>`。不要向终端用户分发远程 Agent 的 `server-token`。
+
+- 同步失败：检查 Gateway 到 Agent 的网络连通性、endpoint、Token 和反向代理配置。
+- 同步成功但工具不可见或调用被拒绝：检查上游和能力是否启用、账号授权是否正确，以及门禁是否已完成。
+- 工具可见但任务失败：检查远程 Agent 的模型配置、Codex Runtime、项目状态和目录权限。
+- 浏览器直接打开 `/mcp` 返回 `405`：该接口不支持普通 GET 请求，不能据此判定服务故障，应使用后台同步或 MCP Client 验证。
+
+其他上游接入和 Gateway endpoint 规则见 [上游 MCP Server 接入](../../server/docs/integration/upstream-mcp.md)。
 
 ## 7. 配置域名访问
 
