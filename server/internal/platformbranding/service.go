@@ -57,8 +57,8 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration,
 			}
 		}
 		normalized := strings.TrimSpace(*value)
-		if !utf8.ValidString(normalized) || utf8.RuneCountInString(normalized) < 1 || utf8.RuneCountInString(normalized) > 4 {
-			return Configuration{}, fmt.Errorf("%w: %s 名称必须为 1～4 个字符", ErrInvalidMenuLabel, key)
+		if !utf8.ValidString(normalized) || utf8.RuneCountInString(normalized) < 1 || utf8.RuneCountInString(normalized) > 10 {
+			return Configuration{}, fmt.Errorf("%w: %s 名称必须为 1～10 个字符", ErrInvalidMenuLabel, key)
 		}
 		labels[key] = &normalized
 	}

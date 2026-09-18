@@ -54,7 +54,7 @@ func TestServiceMenuLabelsValidationAndReset(t *testing.T) {
 	if err != nil || configuration.SidebarMenuLabels.Skills != "企业技能" {
 		t.Fatalf("configuration=%#v error=%v", configuration, err)
 	}
-	for _, value := range []string{"", "   ", "一二三四五", "a\nb", "a\tb", "a\u200bb"} {
+	for _, value := range []string{"", "   ", "一二三四五六七八九十一", "a\nb", "a\tb", "a\u200bb"} {
 		t.Run(value, func(t *testing.T) {
 			_, err := service.Update(context.Background(), UpdateInput{
 				SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
@@ -69,7 +69,7 @@ func TestServiceMenuLabelsValidationAndReset(t *testing.T) {
 			}
 		})
 	}
-	for _, value := range []string{"字", "Ab12", "𠮷𠮷𠮷𠮷"} {
+	for _, value := range []string{"字", "Ab12", "一二三四五", "一二三四五六七八九十", "𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷"} {
 		_, err := service.Update(context.Background(), UpdateInput{
 			SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
 			SidebarMenuLabels: map[string]*string{"drive": &value},

@@ -104,7 +104,7 @@ func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
 	if current.SidebarMenuLabels.Skills != "企业技能" {
 		t.Fatal("legacy update erased menu labels")
 	}
-	for _, value := range []string{`{"skills":""}`, `{"skills":"一二三四五"}`, `{"drive":42}`, `{"unknown":"字"}`, `null`, `[]`, `invalid`} {
+	for _, value := range []string{`{"skills":""}`, `{"skills":"一二三四五六七八九十一"}`, `{"drive":42}`, `{"unknown":"字"}`, `null`, `[]`, `invalid`} {
 		fields["sidebar_menu_labels"] = value
 		brandingMultipartRequest(t, router, fields, nil, nil, http.StatusBadRequest)
 	}

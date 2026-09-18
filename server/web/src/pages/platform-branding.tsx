@@ -31,7 +31,7 @@ function menuLabelError(value: string | null | undefined): string | undefined {
   if (value == null) return undefined;
   if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return "不能包含换行或控制字符";
   const length = Array.from(value.trim()).length;
-  return length < 1 || length > 4 ? "名称必须为 1～4 个字符" : undefined;
+  return length < 1 || length > 10 ? "名称必须为 1～10 个字符" : undefined;
 }
 
 type LogoDraft = {

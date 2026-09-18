@@ -127,12 +127,12 @@ describe("PlatformBrandingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "平台外观" });
     const input = screen.getByLabelText("企业 Skill 名称");
-    for (const value of ["", "   ", "一二三四五", "a\u200bb"]) {
+    for (const value of ["", "   ", "一二三四五六七八九十一", "a\u200bb"]) {
       fireEvent.change(input, { target: { value: value || " " } });
       expect(input).toHaveAttribute("aria-invalid", "true");
       expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     }
-    for (const value of ["字", "𠮷𠮷𠮷𠮷", " 企业技能 "]) {
+    for (const value of ["字", "一二三四五", "𠮷".repeat(10), " 一二三四五六七八九十 "]) {
       fireEvent.change(input, { target: { value } });
       expect(input).toHaveAttribute("aria-invalid", "false");
       expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
@@ -141,7 +141,7 @@ describe("PlatformBrandingPage", () => {
     await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith({
       sidebarLogoAction: "keep", sidebarLogo: undefined,
       sidebarCompactLogoAction: "keep", sidebarCompactLogo: undefined,
-      sidebarMenuLabels: { skills: "企业技能" }
+      sidebarMenuLabels: { skills: "一二三四五六七八九十" }
     }));
   });
 

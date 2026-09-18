@@ -49,7 +49,7 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql"} {
+	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql"} {
 		raw, err := migrations.FS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -60,7 +60,7 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		}
 	}
 	service := NewService(NewPostgresStore(pool))
-	label := "𠮷𠮷𠮷𠮷"
+	label := "𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷"
 	drive := "网盘"
 	input := UpdateInput{
 		SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep, UpdatedBy: "test-admin",
@@ -89,11 +89,14 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT sidebar_skills_label IS NULL FROM platform_branding`).Scan(&resetIsNull); err != nil || !resetIsNull {
 		t.Fatalf("reset is null=%v error=%v", resetIsNull, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE platform_branding SET sidebar_drive_label='一二三四五'`); err == nil {
+	if _, err := pool.Exec(ctx, `UPDATE platform_branding SET sidebar_drive_label='一二三四五六七八九十一'`); err == nil {
 		t.Fatal("数据库未拒绝超长名称")
 	}
-	raw, _ := migrations.FS.ReadFile("00053_sidebar_menu_labels.sql")
+	raw, _ := migrations.FS.ReadFile("00055_sidebar_menu_label_length.sql")
 	if _, err := pool.Exec(ctx, strings.SplitN(string(raw), "-- +goose Down", 2)[1]); err != nil {
 		t.Fatalf("回滚迁移失败: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE platform_branding SET sidebar_drive_label='一二三四五'`); err == nil {
+		t.Fatal("回滚后数据库未恢复 4 字上限")
 	}
 }
