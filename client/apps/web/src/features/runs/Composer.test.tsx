@@ -1171,6 +1171,41 @@ describe('Composer', () => {
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
   });
 
+  it('uploads data, source, config and HTML attachments without image input support', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn(async (file: File) => ({
+      ...attachment(file.name),
+      id: file.name,
+      mime: 'text/plain'
+    }));
+    mockObjectUrls();
+    render(
+      <Composer
+        {...defaultProps}
+        imageInputSupported={false}
+        onUploadAttachment={onUploadAttachment}
+      />
+    );
+    const files = [
+      new File(['name,value\nrose,10'], 'data.csv', { type: 'application/vnd.ms-excel' }),
+      new File(['export const value = 10;'], 'index.ts', { type: 'video/mp2t' }),
+      new File(['enabled: true'], 'config.yaml', { type: 'application/yaml' }),
+      new File(['<script>throw new Error("must not execute")</script>'], 'page.html', {
+        type: 'text/html'
+      })
+    ];
+
+    await user.upload(screen.getByLabelText('选择文件'), files);
+
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledTimes(files.length));
+    for (const file of files) {
+      expect(onUploadAttachment).toHaveBeenCalledWith(file);
+      expect(screen.getByTitle(file.name)).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(document.querySelector('script')).toBeNull();
+  });
+
   it('keeps document input available when Codex image input is unsupported', async () => {
     const user = userEvent.setup();
     const onUploadAttachment = vi.fn(async (file: File) => attachment(file.name));

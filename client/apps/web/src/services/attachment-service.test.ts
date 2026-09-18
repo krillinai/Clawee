@@ -52,6 +52,23 @@ describe('attachment service', () => {
     expect(deleteRequest).toHaveBeenCalledWith('/attachments/attachment-1?draftId=draft%2F1');
   });
 
+  it.each([
+    ['data.csv', 'application/vnd.ms-excel', 'text/csv'],
+    ['index.ts', 'video/mp2t', 'text/plain'],
+    ['config.yaml', 'application/yaml', 'text/yaml']
+  ])('uploads %s with a canonical text MIME type', async (fileName, browserMime, mime) => {
+    const postBinary = vi.fn(async () => ({ attachment: { id: 'attachment-text' } }));
+    const service = createAttachmentService({ postBinary } as unknown as RuntimeClient);
+    const file = new File(['text content'], fileName, { type: browserMime });
+
+    await service.upload({ file, draftId: 'draft-text' });
+
+    expect(postBinary).toHaveBeenCalledWith(
+      `/attachments?fileName=${fileName}&mime=${encodeURIComponent(mime)}&draftId=draft-text`,
+      file
+    );
+  });
+
   it('infers a supported MIME type from the file extension when the browser omits it', async () => {
     const postBinary = vi.fn(async () => ({
       attachment: { id: 'attachment-2' },

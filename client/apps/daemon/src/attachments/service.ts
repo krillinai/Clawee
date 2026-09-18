@@ -35,8 +35,14 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'text/css',
+  'text/csv',
+  'text/html',
   'text/markdown',
-  'text/plain'
+  'text/plain',
+  'text/tab-separated-values',
+  'text/xml',
+  'text/yaml'
 ]);
 
 type AttachmentRow = {

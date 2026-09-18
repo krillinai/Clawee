@@ -235,6 +235,75 @@ describe('attachment service', () => {
     expect(persistedService.listStorageFiles()).toEqual([]);
   });
 
+  it.each([
+    ['data.csv', 'text/csv', 'name,value\nrose,10'],
+    ['data.tsv', 'text/tab-separated-values', 'name\tvalue\nrose\t10'],
+    ['config.yaml', 'text/yaml', 'enabled: true'],
+    ['config.xml', 'text/xml', '<config enabled="true"/>'],
+    ['page.html', 'text/html', '<script>window.attachmentExecuted = true;</script>'],
+    ['styles.css', 'text/css', 'body { color: red; }'],
+    ['main.ts', 'text/plain', 'export const enabled = true;'],
+    ['app.log', 'text/plain', 'INFO application started'],
+    ['config.toml', 'text/plain', '[app]\nenabled = true']
+  ])('stores %s and passes its raw text into run context', async (fileName, mime, text) => {
+    const service = setup();
+    const uploaded = await service.upload({
+      draftId: 'draft-text',
+      fileName,
+      mime,
+      content: Buffer.from(text)
+    });
+    const resolved = await service.resolveForRun({
+      ids: [uploaded.attachment.id],
+      draftId: 'draft-text'
+    });
+
+    expect(uploaded.attachment.mime).toBe(mime);
+    expect(resolved.imagePaths).toEqual([]);
+    expect(resolved.textContext).toContain(`${fileName}（${mime}）`);
+    expect(resolved.textContext).toContain(text);
+  });
+
+  it.each([
+    'text/csv', 'text/tab-separated-values', 'text/yaml',
+    'text/xml', 'text/html', 'text/css', 'text/plain'
+  ])('rejects binary and invalid UTF-8 content declared as %s', async mime => {
+    const service = setup();
+    for (const content of [PNG, Buffer.from([0xc3, 0x28]), Buffer.from('text\u0000binary')]) {
+      await expect(service.upload({
+        draftId: 'draft-text',
+        fileName: 'disguised.txt',
+        mime,
+        content
+      })).rejects.toMatchObject({ code: 'ATTACHMENT_TYPE_MISMATCH', statusCode: 415 });
+    }
+    expect(service.listStorageFiles()).toEqual([]);
+  });
+
+  it('keeps file and total context limits for expanded text attachments', async () => {
+    const service = setup();
+    const ids: string[] = [];
+    for (const [fileName, mime, text] of [
+      ['data.csv', 'text/csv', 'a'.repeat(40_001)],
+      ['config.yaml', 'text/yaml', 'b'.repeat(40_001)],
+      ['main.ts', 'text/plain', 'omitted source code']
+    ] as const) {
+      const uploaded = await service.upload({
+        draftId: 'draft-large', fileName, mime, content: Buffer.from(text)
+      });
+      ids.push(uploaded.attachment.id);
+    }
+    const resolved = await service.resolveForRun({ ids, draftId: 'draft-large' });
+
+    expect(resolved.textContext).toContain('a'.repeat(40_000));
+    expect(resolved.textContext).not.toContain('a'.repeat(40_001));
+    expect(resolved.textContext).toContain('b'.repeat(40_000));
+    expect(resolved.textContext).not.toContain('b'.repeat(40_001));
+    expect(resolved.textContext).toContain('内容已截断');
+    expect(resolved.textContext).toContain('[内容因附件总量限制未注入]');
+    expect(resolved.textContext).not.toContain('omitted source code');
+  });
+
   it('extracts PDF and text attachments into bounded run context', async () => {
     const service = setup();
     const pdf = await service.upload({
