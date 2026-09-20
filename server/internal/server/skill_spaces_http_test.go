@@ -161,6 +161,18 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	if webUploaded.Skill.SpaceID != secondary.SpaceID || webUploaded.Version.UploadedByUserID != user.Account.UserID || webUploaded.Version.UploadedByAgentID != "" {
 		t.Fatalf("web uploaded result=%#v", webUploaded)
 	}
+	webCookies := []*http.Cookie{{Name: "claw_front_token", Value: webTokens.Token(accounts.AudienceFrontend).Token}}
+	pending := doJSON(t, router, http.MethodGet, "/api/v1/app/skills/own-pending-versions", "", webCookies, http.StatusOK)
+	items := pending["data"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["version_id"] != webUploaded.Version.VersionID {
+		t.Fatalf("own pending versions=%#v", items)
+	}
+	publishBody := `{"skill_id":"` + webUploaded.Skill.SkillID + `","version_id":"` + webUploaded.Version.VersionID + `"}`
+	doJSON(t, router, http.MethodPost, "/api/v1/app/skills/current-version/own", publishBody, webCookies, http.StatusOK)
+	pending = doJSON(t, router, http.MethodGet, "/api/v1/app/skills/own-pending-versions", "", webCookies, http.StatusOK)
+	if len(pending["data"].([]any)) != 0 {
+		t.Fatalf("published version remains pending: %#v", pending)
+	}
 
 	body, contentType = skillUploadBodyWithPackage(t, map[string]string{"space_id": secondary.SpaceID, "version": "1.0.0"}, skillPackageNamed(t, "admin-upload"))
 	recorder = httptest.NewRecorder()

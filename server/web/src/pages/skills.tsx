@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Check, Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   ConfirmDialog,
@@ -19,7 +19,7 @@ import {
   SuccessAlert,
   TableStateRow
 } from "@/components/governance-ui";
-import { useAdminPermission } from "@/components/admin-permissions";
+import { useAdminAccount, useAdminPermission } from "@/components/admin-permissions";
 import { SkillSourceForm, type SkillSourceFormInput } from "@/components/skill-source-form";
 import { SkillSpacesPanel } from "@/components/skill-spaces-panel";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +43,9 @@ import {
   listSkills,
   moveSkillsToSpace,
   publishLatestSkillVersions,
+  publishOwnSkillVersion,
   queueGitHubSourceSync,
+  reviewSkillVersion,
   updateGitHubSource,
   type GitHubSource,
   type AdminSkill,
@@ -57,6 +59,9 @@ const skillSourcesKey = ["skill-sources"] as const;
 const skillSourceAvailabilityKey = ["skill-source-availability"] as const;
 
 export function SkillsPage() {
+  const account = useAdminAccount();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const spaceId = searchParams.get("space_id") ?? "";
   const canUpload = useAdminPermission(permissions.skillVersionUpload);
   const canDelete = useAdminPermission(permissions.skillDelete);
   const canMove = useAdminPermission(permissions.skillMove);
@@ -72,11 +77,9 @@ export function SkillsPage() {
   const canSyncSource = useAdminPermission(permissions.skillSourceSync);
   const canEnableSource = useAdminPermission(permissions.skillSourceEnable);
   const canDisableSource = useAdminPermission(permissions.skillSourceDisable);
-  const canSelectSkills = canMove || canPublish;
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [publication, setPublication] = useState("all");
-  const [spaceFilter, setSpaceFilter] = useState("all");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<AdminSkill | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminSkill | null>(null);
@@ -90,7 +93,10 @@ export function SkillsPage() {
   const [batchPublishError, setBatchPublishError] = useState<string | null>(null);
   const [batchSpaceOpen, setBatchSpaceOpen] = useState(false);
   const [targetSpaceId, setTargetSpaceId] = useState("");
-  const [activeTab, setActiveTab] = useState("skills");
+  const [activeTab, setActiveTab] = useState("spaces");
+  const [reviewTarget, setReviewTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]>; decision: "approved" | "rejected" } | null>(null);
+  const [reviewComment, setReviewComment] = useState("");
+  const [ownPublishTarget, setOwnPublishTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]> } | null>(null);
   const [sourceFormOpen, setSourceFormOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<GitHubSource | null>(null);
   const [editingToken, setEditingToken] = useState("");
@@ -98,27 +104,29 @@ export function SkillsPage() {
   const [statusAction, setStatusAction] = useState<"enable" | "disable" | null>(null);
   const [sourceActionError, setSourceActionError] = useState<string | null>(null);
 
-  const skillsQuery = useQuery({ queryKey: skillsKey, queryFn: listSkills });
+  const skillsQuery = useQuery({ queryKey: skillsKey, queryFn: listSkills, enabled: Boolean(spaceId) });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const sourceAvailabilityQuery = useQuery({ queryKey: skillSourceAvailabilityKey, queryFn: getSkillSourceAvailability });
   const skillSourceEnabled = sourceAvailabilityQuery.data === true;
   const sourcesQuery = useQuery({ queryKey: skillSourcesKey, queryFn: listGitHubSources, enabled: skillSourceEnabled && activeTab === "sources" });
   const skills = skillsQuery.data ?? [];
+  const selectedSpace = (spacesQuery.data ?? []).find((space) => space.spaceId === spaceId);
+  const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approverUserId));
+  const spaceSkills = skills.filter((item) => item.spaceId === spaceId);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return skills.filter((item) => {
+    return spaceSkills.filter((item) => {
       const matchesPublication =
         publication === "all" ||
         (publication === "published" && item.currentVersionId !== null) ||
         (publication === "unpublished" && item.currentVersionId === null);
-      const matchesSpace = spaceFilter === "all" || item.spaceId === spaceFilter;
       const matchesQuery = !normalized || [item.name, item.description, item.createdBy].join(" ").toLowerCase().includes(normalized);
-      return matchesPublication && matchesSpace && matchesQuery;
+      return matchesPublication && matchesQuery;
     });
-  }, [publication, query, skills, spaceFilter]);
+  }, [publication, query, skills, spaceId]);
   const selectedSkills = useMemo(
-    () => skills.filter((item) => selectedSkillIds.has(item.skillId)),
-    [selectedSkillIds, skills]
+    () => spaceSkills.filter((item) => selectedSkillIds.has(item.skillId)),
+    [selectedSkillIds, skills, spaceId]
   );
   const selectedSpaceCount = useMemo(() => new Set(selectedSkills.map((item) => item.spaceId)).size, [selectedSkills]);
   const moveCandidateCount = selectedSkills.filter((item) => item.spaceId !== targetSpaceId).length;
@@ -134,6 +142,28 @@ export function SkillsPage() {
     });
   }, [skills]);
 
+  useEffect(() => { setSelectedSkillIds(new Set()); }, [spaceId]);
+
+  const reviewMutation = useMutation({
+    mutationFn: () => reviewSkillVersion(reviewTarget!.skill.skillId, reviewTarget!.version.versionId, reviewTarget!.decision, reviewComment),
+    onSuccess: () => {
+      setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
+      void queryClient.invalidateQueries({ queryKey: skillsKey });
+      void queryClient.invalidateQueries({ queryKey: ["skill", reviewTarget?.skill.skillId] });
+      setReviewTarget(null);
+    }
+  });
+  const ownPublishMutation = useMutation({
+    mutationFn: () => publishOwnSkillVersion(ownPublishTarget!.skill.skillId, ownPublishTarget!.version.versionId),
+    onSuccess: (result) => {
+      setNotice(`Skill“${result.skill.name}”已发布版本 ${result.version.version}`);
+      void queryClient.invalidateQueries({ queryKey: skillsKey });
+      void queryClient.invalidateQueries({ queryKey: ["skill", result.skill.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
+      setOwnPublishTarget(null);
+    }
+  });
+
   useEffect(() => {
     if (uploadOpen && !uploadSpaceId && spacesQuery.data?.[0]) {
       setUploadSpaceId(spacesQuery.data[0].spaceId);
@@ -145,7 +175,7 @@ export function SkillsPage() {
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();
-      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传，待审批`);
+      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传`);
       void queryClient.invalidateQueries({ queryKey: skillsKey });
       void queryClient.invalidateQueries({ queryKey: ["skill", result.skill.skillId] });
       void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
@@ -178,6 +208,7 @@ export function SkillsPage() {
       const publishedIds = new Set(result.published.map((item) => item.skill.skillId));
       setSelectedSkillIds((current) => new Set([...current].filter((id) => !publishedIds.has(id))));
       void queryClient.invalidateQueries({ queryKey: skillsKey });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
       result.published.forEach((item) => {
         void queryClient.invalidateQueries({ queryKey: ["skill", item.skill.skillId] });
       });
@@ -270,7 +301,7 @@ export function SkillsPage() {
     resetUploadForm();
     setNotice(null);
     setUploadTarget(target ?? null);
-    setUploadSpaceId(target?.spaceId ?? spacesQuery.data?.[0]?.spaceId ?? "");
+    setUploadSpaceId(target?.spaceId ?? spaceId ?? spacesQuery.data?.[0]?.spaceId ?? "");
     setUploadOpen(true);
   }
 
@@ -414,7 +445,7 @@ export function SkillsPage() {
     <PageShell>
       <PageHeader
         title="技能中心"
-        actions={(canSelectSkills || canUpload) && activeTab === "skills" ? (
+        actions={(canSelectSkills || canUpload) && activeTab === "spaces" && Boolean(spaceId) ? (
           <>
             {selectedSkills.length > 0 ? (
               <>
@@ -422,7 +453,7 @@ export function SkillsPage() {
                   <FolderInput data-icon="inline-start" aria-hidden="true" />
                   调整空间（{selectedSkills.length}）
                 </Button> : null}
-                {canPublish ? <Button onClick={openBatchPublish} variant="outline">
+                {canPublish && selectedSpace?.approverUserId ? <Button onClick={openBatchPublish} variant="outline">
                   <PackageCheck data-icon="inline-start" aria-hidden="true" />
                   批量发布（{selectedSkills.length}）
                 </Button> : null}
@@ -443,11 +474,16 @@ export function SkillsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="h-auto justify-start">
-          <TabsTrigger value="skills">Skill 列表</TabsTrigger>
           <TabsTrigger value="spaces">技能空间</TabsTrigger>
           {skillSourceEnabled ? <TabsTrigger value="sources">GitHub 来源</TabsTrigger> : null}
         </TabsList>
-        <TabsContent className="mt-6" value="skills">
+        <TabsContent className="mt-6" value="spaces">
+          {spaceId ? <>
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <Button size="sm" variant="outline" onClick={() => setSearchParams({})}><ArrowLeft data-icon="inline-start" aria-hidden="true" />返回空间列表</Button>
+            <h2 className="text-lg font-semibold">{selectedSpace?.name ?? "技能空间"} · Skill 列表</h2>
+          </div>
+          {!spacesQuery.isLoading && !selectedSpace ? <ErrorAlert>技能空间不存在，请返回空间列表。</ErrorAlert> : null}
           <section aria-label="Skill 列表" className="grid gap-4">
             <FilterRow compact>
               <FilterSearchField
@@ -460,10 +496,6 @@ export function SkillsPage() {
                 <option value="all">全部状态</option>
                 <option value="published">已发布</option>
                 <option value="unpublished">未发布</option>
-              </FilterSelect>
-              <FilterSelect ariaLabel="筛选技能空间" value={spaceFilter} onChange={setSpaceFilter}>
-                <option value="all">全部空间</option>
-                {(spacesQuery.data ?? []).map((space) => <option key={space.spaceId} value={space.spaceId}>{space.name}</option>)}
               </FilterSelect>
             </FilterRow>
 
@@ -498,8 +530,8 @@ export function SkillsPage() {
                 {!skillsQuery.isLoading && !skillsQuery.isError && filtered.length === 0 ? (
                   <TableStateRow colSpan={canSelectSkills ? 9 : 8}>
                     <EmptyState
-                      title={skills.length === 0 ? "暂无 Skill" : "暂无匹配的 Skill"}
-                      description={skills.length === 0 ? "上传 ZIP 包后即可创建首个 Skill 版本。" : "请调整搜索词或发布状态筛选。"}
+                      title={spaceSkills.length === 0 ? "暂无 Skill" : "暂无匹配的 Skill"}
+                      description={spaceSkills.length === 0 ? "上传 ZIP 包后即可创建首个 Skill 版本。" : "请调整搜索词或发布状态筛选。"}
                     />
                   </TableStateRow>
                 ) : null}
@@ -522,6 +554,14 @@ export function SkillsPage() {
                     <TableCell className="font-mono text-xs">{item.createdBy}</TableCell>
                     <TableCell className="font-mono text-xs">{formatDateTime(item.updatedAt)}</TableCell>
                     <TableCell className="text-right">
+                      {(() => {
+                        const latest = item.latestVersion;
+                        const pending = latest?.approvalStatus === "pending";
+                        return <>
+                          {pending && selectedSpace?.approverUserId === account?.userId ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
+                          {pending && !selectedSpace?.approverUserId && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
+                        </>;
+                      })()}
                       {canUpload ? <Button aria-label={`替换上传 ${item.name}`} title="替换上传" size="icon" variant="ghost" onClick={() => openUpload(item)}><Upload /></Button> : null}
                       {canDelete && item.currentVersionId === null ? <Button aria-label={`删除 ${item.name}`} title="删除未发布 Skill" size="icon" variant="ghost" onClick={() => { deleteMutation.reset(); setDeleteTarget(item); }}><Trash2 className="text-destructive" /></Button> : null}
                       <Button asChild size="sm" variant="secondary">
@@ -533,15 +573,16 @@ export function SkillsPage() {
               </TableBody>
             </DataTableShell>
           </section>
-        </TabsContent>
-        <TabsContent className="mt-6" value="spaces">
+          </> :
           <SkillSpacesPanel
             canCreate={canCreateSpace}
             canCreateMembers={canCreateSpaceMembers}
             canDeleteMembers={canDeleteSpaceMembers}
             canUpdate={canUpdateSpace}
             canUpdateMembers={canUpdateSpaceMembers}
+            onOpenSpace={(id) => { setSearchParams({ space_id: id }); setQuery(""); setPublication("all"); }}
           />
+          }
         </TabsContent>
         {skillSourceEnabled ? <TabsContent className="mt-6" value="sources">
           <SkillSourcesTable
@@ -565,6 +606,16 @@ export function SkillsPage() {
           />
         </TabsContent> : null}
       </Tabs>
+
+      <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "审批通过" : "驳回版本"} contextLabel={reviewTarget?.skill.name}>
+        <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}>
+          <FieldGroup><Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
+            {reviewMutation.isError ? <ErrorAlert>审批失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
+            <Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" disabled={reviewMutation.isPending} onClick={() => setReviewTarget(null)}>取消</Button><Button type="submit" variant="primary" disabled={reviewMutation.isPending}>{reviewTarget?.decision === "approved" ? "确认通过" : "确认驳回"}</Button></Field>
+          </FieldGroup>
+        </form>
+      </ModalShell>
+      <ConfirmDialog open={Boolean(ownPublishTarget)} onClose={() => { if (!ownPublishMutation.isPending) setOwnPublishTarget(null); }} onConfirm={() => ownPublishMutation.mutate()} title="发布 Skill" description={ownPublishTarget ? `将“${ownPublishTarget.skill.name}”版本 ${ownPublishTarget.version.version} 发布到当前空间。` : ""} confirmLabel="确认发布" pending={ownPublishMutation.isPending} error={ownPublishMutation.isError ? `发布失败：${errorMessage(ownPublishMutation.error)}` : undefined} />
 
       <ModalShell
         contentClassName="max-w-[560px]"

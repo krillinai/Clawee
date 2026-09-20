@@ -239,6 +239,13 @@ func (s *Service) ListAdmin(ctx context.Context) ([]Skill, error) {
 	return s.store.ListAdmin(ctx)
 }
 
+func (s *Service) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrInvalidRequest
+	}
+	return s.store.ListOwnPendingVersions(ctx, userID)
+}
+
 func (s *Service) GetAdmin(ctx context.Context, skillID string) (AdminDetail, error) {
 	if strings.TrimSpace(skillID) == "" {
 		return AdminDetail{}, ErrNotFound
@@ -289,6 +296,30 @@ func (s *Service) SetCurrentVersion(ctx context.Context, skillID, versionID stri
 		return MutationResult{}, err
 	}
 	return MutationResult{Skill: skill, Version: version}, nil
+}
+
+func (s *Service) PublishOwnVersion(ctx context.Context, skillID, versionID, userID string) (MutationResult, error) {
+	store, ok := s.store.(interface {
+		PublishOwnVersion(context.Context, string, string, string, time.Time) (Skill, Version, error)
+	})
+	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(userID) == "" {
+		return MutationResult{}, ErrInvalidRequest
+	}
+	skill, version, err := store.PublishOwnVersion(ctx, skillID, versionID, userID, s.clock().UTC())
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return MutationResult{Skill: skill, Version: version}, nil
+}
+
+func (s *Service) PublishOwnVersionForUser(ctx context.Context, skillID, versionID, userID string) (MutationResult, error) {
+	if s.spaces == nil || strings.TrimSpace(userID) == "" {
+		return MutationResult{}, ErrInvalidRequest
+	}
+	if err := s.spaces.CheckSkillAccess(ctx, userID, skillID, SpaceActionWrite); err != nil {
+		return MutationResult{}, err
+	}
+	return s.PublishOwnVersion(ctx, skillID, versionID, userID)
 }
 
 func (s *Service) ClearCurrentVersion(ctx context.Context, skillID string) (*Version, error) {

@@ -36,19 +36,37 @@ var (
 	ErrMemberAlreadyExists  = errors.New("skill space member already exists")
 	ErrApprovalRequired     = errors.New("skill version approval required")
 	ErrReviewForbidden      = errors.New("skill space reviewer required")
+	ErrSelfPublishForbidden = errors.New("only the uploader can publish without approval")
 )
 
 type Skill struct {
-	SkillID          string    `json:"skill_id"`
-	SpaceID          string    `json:"space_id"`
-	SpaceName        string    `json:"space_name"`
-	Name             string    `json:"name"`
-	Description      string    `json:"description"`
-	CurrentVersionID *string   `json:"current_version_id"`
-	CreatedBy        string    `json:"created_by"`
-	CreatedByUserID  string    `json:"-"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	SkillID          string              `json:"skill_id"`
+	SpaceID          string              `json:"space_id"`
+	SpaceName        string              `json:"space_name"`
+	Name             string              `json:"name"`
+	Description      string              `json:"description"`
+	CurrentVersionID *string             `json:"current_version_id"`
+	CreatedBy        string              `json:"created_by"`
+	CreatedByUserID  string              `json:"-"`
+	CreatedAt        time.Time           `json:"created_at"`
+	UpdatedAt        time.Time           `json:"updated_at"`
+	LatestVersion    *SkillLatestVersion `json:"latest_version,omitempty"`
+}
+
+type SkillLatestVersion struct {
+	VersionID        string `json:"version_id"`
+	Version          string `json:"version"`
+	ApprovalStatus   string `json:"approval_status"`
+	UploadedByUserID string `json:"uploaded_by_user_id"`
+}
+
+type OwnPendingVersion struct {
+	SkillID   string    `json:"skill_id"`
+	SpaceID   string    `json:"space_id"`
+	Name      string    `json:"name"`
+	VersionID string    `json:"version_id"`
+	Version   string    `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Version struct {

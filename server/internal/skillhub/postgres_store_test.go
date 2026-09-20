@@ -287,13 +287,16 @@ func TestPostgresStoreListsAdminAndPublishedSkills(t *testing.T) {
 	current := "version-1"
 
 	mock.ExpectQuery(regexp.QuoteMeta(adminSkillSelect + ` ORDER BY s.updated_at DESC`)).
-		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", current, "admin", now, now))
+		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", current, "admin", now, now, "version-2", "2.0", "pending", "writer-id"))
 	adminItems, err := store.ListAdmin(context.Background())
 	if err != nil || len(adminItems) != 1 || adminItems[0].CurrentVersionID == nil {
 		t.Fatalf("ListAdmin() = %#v, %v", adminItems, err)
 	}
 	if adminItems[0].CreatedAt.Location() != time.UTC || adminItems[0].UpdatedAt.Location() != time.UTC {
 		t.Fatalf("admin timestamps are not UTC: created=%v updated=%v", adminItems[0].CreatedAt, adminItems[0].UpdatedAt)
+	}
+	if adminItems[0].LatestVersion == nil || adminItems[0].LatestVersion.VersionID != "version-2" || adminItems[0].LatestVersion.UploadedByUserID != "writer-id" {
+		t.Fatalf("latest version summary = %#v", adminItems[0].LatestVersion)
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(publishedSelect + ` ORDER BY s.updated_at DESC`)).
@@ -323,7 +326,7 @@ func TestPostgresStoreAdminDetailNormalizesVersionTimestampsToUTC(t *testing.T) 
 	now := time.Date(2026, 7, 27, 17, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
 
 	mock.ExpectQuery(regexp.QuoteMeta(adminSkillSelect + ` WHERE s.skill_id=$1`)).WithArgs("skill-1").
-		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", nil, "admin", now, now))
+		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", nil, "admin", now, now, "version-1", "1.0", "pending", "usr-1"))
 	mock.ExpectQuery(`SELECT v.version_id,v.skill_id,v.version,v.description,v.changelog,v.package_path,v.package_sha256,v.created_at`).WithArgs("skill-1").
 		WillReturnRows(versionSourceRows().
 			AddRow("version-1", "skill-1", "1.0", "description", "changes", "version-1.zip", "sha", now, "source-1", "acme", "skills", "skills/code-review", strings.Repeat("1", 40), strings.Repeat("a", 64), "usr-1", "agent-1", "code-review", "pending", "", "", nil, "").
@@ -341,6 +344,18 @@ func TestPostgresStoreAdminDetailNormalizesVersionTimestampsToUTC(t *testing.T) 
 	}
 	if detail.Versions[1].Source != nil {
 		t.Fatalf("manual version source = %#v, want nil", detail.Versions[1].Source)
+	}
+}
+
+func TestPostgresStoreListsOnlyOwnWritablePendingVersions(t *testing.T) {
+	mock := newPGXMock(t)
+	store := NewPostgresStore(mock)
+	now := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`FROM skill_versions v JOIN skills s`).WithArgs("writer-id").
+		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "space_id", "name", "version_id", "version", "created_at"}).AddRow("skill-1", DefaultSpaceID, "code-review", "version-1", "1.0", now))
+	items, err := store.ListOwnPendingVersions(context.Background(), "writer-id")
+	if err != nil || len(items) != 1 || items[0].VersionID != "version-1" {
+		t.Fatalf("own pending versions = %#v, %v", items, err)
 	}
 }
 
@@ -391,6 +406,27 @@ func TestPostgresStoreSetsAndClearsCurrentVersion(t *testing.T) {
 	}
 }
 
+func TestPostgresStorePublishesOwnVersionWithoutApprover(t *testing.T) {
+	mock := newPGXMock(t)
+	store := NewPostgresStore(mock)
+	now := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills`).WithArgs("skill-1").
+		WillReturnRows(skillRows().AddRow("skill-1", DefaultSpaceID, "code-review", nil, "writer", now, now))
+	mock.ExpectQuery(`SELECT version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at FROM skill_versions`).
+		WithArgs("version-1").WillReturnRows(versionRows().AddRow("version-1", "skill-1", "1.0", "description", "changes", "version-1.zip", "sha", now))
+	mock.ExpectQuery(`SELECT COALESCE\(approver_user_id`).WithArgs(DefaultSpaceID).WillReturnRows(pgxmock.NewRows([]string{"approver"}).AddRow(""))
+	mock.ExpectQuery(`SELECT skill_name,approval_status`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"skill_name", "approval_status", "approved_space_id"}).AddRow("code-review", "pending", ""))
+	mock.ExpectQuery(`SELECT COALESCE\(uploaded_by_user_id`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"uploader"}).AddRow("writer-id"))
+	mock.ExpectExec(`UPDATE skill_versions SET approval_status='approved'`).WithArgs("version-1", DefaultSpaceID, "writer-id", now).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec(`UPDATE skills SET current_version_id`).WithArgs("skill-1", "version-1", now).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectCommit()
+	skill, version, err := store.PublishOwnVersion(context.Background(), "skill-1", "version-1", "writer-id", now)
+	if err != nil || skill.CurrentVersionID == nil || version.ApprovalStatus != "approved" {
+		t.Fatalf("PublishOwnVersion() = %#v %#v, %v", skill, version, err)
+	}
+}
+
 func TestPostgresStoreMapsNotFoundAndConstraintErrors(t *testing.T) {
 	if !errors.Is(mapNotFound(pgx.ErrNoRows), ErrNotFound) {
 		t.Fatal("pgx.ErrNoRows should map to ErrNotFound")
@@ -423,7 +459,7 @@ func skillRows() *pgxmock.Rows {
 }
 
 func adminSkillRows() *pgxmock.Rows {
-	return pgxmock.NewRows([]string{"skill_id", "space_id", "space_name", "name", "description", "current_version_id", "created_by", "created_at", "updated_at"})
+	return pgxmock.NewRows([]string{"skill_id", "space_id", "space_name", "name", "description", "current_version_id", "created_by", "created_at", "updated_at", "latest_version_id", "latest_version", "latest_approval_status", "latest_uploaded_by_user_id"})
 }
 
 func versionRows() *pgxmock.Rows {

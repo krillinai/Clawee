@@ -12,7 +12,10 @@ export type AdminSkill = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  latestVersion?: { versionId: string; version: string; approvalStatus: string; uploadedByUserId: string };
 };
+
+export type OwnPendingVersion = { skillId: string; spaceId: string; name: string; versionId: string; version: string; createdAt: string };
 
 export type SkillVersion = {
   approvalStatus?: "pending" | "approved" | "rejected";
@@ -20,6 +23,7 @@ export type SkillVersion = {
   reviewedBy?: string;
   reviewedAt?: string | null;
   reviewComment?: string;
+  uploadedByUserId?: string;
   versionId: string;
   skillId: string;
   version: string;
@@ -218,7 +222,10 @@ type AdminSkillResponse = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  latest_version?: { version_id: string; version: string; approval_status: string; uploaded_by_user_id: string };
 };
+
+type OwnPendingVersionResponse = { skill_id: string; space_id: string; name: string; version_id: string; version: string; created_at: string };
 
 type SkillVersionResponse = {
   approval_status?: "pending" | "approved" | "rejected";
@@ -226,6 +233,7 @@ type SkillVersionResponse = {
   reviewed_by?: string;
   reviewed_at?: string | null;
   review_comment?: string;
+  uploaded_by_user_id?: string;
   version_id: string;
   skill_id: string;
   version: string;
@@ -402,6 +410,11 @@ export async function listPublishedSkills() {
   return response.items.map(mapPublishedSkill);
 }
 
+export async function listOwnPendingSkillVersions(): Promise<OwnPendingVersion[]> {
+  const response = await appApi.get<ListResponse<OwnPendingVersionResponse>>("/skills/own-pending-versions");
+  return response.items.map((item) => ({ skillId: item.skill_id, spaceId: item.space_id, name: item.name, versionId: item.version_id, version: item.version, createdAt: item.created_at }));
+}
+
 export async function getPublishedSkill(skillId: string) {
   return mapPublishedSkill(await appApi.get<PublishedSkillResponse>(`/skills/detail?skill_id=${encodeURIComponent(skillId)}`));
 }
@@ -533,6 +546,14 @@ export async function setCurrentSkillVersion(skillId: string, versionId: string)
     { skill_id: skillId, version_id: versionId }
   );
   return mapMutation(response);
+}
+
+export async function publishOwnSkillVersion(skillId: string, versionId: string) {
+  return mapMutation(await adminApi.post<SkillMutationResponse>("/skills/current-version/own", { skill_id: skillId, version_id: versionId }));
+}
+
+export async function publishOwnAppSkillVersion(skillId: string, versionId: string) {
+  return mapMutation(await appApi.post<SkillMutationResponse>("/skills/current-version/own", { skill_id: skillId, version_id: versionId }));
 }
 
 export async function publishLatestSkillVersions(candidates: SkillBatchPublishCandidate[]): Promise<SkillBatchPublishResult> {
@@ -668,13 +689,19 @@ function mapSkill(item: AdminSkillResponse): AdminSkill {
     currentVersionId: item.current_version_id,
     createdBy: item.created_by,
     createdAt: item.created_at,
-    updatedAt: item.updated_at
+    updatedAt: item.updated_at,
+    ...(item.latest_version ? { latestVersion: {
+      versionId: item.latest_version.version_id,
+      version: item.latest_version.version,
+      approvalStatus: item.latest_version.approval_status,
+      uploadedByUserId: item.latest_version.uploaded_by_user_id
+    } } : {})
   };
 }
 
 function mapVersion(item: SkillVersionResponse): SkillVersion {
   return {
-    ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment }),
+    ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment, uploadedByUserId: item.uploaded_by_user_id }),
     versionId: item.version_id,
     skillId: item.skill_id,
     version: item.version,

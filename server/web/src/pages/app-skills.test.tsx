@@ -7,9 +7,11 @@ import {
   getPublishedSkill,
   getPublishedSkillVersionFile,
   listAuthorizedSkillSpaces,
+  listOwnPendingSkillVersions,
   listPublishedSkills,
   listPublishedSkillVersionFiles,
-  uploadAppSkillVersion
+  uploadAppSkillVersion,
+  publishOwnAppSkillVersion
 } from "@/lib/skillhub-api";
 
 import { AppSkillsPage } from "./app-skills";
@@ -21,9 +23,11 @@ vi.mock("@/lib/skillhub-api", async () => {
     getPublishedSkill: vi.fn(),
     getPublishedSkillVersionFile: vi.fn(),
     listAuthorizedSkillSpaces: vi.fn(),
+    listOwnPendingSkillVersions: vi.fn(),
     listPublishedSkills: vi.fn(),
     listPublishedSkillVersionFiles: vi.fn(),
-    uploadAppSkillVersion: vi.fn()
+    uploadAppSkillVersion: vi.fn(),
+    publishOwnAppSkillVersion: vi.fn()
   };
 });
 
@@ -33,6 +37,8 @@ const listPublishedSkillsMock = vi.mocked(listPublishedSkills);
 const listPublishedSkillVersionFilesMock = vi.mocked(listPublishedSkillVersionFiles);
 const getPublishedSkillVersionFileMock = vi.mocked(getPublishedSkillVersionFile);
 const uploadAppSkillVersionMock = vi.mocked(uploadAppSkillVersion);
+const listOwnPendingSkillVersionsMock = vi.mocked(listOwnPendingSkillVersions);
+const publishOwnAppSkillVersionMock = vi.mocked(publishOwnAppSkillVersion);
 
 describe("AppSkillsPage published detail", () => {
   beforeEach(() => {
@@ -62,6 +68,7 @@ describe("AppSkillsPage published detail", () => {
       skillSpace("space-read", "只读空间", ["read"]),
       skillSpace("space-write", "可写空间", ["read", "write"])
     ]);
+    listOwnPendingSkillVersionsMock.mockResolvedValue([]);
     uploadAppSkillVersionMock.mockResolvedValue({
       skill: {
         skillId: "skill-2",
@@ -149,7 +156,16 @@ describe("AppSkillsPage published detail", () => {
       changelog: "首次上传",
       packageFile: file
     }));
-    expect(await screen.findByText("Skill“release-helper”版本 1.0.0 已上传，待审批")).toBeInTheDocument();
+    expect(await screen.findByText("Skill“release-helper”版本 1.0.0 已上传")).toBeInTheDocument();
+  });
+
+  it("publishes an own pending version after reopening the page", async () => {
+    listOwnPendingSkillVersionsMock.mockResolvedValue([{ skillId: "skill-2", spaceId: "space-write", name: "release-helper", versionId: "version-1", version: "1.0.0", createdAt: "2026-08-24T10:00:00Z" }]);
+    publishOwnAppSkillVersionMock.mockResolvedValue(await uploadAppSkillVersionMock({ spaceId: "space-write", version: "1.0.0", changelog: "", packageFile: new File([], "test.zip") }));
+    renderPage("/app/skills");
+    fireEvent.click(await within(await screen.findByRole("region", { name: "待发布版本" })).findByRole("button", { name: "发布" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "发布 Skill" })).getByRole("button", { name: "确认发布" }));
+    await waitFor(() => expect(publishOwnAppSkillVersionMock).toHaveBeenCalledWith("skill-2", "version-1"));
   });
 
   it("disables uploading when the user has no writable space", async () => {

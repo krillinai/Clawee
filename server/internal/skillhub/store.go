@@ -10,6 +10,7 @@ import (
 type Store interface {
 	CreateVersion(context.Context, Skill, Version, CreateVersionOptions) (Skill, Version, error)
 	ListAdmin(context.Context) ([]Skill, error)
+	ListOwnPendingVersions(context.Context, string) ([]OwnPendingVersion, error)
 	GetAdmin(context.Context, string) (AdminDetail, error)
 	ListPublished(context.Context) ([]PublishedItem, error)
 	ListPublishedForUser(context.Context, string, string) ([]PublishedItem, error)
@@ -146,6 +147,25 @@ func (s *MemoryStore) ListAdmin(_ context.Context) ([]Skill, error) {
 	return items, nil
 }
 
+func (s *MemoryStore) ListOwnPendingVersions(_ context.Context, userID string) ([]OwnPendingVersion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := []OwnPendingVersion{}
+	for _, skill := range s.skills {
+		space := s.spaces[skill.SpaceID]
+		if space.ApproverUserID != "" || !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionWrite) {
+			continue
+		}
+		for _, version := range s.versions[skill.SkillID] {
+			if version.UploadedByUserID == userID && version.ApprovalStatus == "pending" {
+				items = append(items, OwnPendingVersion{SkillID: skill.SkillID, SpaceID: skill.SpaceID, Name: skill.Name, VersionID: version.VersionID, Version: version.Version, CreatedAt: version.CreatedAt})
+			}
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
+}
+
 func (s *MemoryStore) DeleteUnpublished(_ context.Context, id string) ([]Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -245,6 +265,14 @@ func (s *MemoryStore) GetPublished(_ context.Context, id string) (PublishedDetai
 }
 
 func (s *MemoryStore) SetCurrentVersion(_ context.Context, skillID, versionID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(skillID, versionID, "", now)
+}
+
+func (s *MemoryStore) PublishOwnVersion(_ context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(skillID, versionID, userID, now)
+}
+
+func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	skill, ok := s.skills[skillID]
@@ -268,7 +296,17 @@ func (s *MemoryStore) SetCurrentVersion(_ context.Context, skillID, versionID st
 	if targetSkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
-	if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || s.spaces[skill.SpaceID].ApproverUserID == "" {
+	if s.spaces[skill.SpaceID].ApproverUserID == "" && userID != "" {
+		if target.UploadedByUserID != userID {
+			return Skill{}, Version{}, ErrSelfPublishForbidden
+		}
+		if target.ApprovalStatus == "rejected" {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+		target.ApprovalStatus, target.ApprovedSpaceID, target.ReviewedBy, target.ReviewedAt = "approved", skill.SpaceID, userID, &now
+	} else if userID != "" {
+		return Skill{}, Version{}, ErrApprovalRequired
+	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || s.spaces[skill.SpaceID].ApproverUserID == "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
 	if target.SkillName != "" && target.SkillName != skill.Name {
@@ -278,6 +316,14 @@ func (s *MemoryStore) SetCurrentVersion(_ context.Context, skillID, versionID st
 		delete(s.byName, skill.Name)
 		skill.Name = target.SkillName
 		s.byName[skill.Name] = skillID
+	}
+	if userID != "" {
+		for i := range s.versions[skillID] {
+			if s.versions[skillID][i].VersionID == versionID {
+				s.versions[skillID][i] = target
+				break
+			}
+		}
 	}
 	if skill.CurrentVersionID == nil || *skill.CurrentVersionID != versionID {
 		value := versionID
@@ -348,6 +394,10 @@ func (s *MemoryStore) ClearCurrentVersion(_ context.Context, skillID string, now
 func (s *MemoryStore) adminSkill(skill Skill) Skill {
 	skill.SpaceName = s.spaces[skill.SpaceID].Name
 	versions := s.versions[skill.SkillID]
+	if len(versions) > 0 {
+		latest := versions[0]
+		skill.LatestVersion = &SkillLatestVersion{VersionID: latest.VersionID, Version: latest.Version, ApprovalStatus: latest.ApprovalStatus, UploadedByUserID: latest.UploadedByUserID}
+	}
 	if skill.CurrentVersionID != nil {
 		for _, version := range versions {
 			if version.VersionID == *skill.CurrentVersionID {

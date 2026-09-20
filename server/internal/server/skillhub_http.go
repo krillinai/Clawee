@@ -62,6 +62,8 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 	app.GET("/skills/version-file", handlePublishedSkillVersionFile(opts.SkillHubService))
 	app.GET("/skills/package", skillOperationLog(opts.Logger, skillActionDownload), download)
 	app.POST("/skills/versions", skillOperationLog(opts.Logger, skillActionUpload), requireSkillUploadCaller(), handleSkillUpload(opts.SkillHubService, true))
+	app.GET("/skills/own-pending-versions", handleSkillOwnPendingVersions(opts.SkillHubService))
+	app.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), handleSkillPublishOwn(opts.SkillHubService, true))
 	app.GET("/skill-spaces", handleAppSkillSpaces(opts.SkillHubService))
 
 	mountSkillHubAdminRoutes(admin, opts)
@@ -82,6 +84,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.DELETE("/skills", skillOperationLog(opts.Logger, "skill_delete"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillDelete), handleSkillDelete(opts.SkillHubService))
 	admin.PATCH("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
+	admin.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), read, handleSkillPublishOwn(opts.SkillHubService, false))
 	admin.POST("/skills/versions/review", skillOperationLog(opts.Logger, "skill_review"), read, handleSkillReview(opts.SkillHubService))
 	admin.POST("/skills/current-version/remove", skillOperationLog(opts.Logger, skillActionClear), skillRequirePermission(opts.RBACService, rbac.PermissionSkillUnpublish), handleSkillClearCurrent(opts.SkillHubService))
 	if opts.SkillSourceService == nil {
@@ -398,6 +401,18 @@ func handleSkillList(service *skillhub.Service) gin.HandlerFunc {
 	}
 }
 
+func handleSkillOwnPendingVersions(service *skillhub.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		account, _ := currentAccount(c)
+		items, err := service.ListOwnPendingVersions(c.Request.Context(), account.UserID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, itemsResponse(items))
+	}
+}
+
 func handleSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		account, _ := currentAccount(c)
@@ -697,6 +712,33 @@ func handleSkillSetCurrent(service *skillhub.Service) gin.HandlerFunc {
 	}
 }
 
+func handleSkillPublishOwn(service *skillhub.Service, requireSpaceWrite bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request setCurrentVersionRequest
+		if decodeSkillJSON(c, &request) != nil || strings.TrimSpace(request.SkillID) == "" {
+			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		account, _ := currentAccount(c)
+		c.Set(skillIDKey, request.SkillID)
+		c.Set(skillVersionKey, request.VersionID)
+		var result skillhub.MutationResult
+		var err error
+		if requireSpaceWrite {
+			result, err = service.PublishOwnVersionForUser(c.Request.Context(), request.SkillID, request.VersionID, account.UserID)
+		} else {
+			result, err = service.PublishOwnVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID)
+		}
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.Set(skillSHAKey, result.Version.PackageSHA256)
+		c.Set(skillSpaceIDKey, result.Skill.SpaceID)
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
@@ -908,6 +950,8 @@ func skillError(c *gin.Context, err error) {
 		status, code, message = http.StatusConflict, "skill_approval_required", "该版本尚未通过所属技能空间审批人的审批"
 	case errors.Is(err, skillhub.ErrReviewForbidden):
 		status, code, message = http.StatusForbidden, "skill_review_forbidden", "只有所属技能空间的审批人可以审核版本"
+	case errors.Is(err, skillhub.ErrSelfPublishForbidden):
+		status, code, message = http.StatusForbidden, "skill_self_publish_forbidden", "只有上传人可以在未开启审批的空间发布该版本"
 	case errors.Is(err, skillhub.ErrInvalidRequest):
 		status, code, message = http.StatusBadRequest, "invalid_request", "请求参数不合法"
 	case errors.Is(err, skillhub.ErrPackageInvalid):

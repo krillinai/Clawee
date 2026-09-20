@@ -100,6 +100,41 @@ func TestSkillApprovalHTTPRequiresConfiguredReviewer(t *testing.T) {
 	}
 }
 
+func TestSkillSelfPublishHTTPChecksUploader(t *testing.T) {
+	ctx := context.Background()
+	accountsService := newTestAccountService(accounts.NewMemoryStore())
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountsService})
+	if err := rbacService.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountsService, RBACService: rbacService, SkillHubService: service})
+	uploader := register(t, router, `{"email":"self-publish-admin@example.com","password":"passw0rd!"}`)
+	reader := register(t, router, `{"email":"self-publish-reader@example.com","password":"passw0rd!"}`)
+	readerID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", reader, http.StatusOK), "data", "account", "user_id")
+	role := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"self_publish_reader","name":"技能只读","permission_codes":["console:skill:read"]}`, uploader, http.StatusCreated)
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+readerID+`","role_id":"`+nestedString(t, role, "data", "role_id")+`"}`, uploader, http.StatusCreated)
+	reader = loginCookies(t, router, `{"email":"self-publish-reader@example.com","password":"passw0rd!"}`)
+	body, contentType := skillUploadBody(t, map[string]string{"version": "1"}, true)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/skills/versions", body)
+	request.Header.Set("Content-Type", contentType)
+	request.AddCookie(adminCookie(t, uploader))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("upload: %s", recorder.Body.String())
+	}
+	created := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
+	payload := `{"skill_id":"` + created.Skill.SkillID + `","version_id":"` + created.Version.VersionID + `"}`
+	endpoint := "/api/v1/admin/skills/current-version/own"
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, endpoint, payload, nil), http.StatusUnauthorized, "unauthorized")
+	if _, err := service.SetSpaceMember(ctx, created.Skill.SpaceID, readerID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, "admin", false); err != nil {
+		t.Fatal(err)
+	}
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, endpoint, payload, reader), http.StatusForbidden, "skill_self_publish_forbidden")
+	doJSON(t, router, http.MethodPost, endpoint, payload, uploader, http.StatusOK)
+}
+
 func uploadApprovedVersionForTest(service *skillhub.Service, ctx context.Context, input skillhub.UploadVersionInput) (skillhub.MutationResult, error) {
 	result, err := service.UploadVersion(ctx, input)
 	if err != nil {

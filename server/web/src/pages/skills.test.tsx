@@ -7,18 +7,22 @@ import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import {
   enableGitHubSource,
   deleteUnpublishedSkill,
+  getSkill,
   getGitHubSourceToken,
   listGitHubSources,
 	listSkillSpaces,
   listSkills,
   moveSkillsToSpace,
   publishLatestSkillVersions,
+  publishOwnSkillVersion,
   queueGitHubSourceSync,
+  reviewSkillVersion,
   updateGitHubSource,
   uploadSkillVersion,
   type AdminSkill,
   type GitHubSource,
   type GitHubSourceSummary,
+  type SkillSpace,
   type SkillSourceSyncRun,
   type SkillVersion
 } from "@/lib/skillhub-api";
@@ -35,19 +39,23 @@ vi.mock("@/lib/skillhub-api", async () => {
     getSkillSourceAvailability: skillSourceAvailabilityMock,
     enableGitHubSource: vi.fn(),
     deleteUnpublishedSkill: vi.fn(),
+    getSkill: vi.fn(),
     getGitHubSourceToken: vi.fn(),
     listGitHubSources: vi.fn(),
 		listSkillSpaces: vi.fn(),
     listSkills: vi.fn(),
     moveSkillsToSpace: vi.fn(),
     publishLatestSkillVersions: vi.fn(),
+    publishOwnSkillVersion: vi.fn(),
     queueGitHubSourceSync: vi.fn(),
+    reviewSkillVersion: vi.fn(),
     updateGitHubSource: vi.fn(),
     uploadSkillVersion: vi.fn()
   };
 });
 
 const listSkillsMock = vi.mocked(listSkills);
+const getSkillMock = vi.mocked(getSkill);
 const listSkillSpacesMock = vi.mocked(listSkillSpaces);
 const moveSkillsToSpaceMock = vi.mocked(moveSkillsToSpace);
 const publishLatestSkillVersionsMock = vi.mocked(publishLatestSkillVersions);
@@ -66,8 +74,60 @@ const sourceSummary: GitHubSourceSummary = {
   latestRun: syncRun({ targetCommitSha: "a".repeat(40), discoveredCount: 7 }),
   discoveredCount: 7
 };
+const defaultSpace: SkillSpace = {
+  spaceId: "skillspace_default", name: "默认技能空间", description: "", approverUserId: "usr_reviewer", actions: [],
+  memberCount: 0, skillCount: 2, publishedCount: 1, createdBy: "system", updatedBy: "system",
+  createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z"
+};
+const productSpace: SkillSpace = {
+  spaceId: "skillspace_product", name: "产品技能空间", description: "", actions: [],
+  memberCount: 0, skillCount: 0, publishedCount: 0, createdBy: "usr_admin", updatedBy: "usr_admin",
+  createdAt: "2026-08-24T08:00:00Z", updatedAt: "2026-08-24T08:00:00Z"
+};
 
 describe("SkillsPage", () => {
+  it("starts with spaces and opens only the selected space's Skills", async () => {
+    listSkillsMock.mockResolvedValue([published, { ...unpublished, spaceId: "skillspace_product", spaceName: "产品技能空间" }]);
+    renderPage(undefined, "");
+    expect(await screen.findByRole("button", { name: "查看 默认技能空间 Skill" })).toBeInTheDocument();
+    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
+    expect(listSkillsMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "查看 默认技能空间 Skill" }));
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+    expect(screen.queryByText("release-notes")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "返回空间列表" }));
+    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
+  });
+
+  it("offers quick approval only to the space reviewer", async () => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "usr_reader" }, productSpace]);
+    listSkillsMock.mockResolvedValue([published, { ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin" } }]);
+    vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: "approved" }));
+    renderPage([permissions.skillRead]);
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过 release-notes" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "审批通过" })).getByRole("button", { name: "确认通过" }));
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith(unpublished.skillId, "version-default", "approved", ""));
+    expect(getSkillMock).not.toHaveBeenCalled();
+  });
+
+  it("lets the uploader publish when the space has no reviewer", async () => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "" }, productSpace]);
+    listSkillsMock.mockResolvedValue([{ ...published, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_reader" } }, unpublished]);
+    vi.mocked(publishOwnSkillVersion).mockResolvedValue({ skill: published, version: version({}) });
+    renderPage([permissions.skillRead]);
+    fireEvent.click(await within((await screen.findByText("code-review")).closest("tr")!).findByRole("button", { name: "发布" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "发布 Skill" })).getByRole("button", { name: "确认发布" }));
+    await waitFor(() => expect(publishOwnSkillVersion).toHaveBeenCalledWith(published.skillId, "version-default"));
+  });
+
+  it("hides selection when approval is off and moving is unavailable", async () => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "" }, productSpace]);
+    renderPage([permissions.skillRead, permissions.skillPublish]);
+    await screen.findByText("code-review");
+    expect(screen.queryByRole("checkbox", { name: "选择当前可见的 Skill" })).not.toBeInTheDocument();
+    expect(getSkillMock).not.toHaveBeenCalled();
+  });
+
   it("replaces the selected Skill even when the uploaded name changes", async () => {
     listSkillsMock.mockResolvedValue([published, unpublished]);
     uploadSkillVersionMock.mockResolvedValue({ skill: { ...published, name: "renamed" }, version: uploadedVersion });
@@ -80,7 +140,7 @@ describe("SkillsPage", () => {
     expect(screen.getByRole("button", { name: "确认替换" })).toBeEnabled();
     fireEvent.submit(screen.getByRole("dialog").querySelector("form") as HTMLFormElement);
     await waitFor(() => expect(uploadSkillVersionMock).toHaveBeenCalledWith({ skillId: published.skillId, spaceId: published.spaceId, version: "1.3.0", changelog: "", packageFile: file }));
-    expect(await screen.findByText(/renamed.*已上传，待审批/)).toBeInTheDocument();
+    expect(await screen.findByText(/renamed.*已上传/)).toBeInTheDocument();
   });
 
   it("deletes only unpublished Skills after confirmation", async () => {
@@ -106,36 +166,13 @@ describe("SkillsPage", () => {
     vi.clearAllMocks();
     skillSourceAvailabilityMock.mockResolvedValue(true);
     listGitHubSourcesMock.mockResolvedValue([sourceSummary]);
-		listSkillSpacesMock.mockResolvedValue([{
-			spaceId: "skillspace_default",
-			name: "默认技能空间",
-			description: "",
-			actions: [],
-			memberCount: 0,
-			skillCount: 2,
-			publishedCount: 1,
-			createdBy: "system",
-			updatedBy: "system",
-			createdAt: "2026-07-27T08:00:00Z",
-			updatedAt: "2026-07-27T08:00:00Z"
-		}, {
-			spaceId: "skillspace_product",
-			name: "产品技能空间",
-			description: "",
-			actions: [],
-			memberCount: 0,
-			skillCount: 0,
-			publishedCount: 0,
-			createdBy: "usr_admin",
-			updatedBy: "usr_admin",
-			createdAt: "2026-08-24T08:00:00Z",
-			updatedAt: "2026-08-24T08:00:00Z"
-		}]);
+    listSkillSpacesMock.mockResolvedValue([defaultSpace, productSpace]);
     enableGitHubSourceMock.mockResolvedValue(sourceSummary.source);
     getGitHubSourceTokenMock.mockResolvedValue("github_pat_saved");
     queueGitHubSourceSyncMock.mockResolvedValue({ runId: "run-queued" });
     updateGitHubSourceMock.mockResolvedValue(sourceSummary.source);
     listSkillsMock.mockResolvedValue([published, unpublished]);
+    getSkillMock.mockImplementation(async (id) => ({ skill: id === published.skillId ? published : unpublished, versions: [version({ skillId: id, approvalStatus: "pending", uploadedByUserId: "usr_reader" })], canReview: false }));
     publishLatestSkillVersionsMock.mockResolvedValue({
       published: [
         { skill: published, version: version({ versionId: "version-3", skillId: published.skillId, version: "1.3.0" }) },
@@ -165,16 +202,16 @@ describe("SkillsPage", () => {
   it("keeps tab workspaces concise with deliberate vertical spacing", async () => {
     renderPage();
 
-    const skillPanel = await screen.findByRole("tabpanel", { name: "Skill 列表" });
+    const skillPanel = await screen.findByRole("tabpanel", { name: "技能空间" });
     expect(skillPanel).toHaveClass("mt-6");
     expect(within(skillPanel).getByRole("region", { name: "Skill 列表" })).toHaveClass("gap-4");
-    expect(screen.getAllByText("Skill 列表")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: /Skill 列表/ })).toBeInTheDocument();
     expect(screen.queryByText("按更新时间倒序展示全部 Skill，未发布版本不会出现在用户侧目录。")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "批量发布" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "调整空间" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "上传版本" })).toBeInTheDocument();
 
-    clickTab(screen.getByRole("tab", { name: "技能空间" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回空间列表" }));
     const spacesPanel = await screen.findByRole("tabpanel", { name: "技能空间" });
     expect(spacesPanel).toHaveClass("mt-6");
     expect(within(spacesPanel).queryByRole("heading", { name: "技能空间" })).not.toBeInTheDocument();
@@ -198,7 +235,7 @@ describe("SkillsPage", () => {
     fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
 
 		await waitFor(() => expect(uploadSkillVersionMock).toHaveBeenCalledWith({ spaceId: "skillspace_default", version: "1.3.0", changelog: "补充安装脚本", packageFile: file }));
-    expect(await screen.findByText("Skill“code-review”版本 1.3.0 已上传，待审批")).toBeInTheDocument();
+    expect(await screen.findByText("Skill“code-review”版本 1.3.0 已上传")).toBeInTheDocument();
   });
 
   it("links each skill to its independent detail page", async () => {
@@ -289,7 +326,7 @@ describe("SkillsPage", () => {
     expect(screen.getByRole("button", { name: "调整空间（1）" })).toBeEnabled();
   });
 
-  it("keeps the Skill list as the default tab and displays GitHub source operations after switching", async () => {
+  it("displays GitHub source operations after switching", async () => {
     renderPage();
 
     expect(await screen.findByText("code-review")).toBeInTheDocument();
@@ -414,11 +451,11 @@ describe("SkillsPage", () => {
   });
 });
 
-function renderPage(adminPermissions?: string[]) {
+function renderPage(adminPermissions?: string[], initialSpaceId = "skillspace_default") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/admin/skills"]}>
+      <MemoryRouter initialEntries={[initialSpaceId ? `/admin/skills?space_id=${initialSpaceId}` : "/admin/skills"]}>
         {adminPermissions ? <AdminPermissionsProvider account={{
           userId: "usr_reader",
           email: "reader@example.com",

@@ -21,6 +21,80 @@ func uploadApprovedVersion(service *Service, ctx context.Context, input UploadVe
 	return service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID)
 }
 
+func TestSelfPublishRequiresUploaderAndDisabledApproval(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	result, err := service.UploadVersion(ctx, UploadVersionInput{
+		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id",
+		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("self-publish")}})),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, userID := range []string{"writer-id", "other-id"} {
+		if _, err := service.SetSpaceMember(ctx, result.Skill.SpaceID, userID, []string{SpaceActionRead, SpaceActionWrite}, "admin", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.PublishOwnVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "other-id"); !errors.Is(err, ErrSelfPublishForbidden) {
+		t.Fatalf("other user published: %v", err)
+	}
+	if _, err := service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("admin bypassed uploader: %v", err)
+	}
+	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "reviewer", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PublishOwnVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "writer-id"); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("uploader bypassed approval: %v", err)
+	}
+	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	published, err := service.PublishOwnVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "writer-id")
+	if err != nil || published.Skill.CurrentVersionID == nil || published.Version.ApprovalStatus != "approved" {
+		t.Fatalf("self publish = %#v, %v", published, err)
+	}
+}
+
+func TestOwnPendingVersionsRequireWriteAccessAndDisabledApproval(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	result, err := service.UploadVersion(ctx, UploadVersionInput{
+		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id",
+		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("pending-own")}})),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetSpaceMember(ctx, result.Skill.SpaceID, "writer-id", []string{SpaceActionRead, SpaceActionWrite}, "admin", false); err != nil {
+		t.Fatal(err)
+	}
+	check := func(user string, want int) {
+		t.Helper()
+		items, err := service.ListOwnPendingVersions(ctx, user)
+		if err != nil || len(items) != want {
+			t.Fatalf("pending for %s = %#v, %v; want %d", user, items, err, want)
+		}
+	}
+	check("writer-id", 1)
+	check("other-id", 0)
+	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "reviewer-id", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	check("writer-id", 0)
+	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RemoveSpaceMember(ctx, result.Skill.SpaceID, "writer-id"); err != nil {
+		t.Fatal(err)
+	}
+	check("writer-id", 0)
+	if _, err := service.PublishOwnVersionForUser(ctx, result.Skill.SkillID, result.Version.VersionID, "writer-id"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked writer published: %v", err)
+	}
+}
+
 func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

@@ -124,6 +124,29 @@ func (s *PostgresStore) ListAdmin(ctx context.Context) ([]Skill, error) {
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
+	rows, err := s.pool.Query(ctx, `SELECT s.skill_id,s.space_id,s.name,v.version_id,v.version,v.created_at
+FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id
+JOIN skill_spaces sp ON sp.space_id=s.space_id
+JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=s.space_id AND g.user_id=$1 AND g.action='write'
+WHERE v.uploaded_by_user_id=$1 AND v.approval_status='pending' AND sp.approver_user_id IS NULL
+ORDER BY v.created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OwnPendingVersion{}
+	for rows.Next() {
+		var item OwnPendingVersion
+		if err := rows.Scan(&item.SkillID, &item.SpaceID, &item.Name, &item.VersionID, &item.Version, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = item.CreatedAt.UTC()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *PostgresStore) DeleteUnpublished(ctx context.Context, id string) ([]Version, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -297,6 +320,14 @@ func (s *PostgresStore) GetPublished(ctx context.Context, skillID string) (Publi
 }
 
 func (s *PostgresStore) SetCurrentVersion(ctx context.Context, skillID, versionID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(ctx, skillID, versionID, "", now)
+}
+
+func (s *PostgresStore) PublishOwnVersion(ctx context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(ctx, skillID, versionID, userID, now)
+}
+
+func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return Skill{}, Version{}, err
@@ -320,20 +351,40 @@ func (s *PostgresStore) SetCurrentVersion(ctx context.Context, skillID, versionI
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,'') FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&approver); err != nil {
 		return Skill{}, Version{}, err
 	}
-	if approver == "" {
+	if approver == "" && userID == "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
-	var approverActive bool
-	if err := tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, approver).Scan(&approverActive); err != nil {
-		return Skill{}, Version{}, err
-	}
-	if !approverActive {
-		return Skill{}, Version{}, ErrApprovalRequired
+	if approver != "" {
+		if userID != "" {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+		var approverActive bool
+		if err := tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, approver).Scan(&approverActive); err != nil {
+			return Skill{}, Version{}, err
+		}
+		if !approverActive {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
 	}
 	if err := tx.QueryRow(ctx, `SELECT skill_name,approval_status,COALESCE(approved_space_id,'') FROM skill_versions WHERE version_id=$1 FOR UPDATE`, versionID).Scan(&version.SkillName, &version.ApprovalStatus, &version.ApprovedSpaceID); err != nil {
 		return Skill{}, Version{}, err
 	}
-	if version.ApprovalStatus != "approved" || version.ApprovedSpaceID != skill.SpaceID {
+	if approver == "" && userID != "" {
+		var uploader string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(uploaded_by_user_id,'') FROM skill_versions WHERE version_id=$1`, versionID).Scan(&uploader); err != nil {
+			return Skill{}, Version{}, err
+		}
+		if uploader != userID {
+			return Skill{}, Version{}, ErrSelfPublishForbidden
+		}
+		if version.ApprovalStatus == "rejected" {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+		if _, err := tx.Exec(ctx, `UPDATE skill_versions SET approval_status='approved',approved_space_id=$2,reviewed_by=$3,reviewed_at=$4 WHERE version_id=$1`, versionID, skill.SpaceID, userID, now); err != nil {
+			return Skill{}, Version{}, err
+		}
+		version.ApprovalStatus, version.ApprovedSpaceID, version.ReviewedBy, version.ReviewedAt = "approved", skill.SpaceID, userID, &now
+	} else if version.ApprovalStatus != "approved" || version.ApprovedSpaceID != skill.SpaceID {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
 	if version.SkillName != "" && version.SkillName != skill.Name {
@@ -430,12 +481,13 @@ func (s *PostgresStore) ClearCurrentVersion(ctx context.Context, skillID string,
 }
 
 const adminSkillSelect = `
-SELECT s.skill_id,s.space_id,sp.name,s.name,COALESCE(cv.description,lv.description,''),s.current_version_id,s.created_by,s.created_at,s.updated_at
+SELECT s.skill_id,s.space_id,sp.name,s.name,COALESCE(cv.description,lv.description,''),s.current_version_id,s.created_by,s.created_at,s.updated_at,
+COALESCE(lv.version_id,''),COALESCE(lv.version,''),COALESCE(lv.approval_status,''),COALESCE(lv.uploaded_by_user_id,'')
 FROM skills s
 JOIN skill_spaces sp ON sp.space_id=s.space_id
 LEFT JOIN skill_versions cv ON cv.skill_id=s.skill_id AND cv.version_id=s.current_version_id
 LEFT JOIN LATERAL (
-  SELECT description FROM skill_versions WHERE skill_id=s.skill_id ORDER BY created_at DESC LIMIT 1
+  SELECT version_id,version,description,approval_status,uploaded_by_user_id FROM skill_versions WHERE skill_id=s.skill_id ORDER BY created_at DESC LIMIT 1
 ) lv ON TRUE`
 
 const publishedSelect = `
@@ -462,8 +514,12 @@ func scanSkill(row rowScanner, skill *Skill) error {
 
 func scanAdminSkill(row rowScanner, skill *Skill) error {
 	var current pgtype.Text
-	if err := row.Scan(&skill.SkillID, &skill.SpaceID, &skill.SpaceName, &skill.Name, &skill.Description, &current, &skill.CreatedBy, &skill.CreatedAt, &skill.UpdatedAt); err != nil {
+	var latest SkillLatestVersion
+	if err := row.Scan(&skill.SkillID, &skill.SpaceID, &skill.SpaceName, &skill.Name, &skill.Description, &current, &skill.CreatedBy, &skill.CreatedAt, &skill.UpdatedAt, &latest.VersionID, &latest.Version, &latest.ApprovalStatus, &latest.UploadedByUserID); err != nil {
 		return err
+	}
+	if latest.VersionID != "" {
+		skill.LatestVersion = &latest
 	}
 	skill.CurrentVersionID = nullableString(current)
 	skill.CreatedAt = skill.CreatedAt.UTC()

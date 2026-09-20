@@ -4,7 +4,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { DataTableShell, EmptyState, ErrorAlert, FilterSelect, LoadingState, ModalShell, PageHeader, PageShell, SuccessAlert, TableStateRow } from "@/components/governance-ui";
+import { ConfirmDialog, DataTableShell, EmptyState, ErrorAlert, FilterSelect, LoadingState, ModalShell, PageHeader, PageShell, SuccessAlert, TableStateRow } from "@/components/governance-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -16,9 +16,12 @@ import {
   getPublishedSkillPackageURL,
   getPublishedSkillVersionFile,
   listAuthorizedSkillSpaces,
+  listOwnPendingSkillVersions,
   listPublishedSkills,
   listPublishedSkillVersionFiles,
-  uploadAppSkillVersion
+  uploadAppSkillVersion,
+  publishOwnAppSkillVersion,
+  type OwnPendingVersion
 } from "@/lib/skillhub-api";
 
 import { SkillDetailView, type SkillDetailData } from "./skill-detail";
@@ -38,7 +41,9 @@ function PublishedSkillList() {
   const [changelog, setChangelog] = useState("");
   const [packageFile, setPackageFile] = useState<File | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [publishTarget, setPublishTarget] = useState<OwnPendingVersion | null>(null);
   const query = useQuery({ queryKey: ["app-skills"], queryFn: listPublishedSkills });
+  const pendingQuery = useQuery({ queryKey: ["app-skills-own-pending"], queryFn: listOwnPendingSkillVersions });
   const spacesQuery = useQuery({ queryKey: ["app-skill-spaces"], queryFn: listAuthorizedSkillSpaces });
   const writableSpaces = useMemo(
     () => (spacesQuery.data ?? []).filter((space) => space.actions.includes("write")),
@@ -46,6 +51,7 @@ function PublishedSkillList() {
   );
   const allItems = query.data ?? [];
   const items = spaceId === "all" ? allItems : allItems.filter((item) => item.spaceId === spaceId);
+  const pendingItems = (pendingQuery.data ?? []).filter((item) => spaceId === "all" || item.spaceId === spaceId);
 
   useEffect(() => {
     if (uploadOpen && !uploadSpaceId && writableSpaces[0]) {
@@ -58,9 +64,21 @@ function PublishedSkillList() {
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();
-      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传，待审批`);
+      setNotice(`Skill“${result.skill.name}”版本 ${result.version.version} 已上传`);
       void queryClient.invalidateQueries({ queryKey: ["app-skills"] });
+      void queryClient.invalidateQueries({ queryKey: ["app-skills-own-pending"] });
       void queryClient.invalidateQueries({ queryKey: ["app-skill-spaces"] });
+    }
+  });
+
+  const publishMutation = useMutation({
+    mutationFn: () => publishOwnAppSkillVersion(publishTarget!.skillId, publishTarget!.versionId),
+    onSuccess: (result) => {
+      setPublishTarget(null);
+      setNotice(`Skill“${result.skill.name}”已发布版本 ${result.version.version}`);
+      void queryClient.invalidateQueries({ queryKey: ["app-skills"] });
+      void queryClient.invalidateQueries({ queryKey: ["app-skills-own-pending"] });
+      void queryClient.invalidateQueries({ queryKey: ["app-skill", result.skill.skillId] });
     }
   });
 
@@ -103,6 +121,14 @@ function PublishedSkillList() {
       />
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
       <div className="mb-3 max-w-64"><FilterSelect ariaLabel="筛选技能空间" value={spaceId} onChange={setSpaceId}><option value="all">全部空间</option>{(spacesQuery.data ?? []).map((space) => <option key={space.spaceId} value={space.spaceId}>{space.name}</option>)}</FilterSelect></div>
+      {pendingQuery.isError ? <ErrorAlert>待发布版本加载失败：{errorMessage(pendingQuery.error)}</ErrorAlert> : null}
+      {pendingItems.length > 0 ? <section className="mb-6" aria-label="待发布版本">
+        <h2 className="mb-3 text-base font-semibold">待发布版本</h2>
+        <DataTableShell dense minWidth={600}>
+          <TableHeader><TableRow><TableHead>技能</TableHead><TableHead>空间</TableHead><TableHead>版本</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+          <TableBody>{pendingItems.map((item) => <TableRow key={item.versionId}><TableCell>{item.name}</TableCell><TableCell>{(spacesQuery.data ?? []).find((space) => space.spaceId === item.spaceId)?.name ?? item.spaceId}</TableCell><TableCell>v{item.version}</TableCell><TableCell className="text-right"><Button size="sm" variant="secondary" onClick={() => { publishMutation.reset(); setPublishTarget(item); }}>发布</Button></TableCell></TableRow>)}</TableBody>
+        </DataTableShell>
+      </section> : null}
       <DataTableShell dense minWidth={800}>
         <TableHeader><TableRow><TableHead>技能</TableHead><TableHead>空间</TableHead><TableHead>版本</TableHead><TableHead>说明</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
         <TableBody>
@@ -112,6 +138,7 @@ function PublishedSkillList() {
           {items.map((item) => <TableRow key={item.skillId}><TableCell className="font-medium">{item.name}</TableCell><TableCell><Badge variant="outline">{item.spaceName}</Badge></TableCell><TableCell><Badge variant="secondary">v{item.version}</Badge></TableCell><TableCell className="max-w-96 text-muted-foreground"><span className="block truncate">{item.description}</span></TableCell><TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link to={`/app/skills/detail?skill_id=${encodeURIComponent(item.skillId)}`}>查看</Link></Button></TableCell></TableRow>)}
         </TableBody>
       </DataTableShell>
+      <ConfirmDialog open={Boolean(publishTarget)} onClose={() => { if (!publishMutation.isPending) setPublishTarget(null); }} onConfirm={() => publishMutation.mutate()} title="发布 Skill" description={publishTarget ? `将“${publishTarget.name}”版本 ${publishTarget.version} 发布到当前空间。` : ""} confirmLabel="确认发布" pending={publishMutation.isPending} error={publishMutation.isError ? `发布失败：${errorMessage(publishMutation.error)}` : undefined} />
       <ModalShell
         contentClassName="max-w-[560px]"
         contextLabel="技能中心"
