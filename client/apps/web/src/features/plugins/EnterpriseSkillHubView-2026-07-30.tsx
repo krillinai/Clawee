@@ -178,6 +178,12 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [activeDetail]);
 
+  useEffect(() => {
+    if (activeDetail !== undefined && props.skills !== undefined && !props.skills.some(skill => skill.skillId === activeDetail.skillId)) {
+      closeDetail();
+    }
+  }, [activeDetail, props.skills]);
+
   function closeDetail() {
     detailRequestRef.current += 1;
     setActiveDetail(undefined);

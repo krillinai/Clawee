@@ -251,7 +251,6 @@ export function createEnterpriseSkillManager(input: {
     const localByName = new Map(
       input.skillManager.listSkills().skills.map(skill => [skill.id, skill])
     );
-    const remoteIds = new Set(remoteSkills.map(skill => skill.skillId));
     const results: EnterpriseSkillResponse[] = [];
 
     for (const remote of remoteSkills) {
@@ -266,17 +265,6 @@ export function createEnterpriseSkillManager(input: {
       }));
     }
 
-    for (const record of input.records.listRecords()) {
-      if (remoteIds.has(record.skillId)) continue;
-      const local = localByName.get(record.name);
-      if (local === undefined) continue;
-      results.push(computeEnterpriseSkillState({
-        local,
-        enterpriseRecord: record,
-        publicRecordExists: input.publicRecords.getRecord(record.name) !== undefined,
-        ...(await localDigest(local, record))
-      }));
-    }
     return results;
   }
 

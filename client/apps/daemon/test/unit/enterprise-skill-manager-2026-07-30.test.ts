@@ -134,6 +134,33 @@ describe('enterprise skill manager', () => {
     });
   });
 
+  it('lists only authorized remote skills even when an older enterprise skill remains installed locally', async () => {
+    const client = createHttpClient();
+    const skillManager = createSkillManager(createTransaction());
+    vi.mocked(skillManager.listSkills).mockReturnValue({
+      codexHome: '/codex-home',
+      codexHomeMode: 'isolated',
+      skillsPath: '/codex-home/skills',
+      skillsWritable: true,
+      requiresWriteConfirmation: false,
+      skills: [localSkill()],
+      diagnostics: []
+    });
+    const manager = createManager({
+      client,
+      skillManager,
+      records: createEnterpriseRecords(enterpriseRecord())
+    });
+
+    await expect(manager.listSkills()).resolves.toMatchObject({
+      skills: [expect.objectContaining({ skillId: 'skill_1', status: 'installed' })]
+    });
+
+    vi.mocked(client.listSkills).mockResolvedValue([]);
+    await expect(manager.listSkills()).resolves.toMatchObject({ skills: [] });
+    expect(skillManager.deleteSkill).not.toHaveBeenCalled();
+  });
+
   it('retries only readable transient failures with bounded delays', async () => {
     const sleep = vi.fn(async () => undefined);
     const client = createHttpClient();

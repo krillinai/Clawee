@@ -168,6 +168,18 @@ describe('EnterpriseSkillHubView', () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it('closes a detail card when the refreshed catalog no longer contains it', async () => {
+    const user = userEvent.setup();
+    const skill = createSkill('enterprise-writer', 'installed', 'verified', ['use']);
+    const view = renderHub({ skills: [skill] });
+
+    await user.click(screen.getByRole('button', { name: '查看 enterprise-writer 详情' }));
+    expect(await screen.findByRole('dialog', { name: 'enterprise-writer 详情' })).toBeInTheDocument();
+
+    view.rerender(createHub({ skills: [] }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   it('shows mock enterprise skills without a redundant login gate', () => {
     const view = renderHub({
       session: {

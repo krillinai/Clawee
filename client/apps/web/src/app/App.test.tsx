@@ -3992,6 +3992,55 @@ describe('App', () => {
     }
   );
 
+  it.each([
+    { status: 403, code: 'ENTERPRISE_FORBIDDEN' },
+    { status: 404, code: 'ENTERPRISE_SKILL_NOT_FOUND' }
+  ])('removes a stale enterprise skill after its detail returns $status', async ({ status, code }) => {
+    const user = userEvent.setup();
+    window.location.hash = '#/plugins?source=enterprise';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({
+      baseUrl: 'http://127.0.0.1:60764',
+      token: 'runtime-token'
+    });
+    let skillRequests = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [] });
+      if (url.endsWith('/enterprise/session')) return jsonResponse(createEnterpriseSessionResponse());
+      if (url.endsWith('/enterprise/skills')) {
+        skillRequests += 1;
+        return jsonResponse(createEnterpriseSkillListResponse(
+          skillRequests === 1 ? [createEnterpriseSkillResponse()] : []
+        ));
+      }
+      if (url.endsWith('/enterprise/skills/enterprise-skill')) {
+        return jsonResponse({ error: { code, message: 'Skill unavailable' } }, { status });
+      }
+      if (url.endsWith('/codex/skills')) return jsonResponse(createSkillListResponse());
+      throw new Error(`Unexpected request ${url}`);
+    };
+
+    render(
+      <App
+        fileService={createFileService()}
+        hostBridge={hostBridge}
+        runtimeFetch={runtimeFetch}
+        subscribeRunEvents={async () => undefined}
+      />
+    );
+
+    const skill = await screen.findByTestId('enterprise-skill-enterprise-skill');
+    await user.click(within(skill).getByRole('button', { name: '查看 enterprise-name 详情' }));
+    await waitFor(() => expect(skillRequests).toBe(2));
+    await waitFor(() => expect(screen.queryByTestId('enterprise-skill-enterprise-skill')).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'enterprise-name 详情' })).not.toBeInTheDocument();
+  });
+
   it('turns enterprise unauthorized into signed-out without affecting public market', async () => {
     const user = userEvent.setup();
     window.location.hash = '#/plugins?source=enterprise';

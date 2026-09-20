@@ -1728,6 +1728,7 @@ export function AppController(props: AppControllerProps) {
     const generation = enterpriseHubGenerationRef.current;
     const activeEnterpriseService = enterpriseService;
     setEnterpriseSkillsLoading(true);
+    setEnterpriseSkills(undefined);
     setEnterpriseSkillsLoadError(undefined);
 
     void activeEnterpriseService.listSkills()
@@ -4607,7 +4608,7 @@ export function AppController(props: AppControllerProps) {
           });
         } else if (
           error instanceof ApiClientError
-          && error.status === 404
+          && (error.status === 403 || error.status === 404)
         ) {
           setEnterpriseSkillsReloadKey(current => current + 1);
         }
