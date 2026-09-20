@@ -102,10 +102,7 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
     assert.match(sums, /release\.json/);
     assert.match(sums, /release-notes\.md/);
     assert.doesNotMatch(sums, /  SHA256SUMS/);
-    assert.match(
-      readFileSync(join(result.versionRoot, 'release-notes.md'), 'utf8'),
-      /Windows x64 安装包当前未进行 Authenticode 签名/
-    );
+    assert.equal(readFileSync(join(result.versionRoot, 'release-notes.md'), 'utf8'), 'release notes');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

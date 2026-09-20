@@ -323,6 +323,14 @@ jobs:
             --image "$IMAGE" \
             --image-digest "$IMAGE_DIGEST" \
             --generated-at "$(git show -s --format=%cI "$GITHUB_SHA")"
+      - name: 生成平台下载说明
+        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+        run: |
+          node scripts/generate-release-notes.mjs \
+            --manifest artifacts/release-manifest.json \
+            --generated "$RUNNER_TEMP/release-notes.md" \
+            --output "$RUNNER_TEMP/release-notes-rendered.md" \
+            --repository "$GITHUB_REPOSITORY"
       - name: 生成 COS 版本目录和官网目录文件
         if: env.RELEASE_ALREADY_PUBLISHED != 'true'
         shell: bash
@@ -331,7 +339,7 @@ jobs:
             --artifacts artifacts \
             --stage cos-stage \
             --manifest artifacts/release-manifest.json \
-            --release-notes "$RUNNER_TEMP/release-notes.md" \
+            --release-notes "$RUNNER_TEMP/release-notes-rendered.md" \
             --version "$VERSION" \
             --tag "$TAG" \
             --commit "$GITHUB_SHA" \

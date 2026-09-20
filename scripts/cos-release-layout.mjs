@@ -118,7 +118,7 @@ export function prepareReleaseLayout(input) {
   }
 
   copyPublicFile(input.manifestPath, join(versionRoot, 'release-manifest.json'));
-  writeReleaseNotes(input.releaseNotesPath, join(versionRoot, 'release-notes.md'));
+  copyPublicFile(input.releaseNotesPath, join(versionRoot, 'release-notes.md'));
   const updaterArtifacts = rewriteUpdaterFiles({
     mapped,
     release,
@@ -392,15 +392,6 @@ function listFiles(root) {
 function copyPublicFile(source, destination) {
   mkdirSync(dirname(destination), { recursive: true });
   copyFileSync(source, destination);
-}
-
-function writeReleaseNotes(source, destination) {
-  const warning = 'Windows x64 安装包当前未进行 Authenticode 签名。';
-  const content = readFileSync(source, 'utf8').trimEnd();
-  const output = content.includes(warning)
-    ? `${content}\n`
-    : `${content}${content ? '\n\n' : ''}## 平台说明\n\n- ${warning}\n`;
-  writeFileSync(destination, output);
 }
 
 function fileDetails(path) {
