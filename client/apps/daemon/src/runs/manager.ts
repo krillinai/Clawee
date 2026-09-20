@@ -66,6 +66,7 @@ import type {
 import type {
   EnterpriseActivityReporter
 } from '../enterprise/activity-reporter-2026-08-28.js';
+import { createSkillUsageTracker } from '../enterprise/skill-usage-tracker.js';
 import { MCP_TASK_MAX_EXECUTION_MS } from '../task-mcp/constants.js';
 
 export type ThreadAccess = {
@@ -116,6 +117,7 @@ export type RunManagerOptions = {
     thread: RuntimeThread;
   }): Promise<void>;
   activityReporter?: EnterpriseActivityReporter;
+  enterpriseSkillVersion?(name: string): { skillId: string; versionId: string } | undefined;
 };
 
 export type RuntimeRun = {
@@ -228,6 +230,11 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   const runningThreadRun = new Map<string, string>();
   const subscribers = new Map<string, Set<RunEventSubscriber>>();
   const logWriters = new Map<string, OrderedLogWriter>();
+  const skillTrackers = new Map<string, {
+    tracker: ReturnType<typeof createSkillUsageTracker>;
+    commands: Map<string, string>;
+    seen: Set<string>;
+  }>();
   let closing = false;
   let closeWork: Promise<void> | undefined;
   const runningPersistentRunIds = new Set<string>();
@@ -251,6 +258,34 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       () => {
         try {
           options.activityReporter?.enqueue(event);
+          const state = skillTrackers.get(event.runId);
+          if (state !== undefined) {
+            const payload = event.payload as Record<string, unknown>;
+            if (event.type === 'tool_use' && payload.name === 'command_execution') {
+              const toolCallId = payload.toolCallId;
+              const input = payload.input as Record<string, unknown> | undefined;
+              if (typeof toolCallId === 'string' && typeof input?.command === 'string') {
+                state.commands.set(toolCallId, input.command);
+              }
+            } else if (event.type === 'tool_result') {
+              const toolCallId = payload.toolCallId;
+              const command = typeof toolCallId === 'string' ? state.commands.get(toolCallId) : undefined;
+              if (typeof toolCallId === 'string') state.commands.delete(toolCallId);
+              if (command !== undefined && payload.isError !== true && payload.exitCode === 0) {
+                for (const evidence of state.tracker.observeCommand(command, 0)) {
+                  const key = `${evidence.skillKey}:${evidence.evidence}`;
+                  if (state.seen.has(key)) continue;
+                  state.seen.add(key);
+                  options.activityReporter?.recordSkillEvidence({
+                    runId: event.runId, eventId: `evt_${event.runId}_skill_${nanoid(12)}`,
+                    sequence: event.seq, occurredAt: event.ts, evidence
+                  });
+                }
+              }
+            } else if (event.type === 'done') {
+              skillTrackers.delete(event.runId);
+            }
+          }
         } catch {
           console.warn('Enterprise activity enqueue failed');
         }
@@ -1852,6 +1887,19 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         workspaceName: basename(canonicalCwd),
         createdAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at)
       });
+      if (options.activityReporter !== undefined) {
+        const tracker = createSkillUsageTracker({
+          codexHome: options.codexHome, cwd: canonicalCwd, homeDir: options.homeDir ?? homedir(),
+          enterpriseVersion: options.enterpriseSkillVersion
+        });
+        skillTrackers.set(id, { tracker, commands: new Map(), seen: new Set() });
+        for (const evidence of tracker.explicitRequests(input.prompt)) {
+          options.activityReporter.recordSkillEvidence({
+            runId: id, eventId: `evt_${id}_skill_${nanoid(12)}`,
+            sequence: 0, occurredAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at), evidence
+          });
+        }
+      }
     } catch {
       console.warn('Enterprise activity run registration failed');
     }

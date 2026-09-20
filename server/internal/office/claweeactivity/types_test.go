@@ -57,6 +57,31 @@ func TestValidateAndSanitizeRejectsInvalidBatchBeforeMapping(t *testing.T) {
 	}
 }
 
+func TestSkillEvidenceValidation(t *testing.T) {
+	valid := `{"skill_id":"reports","skill_name":"reports","skill_key":"reports","source":"local","evidence":"skill_file_read","invocation":"implicit"}`
+	for _, payload := range []string{
+		valid,
+		`{"skill_id":"reports","skill_name":"reports","skill_key":"reports","source":"enterprise","version_id":"v1","evidence":"explicit_request","invocation":"explicit"}`,
+	} {
+		req := validRequest(payload)
+		req.Events[0].EventType = "skill_evidence"
+		if err := ValidateAndSanitize(&req); err != nil {
+			t.Fatalf("valid evidence %s: %v", payload, err)
+		}
+	}
+	for _, payload := range []string{
+		`{"skill_id":"../private","skill_name":"reports","skill_key":"reports","source":"local","evidence":"skill_file_read","invocation":"implicit"}`,
+		`{"skill_id":"reports","skill_name":"reports","skill_key":"reports","source":"local","evidence":"explicit_request","invocation":"implicit"}`,
+		`{"skill_id":"reports","skill_name":"reports","skill_key":"reports","source":"enterprise","evidence":"skill_file_read","invocation":"implicit"}`,
+	} {
+		req := validRequest(payload)
+		req.Events[0].EventType = "skill_evidence"
+		if err := ValidateAndSanitize(&req); !errors.Is(err, ErrInvalidActivityEvent) {
+			t.Fatalf("invalid evidence %s: %v", payload, err)
+		}
+	}
+}
+
 func validRequest(payload string) EventsRequest {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
 	return EventsRequest{

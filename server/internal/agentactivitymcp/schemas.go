@@ -74,7 +74,7 @@ func outputSchemas() map[string]mcpgateway.JSONMap {
 	summaryProperties["organization"] = mcpgateway.JSONMap{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []any{"usage", "active_employees", "active_agents", "completed_turns", "mcp_distribution"},
+		"required":             []any{"usage", "active_employees", "active_agents", "completed_turns", "mcp_distribution", "skill_usage"},
 		"properties": mcpgateway.JSONMap{
 			"usage":            usageSchema,
 			"active_employees": mcpgateway.JSONMap{"type": "integer"},
@@ -91,6 +91,19 @@ func outputSchemas() map[string]mcpgateway.JSONMap {
 						"label":            mcpgateway.JSONMap{"type": "string"},
 						"invocation_count": mcpgateway.JSONMap{"type": "integer"},
 						"share":            mcpgateway.JSONMap{"type": "number"},
+					},
+				},
+			},
+			"skill_usage": mcpgateway.JSONMap{
+				"type": "array",
+				"items": mcpgateway.JSONMap{
+					"type": "object", "additionalProperties": false,
+					"required": []any{"skill_id", "skill_name", "skill_key", "source", "requested_runs", "observed_runs", "implicit_runs"},
+					"properties": mcpgateway.JSONMap{
+						"skill_id": mcpgateway.JSONMap{"type": "string"}, "skill_name": mcpgateway.JSONMap{"type": "string"},
+						"skill_key": mcpgateway.JSONMap{"type": "string"}, "source": mcpgateway.JSONMap{"type": "string"},
+						"requested_runs": mcpgateway.JSONMap{"type": "integer"}, "observed_runs": mcpgateway.JSONMap{"type": "integer"},
+						"implicit_runs": mcpgateway.JSONMap{"type": "integer"},
 					},
 				},
 			},

@@ -33,6 +33,21 @@ func TestMapEventMaterializesRunContentWithStableDerivedIDs(t *testing.T) {
 	}
 }
 
+func TestMapSkillEvidencePreservesOnlyValidatedMetadata(t *testing.T) {
+	req := validRequest(`{"skill_id":"reports","skill_name":"reports","skill_key":"reports","source":"local","evidence":"skill_file_read","invocation":"implicit","command":"secret"}`)
+	req.Events[0].EventType = "skill_evidence"
+	if err := ValidateAndSanitize(&req); err != nil {
+		t.Fatal(err)
+	}
+	events, err := MapEvent(req.Events[0], "agent_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].SourceEvent == nil || events[0].SourceEvent.ParsedPayload["command"] != nil || events[0].SourceEvent.ParsedPayload["skill_id"] != "reports" {
+		t.Fatalf("skill evidence = %#v", events)
+	}
+}
+
 func TestMapEventStoresApprovalParsedPayloadOnlyOnCarrier(t *testing.T) {
 	req := validRequest(`{"approval":{"id":"approval_1","status":"pending","title":"执行命令","summary":"需要确认","details":{"risk":"high"}}}`)
 	req.Events[0].EventType = "approval"

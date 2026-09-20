@@ -55,16 +55,29 @@ const member = {
 };
 
 describe("SkillSpacesPanel", () => {
-  it("configures the space reviewer with the existing shadcn select and dialog", async () => {
+  it("requires a reviewer when approval is enabled in the settings drawer", async () => {
     renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
-    fireEvent.click(await screen.findByRole("button", { name: "配置 研发技能 审批人" }));
-    const dialog = screen.getByRole("dialog", { name: "配置技能空间审批人" });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const dialog = screen.getByRole("dialog", { name: "空间设置" });
+    expect(within(dialog).queryByRole("combobox")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "开启审批" }));
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
     const select = within(dialog).getByRole("combobox");
     await waitFor(() => expect(select).toBeEnabled());
     fireEvent.click(select);
     fireEvent.click(await screen.findByRole("option", { name: /李四/ }));
     fireEvent.submit(dialog.querySelector("form")!);
     await waitFor(() => expect(setSkillSpaceApprover).toHaveBeenCalledWith("skillspace_dev", "usr_2"));
+  });
+
+  it("turns approval off without requiring a reviewer", async () => {
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approverUserId: "usr_2", approverName: "李四" }]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const drawer = screen.getByRole("dialog", { name: "空间设置" });
+    fireEvent.click(within(drawer).getByRole("checkbox", { name: "开启审批" }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(setSkillSpaceApprover).toHaveBeenCalledWith("skillspace_dev", ""));
   });
 
   beforeEach(() => {
@@ -150,7 +163,7 @@ describe("SkillSpacesPanel", () => {
   });
 });
 
-function renderPanel(permissions: Parameters<typeof SkillSpacesPanel>[0]) {
+function renderPanel(permissions: Omit<Parameters<typeof SkillSpacesPanel>[0], "onOpenSpace">) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><SkillSpacesPanel {...permissions} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><SkillSpacesPanel {...permissions} onOpenSpace={vi.fn()} /></QueryClientProvider>);
 }

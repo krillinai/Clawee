@@ -130,6 +130,20 @@ func (r *Reducer) ApplyEvents(ctx context.Context, req collectorapi.EventsReques
 			ParseStatus:       parseStatus,
 			ParseError:        parseError,
 		}, func(ctx context.Context, eventStore Store) error {
+			if event.SourceType == "clawee" && sourceEventType == "skill_evidence" &&
+				event.EventType == collectorapi.EventSourceEventReceived && event.SourceEvent != nil {
+				payload := event.SourceEvent.ParsedPayload
+				if err := eventStore.InsertSkillEvidence(ctx, SkillEvidenceState{
+					CollectorID: req.CollectorID, SourceEventID: sourceEventID, AgentID: event.AgentID,
+					RunID: event.TurnID, SkillID: skillString(payload, "skill_id"),
+					SkillName: skillString(payload, "skill_name"), SkillKey: skillString(payload, "skill_key"),
+					Source: skillString(payload, "source"), VersionID: skillString(payload, "version_id"),
+					Evidence: skillString(payload, "evidence"), Invocation: skillString(payload, "invocation"),
+					OccurredAt: event.OccurredAt,
+				}); err != nil {
+					return err
+				}
+			}
 			if err := eventStore.UpsertAgent(ctx, AgentState{
 				CollectorID:      req.CollectorID,
 				DeviceID:         req.DeviceID,
@@ -172,6 +186,11 @@ func (r *Reducer) ApplyEvents(ctx context.Context, req collectorapi.EventsReques
 	}
 
 	return accepted, nil
+}
+
+func skillString(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
 }
 
 func (r *Reducer) applySession(ctx context.Context, eventStore Store, collectorID string, event collectorapi.CollectorEvent) error {

@@ -49,11 +49,14 @@ func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statis
 	if activity.Agents == nil {
 		activity.Agents = []Agent{}
 	}
+	if activity.SkillUsage == nil {
+		activity.SkillUsage = []SkillUsage{}
+	}
 	empty := Statistics{
 		Range: r.Range, Timezone: r.Timezone, StartDate: request.StartDate, EndDate: request.EndDate,
 		GeneratedAt: r.GeneratedAt,
 		Organization: Organization{Usage: Usage{}, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents,
-			CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution},
+			CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage},
 		Trend: Trend{Granularity: r.Granularity, Points: []TrendPoint{}}, ModelDistribution: []ModelUsage{}, TokenUsageRanking: []TokenUsageRank{},
 		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": "not_configured", "activity": "available"},
 	}
@@ -87,7 +90,7 @@ func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statis
 	return Statistics{
 		Range: r.Range, Timezone: r.Timezone, StartDate: request.StartDate, EndDate: request.EndDate,
 		GeneratedAt:  snapshot.GeneratedAt,
-		Organization: Organization{Usage: usage, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents, CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution},
+		Organization: Organization{Usage: usage, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents, CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage},
 		Trend:        Trend{Granularity: r.Granularity, Points: points}, ModelDistribution: snapshot.Models, TokenUsageRanking: snapshot.TokenUsageRanking,
 		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": "available", "activity": "available"},
 	}, nil

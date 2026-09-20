@@ -22,6 +22,7 @@ type Store interface {
 	CompleteTurn(context.Context, TurnCompletion) error
 	UpsertToolCall(context.Context, ToolCallState) error
 	CompleteToolCall(context.Context, ToolCallCompletion) error
+	InsertSkillEvidence(context.Context, SkillEvidenceState) error
 }
 
 type DeviceHeartbeat struct {
@@ -63,6 +64,21 @@ type SourceEventState struct {
 	StandardPayload   json.RawMessage
 	ParseStatus       string
 	ParseError        string
+}
+
+type SkillEvidenceState struct {
+	CollectorID   string
+	SourceEventID string
+	AgentID       string
+	RunID         string
+	SkillID       string
+	SkillName     string
+	SkillKey      string
+	Source        string
+	VersionID     string
+	Evidence      string
+	Invocation    string
+	OccurredAt    time.Time
 }
 
 type SessionState struct {

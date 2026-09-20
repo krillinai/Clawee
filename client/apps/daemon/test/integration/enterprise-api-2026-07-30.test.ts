@@ -937,6 +937,7 @@ function createActivityReporter(): EnterpriseActivityReporter {
   return {
     registerRun: vi.fn(),
     enqueue: vi.fn(),
+    recordSkillEvidence: vi.fn(),
     resume: vi.fn(),
     clear: vi.fn(),
     close: vi.fn(async () => undefined)

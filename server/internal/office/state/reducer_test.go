@@ -17,6 +17,31 @@ func timePtr(value time.Time) *time.Time {
 	return &value
 }
 
+func TestSkillEvidenceIsStoredOnceWithTrustedCollector(t *testing.T) {
+	store := &fakeStore{}
+	reducer := NewReducer(store)
+	event := collectorapi.CollectorEvent{
+		EventID: "evt_skill", EventType: collectorapi.EventSourceEventReceived,
+		SourceType: "clawee", SourceEventType: "skill_evidence", OccurredAt: occurredAt,
+		AgentID: "agent_1", AgentType: collectorapi.AgentTypeCodex,
+		SessionID: "session_1", TurnID: "run_1", Status: collectorapi.StatusThinking,
+		SourceEvent: &collectorapi.SourceEventSummary{
+			SourceEventID: "evt_skill", SourceType: "clawee", SourceEventType: "skill_evidence",
+			ParsedPayload: map[string]any{"skill_id": "reports", "skill_name": "reports", "skill_key": "reports", "source": "local", "evidence": "skill_file_read", "invocation": "implicit"},
+		},
+	}
+	req := collectorapi.EventsRequest{CollectorID: "collector_1", DeviceID: "device_1", Events: []collectorapi.CollectorEvent{event}}
+	for _, expected := range []int{1, 0} {
+		accepted, err := reducer.ApplyEvents(context.Background(), req, reducerNow)
+		if err != nil || accepted != expected {
+			t.Fatalf("accepted = %d, error = %v", accepted, err)
+		}
+	}
+	if len(store.skillEvidence) != 1 || store.skillEvidence[0].CollectorID != "collector_1" || store.skillEvidence[0].RunID != "run_1" {
+		t.Fatalf("skill evidence = %#v", store.skillEvidence)
+	}
+}
+
 func TestApplyHeartbeatUpsertsDeviceAndAgents(t *testing.T) {
 	store := &fakeStore{}
 	reducer := NewReducer(store)
@@ -1030,6 +1055,7 @@ type fakeStore struct {
 	turnCompletions               []TurnCompletion
 	toolCalls                     []ToolCallState
 	toolCallCompletions           []ToolCallCompletion
+	skillEvidence                 []SkillEvidenceState
 }
 
 func (s *fakeStore) UpsertDevice(ctx context.Context, input DeviceHeartbeat) error {
@@ -1073,6 +1099,7 @@ func (s *fakeStore) ApplySourceEvent(ctx context.Context, input SourceEventState
 	s.turnCompletions = tx.turnCompletions
 	s.toolCalls = tx.toolCalls
 	s.toolCallCompletions = tx.toolCallCompletions
+	s.skillEvidence = tx.skillEvidence
 	s.events = append(s.events, input)
 	if s.committedSourceEventIDs == nil {
 		s.committedSourceEventIDs = map[string]bool{}
@@ -1099,6 +1126,7 @@ func (s *fakeStore) clone() *fakeStore {
 		turnCompletions:         append([]TurnCompletion(nil), s.turnCompletions...),
 		toolCalls:               append([]ToolCallState(nil), s.toolCalls...),
 		toolCallCompletions:     append([]ToolCallCompletion(nil), s.toolCallCompletions...),
+		skillEvidence:           append([]SkillEvidenceState(nil), s.skillEvidence...),
 	}
 }
 
@@ -1144,5 +1172,10 @@ func (s *fakeStore) UpsertToolCall(ctx context.Context, input ToolCallState) err
 
 func (s *fakeStore) CompleteToolCall(ctx context.Context, input ToolCallCompletion) error {
 	s.toolCallCompletions = append(s.toolCallCompletions, input)
+	return nil
+}
+
+func (s *fakeStore) InsertSkillEvidence(_ context.Context, input SkillEvidenceState) error {
+	s.skillEvidence = append(s.skillEvidence, input)
 	return nil
 }

@@ -19,6 +19,7 @@ import {
   type ActivityAgent,
   type ActivityRange,
   type ActivityStatistics,
+  type ActivitySkillUsage,
   type ActivityTokenUsageRank,
 } from "@/lib/activity-api";
 import { APIError } from "@/lib/api";
@@ -227,6 +228,8 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
         />
       </section>
 
+      <SkillEvidenceTable items={data.organization.skill_usage ?? []} />
+
       <AgentActivityTable agents={data.agents} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -239,6 +242,36 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
         </div>
       </div>
     </>
+  );
+}
+
+function SkillEvidenceTable({ items }: { items: ActivitySkillUsage[] }) {
+  return (
+    <section aria-label="Skill 证据统计">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">Skill 使用证据</h2>
+        <span className="text-xs text-muted-foreground">按任务与 Skill 去重；未观测到不代表未使用</span>
+      </div>
+      {items.length === 0 ? <EmptyState title="当前范围内暂无 Skill 使用证据" /> : (
+        <Table aria-label="Skill 使用证据">
+          <TableHeader><TableRow>
+            <TableHead>Skill</TableHead><TableHead>来源</TableHead>
+            <TableHead className="text-right">明确请求</TableHead>
+            <TableHead className="text-right">观测使用</TableHead>
+            <TableHead className="text-right">其中隐式</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>{items.map(item => (
+            <TableRow key={`${item.source}:${item.skill_key}`}>
+              <TableCell className="font-medium">{item.skill_name}</TableCell>
+              <TableCell>{item.source === "enterprise" ? "企业" : "本地"}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.requested_runs)}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.observed_runs)}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.implicit_runs)}</TableCell>
+            </TableRow>
+          ))}</TableBody>
+        </Table>
+      )}
+    </section>
   );
 }
 

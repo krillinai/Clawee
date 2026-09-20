@@ -13,3 +13,7 @@ export function useAdminPermission(permissionCode: string) {
   const account = useContext(AdminAccountContext);
   return account ? hasAdminPermission(account, permissionCode) : true;
 }
+
+export function useAdminAccount() {
+  return useContext(AdminAccountContext);
+}

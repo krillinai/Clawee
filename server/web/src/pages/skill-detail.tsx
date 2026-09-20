@@ -16,7 +16,7 @@ import {
   PageShell,
   SuccessAlert
 } from "@/components/governance-ui";
-import { useAdminPermission } from "@/components/admin-permissions";
+import { useAdminAccount, useAdminPermission } from "@/components/admin-permissions";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -41,6 +41,8 @@ import {
   getSkillVersionFile,
   getSkillVersionPackageURL,
   listSkillVersionFiles,
+  listSkillSpaces,
+  publishOwnSkillVersion,
   setCurrentSkillVersion,
   reviewSkillVersion,
   SkillHubAPIError,
@@ -70,6 +72,7 @@ export type SkillDetailData = {
 
 type SkillDetailManagement = {
   canReview?: boolean;
+  canSelfPublish?: (version: SkillVersion) => boolean;
   reviewPending?: boolean;
   onReview?: (version: SkillVersion, decision: "approved" | "rejected") => void;
   canPublish: boolean;
@@ -95,6 +98,7 @@ type SkillDetailViewProps = {
 };
 
 export function SkillDetailPage() {
+  const account = useAdminAccount();
   const canPublish = useAdminPermission(permissions.skillPublish);
   const canUnpublish = useAdminPermission(permissions.skillUnpublish);
   const [searchParams] = useSearchParams();
@@ -111,14 +115,21 @@ export function SkillDetailPage() {
     queryFn: () => getSkill(skillId),
     enabled: Boolean(skillId)
   });
+  const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
+  const space = spacesQuery.data?.find((item) => item.spaceId === detailQuery.data?.skill.spaceId);
+  const canSelfPublish = (version: SkillVersion) => Boolean(space && !space.approverUserId && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
 
   const publishMutation = useMutation({
-    mutationFn: (target: PublishTarget) => setCurrentSkillVersion(skillId, target.versionId),
+    mutationFn: (target: PublishTarget) => {
+      const version = detailQuery.data?.versions.find((item) => item.versionId === target.versionId);
+      return version && canSelfPublish(version) ? publishOwnSkillVersion(skillId, target.versionId) : setCurrentSkillVersion(skillId, target.versionId);
+    },
     onSuccess: (result) => {
       setNotice(`Skill“${result.skill.name}”已发布版本 ${result.version.version}`);
       setPublishTarget(null);
       void queryClient.invalidateQueries({ queryKey: ["skills"] });
       void queryClient.invalidateQueries({ queryKey: ["skill", skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
     }
   });
   const clearMutation = useMutation({
@@ -128,6 +139,7 @@ export function SkillDetailPage() {
       setClearOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["skills"] });
       void queryClient.invalidateQueries({ queryKey: ["skill", skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
     }
   });
   const reviewMutation = useMutation({
@@ -153,8 +165,8 @@ export function SkillDetailPage() {
   return (
     <>
       <SkillDetailView
-        backHref="/admin/skills"
-        backLabel="返回技能中心"
+        backHref={`/admin/skills?space_id=${encodeURIComponent(detail.skill.spaceId ?? "")}`}
+        backLabel="返回 Skill 列表"
         breadcrumbLabel="技能中心"
         detail={detail}
         getPackageURL={getSkillVersionPackageURL}
@@ -162,9 +174,10 @@ export function SkillDetailPage() {
         loadFiles={listSkillVersionFiles}
         management={{
           canReview: detail.canReview,
+          canSelfPublish,
           reviewPending: reviewMutation.isPending,
           onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
-          canPublish,
+          canPublish: canPublish && Boolean(space?.approverUserId),
           canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,
@@ -363,10 +376,10 @@ export function SkillDetailView({
                       取消当前发布
                     </Button>
                   ) : null}
-                  {management.canPublish && viewedVersion.versionId !== detail.skill.currentVersionId ? (
+                  {(management.canPublish || management.canSelfPublish?.(viewedVersion)) && viewedVersion.versionId !== detail.skill.currentVersionId ? (
                     <Button
                       aria-label={`设为当前查看版本 ${viewedVersion.version}`}
-                      disabled={management.publishPending || viewedVersion.approvalStatus !== "approved"}
+                      disabled={management.publishPending || (viewedVersion.approvalStatus !== "approved" && !management.canSelfPublish?.(viewedVersion))}
                       onClick={() => management.onPublish(viewedVersion)}
                       size="sm"
                       variant="secondary"
@@ -415,6 +428,7 @@ export function SkillDetailView({
                 <TabsContent className="mt-5" value="history">
                   <VersionHistory
                     canPublish={management?.canPublish ?? false}
+                    canSelfPublish={management?.canSelfPublish}
                     currentVersionId={detail.skill.currentVersionId}
                     latestVersionId={sortedVersions[0]?.versionId ?? null}
                     onPublish={(item) => management?.onPublish(item)}
@@ -587,6 +601,7 @@ function VersionHistory({
   currentVersionId,
   latestVersionId,
   onPublish,
+  canSelfPublish,
   onView,
   pending,
   showSourceEvidence,
@@ -594,6 +609,7 @@ function VersionHistory({
   viewedVersionId
 }: {
   canPublish: boolean;
+  canSelfPublish?: (version: SkillVersion) => boolean;
   currentVersionId: string | null;
   latestVersionId: string | null;
   onPublish: (version: SkillVersion) => void;
@@ -637,8 +653,8 @@ function VersionHistory({
                   <Button aria-label={`查看此版本 ${item.version}`} disabled={viewed} onClick={() => onView(item.versionId)} size="sm" variant="ghost">
                     {viewed ? "正在查看" : "查看"}
                   </Button>
-                  {canPublish && !current ? (
-                    <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending || item.approvalStatus !== "approved"} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
+                  {(canPublish || canSelfPublish?.(item)) && !current ? (
+                    <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending || (item.approvalStatus !== "approved" && !canSelfPublish?.(item))} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
                   ) : null}
                 </div>
               </TableCell>

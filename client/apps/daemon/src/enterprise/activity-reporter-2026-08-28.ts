@@ -4,10 +4,12 @@ import {
   ENTERPRISE_ACTIVITY_SCHEMA_VERSION,
   projectActivityEvent,
   projectRunStarted,
+  projectSkillEvidence,
   type EnterpriseActivityEvent,
   type EnterpriseActivityEventsRequest,
   type EnterpriseActivityRunContext
 } from './activity-event-projector-2026-08-28.js';
+import type { SkillUsageEvidence } from './skill-usage-tracker.js';
 
 const MAX_BATCH_EVENTS = 20;
 const MAX_BATCH_BYTES = 512 * 1024;
@@ -34,6 +36,13 @@ export type EnterpriseActivityReporter = {
     createdAt: string;
   }): void;
   enqueue(event: AgentEventEnvelope): void;
+  recordSkillEvidence(input: {
+    runId: string;
+    eventId: string;
+    sequence: number;
+    occurredAt: string;
+    evidence: SkillUsageEvidence;
+  }): void;
   resume(): void;
   clear(reason: string): void;
   close(): Promise<void>;
@@ -186,6 +195,12 @@ export function createEnterpriseActivityReporter(input: {
       const projected = projectActivityEvent(event, context);
       if (projected !== undefined) enqueueProjected(projected);
       if (event.type === 'done') contexts.delete(event.runId);
+    },
+
+    recordSkillEvidence(input) {
+      const context = contexts.get(input.runId);
+      if (context === undefined || paused || closed) return;
+      enqueueProjected(projectSkillEvidence({ ...input, context }));
     },
 
     resume() {

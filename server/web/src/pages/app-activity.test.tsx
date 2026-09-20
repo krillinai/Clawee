@@ -44,6 +44,7 @@ const fixtureStatistics: ActivityStatistics = {
     active_agents: 5,
     completed_turns: 42,
     mcp_distribution: [{ id: "filesystem", label: "filesystem", invocation_count: 18, share: 1 }],
+    skill_usage: [{ skill_id: "reports", skill_name: "reports", skill_key: "reports", source: "enterprise", requested_runs: 3, observed_runs: 2, implicit_runs: 1 }],
   },
   trend: {
     granularity: "day",
@@ -87,6 +88,7 @@ describe("AppActivityPage", () => {
     expect(screen.getByRole("region", { name: "核心指标" })).toHaveTextContent("活跃员工3");
     expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Skill 使用证据" })).toHaveTextContent("reports企业321");
     expect(screen.getByRole("table", { name: "Token 使用排行" })).toHaveTextContent("张三12860,000");
     expect(screen.getByRole("region", { name: "账户额度" })).toHaveTextContent("账户余额");
     expect(screen.getByRole("region", { name: "账户额度" })).toHaveTextContent("¥100.00");

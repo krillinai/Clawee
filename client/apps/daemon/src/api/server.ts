@@ -638,6 +638,10 @@ export async function buildServer(input: BuildServerInput) {
       persistentAppServerExecutor,
       serverDeployment: input.serverDeployment,
       activityReporter,
+      enterpriseSkillVersion: name => {
+        const record = enterpriseInstallRecords.getByName(name);
+        return record === undefined ? undefined : { skillId: record.skillId, versionId: record.versionId };
+      },
       onBeforeCodexWritableRequest:
         input.onBeforeCodexWritableRequest,
       codexThreadRotationRunThreshold:

@@ -25,6 +25,8 @@ import {
   type OrderedLogWriter
 } from '../../src/runs/ordered-log-writer.js';
 import { createThreadManager } from '../../src/threads/manager.js';
+import { createEnterpriseActivityReporter } from '../../src/enterprise/activity-reporter-2026-08-28.js';
+import type { EnterpriseActivityEventsRequest } from '../../src/enterprise/activity-event-projector-2026-08-28.js';
 
 let tempDir = '';
 let db: Database.Database | undefined;
@@ -159,6 +161,40 @@ async function waitForRunStatus(
 }
 
 describe('run manager', () => {
+  it('reports requested and successful observed Skill evidence without reporting failed reads', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-manager-skill-'));
+    const skillPath = join(tempDir, 'codex-home', 'skills', 'reports');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: reports\ndescription: reports\n---\n');
+    const command = `cat ${join(skillPath, 'SKILL.md')}`;
+    const fake = createFakeCodex(tempDir, { stdoutLines: [
+      { type: 'thread.started', thread_id: 'codex_thread_1' },
+      { type: 'turn.started' },
+      { type: 'item.started', item: { type: 'command_execution', id: 'cmd_ok', command } },
+      { type: 'item.completed', item: { type: 'command_execution', id: 'cmd_ok', exit_code: 0, aggregated_output: 'read' } },
+      { type: 'item.started', item: { type: 'command_execution', id: 'cmd_fail', command } },
+      { type: 'item.completed', item: { type: 'command_execution', id: 'cmd_fail', exit_code: 1, aggregated_output: 'failed' } },
+      { type: 'turn.completed' }
+    ] });
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const batches: EnterpriseActivityEventsRequest[] = [];
+    const activityReporter = createEnterpriseActivityReporter({
+      httpClient: { reportAgentActivity: async (_token, request) => { batches.push(request); } },
+      requireAccessToken: async () => 'test-token'
+    });
+    activityReporter.resume();
+    const manager = createRunManager({
+      db, dataDir: tempDir, codexBin: fake.bin, codexHome: join(tempDir, 'codex-home'), homeDir: tempDir, activityReporter
+    });
+    const run = await manager.createAndRun({
+      prompt: '使用 $reports', cwd: tempDir, profile: 'default', sandbox: 'read-only'
+    });
+    await activityReporter.close();
+    const evidence = batches.flatMap(batch => batch.events).filter(event => event.event_type === 'skill_evidence' && event.run_id === run.id);
+    expect(evidence.map(event => event.payload.evidence)).toEqual(['explicit_request', 'skill_file_read']);
+    expect(evidence[1]?.payload.invocation).toBe('explicit');
+    expect(JSON.stringify(evidence)).not.toContain(skillPath);
+  });
   it('maps a canceled Codex fallback error to user cancellation', () => {
     expect(errorToTerminationReason(new CodexExecError({
       message: 'Codex exec did not exit after forced termination',

@@ -371,6 +371,18 @@ RETURNING true
 	return inserted, err
 }
 
+func (s *PostgresStore) InsertSkillEvidence(ctx context.Context, input state.SkillEvidenceState) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO office_agent_skill_evidence
+ (collector_id, source_event_id, agent_id, run_id, skill_id, skill_name, skill_key, source, version_id, evidence, invocation, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (collector_id, source_event_id) DO NOTHING
+`, input.CollectorID, input.SourceEventID, input.AgentID, input.RunID, input.SkillID,
+		input.SkillName, input.SkillKey, input.Source, input.VersionID, input.Evidence,
+		input.Invocation, input.OccurredAt)
+	return err
+}
+
 func (s *PostgresStore) UpsertSession(ctx context.Context, input state.SessionState) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO office_agent_sessions (collector_id, agent_id, session_id, status, summary, started_at, ended_at, workspace_name, updated_at)

@@ -64,6 +64,7 @@ type AcceptedResponse struct {
 
 var eventPayloadFields = map[string]map[string]bool{
 	"run_started":       {"prompt": true, "created_by": true, "workspace_name": true, "truncated": true},
+	"skill_evidence":    {"skill_id": true, "skill_name": true, "skill_key": true, "source": true, "version_id": true, "evidence": true, "invocation": true},
 	"status":            {"label": true, "threadId": true, "codexThreadId": true, "truncated": true},
 	"reasoning_summary": {"text": true, "format": true, "delivery": true, "truncated": true},
 	"assistant_message": {"text": true, "format": true, "delivery": true, "truncated": true},
@@ -145,6 +146,27 @@ func validatePayload(eventType string, payload map[string]any) error {
 	switch eventType {
 	case "run_started":
 		if !requiredString("prompt") {
+			return ErrInvalidActivityEvent
+		}
+	case "skill_evidence":
+		for _, key := range []string{"skill_id", "skill_name", "skill_key"} {
+			value, ok := payload[key].(string)
+			if !ok || strings.TrimSpace(value) != value || len(value) > 128 || value == "" || strings.ContainsAny(value, "/\\\n\r") {
+				return ErrInvalidActivityEvent
+			}
+		}
+		if version, ok := payload["version_id"]; ok {
+			value, valid := version.(string)
+			if !valid || value == "" || len(value) > 128 || strings.ContainsAny(value, "/\\\n\r") {
+				return ErrInvalidActivityEvent
+			}
+		}
+		if !oneOf(payload["source"], "enterprise", "local") ||
+			!oneOf(payload["evidence"], "explicit_request", "skill_file_read", "skill_resource_run") ||
+			!oneOf(payload["invocation"], "explicit", "implicit") ||
+			(payload["evidence"] == "explicit_request" && payload["invocation"] != "explicit") ||
+			(payload["source"] == "enterprise" && payload["version_id"] == nil) ||
+			(payload["source"] == "local" && payload["version_id"] != nil) {
 			return ErrInvalidActivityEvent
 		}
 	case "status":

@@ -2,12 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminPermissionsProvider } from "@/components/admin-permissions";
+import { permissions } from "@/lib/rbac-api";
 
 import {
   clearCurrentSkillVersion,
   getSkill,
   getSkillVersionFile,
+  listSkillSpaces,
   listSkillVersionFiles,
+  publishOwnSkillVersion,
   setCurrentSkillVersion,
   reviewSkillVersion,
   SkillHubAPIError,
@@ -24,7 +28,9 @@ vi.mock("@/lib/skillhub-api", async () => {
     clearCurrentSkillVersion: vi.fn(),
     getSkill: vi.fn(),
     getSkillVersionFile: vi.fn(),
+    listSkillSpaces: vi.fn(),
     listSkillVersionFiles: vi.fn(),
+    publishOwnSkillVersion: vi.fn(),
     setCurrentSkillVersion: vi.fn(),
     reviewSkillVersion: vi.fn()
   };
@@ -39,6 +45,7 @@ const clearCurrentSkillVersionMock = vi.mocked(clearCurrentSkillVersion);
 const detail: AdminSkillDetail = {
   skill: {
     skillId: "skill-1",
+    spaceId: "skillspace_default",
     name: "web-tools-guide",
     description: "为企业 Agent 提供网页工具使用规范。",
     currentVersionId: "version-2",
@@ -54,6 +61,17 @@ const detail: AdminSkillDetail = {
 };
 
 describe("SkillDetailPage", () => {
+  it("allows the uploader to publish a pending version when approval is off", async () => {
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 0, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });
+    vi.mocked(publishOwnSkillVersion).mockResolvedValue({ skill: detail.skill, version: version({}) });
+    renderPage(true);
+    fireEvent.click(await screen.findByRole("button", { name: "设为当前查看版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "设为当前版本" })).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(publishOwnSkillVersion).toHaveBeenCalledWith("skill-1", "version-default"));
+    expect(setCurrentSkillVersionMock).not.toHaveBeenCalled();
+  });
+
   it("keeps the reviewed update selected after approval so it can be published", async () => {
     const pending = { ...detail, canReview: true, versions: detail.versions.map((item) => item.versionId === "version-3" ? { ...item, approvalStatus: "pending" as const } : item) };
     getSkillMock.mockResolvedValueOnce(pending).mockResolvedValue({ ...detail, canReview: true });
@@ -89,6 +107,7 @@ describe("SkillDetailPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", approverUserId: "reviewer", approverName: "审批人", description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 1, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue(detail);
     listSkillVersionFilesMock.mockImplementation(async (_skillId, versionId) => ({
       items: versionId === "version-3"
@@ -287,13 +306,13 @@ function clickTab(tab: HTMLElement) {
   fireEvent.click(tab);
 }
 
-function renderPage() {
+function renderPage(asUploader = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/admin/skills/detail?skill_id=skill-1"]}>
         <Routes>
-          <Route path="/admin/skills/detail" element={<SkillDetailPage />} />
+          <Route path="/admin/skills/detail" element={asUploader ? <AdminPermissionsProvider account={{ userId: "writer-id", email: "writer@example.com", name: "Writer", status: "active", adminPermissions: [permissions.skillRead] }}><SkillDetailPage /></AdminPermissionsProvider> : <SkillDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>

@@ -49,5 +49,34 @@ LEFT JOIN mcp_agents ma ON ma.agent_id = a.mcp_agent_id
 		}
 		result.Agents = append(result.Agents, item)
 	}
-	return result, agentRows.Err()
+	if err := agentRows.Err(); err != nil {
+		return activity.ActivitySnapshot{}, err
+	}
+	skillRows, err := s.db.QueryContext(ctx, `
+SELECT MAX(e.skill_id), MAX(e.skill_name), e.skill_key, e.source,
+  COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id)) FILTER (WHERE e.evidence = 'explicit_request'),
+  COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run')),
+  COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run') AND e.invocation = 'implicit')
+FROM office_agent_skill_evidence e
+JOIN office_collector_tokens ct ON ct.collector_id = e.collector_id
+WHERE ct.user_id IS NOT NULL AND e.occurred_at >= $1 AND e.occurred_at < $2
+GROUP BY e.skill_key, e.source
+ORDER BY COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run')) DESC,
+  MAX(e.skill_name), e.skill_key
+LIMIT 100
+`, start, end)
+	if err != nil {
+		return activity.ActivitySnapshot{}, err
+	}
+	defer skillRows.Close()
+	result.SkillUsage = []activity.SkillUsage{}
+	for skillRows.Next() {
+		var item activity.SkillUsage
+		if err := skillRows.Scan(&item.SkillID, &item.SkillName, &item.SkillKey, &item.Source,
+			&item.RequestedRuns, &item.ObservedRuns, &item.ImplicitRuns); err != nil {
+			return activity.ActivitySnapshot{}, err
+		}
+		result.SkillUsage = append(result.SkillUsage, item)
+	}
+	return result, skillRows.Err()
 }

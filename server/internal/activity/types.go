@@ -70,6 +70,16 @@ type MCPUsage struct {
 	Share           float64 `json:"share"`
 }
 
+type SkillUsage struct {
+	SkillID       string `json:"skill_id"`
+	SkillName     string `json:"skill_name"`
+	SkillKey      string `json:"skill_key"`
+	Source        string `json:"source"`
+	RequestedRuns int64  `json:"requested_runs"`
+	ObservedRuns  int64  `json:"observed_runs"`
+	ImplicitRuns  int64  `json:"implicit_runs"`
+}
+
 type Agent struct {
 	CollectorID    string     `json:"collector_id"`
 	AgentID        string     `json:"agent_id"`
@@ -81,10 +91,11 @@ type Agent struct {
 }
 
 type ActivitySnapshot struct {
-	ActiveEmployees int64   `json:"active_employees"`
-	ActiveAgents    int64   `json:"active_agents"`
-	CompletedTurns  int64   `json:"completed_turns"`
-	Agents          []Agent `json:"agents"`
+	ActiveEmployees int64        `json:"active_employees"`
+	ActiveAgents    int64        `json:"active_agents"`
+	CompletedTurns  int64        `json:"completed_turns"`
+	Agents          []Agent      `json:"agents"`
+	SkillUsage      []SkillUsage `json:"skill_usage"`
 }
 
 type ActivityStore interface {
@@ -117,11 +128,12 @@ type Snapshot struct {
 }
 
 type Organization struct {
-	Usage           Usage      `json:"usage"`
-	ActiveEmployees int64      `json:"active_employees"`
-	ActiveAgents    int64      `json:"active_agents"`
-	CompletedTurns  int64      `json:"completed_turns"`
-	MCPDistribution []MCPUsage `json:"mcp_distribution"`
+	Usage           Usage        `json:"usage"`
+	ActiveEmployees int64        `json:"active_employees"`
+	ActiveAgents    int64        `json:"active_agents"`
+	CompletedTurns  int64        `json:"completed_turns"`
+	MCPDistribution []MCPUsage   `json:"mcp_distribution"`
+	SkillUsage      []SkillUsage `json:"skill_usage"`
 }
 
 type Statistics struct {

@@ -34,6 +34,16 @@ export type ActivityMCPUsage = {
   share: number;
 };
 
+export type ActivitySkillUsage = {
+  skill_id: string;
+  skill_name: string;
+  skill_key: string;
+  source: "enterprise" | "local";
+  requested_runs: number;
+  observed_runs: number;
+  implicit_runs: number;
+};
+
 export type ActivityAgent = {
   collector_id: string;
   agent_id: string;
@@ -56,6 +66,7 @@ export type ActivityStatistics = {
     active_agents: number;
     completed_turns: number;
     mcp_distribution: ActivityMCPUsage[];
+    skill_usage: ActivitySkillUsage[];
   };
   trend: {
     granularity: "hour" | "day";

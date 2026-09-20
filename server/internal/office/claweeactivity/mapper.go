@@ -30,6 +30,10 @@ func MapEvent(input ActivityEvent, agentID string) ([]collectorapi.CollectorEven
 	}
 
 	switch input.EventType {
+	case "skill_evidence":
+		event := base(collectorapi.EventSourceEventReceived, collectorapi.StatusThinking)
+		withParsed(&event)
+		return []collectorapi.CollectorEvent{event}, nil
 	case "run_started":
 		workspace := stringField(payload, "workspace_name")
 		prompt := stringField(payload, "prompt")

@@ -1,5 +1,6 @@
 import type { AgentEventEnvelope } from '@clawee/protocol';
 import { redactText } from '../security/redaction.js';
+import type { SkillUsageEvidence } from './skill-usage-tracker.js';
 
 export const ENTERPRISE_ACTIVITY_SCHEMA_VERSION = 'clawee.activity.v1' as const;
 export const ENTERPRISE_ACTIVITY_MAX_EVENT_BYTES = 128 * 1024;
@@ -17,6 +18,7 @@ export type EnterpriseActivityEventType =
   | 'approval'
   | 'diagnostic'
   | 'error'
+  | 'skill_evidence'
   | 'done';
 
 export type EnterpriseActivityEvent = {
@@ -99,6 +101,35 @@ export function projectActivityEvent(
   });
 }
 
+export function projectSkillEvidence(input: {
+  runId: string;
+  context: EnterpriseActivityRunContext;
+  eventId: string;
+  sequence: number;
+  occurredAt: string;
+  evidence: SkillUsageEvidence;
+}): EnterpriseActivityEvent {
+  return {
+    event_id: input.eventId,
+    run_id: input.runId,
+    session_id: input.context.sessionId,
+    turn_id: input.context.turnId,
+    sequence: input.sequence,
+    occurred_at: input.occurredAt,
+    event_type: 'skill_evidence',
+    normalizer_version: 1,
+    payload: {
+      skill_id: input.evidence.skillId,
+      skill_name: input.evidence.skillName,
+      skill_key: input.evidence.skillKey,
+      source: input.evidence.source,
+      ...(input.evidence.versionId === undefined ? {} : { version_id: input.evidence.versionId }),
+      evidence: input.evidence.evidence,
+      invocation: input.evidence.invocation
+    }
+  };
+}
+
 function projectPayload(event: AgentEventEnvelope): Record<string, unknown> | undefined {
   const payload = event.payload as Record<string, any>;
   switch (event.type) {
@@ -150,6 +181,8 @@ function fitEvent(event: EnterpriseActivityEvent): EnterpriseActivityEvent {
 function fallbackPayload(event: EnterpriseActivityEvent): Record<string, unknown> {
   const payload = event.payload;
   switch (event.event_type) {
+    case 'skill_evidence':
+      return payload;
     case 'run_started':
       return { ...pick(payload, ['prompt', 'created_by', 'workspace_name']), truncated: true };
     case 'status':
