@@ -223,6 +223,10 @@ Go 服务位于 `server`。路由、中间件、Service、Store、MCP Gateway、
 
 管理台位于 `server/web`，使用 React、Vite、Tailwind、Radix UI 和现有 `components/ui`。页面隐藏入口不能替代 Gateway 的服务端权限校验。
 
+Gateway 管理后台的页面设计与交互遵循 [前端设计指南](../design/design.md)，优先复用 `server/web/src/components/governance-ui.tsx` 和现有 `components/ui`。
+
+页面工程结构、请求、权限、测试与构建遵循 [Gateway 前端开发指导](../frontend/frontend-development-guidelines.md)。
+
 ### 8.3 可选能力
 
 知识库、Skill Hub、共享文件、钉钉、Bilibili、模型和计费属于可选能力。未配置外部服务时，核心 Gateway、账号、RBAC、MCP 纳管和审计仍应能够启动和测试。

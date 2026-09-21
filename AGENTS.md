@@ -38,6 +38,8 @@ Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企�
 - `client/apps/desktop` 使用 Electron。主进程、preload 与渲染进程保持权限隔离，新增原生能力必须通过已有 Bridge/IPC 边界暴露。
 - `server` 使用 Go、Gin 和 PostgreSQL。遵循现有包边界与依赖风格，优先使用标准库和仓库已有依赖，不为单一需求引入新的基础设施。
 - `server/web` 使用 TypeScript、React 19、Vite、Tailwind CSS、Radix UI 和现有 `components/ui` 组件体系。管理台组件优先复用现有 shadcn/ui 风格实现，Tailwind 主要用于布局、间距、尺寸和状态微调。
+- 开发 `server/web` 的 Gateway 管理后台页面前，遵循 `docs/design/design.md` 中的组件、布局、状态、文案和验收规范；该指南不适用于 `client/apps/web` 的本地任务工作台。
+- 开发 `server/web` 页面时同时遵循 `docs/frontend/frontend-development-guidelines.md` 的工程边界、API、路由、可访问性和验证要求；以仓库现有代码及服务端契约为准。
 - 客户端工作台与管理台是两套独立前端，不强行统一 React 版本、构建配置或样式实现，但应保持各自已有的视觉与交互一致性。
 - 前端整体保持克制、清晰、稳定和高信息密度。桌面端与浏览器端的共享流程应使用同一份 Web 实现；能力不可用时不得展示无效入口。
 
