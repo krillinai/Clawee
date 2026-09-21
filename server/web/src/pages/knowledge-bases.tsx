@@ -49,6 +49,7 @@ import { APIError } from "@/lib/api";
 import { knowledgeBaseStatusOptions, knowledgeStatusPresentation } from "@/lib/knowledge-ui";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { trimInput } from "@/lib/text";
 
 const knowledgeBasesKey = ["knowledge-bases"] as const;
 
@@ -101,7 +102,7 @@ export function KnowledgeBasesPage() {
     removeMember: (userId) => removeKnowledgeAccountGrant(userId, authorizationId ?? "")
   }), [authorizationId]);
   const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+    const normalized = trimInput(query).toLowerCase();
     return bases.filter((item) => {
       const matchesStatus = status === "all" || item.status === status;
       const matchesQuery =
@@ -114,12 +115,12 @@ export function KnowledgeBasesPage() {
     });
   }, [bases, query, status]);
   const editDirty = editForm !== null && (
-    editForm.name.trim() !== editForm.originalName ||
-    editForm.description.trim() !== editForm.originalDescription
+    trimInput(editForm.name) !== editForm.originalName ||
+    trimInput(editForm.description) !== editForm.originalDescription
   );
 
   const createMutation = useMutation({
-    mutationFn: () => createKnowledgeBase({ name: name.trim(), description: description.trim() }),
+    mutationFn: () => createKnowledgeBase({ name: trimInput(name), description: trimInput(description) }),
     onSuccess: (item) => {
       setCreateOpen(false);
       setName("");
@@ -132,8 +133,8 @@ export function KnowledgeBasesPage() {
   const updateMutation = useMutation({
     mutationFn: (form: KnowledgeBaseEditForm) => updateKnowledgeBase({
       knowledgeBaseId: form.knowledgeBaseId,
-      name: form.name.trim(),
-      description: form.description.trim()
+      name: trimInput(form.name),
+      description: trimInput(form.description)
     }),
     onSuccess: (item) => {
       setEditForm(null);
@@ -172,7 +173,7 @@ export function KnowledgeBasesPage() {
 
   function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (createMutation.isPending || !name.trim()) return;
+    if (createMutation.isPending || !trimInput(name)) return;
     createMutation.mutate();
   }
 
@@ -205,7 +206,7 @@ export function KnowledgeBasesPage() {
 
   function submitEditKnowledgeBase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editForm || updateMutation.isPending || !editForm.name.trim() || !editDirty) return;
+    if (!editForm || updateMutation.isPending || !trimInput(editForm.name) || !editDirty) return;
     updateMutation.mutate(editForm);
   }
 
@@ -437,11 +438,11 @@ export function KnowledgeBasesPage() {
         {editForm ? (
           <form onSubmit={submitEditKnowledgeBase}>
             <FieldGroup>
-              <Field data-invalid={!editForm.name.trim()}>
+              <Field data-invalid={!trimInput(editForm.name)}>
                 <FieldLabel htmlFor="knowledge-edit-name">名称</FieldLabel>
                 <Input
                   aria-describedby="knowledge-edit-name-description"
-                  aria-invalid={!editForm.name.trim()}
+                  aria-invalid={!trimInput(editForm.name)}
                   aria-label="知识库名称"
                   id="knowledge-edit-name"
                   maxLength={100}
@@ -468,7 +469,7 @@ export function KnowledgeBasesPage() {
               ) : null}
               <Field className="flex-wrap justify-end" orientation="horizontal">
                 <Button disabled={updateMutation.isPending} onClick={closeEditKnowledgeBase} type="button" variant="outline">取消</Button>
-                <Button disabled={updateMutation.isPending || !editForm.name.trim() || !editDirty} type="submit" variant="primary">
+                <Button disabled={updateMutation.isPending || !trimInput(editForm.name) || !editDirty} type="submit" variant="primary">
                   {updateMutation.isPending ? "保存中..." : "保存"}
                 </Button>
               </Field>
@@ -517,7 +518,7 @@ export function KnowledgeBasesPage() {
             ) : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={createMutation.isPending} onClick={closeCreate} type="button" variant="outline">取消</Button>
-              <Button disabled={createMutation.isPending || !name.trim()} type="submit" variant="primary">
+              <Button disabled={createMutation.isPending || !trimInput(name)} type="submit" variant="primary">
                 {createMutation.isPending ? "创建中..." : "创建"}
               </Button>
             </Field>

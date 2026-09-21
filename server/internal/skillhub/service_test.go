@@ -640,7 +640,7 @@ func TestServiceValidatesUploadFields(t *testing.T) {
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("valid")}})
 	tests := []UploadVersionInput{
 		{Version: "", Package: bytes.NewReader(data), CreatedBy: "admin"},
-		{Version: " invalid", Package: bytes.NewReader(data), CreatedBy: "admin"},
+		{Version: "invalid!", Package: bytes.NewReader(data), CreatedBy: "admin"},
 		{Version: "1", Changelog: string(make([]rune, MaxChangelogRunes+1)), Package: bytes.NewReader(data), CreatedBy: "admin"},
 		{Version: "1", Package: nil, CreatedBy: "admin"},
 	}
@@ -648,6 +648,12 @@ func TestServiceValidatesUploadFields(t *testing.T) {
 		if _, err := uploadApprovedVersion(service, context.Background(), input); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatalf("UploadVersion(%#v) error = %v, want ErrInvalidRequest", input, err)
 		}
+	}
+	normalized, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{
+		Version: " 1\u200c ", Changelog: " \u200c更新说明 \u2060", Package: bytes.NewReader(data), CreatedBy: "admin",
+	})
+	if err != nil || normalized.Version.Version != "1" || normalized.Version.Changelog != "更新说明" {
+		t.Fatalf("normalized upload = %#v, error = %v", normalized.Version, err)
 	}
 	for _, origin := range []string{"", "unregistered"} {
 		_, err := service.UploadVersion(context.Background(), UploadVersionInput{

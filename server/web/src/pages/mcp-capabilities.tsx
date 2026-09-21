@@ -64,6 +64,7 @@ import {
 } from "@/lib/mcp-admin-ui";
 import { readQueryParam, updateQueryParams } from "@/lib/url-state";
 import { permissions } from "@/lib/rbac-api";
+import { cleanInputIdentifier } from "@/lib/text";
 
 const capabilitiesQueryKey = ["mcp-capabilities"] as const;
 const upstreamServersQueryKey = ["mcp-upstream-servers"] as const;
@@ -276,7 +277,7 @@ export function MCPCapabilitiesPage() {
     event.preventDefault();
     if (!renameState) return;
 
-    const nextExposedName = renameState.value.trim();
+    const nextExposedName = cleanInputIdentifier(renameState.value);
     const validationError = validateExposedName(nextExposedName);
     if (validationError) {
       setRenameState({ ...renameState, error: validationError });
@@ -289,7 +290,7 @@ export function MCPCapabilitiesPage() {
     if (
       renameState.capability.status === "active" &&
       renameState.capability.grantCount === 0 &&
-      renameState.confirmation.trim() !== renameState.capability.exposedName
+      cleanInputIdentifier(renameState.confirmation) !== renameState.capability.exposedName
     ) {
       setRenameState({ ...renameState, error: activeRenameConfirmMessage });
       return;

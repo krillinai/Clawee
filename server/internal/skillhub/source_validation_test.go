@@ -58,6 +58,12 @@ func TestValidateGitHubSourceNormalizesRepositoryRelativePaths(t *testing.T) {
 			t.Fatalf("NormalizeRepositoryRelativePath(%q) error = %v, want ErrInvalidRequest", value, err)
 		}
 	}
+	for _, value := range []string{" skills", "skills ", "\u200bskills"} {
+		got, err := NormalizeRepositoryRelativePath(value, true)
+		if err != nil || got != value {
+			t.Fatalf("NormalizeRepositoryRelativePath(%q) = %q, %v; want original path", value, got, err)
+		}
+	}
 	if _, err := NormalizeRepositoryRelativePath("", false); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("empty exclude path error = %v, want ErrInvalidRequest", err)
 	}

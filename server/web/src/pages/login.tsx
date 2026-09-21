@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { authMethods, login } from "@/lib/auth-api";
+import { cleanInputIdentifier } from "@/lib/text";
 
 const oauthErrors: Record<string, string> = {
   dingtalk_disabled: "钉钉登录暂未启用",
@@ -53,7 +54,7 @@ export function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      const response = await login({ email, password });
+      const response = await login({ email: cleanInputIdentifier(email), password });
       queryClient.removeQueries({ queryKey: ["auth"] });
       navigate(loginDestination(location.state, response.redirectTo), { replace: true });
     } catch {
@@ -80,7 +81,7 @@ export function LoginPage() {
                 autoComplete="email"
                 id="login-email"
                 name="email"
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => setEmail(cleanInputIdentifier(event.target.value))}
                 required
                 type="email"
                 value={email}

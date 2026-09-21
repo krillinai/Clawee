@@ -130,6 +130,23 @@ describe("UsersPage", () => {
     await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
   });
 
+  it("创建账号时清理邮箱编码和名称边界字符，保留密码原样", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "新增账号" }));
+    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "\u200bnew\u200d@example.com\ufeff" } });
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "\u2060 新增账号 \u200b" } });
+    fireEvent.change(screen.getByLabelText("初始密码"), { target: { value: " passw0rd! " } });
+    fireEvent.click(screen.getByRole("button", { name: "创建账号" }));
+
+    await waitFor(() => expect(createAccountMock).toHaveBeenCalledWith({
+      email: "new@example.com",
+      name: "新增账号",
+      password: " passw0rd! ",
+      status: "active"
+    }));
+  });
+
   it("名称为空时不允许创建账号", async () => {
     renderPage();
 
@@ -141,6 +158,8 @@ describe("UsersPage", () => {
     expect(nameInput).toBeRequired();
     expect(submit).toBeDisabled();
     fireEvent.change(nameInput, { target: { value: "   " } });
+    expect(submit).toBeDisabled();
+    fireEvent.change(nameInput, { target: { value: "\u200b\u2060" } });
     expect(submit).toBeDisabled();
     fireEvent.change(nameInput, { target: { value: "新增账号" } });
     expect(submit).toBeEnabled();

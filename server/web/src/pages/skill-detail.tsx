@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { permissions } from "@/lib/rbac-api";
+import { trimInput } from "@/lib/text";
 import {
   clearCurrentSkillVersion,
   githubCommitURL,
@@ -143,7 +144,7 @@ export function SkillDetailPage() {
     }
   });
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(skillId, reviewTarget!.version.versionId, reviewTarget!.decision, reviewComment),
+    mutationFn: () => reviewSkillVersion(skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
     onSuccess: () => {
       setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
       setReviewTarget(null);

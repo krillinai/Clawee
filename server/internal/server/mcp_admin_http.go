@@ -14,6 +14,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
 	"github.com/krillinai/Clawee/server/internal/office/management"
 	"github.com/krillinai/Clawee/server/internal/rbac"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 type registerUpstreamServerRequest struct {
@@ -90,6 +91,9 @@ type upstreamServerResponse struct {
 }
 
 func validateUpstreamRegistration(req registerUpstreamServerRequest) error {
+	if req.Token != textutil.TrimInput(req.Token) {
+		return errors.New("token must not contain surrounding spaces or invisible characters")
+	}
 	if !upstreamEndpointServerIDPattern.MatchString(strings.TrimSpace(req.ServerID)) {
 		return errors.New("server_id must contain only letters, numbers, dots, underscores, or hyphens")
 	}
@@ -127,21 +131,21 @@ func hasStdioConfig(stdio mcpgateway.StdioConfig) bool {
 func upstreamServerFromRequest(serverID string, req registerUpstreamServerRequest, status string, createdAt time.Time) mcpgateway.UpstreamServer {
 	routingDescription := ""
 	if req.RoutingDescription != nil {
-		routingDescription = strings.TrimSpace(*req.RoutingDescription)
+		routingDescription = textutil.TrimInput(*req.RoutingDescription)
 	}
 	collectorID := ""
 	if req.CollectorID != nil {
-		collectorID = strings.TrimSpace(*req.CollectorID)
+		collectorID = textutil.CleanInputIdentifier(*req.CollectorID)
 	}
 	return mcpgateway.UpstreamServer{
 		ID:                 serverID,
-		Name:               req.Name,
-		Domain:             req.Domain,
+		Name:               textutil.TrimInput(req.Name),
+		Domain:             textutil.CleanInputIdentifier(req.Domain),
 		Transport:          normalizedUpstreamTransport(req.Transport),
-		Endpoint:           req.Endpoint,
+		Endpoint:           textutil.TrimInput(req.Endpoint),
 		Stdio:              req.Stdio,
-		OwnerTeam:          req.OwnerTeam,
-		Namespace:          req.Namespace,
+		OwnerTeam:          textutil.TrimInput(req.OwnerTeam),
+		Namespace:          textutil.CleanInputIdentifier(req.Namespace),
 		RoutingDescription: routingDescription,
 		CollectorID:        collectorID,
 		Status:             status,
@@ -294,7 +298,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		req.ServerID = strings.TrimSpace(req.ServerID)
+		req.ServerID = textutil.CleanInputIdentifier(req.ServerID)
 		if isApplicationManagedBuiltinServerID(req.ServerID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "builtin upstream server id is reserved"})
 			return
@@ -383,7 +387,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 		if !authorizePermission(c, opts.RBACService, permissionCode) {
 			return
 		}
-		serverID := strings.TrimSpace(req.ServerID)
+		serverID := textutil.CleanInputIdentifier(req.ServerID)
 		if serverID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "server_id is required"})
 			return
@@ -538,7 +542,9 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(req.AgentID) == "" {
+		req.AgentID = textutil.CleanInputIdentifier(req.AgentID)
+		req.UserID = textutil.CleanInputIdentifier(req.UserID)
+		if req.AgentID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id is required"})
 			return
 		}
@@ -563,9 +569,9 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 		}
 		agent := mcpgateway.AgentRegistration{
 			AgentID:        req.AgentID,
-			ClientID:       req.ClientID,
-			Name:           req.Name,
-			TenantID:       req.TenantID,
+			ClientID:       textutil.CleanInputIdentifier(req.ClientID),
+			Name:           textutil.TrimInput(req.Name),
+			TenantID:       textutil.CleanInputIdentifier(req.TenantID),
 			ActorID:        req.UserID,
 			Status:         status,
 			CreationSource: mcpgateway.AgentCreationSourceManual,
@@ -1000,7 +1006,7 @@ func renameCapabilityFromRequest(c *gin.Context, opts Options, req renameCapabil
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})
 		return
 	}
-	newName := strings.TrimSpace(req.ExposedName)
+	newName := textutil.CleanInputIdentifier(req.ExposedName)
 	if newName == "" || strings.Contains(newName, " ") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "exposed_name is invalid"})
 		return

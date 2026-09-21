@@ -18,6 +18,7 @@ import {
 } from "@/lib/platform-branding-api";
 import { cn } from "@/lib/utils";
 import { permissions } from "@/lib/rbac-api";
+import { trimInput } from "@/lib/text";
 
 const MAX_IMAGE_BYTES = 1024 * 1024;
 const sidebarMenus: Array<{ key: SidebarMenuKey; label: string; defaultName: string }> = [
@@ -29,8 +30,9 @@ const sidebarMenus: Array<{ key: SidebarMenuKey; label: string; defaultName: str
 
 function menuLabelError(value: string | null | undefined): string | undefined {
   if (value == null) return undefined;
-  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return "不能包含换行或控制字符";
-  const length = Array.from(value.trim()).length;
+  const normalized = trimInput(value);
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(normalized)) return "不能包含换行或控制字符";
+  const length = Array.from(normalized).length;
   return length < 1 || length > 10 ? "名称必须为 1～10 个字符" : undefined;
 }
 
@@ -107,7 +109,7 @@ export function PlatformBrandingPage() {
         sidebarCompactLogoAction: compactLogo.action,
         sidebarCompactLogo: compactLogo.file,
         ...(Object.keys(menuDraft).length === 0 ? {} : {
-          sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value?.trim() ?? null]))
+          sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value == null ? null : trimInput(value)]))
         })
       });
       releaseObjectUrl(sidebarLogo.objectUrl);

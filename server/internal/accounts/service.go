@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 const (
@@ -547,7 +548,7 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 }
 
 func normalizeAccountName(value string) string {
-	return strings.TrimSpace(value)
+	return textutil.TrimInput(value)
 }
 
 func (s *Service) UpdateAccountName(ctx context.Context, userID, name string) (Account, error) {
@@ -763,7 +764,7 @@ func validClientForAudience(clientID, audience string) bool {
 }
 
 func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	return strings.ToLower(textutil.CleanInputIdentifier(email))
 }
 
 func validStatus(status string) bool {

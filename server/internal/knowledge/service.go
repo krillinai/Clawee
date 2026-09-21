@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/krillinai/Clawee/server/internal/knowledge/provider"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 type Service struct {
@@ -32,8 +33,8 @@ func NewService(store Store, p provider.KnowledgeProvider, loggers ...*zap.Logge
 func (s *Service) Store() Store { return s.store }
 
 func (s *Service) CreateKnowledgeBase(ctx context.Context, input CreateKnowledgeBaseInput) (KnowledgeBase, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Description = strings.TrimSpace(input.Description)
+	input.Name = textutil.TrimInput(input.Name)
+	input.Description = textutil.TrimInput(input.Description)
 	if input.Name == "" || len([]rune(input.Name)) > 100 || len([]rune(input.Description)) > 1000 || s.provider == nil {
 		return KnowledgeBase{}, ErrInvalidRequest
 	}
@@ -96,14 +97,14 @@ func (s *Service) UpdateKnowledgeBase(ctx context.Context, input UpdateKnowledge
 		return KnowledgeBase{}, err
 	}
 	if input.Name != nil {
-		name := strings.TrimSpace(*input.Name)
+		name := textutil.TrimInput(*input.Name)
 		if name == "" || len([]rune(name)) > 100 {
 			return KnowledgeBase{}, ErrInvalidRequest
 		}
 		kb.Name = name
 	}
 	if input.Description != nil {
-		description := strings.TrimSpace(*input.Description)
+		description := textutil.TrimInput(*input.Description)
 		if len([]rune(description)) > 1000 {
 			return KnowledgeBase{}, ErrInvalidRequest
 		}

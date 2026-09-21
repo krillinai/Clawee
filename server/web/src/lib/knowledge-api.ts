@@ -1,4 +1,5 @@
 import { adminApi, unwrapAPIResponse } from "./api";
+import { trimInput } from "./text";
 
 type ListResponse<T> = { items: T[] };
 
@@ -174,7 +175,7 @@ export async function listKnowledgeAccountGrants(knowledgeBaseId: string): Promi
 
 export async function listKnowledgeMembers(knowledgeBaseId: string, query = "") {
   const params = new URLSearchParams({ knowledge_base_id: knowledgeBaseId });
-  if (query.trim()) params.set("query", query.trim());
+  if (trimInput(query)) params.set("query", trimInput(query));
   const response = await adminApi.get<ListResponse<KnowledgeMemberResponse>>(`/knowledge-bases/members?${params}`);
   return {
     items: response.items.map((item) => ({
@@ -191,7 +192,7 @@ export async function listKnowledgeMembers(knowledgeBaseId: string, query = "") 
 
 export async function listKnowledgeMemberCandidates(knowledgeBaseId: string, query = "") {
   const params = new URLSearchParams({ knowledge_base_id: knowledgeBaseId });
-  if (query.trim()) params.set("query", query.trim());
+  if (trimInput(query)) params.set("query", trimInput(query));
   const response = await adminApi.get<ListResponse<KnowledgeMemberCandidateResponse>>(`/knowledge-bases/member-candidates?${params}`);
   return {
     items: response.items.map((item) => ({ userId: item.user_id, name: item.name, email: item.email })),

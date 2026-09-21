@@ -25,6 +25,7 @@ import {
   type SkillSpace
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
+import { trimInput } from "@/lib/text";
 
 export function SkillSpacesPanel({
   canCreate,
@@ -62,8 +63,8 @@ export function SkillSpacesPanel({
 
   const saveMutation = useMutation({
     mutationFn: () => editing
-      ? updateSkillSpace({ spaceId: editing.spaceId, name, description })
-      : createSkillSpace({ name, description }),
+      ? updateSkillSpace({ spaceId: editing.spaceId, name: trimInput(name), description: trimInput(description) })
+      : createSkillSpace({ name: trimInput(name), description: trimInput(description) }),
     onSuccess: () => {
       setEditing(undefined);
       void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
@@ -95,7 +96,7 @@ export function SkillSpacesPanel({
 
   function submitSpace(event: FormEvent) {
     event.preventDefault();
-    if (name.trim()) saveMutation.mutate();
+    if (trimInput(name)) saveMutation.mutate();
   }
 
   return <section aria-label="技能空间" className="grid gap-5">
@@ -121,7 +122,7 @@ export function SkillSpacesPanel({
     </DataTableShell>
 
     <ModalShell open={editing !== undefined} onClose={() => setEditing(undefined)} title={editing ? "编辑技能空间" : "新建技能空间"} contextLabel="技能中心">
-      <form onSubmit={submitSpace}><FieldGroup><Field><FieldLabel htmlFor="skill-space-name">空间名称</FieldLabel><Input id="skill-space-name" maxLength={100} required value={name} onChange={(event) => setName(event.target.value)} /></Field><Field><FieldLabel htmlFor="skill-space-description">说明</FieldLabel><Textarea id="skill-space-description" maxLength={500} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>{saveMutation.isError ? <ErrorAlert>保存失败：{errorText(saveMutation.error)}</ErrorAlert> : null}<Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button disabled={saveMutation.isPending || !name.trim()} type="submit" variant="primary">保存</Button></Field></FieldGroup></form>
+      <form onSubmit={submitSpace}><FieldGroup><Field><FieldLabel htmlFor="skill-space-name">空间名称</FieldLabel><Input id="skill-space-name" maxLength={100} required value={name} onChange={(event) => setName(event.target.value)} /></Field><Field><FieldLabel htmlFor="skill-space-description">说明</FieldLabel><Textarea id="skill-space-description" maxLength={500} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>{saveMutation.isError ? <ErrorAlert>保存失败：{errorText(saveMutation.error)}</ErrorAlert> : null}<Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button disabled={saveMutation.isPending || !trimInput(name)} type="submit" variant="primary">保存</Button></Field></FieldGroup></form>
     </ModalShell>
 
     <DetailDrawer open={Boolean(approverTarget)} onClose={() => { if (!approverMutation.isPending) setApproverTarget(null); }} title="空间设置" subtitle={approverTarget?.name ?? ""} contextLabel="技能中心">

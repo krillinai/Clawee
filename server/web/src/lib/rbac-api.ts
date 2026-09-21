@@ -111,7 +111,10 @@ export const permissions = {
   platformBrandingManage: "console:platform_branding:manage",
   platformBrandingUpdate: "console:platform_branding:update",
   clientDownloadsRead: "console:client_downloads:read",
-  clientDownloadsUpdate: "console:client_downloads:update"
+  clientDownloadsUpdate: "console:client_downloads:update",
+  workflowTemplateManage: "console:workflow:template_manage",
+  workflowInstanceRead: "console:workflow:instance_read",
+  workflowInstanceTerminate: "console:workflow:instance_terminate"
 } as const;
 
 export type Permission = {

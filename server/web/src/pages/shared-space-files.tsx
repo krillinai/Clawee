@@ -74,7 +74,7 @@ export function SharedSpaceFilesPage() {
   const uploadMutation = useMutation({
     mutationFn: (value: UploadForm) => uploadSharedFile({
       spaceId,
-      logicalPath: value.logicalPath.trim(),
+      logicalPath: value.logicalPath,
       file: value.file as File,
       expectedRevision: value.expectedRevision
     }),

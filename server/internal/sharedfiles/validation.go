@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 type cursorPayload struct {
@@ -97,7 +99,8 @@ func decodeCursor(value string, kind string) (Cursor, error) {
 }
 
 func normalizeSpaceInput(name, description string) (string, string, error) {
-	name = strings.TrimSpace(name)
+	name = textutil.TrimInput(name)
+	description = textutil.TrimInput(description)
 	if name == "" || utf8.RuneCountInString(name) > 100 || utf8.RuneCountInString(description) > 500 {
 		return "", "", ErrInvalidRequest
 	}

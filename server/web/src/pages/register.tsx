@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { registerAccount } from "@/lib/auth-api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -23,11 +24,11 @@ export function RegisterPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const normalizedName = name.trim();
+    const normalizedName = trimInput(name);
     if (!normalizedName) return;
     setSubmitting(true);
     try {
-      const response = await registerAccount({ email: email.trim(), name: normalizedName, password });
+      const response = await registerAccount({ email: cleanInputIdentifier(email), name: normalizedName, password });
       navigate(response.redirectTo, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "注册失败");
@@ -53,7 +54,7 @@ export function RegisterPage() {
                 autoComplete="email"
                 id="register-email"
                 name="email"
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => setEmail(cleanInputIdentifier(event.target.value))}
                 required
                 type="email"
                 value={email}

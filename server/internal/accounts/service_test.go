@@ -427,6 +427,10 @@ func TestRegisterTrimsNamesAndAllowsDuplicates(t *testing.T) {
 	if first.Account.Name != "Alice" {
 		t.Fatalf("stored name = %q", first.Account.Name)
 	}
+	cleaned, err := svc.Register(context.Background(), RegisterRequest{Email: " \u200cTHREE@example.com\u2060 ", Name: " \u200c张三\u2060 ", Password: "passw0rd!"})
+	if err != nil || cleaned.Account.Email != "three@example.com" || cleaned.Account.Name != "张三" {
+		t.Fatalf("normalized account = %#v, error = %v", cleaned.Account, err)
+	}
 	second, err := svc.Register(context.Background(), RegisterRequest{Email: "two@example.com", Name: "Alice", Password: "passw0rd!"})
 	if err != nil || second.Account.Name != "Alice" {
 		t.Fatalf("duplicate name registration = %#v, %v", second.Account, err)

@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { MCPAccountTokenInfo, MCPAccountTokenResponse, MCPAgent, MCPGrant, MCPCapability, MCPUpstreamServer } from "@/lib/mcp-admin-api";
 import { agentCreationSourceLabel } from "@/lib/agent-source";
 import { formatDateTime, mcpStatusLabel, mcpStatusVariant } from "@/lib/mcp-admin-ui";
+import { trimInput } from "@/lib/text";
 
 export type AgentTableMode = "admin" | "user";
 
@@ -415,7 +416,7 @@ export function MCPAgentGrantsDrawer({
     [grantItems]
   );
   const filteredGrantItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = trimInput(query).toLowerCase();
     return grantItems.filter(({ grant, capability, server }) => {
       const searchable = [
         grant.id,

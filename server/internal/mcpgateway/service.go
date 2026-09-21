@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/krillinai/Clawee/server/internal/textutil"
 	"github.com/krillinai/Clawee/server/internal/tokenutil"
 )
 
@@ -238,16 +239,15 @@ func (s *Service) validateCaller(ctx context.Context, userID, agentID string) er
 }
 
 func (s *Service) UpdateAgentName(ctx context.Context, agentID, name string) (AgentRegistration, error) {
-	return s.store.UpdateAgentName(ctx, strings.TrimSpace(agentID), strings.TrimSpace(name))
+	return s.store.UpdateAgentName(ctx, strings.TrimSpace(agentID), textutil.TrimInput(name))
 }
 
 func (s *Service) SetUpstreamBearerToken(server *UpstreamServer, plaintext string) error {
 	if server == nil {
 		return errors.New("upstream server is required")
 	}
-	plaintext = strings.TrimSpace(plaintext)
-	if plaintext == "" {
-		return errors.New("upstream bearer token is empty")
+	if plaintext == "" || plaintext != textutil.TrimInput(plaintext) {
+		return errors.New("upstream bearer token must not contain surrounding spaces or invisible characters")
 	}
 	ciphertext, err := s.encryptTokenPlaintext(plaintext)
 	if err != nil {
@@ -1144,7 +1144,7 @@ func (s *Service) DeclineConfirmation(ctx context.Context, id string, reason str
 		}
 		return updated, ErrGateConflict
 	}
-	reason = strings.TrimSpace(reason)
+	reason = textutil.TrimInput(reason)
 	if reason == "" {
 		reason = "rejected"
 	}

@@ -32,6 +32,7 @@ import {
 } from "@/lib/mcp-admin-api";
 import { decisionLabel, decisionVariant, formatDateTime, formatDuration, redactHeaders } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { trimInput } from "@/lib/text";
 import { readQueryParam, updateQueryParams } from "@/lib/url-state";
 import { cn } from "@/lib/utils";
 
@@ -62,7 +63,7 @@ export function MCPProxyAuditPage() {
       ...(decision !== "all" ? { decision } : {}),
       ...(agentID !== "all" ? { agentId: agentID } : {}),
       ...(upstreamServerID !== "all" ? { upstreamServerId: upstreamServerID } : {}),
-      ...(tool.trim() ? { tool: tool.trim() } : {}),
+      ...(trimInput(tool) ? { tool: trimInput(tool) } : {}),
       ...(createdFrom ? { createdFrom } : {}),
       ...(createdTo ? { createdTo } : {}),
       ...(errorOnly ? { errorOnly: true } : {}),

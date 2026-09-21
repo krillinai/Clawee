@@ -1,6 +1,27 @@
 package textutil
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+func isInputBoundary(r rune) bool {
+	return unicode.IsSpace(r) || r == '\u200b' || r == '\u200c' || r == '\u200d' || r == '\u2060' || r == '\ufeff'
+}
+
+func TrimInput(value string) string {
+	return strings.TrimFunc(value, isInputBoundary)
+}
+
+func CleanInputIdentifier(value string) string {
+	return TrimInput(strings.Map(func(r rune) rune {
+		if r == '\u200b' || r == '\u200c' || r == '\u200d' || r == '\u2060' || r == '\ufeff' {
+			return -1
+		}
+		return r
+	}, value))
+}
 
 func TruncateRunes(value string, maxRunes int, suffix string) string {
 	if maxRunes <= 0 {

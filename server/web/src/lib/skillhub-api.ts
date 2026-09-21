@@ -1,4 +1,5 @@
 import { adminApi, appApi, unwrapAPIResponse } from "./api";
+import { trimInput } from "./text";
 
 type ListResponse<T> = { items: T[] };
 
@@ -516,14 +517,14 @@ export async function updateSkillSpace(input: { spaceId: string; name: string; d
 
 export async function listSkillSpaceMembers(spaceId: string, query = "") {
   const params = new URLSearchParams({ space_id: spaceId });
-  if (query.trim()) params.set("query", query.trim());
+  if (trimInput(query)) params.set("query", trimInput(query));
   const response = await adminApi.get<ListResponse<SkillSpaceMemberResponse>>(`/skill-spaces/account-grants?${params.toString()}`);
   return response.items.map(mapSkillSpaceMember);
 }
 
 export async function listSkillSpaceCandidates(spaceId: string, query = "") {
   const params = new URLSearchParams({ space_id: spaceId });
-  if (query.trim()) params.set("query", query.trim());
+  if (trimInput(query)) params.set("query", trimInput(query));
   const response = await adminApi.get<ListResponse<{ user_id: string; name: string; email: string }>>(`/skill-spaces/member-candidates?${params.toString()}`);
   return response.items.map((item) => ({ userId: item.user_id, name: item.name, email: item.email }));
 }

@@ -3,6 +3,17 @@ const segmenter =
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
     : undefined;
 
+const invisibleInputCharacters = /[\u200B-\u200D\u2060\uFEFF]/g;
+const inputBoundary = /^[\s\u200B-\u200D\u2060\uFEFF]+|[\s\u200B-\u200D\u2060\uFEFF]+$/g;
+
+export function trimInput(value: string) {
+  return value.replace(inputBoundary, "");
+}
+
+export function cleanInputIdentifier(value: string) {
+  return trimInput(value.replace(invisibleInputCharacters, ""));
+}
+
 export function truncateText(value: string, maxLength: number, suffix = "...") {
   if (maxLength <= 0) return "";
 

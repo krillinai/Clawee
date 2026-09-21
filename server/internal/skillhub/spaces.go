@@ -5,10 +5,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 func (s *Service) CreateSpace(ctx context.Context, name, description, operator string) (SpaceSummary, error) {
-	name, description, operator = strings.TrimSpace(name), strings.TrimSpace(description), strings.TrimSpace(operator)
+	name, description, operator = textutil.TrimInput(name), textutil.TrimInput(description), strings.TrimSpace(operator)
 	if s == nil || s.spaces == nil || name == "" || len([]rune(name)) > 100 || len([]rune(description)) > 500 || operator == "" {
 		return SpaceSummary{}, ErrInvalidRequest
 	}
@@ -20,7 +22,7 @@ func (s *Service) CreateSpace(ctx context.Context, name, description, operator s
 }
 
 func (s *Service) UpdateSpace(ctx context.Context, spaceID, name, description, operator string) (SpaceSummary, error) {
-	spaceID, name, description, operator = strings.TrimSpace(spaceID), strings.TrimSpace(name), strings.TrimSpace(description), strings.TrimSpace(operator)
+	spaceID, name, description, operator = strings.TrimSpace(spaceID), textutil.TrimInput(name), textutil.TrimInput(description), strings.TrimSpace(operator)
 	if s == nil || s.spaces == nil || spaceID == "" || name == "" || len([]rune(name)) > 100 || len([]rune(description)) > 500 || operator == "" {
 		return SpaceSummary{}, ErrInvalidRequest
 	}

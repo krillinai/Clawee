@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
+import { APIError } from "@/lib/api";
 import {
   createRole,
   listPermissions,
@@ -138,6 +139,49 @@ describe("RBACRolesPage", () => {
       name: "安全只读",
       permissionCodes: [permissions.mcpAuditRead]
     }));
+  });
+
+  it("清理角色编码中的空白和不可见格式字符后提交", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
+    const code = screen.getByLabelText<HTMLInputElement>("角色编码");
+    fireEvent.change(code, { target: { value: "  skillreviewer\u200C  " } });
+    expect(code).toHaveValue("skillreviewer");
+    fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "技能审核员" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
+    await waitFor(() => expect(createRoleMock).toHaveBeenCalledWith({
+      code: "skillreviewer", name: "技能审核员", permissionCodes: []
+    }));
+  });
+
+  it("角色编码按具体原因提示格式错误及保留编码", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
+    const code = screen.getByLabelText<HTMLInputElement>("角色编码");
+    fireEvent.change(code, { target: { value: "Skill-reviewer" } });
+    fireEvent.invalid(code);
+    expect(code.validationMessage).toMatch(/小写英文字母开头/);
+    fireEvent.change(code, { target: { value: "skill-reviewer" } });
+    fireEvent.invalid(code);
+    expect(code.validationMessage).toMatch(/只能使用小写英文字母、数字和下划线/);
+    fireEvent.change(code, { target: { value: "admin" } });
+    expect(code.validationMessage).toMatch(/系统保留/);
+    fireEvent.change(code, { target: { value: "skillreviewer" } });
+    expect(code.validationMessage).toBe("");
+  });
+
+  it("名称全为空白及角色编码重复时给出可理解的提示", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
+    const name = screen.getByLabelText<HTMLInputElement>("角色名称");
+    fireEvent.change(name, { target: { value: "   " } });
+    expect(name.validationMessage).toMatch(/不能只包含空格/);
+    fireEvent.change(name, { target: { value: "技能审核员" } });
+    expect(name.validationMessage).toBe("");
+    createRoleMock.mockRejectedValue(new APIError("rbac role code already exists", 409, "conflict"));
+    fireEvent.change(screen.getByLabelText("角色编码"), { target: { value: "skillreviewer" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
+    expect(await screen.findByText("角色编码已存在，请更换编码")).toBeInTheDocument();
   });
 
   it("支持按模块批量选择权限并显示半选状态", async () => {

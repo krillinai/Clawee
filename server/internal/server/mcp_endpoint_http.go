@@ -111,6 +111,8 @@ func newMCPHandler(opts Options, upstreamServerID, endpointPath string) http.Han
 		return mcpserver.New(mcpserver.Options{
 			ProxyGateway:     opts.ProxyGateway,
 			UpstreamServerID: upstreamServerID,
+			Workflow:         opts.WorkflowService,
+			Accounts:         opts.AccountService,
 		}, r)
 	}, &mcp.StreamableHTTPOptions{
 		Stateless:                    true,

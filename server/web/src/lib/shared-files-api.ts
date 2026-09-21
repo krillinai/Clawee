@@ -1,4 +1,5 @@
 import { adminApi } from "./api";
+import { trimInput } from "./text";
 
 export type SharedSpace = {
   spaceId: string;
@@ -108,7 +109,7 @@ type UploadResponse = {
 
 export async function listSharedSpaces(input: { query?: string; cursor?: string }) {
   const params = new URLSearchParams({ limit: "50" });
-  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.query && trimInput(input.query)) params.set("query", trimInput(input.query));
   if (input.cursor) params.set("cursor", input.cursor);
   const response = await adminApi.get<ListEnvelope<SharedSpaceResponse>>(`/shared-spaces?${params}`);
   return { items: response.data.map(mapSpace), meta: response.meta };
@@ -133,7 +134,7 @@ export async function updateSharedSpace(input: { spaceId: string; name: string; 
 
 export async function listSharedSpaceMembers(input: { spaceId: string; query?: string; cursor?: string }) {
   const params = new URLSearchParams({ space_id: input.spaceId, limit: "100" });
-  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.query && trimInput(input.query)) params.set("query", trimInput(input.query));
   if (input.cursor) params.set("cursor", input.cursor);
   const response = await adminApi.get<ListEnvelope<MemberResponse>>(`/shared-spaces/account-grants?${params}`);
   return { items: response.data.map(mapMember), meta: response.meta };
@@ -141,7 +142,7 @@ export async function listSharedSpaceMembers(input: { spaceId: string; query?: s
 
 export async function listSharedSpaceCandidates(input: { spaceId: string; query?: string; cursor?: string }) {
   const params = new URLSearchParams({ space_id: input.spaceId, limit: "100" });
-  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.query && trimInput(input.query)) params.set("query", trimInput(input.query));
   if (input.cursor) params.set("cursor", input.cursor);
   const response = await adminApi.get<ListEnvelope<CandidateResponse>>(`/shared-spaces/member-candidates?${params}`);
   return { items: response.data.map((item) => ({ userId: item.user_id, name: item.name, email: item.email })), meta: response.meta };
@@ -172,7 +173,7 @@ export function removeSharedSpaceMember(input: { spaceId: string; userId: string
 
 export async function listSharedFiles(input: { spaceId: string; query?: string; logicalPathPrefix?: string; cursor?: string }) {
   const params = new URLSearchParams({ space_id: input.spaceId, limit: "50" });
-  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.query && trimInput(input.query)) params.set("query", trimInput(input.query));
   if (input.logicalPathPrefix?.trim()) params.set("logical_path_prefix", input.logicalPathPrefix.trim());
   if (input.cursor) params.set("cursor", input.cursor);
   const response = await adminApi.get<ListEnvelope<SharedFileResponse>>(`/shared-files?${params}`);

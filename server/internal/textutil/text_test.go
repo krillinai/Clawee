@@ -48,3 +48,12 @@ func TestTruncateUTF8BytesReturnsValueWithinLimit(t *testing.T) {
 		t.Fatalf("TruncateUTF8Bytes() = %q, want unchanged value", got)
 	}
 }
+
+func TestTrimInputPreservesInternalText(t *testing.T) {
+	if got := TrimInput(" \u200c标题 👩‍💻\n \u2060"); got != "标题 👩‍💻" {
+		t.Fatalf("TrimInput() = %q", got)
+	}
+	if got := CleanInputIdentifier(" skill\u200creviewer\ufeff "); got != "skillreviewer" {
+		t.Fatalf("CleanInputIdentifier() = %q", got)
+	}
+}

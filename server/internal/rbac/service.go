@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/krillinai/Clawee/server/internal/accounts"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 var roleCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,63}$`)
@@ -95,8 +96,8 @@ func (s *Service) RoleByCode(ctx context.Context, code string) (Role, error) {
 }
 
 func (s *Service) CreateRole(ctx context.Context, operatorID string, input CreateRoleInput) (Role, error) {
-	code := strings.TrimSpace(input.Code)
-	name := strings.TrimSpace(input.Name)
+	code := textutil.CleanInputIdentifier(input.Code)
+	name := textutil.TrimInput(input.Name)
 	permissions, err := normalizePermissions(input.Permissions)
 	if err != nil {
 		return Role{}, err
@@ -123,7 +124,7 @@ func (s *Service) UpdateRole(ctx context.Context, operatorID string, input Updat
 		}
 		return Role{}, ErrSystemRoleImmutable
 	}
-	name := strings.TrimSpace(input.Name)
+	name := textutil.TrimInput(input.Name)
 	permissions, err := normalizePermissions(input.Permissions)
 	if err != nil {
 		return Role{}, err

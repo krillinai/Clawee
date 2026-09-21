@@ -64,6 +64,7 @@ import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import { APIError } from "@/lib/api";
 import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 import {
   bindOfficeAgentToMCP,
   deleteOfficeAgent,
@@ -223,7 +224,7 @@ export function MCPAgentsGrantsPage() {
       governanceRows.filter((row) => {
         const agent = row.mcpAgent;
         const office = row.officeAgent;
-        const normalizedQuery = query.trim().toLowerCase();
+        const normalizedQuery = trimInput(query).toLowerCase();
         return (
           (!normalizedQuery ||
             row.displayName.toLowerCase().includes(normalizedQuery) ||
@@ -273,11 +274,11 @@ export function MCPAgentsGrantsPage() {
   const createAgentMutation = useMutation({
     mutationFn: () =>
       createMCPAgent({
-        userId: createForm.userId,
-        agentId: createForm.agentId.trim(),
-        clientId: emptyToUndefined(createForm.clientId),
-        name: emptyToUndefined(createForm.name),
-        tenantId: emptyToUndefined(createForm.tenantId),
+        userId: cleanInputIdentifier(createForm.userId),
+        agentId: cleanInputIdentifier(createForm.agentId),
+        clientId: emptyToUndefined(cleanInputIdentifier(createForm.clientId)),
+        name: emptyToUndefined(trimInput(createForm.name)),
+        tenantId: emptyToUndefined(cleanInputIdentifier(createForm.tenantId)),
         status: "active"
       }),
     onSuccess: () => {
@@ -391,8 +392,8 @@ export function MCPAgentsGrantsPage() {
     mutationFn: () => transferMCPAgent({
       agentId: transferAgent?.agentId ?? "",
       sourceUserId: transferAgent?.boundUserId ?? "",
-      targetUserId: transferTargetUserID,
-      reason: transferReason.trim()
+      targetUserId: cleanInputIdentifier(transferTargetUserID),
+      reason: trimInput(transferReason)
     }),
     onSuccess: () => {
       setTransferAgent(null);
@@ -656,7 +657,7 @@ export function MCPAgentsGrantsPage() {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (transferTargetUserID && transferReason.trim()) transferAgentMutation.mutate();
+            if (transferTargetUserID && trimInput(transferReason)) transferAgentMutation.mutate();
           }}
         >
           <FieldGroup className="gap-4">
@@ -677,7 +678,7 @@ export function MCPAgentsGrantsPage() {
             {transferAgentMutation.isError ? <ErrorBlock>{transferAgentMutation.error.message}</ErrorBlock> : null}
             <Field className="justify-end" orientation="horizontal">
               <Button onClick={() => setTransferAgent(null)} type="button" variant="secondary">取消</Button>
-              <Button disabled={transferAgentMutation.isPending || !transferTargetUserID || !transferReason.trim()} type="submit" variant="primary">确认迁移</Button>
+              <Button disabled={transferAgentMutation.isPending || !transferTargetUserID || !trimInput(transferReason)} type="submit" variant="primary">确认迁移</Button>
             </Field>
           </FieldGroup>
         </form>

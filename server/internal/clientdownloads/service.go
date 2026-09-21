@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/krillinai/Clawee/server/internal/settings"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 const (
@@ -99,8 +100,8 @@ func (s *Service) Get(ctx context.Context) (StoredConfig, error) {
 	return StoredConfig{Config: cfg, Version: record.Version, UpdatedBy: record.UpdatedBy, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, nil
 }
 func (s *Service) Update(ctx context.Context, cfg Config, updatedBy string, expectedVersion int64) (StoredConfig, error) {
-	cfg.GatewayURL = strings.TrimSpace(cfg.GatewayURL)
-	cfg.CatalogURL = strings.TrimSpace(cfg.CatalogURL)
+	cfg.GatewayURL = textutil.TrimInput(cfg.GatewayURL)
+	cfg.CatalogURL = textutil.TrimInput(cfg.CatalogURL)
 	if err := Validate(cfg); err != nil {
 		return StoredConfig{}, err
 	}

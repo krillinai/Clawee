@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { AgentListItem, AgentStatus, BusinessSystemCount } from "../lib/office-api";
+import { trimInput } from "../lib/text";
 
 export type DashboardFilterState = {
   query: string;
@@ -17,7 +18,7 @@ const defaultFilters: DashboardFilterState = {
 };
 
 export function filterAgents(agents: AgentListItem[], filters: DashboardFilterState): AgentListItem[] {
-  const query = filters.query.trim().toLowerCase();
+  const query = trimInput(filters.query).toLowerCase();
 
   return agents.filter((agent) => {
     if (query && !agentSearchText(agent).includes(query)) {

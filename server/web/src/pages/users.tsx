@@ -17,6 +17,7 @@ import { createAccount, listAccounts, mergeAccounts, resetAccountPassword, updat
 import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { assignAccountRole, listAccountRoles, listRoles, permissions, removeAccountRole } from "@/lib/rbac-api";
 import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 const accountsKey = ["accounts"] as const;
 
@@ -56,7 +57,7 @@ export function UsersPage() {
 
   const createMutation = useMutation({
     mutationFn: () => createAccount({
-      email: createForm.email.trim(), name: createForm.name.trim(),
+      email: cleanInputIdentifier(createForm.email), name: trimInput(createForm.name),
       password: createForm.password, status: createForm.status
     }),
     onSuccess: async () => {
@@ -70,7 +71,7 @@ export function UsersPage() {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: accountsKey })
   });
   const nameMutation = useMutation({
-    mutationFn: () => updateAccountName(nameAccount?.userId ?? "", accountName.trim()),
+    mutationFn: () => updateAccountName(nameAccount?.userId ?? "", trimInput(accountName)),
     onSuccess: async () => {
       setNameAccount(null);
       setAccountName("");
@@ -102,8 +103,8 @@ export function UsersPage() {
   const mergeMutation = useMutation({
     mutationFn: () => mergeAccounts({
       sourceUserId: mergeAccount?.userId ?? "",
-      targetUserId: mergeTargetUserID,
-      reason: mergeReason.trim()
+      targetUserId: cleanInputIdentifier(mergeTargetUserID),
+      reason: trimInput(mergeReason)
     }),
     onSuccess: async () => {
       setMergeAccount(null);
@@ -129,7 +130,7 @@ export function UsersPage() {
 
   function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!createForm.name.trim()) return;
+    if (!trimInput(createForm.name)) return;
     createMutation.mutate();
   }
   function submitPassword(event: FormEvent<HTMLFormElement>) {
@@ -138,7 +139,7 @@ export function UsersPage() {
   }
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (accountName.trim() && accountName.trim() !== nameAccount?.name) nameMutation.mutate();
+    if (trimInput(accountName) && trimInput(accountName) !== nameAccount?.name) nameMutation.mutate();
   }
   function openMerge(account: Account) {
     mergeMutation.reset();
@@ -210,12 +211,12 @@ export function UsersPage() {
       <ModalShell open={createOpen} onClose={() => setCreateOpen(false)} contextLabel="账号" title="新增账号">
         <form onSubmit={submitCreate}>
           <FieldGroup>
-            <Field><FieldLabel htmlFor="account-email">邮箱</FieldLabel><Input id="account-email" aria-label="邮箱" required type="email" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: event.target.value }))} /></Field>
+            <Field><FieldLabel htmlFor="account-email">邮箱</FieldLabel><Input id="account-email" aria-label="邮箱" required type="email" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: cleanInputIdentifier(event.target.value) }))} /></Field>
             <Field><FieldLabel htmlFor="account-name">名称</FieldLabel><Input id="account-name" aria-label="名称" required value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} /></Field>
             <Field><FieldLabel htmlFor="account-password">初始密码</FieldLabel><Input id="account-password" aria-label="初始密码" minLength={8} required type="password" value={createForm.password} onChange={(event) => setCreateForm((current) => ({ ...current, password: event.target.value }))} /></Field>
             <Field><FieldLabel htmlFor="account-status">状态</FieldLabel><NativeSelect id="account-status" aria-label="状态" value={createForm.status} onChange={(event) => setCreateForm((current) => ({ ...current, status: event.target.value as AccountStatus }))}><option value="active">启用</option><option value="disabled">停用</option></NativeSelect></Field>
             {createMutation.isError ? <ErrorAlert>{createMutation.error.message}</ErrorAlert> : null}
-            <Field className="justify-end" orientation="horizontal"><Button onClick={() => setCreateOpen(false)} type="button" variant="outline">取消</Button><Button disabled={createMutation.isPending || !createForm.name.trim()} type="submit">创建账号</Button></Field>
+            <Field className="justify-end" orientation="horizontal"><Button onClick={() => setCreateOpen(false)} type="button" variant="outline">取消</Button><Button disabled={createMutation.isPending || !trimInput(createForm.name)} type="submit">创建账号</Button></Field>
           </FieldGroup>
         </form>
       </ModalShell>
@@ -225,7 +226,7 @@ export function UsersPage() {
           <FieldGroup>
             <Field><FieldLabel htmlFor="account-edit-name">昵称</FieldLabel><Input id="account-edit-name" required value={accountName} onChange={(event) => setAccountName(event.target.value)} /></Field>
             {nameMutation.isError ? <ErrorAlert>{nameMutation.error.message}</ErrorAlert> : null}
-            <Field className="justify-end" orientation="horizontal"><Button onClick={() => setNameAccount(null)} type="button" variant="outline">取消</Button><Button disabled={nameMutation.isPending || !accountName.trim() || accountName.trim() === nameAccount?.name} type="submit">保存昵称</Button></Field>
+            <Field className="justify-end" orientation="horizontal"><Button onClick={() => setNameAccount(null)} type="button" variant="outline">取消</Button><Button disabled={nameMutation.isPending || !trimInput(accountName) || trimInput(accountName) === nameAccount?.name} type="submit">保存昵称</Button></Field>
           </FieldGroup>
         </form>
       </ModalShell>
@@ -258,7 +259,7 @@ export function UsersPage() {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (mergeTargetUserID && mergeReason.trim()) mergeMutation.mutate();
+            if (mergeTargetUserID && trimInput(mergeReason)) mergeMutation.mutate();
           }}
         >
           <FieldGroup>
@@ -277,7 +278,7 @@ export function UsersPage() {
             {mergeMutation.isError ? <ErrorAlert>{mergeMutation.error.message}</ErrorAlert> : null}
             <Field className="justify-end" orientation="horizontal">
               <Button onClick={() => setMergeAccount(null)} type="button" variant="outline">取消</Button>
-              <Button disabled={mergeMutation.isPending || !mergeTargetUserID || !mergeReason.trim()} type="submit">确认合并</Button>
+              <Button disabled={mergeMutation.isPending || !mergeTargetUserID || !trimInput(mergeReason)} type="submit">确认合并</Button>
             </Field>
           </FieldGroup>
         </form>

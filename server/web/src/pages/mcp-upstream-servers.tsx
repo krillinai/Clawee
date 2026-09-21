@@ -38,6 +38,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 import {
   createUpstreamServer,
   deleteMCPUpstreamServer,
@@ -286,12 +287,16 @@ export function MCPUpstreamServersPage() {
     event.preventDefault();
     if (!serverFormState) return;
     setStdioFormError("");
+    if (createForm.token && createForm.token !== trimInput(createForm.token)) {
+      setStdioFormError("Token 首尾不能包含空格或不可见字符");
+      return;
+    }
     let stdio = sanitizeStdioConfig(createForm);
     if (createForm.transport === "stdio") {
       try {
         stdio = {
-          command: createForm.stdio?.command?.trim() ?? "",
-          cwd: createForm.stdio?.cwd?.trim() ?? "",
+          command: createForm.stdio?.command ?? "",
+          cwd: createForm.stdio?.cwd ?? "",
           args: parseStringArrayJSON(stdioArgsText),
           env: parseStdioEnvJSON(stdioEnvText)
         };
@@ -302,16 +307,16 @@ export function MCPUpstreamServersPage() {
     }
     const input = {
       ...createForm,
-      serverId: createForm.serverId.trim(),
-      name: createForm.name.trim(),
-      domain: createForm.domain.trim(),
-      endpoint: createForm.endpoint.trim(),
+      serverId: cleanInputIdentifier(createForm.serverId),
+      name: trimInput(createForm.name),
+      domain: cleanInputIdentifier(createForm.domain),
+      endpoint: trimInput(createForm.endpoint),
       stdio,
-      namespace: createForm.namespace.trim(),
-      ownerTeam: createForm.ownerTeam.trim(),
-      routingDescription: createForm.routingDescription?.trim() ?? "",
-      collectorId: createForm.collectorId?.trim() ?? "",
-      token: createForm.token?.trim() ?? ""
+      namespace: cleanInputIdentifier(createForm.namespace),
+      ownerTeam: trimInput(createForm.ownerTeam),
+      routingDescription: trimInput(createForm.routingDescription ?? ""),
+      collectorId: cleanInputIdentifier(createForm.collectorId ?? ""),
+      token: createForm.token ?? ""
     };
     if (serverFormState.mode === "edit" && serverFormState.serverId) {
       updateMutation.mutate({ serverId: serverFormState.serverId, input });
@@ -1022,9 +1027,9 @@ function EndpointValue({ value }: { value?: string }) {
 function sanitizeStdioConfig(form: CreateServerForm) {
   if (form.transport !== "stdio") return undefined;
   return {
-    command: form.stdio?.command?.trim() ?? "",
+    command: form.stdio?.command ?? "",
     args: form.stdio?.args ?? [],
-    cwd: form.stdio?.cwd?.trim() ?? "",
+    cwd: form.stdio?.cwd ?? "",
     env: form.stdio?.env ?? {}
   };
 }

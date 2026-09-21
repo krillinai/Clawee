@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/krillinai/Clawee/server/internal/textutil"
 	"go.uber.org/zap"
 )
 
@@ -207,10 +208,10 @@ func (s *StorageConfigurationService) Retire(ctx context.Context, profileID, ope
 }
 
 func (s *StorageConfigurationService) profileFromInput(input OSSProfileInput, current StorageProfile, create bool) (StorageProfile, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Endpoint = strings.TrimSpace(input.Endpoint)
-	input.Region = strings.TrimSpace(input.Region)
-	input.Bucket = strings.TrimSpace(input.Bucket)
+	input.Name = textutil.TrimInput(input.Name)
+	input.Endpoint = textutil.TrimInput(input.Endpoint)
+	input.Region = textutil.CleanInputIdentifier(input.Region)
+	input.Bucket = textutil.CleanInputIdentifier(input.Bucket)
 	input.ObjectPrefix = normalizeObjectPrefix(input.ObjectPrefix)
 	if input.ObjectPrefix == "" {
 		input.ObjectPrefix = "clawee/shared-files"
@@ -241,8 +242,8 @@ func (s *StorageConfigurationService) profileFromInput(input OSSProfileInput, cu
 			profile.AccessKeySecretCiphertext = current.AccessKeySecretCiphertext
 			profile.AccessKeyIDHint = current.AccessKeyIDHint
 		case "replace":
-			accessKeyID, accessKeySecret := strings.TrimSpace(input.AccessKeyID), strings.TrimSpace(input.AccessKeySecret)
-			if accessKeyID == "" || accessKeySecret == "" {
+			accessKeyID, accessKeySecret := input.AccessKeyID, input.AccessKeySecret
+			if accessKeyID == "" || accessKeySecret == "" || accessKeyID != textutil.TrimInput(accessKeyID) || accessKeySecret != textutil.TrimInput(accessKeySecret) {
 				return StorageProfile{}, ErrInvalidStorageConfiguration
 			}
 			var err error

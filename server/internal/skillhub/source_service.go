@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 var (
@@ -173,7 +174,7 @@ func (s *GitHubSourceService) Create(ctx context.Context, input CreateGitHubSour
 		return GitHubSource{}, ErrInvalidRequest
 	}
 	owner, repository, err := normalizeRepository(input.RepositoryOwner, input.RepositoryName)
-	if err != nil || strings.TrimSpace(input.CreatedBy) == "" || strings.TrimSpace(input.Token) != input.Token {
+	if err != nil || strings.TrimSpace(input.CreatedBy) == "" || textutil.TrimInput(input.Token) != input.Token {
 		return GitHubSource{}, ErrInvalidRequest
 	}
 	scanRoot, err := NormalizeRepositoryRelativePath(input.ScanRoot, true)
@@ -191,7 +192,7 @@ func (s *GitHubSourceService) Create(ctx context.Context, input CreateGitHubSour
 	if !validSourceSchedule(schedule) {
 		return GitHubSource{}, ErrInvalidRequest
 	}
-	branch := strings.TrimSpace(input.Branch)
+	branch := textutil.CleanInputIdentifier(input.Branch)
 	if branch == "" {
 		branch = "main"
 	}
@@ -242,7 +243,7 @@ func (s *GitHubSourceService) Update(ctx context.Context, sourceID string, input
 			return GitHubSource{}, ErrInvalidRequest
 		}
 	}
-	branch := strings.TrimSpace(input.Branch)
+	branch := textutil.CleanInputIdentifier(input.Branch)
 	if branch == "" {
 		branch = current.Branch
 	}
@@ -267,7 +268,7 @@ func (s *GitHubSourceService) Update(ctx context.Context, sourceID string, input
 
 	tokenMode := TokenKeep
 	if input.Token != nil {
-		if strings.TrimSpace(*input.Token) != *input.Token {
+		if textutil.TrimInput(*input.Token) != *input.Token {
 			return GitHubSource{}, ErrInvalidRequest
 		}
 		if *input.Token == "" {
@@ -405,8 +406,8 @@ func (s *GitHubSourceService) ready() bool {
 }
 
 func normalizeRepository(owner, repository string) (string, string, error) {
-	owner = strings.ToLower(strings.TrimSpace(owner))
-	repository = strings.ToLower(strings.TrimSpace(repository))
+	owner = strings.ToLower(textutil.CleanInputIdentifier(owner))
+	repository = strings.ToLower(textutil.CleanInputIdentifier(repository))
 	if ValidateGitHubRepositoryPart(owner) != nil || ValidateGitHubRepositoryPart(repository) != nil {
 		return "", "", ErrInvalidRequest
 	}

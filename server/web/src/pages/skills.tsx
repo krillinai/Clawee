@@ -53,6 +53,7 @@ import {
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 const skillsKey = ["skills"] as const;
 const skillSourcesKey = ["skill-sources"] as const;
@@ -114,7 +115,7 @@ export function SkillsPage() {
   const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approverUserId));
   const spaceSkills = skills.filter((item) => item.spaceId === spaceId);
   const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+    const normalized = trimInput(query).toLowerCase();
     return spaceSkills.filter((item) => {
       const matchesPublication =
         publication === "all" ||
@@ -145,7 +146,7 @@ export function SkillsPage() {
   useEffect(() => { setSelectedSkillIds(new Set()); }, [spaceId]);
 
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(reviewTarget!.skill.skillId, reviewTarget!.version.versionId, reviewTarget!.decision, reviewComment),
+    mutationFn: () => reviewSkillVersion(reviewTarget!.skill.skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
     onSuccess: () => {
       setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
       void queryClient.invalidateQueries({ queryKey: skillsKey });
@@ -171,7 +172,7 @@ export function SkillsPage() {
   }, [spacesQuery.data, uploadOpen, uploadSpaceId]);
 
   const uploadMutation = useMutation({
-    mutationFn: () => uploadSkillVersion({ ...(uploadTarget ? { skillId: uploadTarget.skillId } : {}), spaceId: uploadSpaceId, version, changelog, packageFile: packageFile as File }),
+    mutationFn: () => uploadSkillVersion({ ...(uploadTarget ? { skillId: uploadTarget.skillId } : {}), spaceId: uploadSpaceId, version: cleanInputIdentifier(version), changelog: trimInput(changelog), packageFile: packageFile as File }),
     onSuccess: (result) => {
       setUploadOpen(false);
       resetUploadForm();

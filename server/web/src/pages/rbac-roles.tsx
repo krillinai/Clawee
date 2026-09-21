@@ -15,9 +15,22 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { createRole, listPermissions, listRoles, permissions, removeRole, updateRole, type Permission, type Role } from "@/lib/rbac-api";
 import { buildPermissionTree, permissionGroupLabel, type PermissionGroupNode } from "@/lib/rbac-permission-tree";
+import { APIError } from "@/lib/api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 type RoleForm = { roleId: string; code: string; name: string; permissionCodes: string[] };
 const emptyForm: RoleForm = { roleId: "", code: "", name: "", permissionCodes: [] };
+
+function normalizeRoleCode(value: string) {
+  return cleanInputIdentifier(value);
+}
+
+function roleCodeValidationMessage(input: HTMLInputElement) {
+  if (input.validity.valueMissing) return "请输入角色编码";
+  if (input.value.length < 2 || input.value.length > 64) return "角色编码长度应为 2-64 位";
+  if (!/^[a-z]/.test(input.value)) return "角色编码必须以小写英文字母开头";
+  return "角色编码只能使用小写英文字母、数字和下划线";
+}
 
 export function RBACRolesPage() {
   const canCreate = useAdminPermission(permissions.rbacRoleCreate);
@@ -33,8 +46,8 @@ export function RBACRolesPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => form.roleId
-      ? updateRole({ roleId: form.roleId, name: form.name.trim(), permissionCodes: form.permissionCodes })
-      : createRole({ code: form.code.trim(), name: form.name.trim(), permissionCodes: form.permissionCodes }),
+      ? updateRole({ roleId: form.roleId, name: trimInput(form.name), permissionCodes: form.permissionCodes })
+      : createRole({ code: normalizeRoleCode(form.code), name: trimInput(form.name), permissionCodes: form.permissionCodes }),
     onSuccess: async () => {
       setFormOpen(false);
       setForm(emptyForm);
@@ -66,7 +79,7 @@ export function RBACRolesPage() {
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form.name.trim() || (!form.roleId && !form.code.trim())) return;
+    if (!trimInput(form.name) || (!form.roleId && !normalizeRoleCode(form.code))) return;
     saveMutation.mutate();
   }
   function togglePermission(code: string, checked: boolean) {
@@ -137,12 +150,35 @@ export function RBACRolesPage() {
           <FieldGroup className="gap-5">
             <Field>
               <FieldLabel htmlFor="role-code">角色编码</FieldLabel>
-              <Input id="role-code" aria-label="角色编码" disabled={Boolean(form.roleId)} pattern="[a-z][a-z0-9_]+" required value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
-              <FieldDescription>使用小写字母、数字和下划线，创建后不可修改。</FieldDescription>
+              <Input
+                id="role-code" aria-label="角色编码" disabled={Boolean(form.roleId)}
+                pattern="[a-z][a-z0-9_]{1,63}" required value={form.code}
+                onChange={(event) => {
+                  const code = normalizeRoleCode(event.currentTarget.value);
+                  event.currentTarget.setCustomValidity(code === "admin" ? "admin 是系统保留的角色编码，请更换" : "");
+                  setForm((current) => ({ ...current, code }));
+                }}
+                onInvalid={(event) => {
+                  if (!event.currentTarget.validity.customError) {
+                    event.currentTarget.setCustomValidity(roleCodeValidationMessage(event.currentTarget));
+                  }
+                }}
+              />
+              <FieldDescription>2-64 位，以小写英文字母开头，仅使用小写英文字母、数字和下划线；创建后不可修改。</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="role-name">角色名称</FieldLabel>
-              <Input id="role-name" aria-label="角色名称" maxLength={100} required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+              <Input
+                id="role-name" aria-label="角色名称" maxLength={100} required value={form.name}
+                onChange={(event) => {
+                  const name = event.currentTarget.value;
+                  event.currentTarget.setCustomValidity(name && !trimInput(name) ? "角色名称不能只包含空格或不可见字符" : "");
+                  setForm((current) => ({ ...current, name }));
+                }}
+                onInvalid={(event) => {
+                  if (event.currentTarget.validity.valueMissing) event.currentTarget.setCustomValidity("请输入角色名称");
+                }}
+              />
             </Field>
             <FieldSet className="gap-3">
               <FieldLegend className="mb-0 flex w-full items-center justify-between gap-2">
@@ -166,7 +202,7 @@ export function RBACRolesPage() {
                 </TooltipProvider>
               </div>
             </FieldSet>
-            {saveMutation.isError ? <ErrorAlert>{saveMutation.error.message}</ErrorAlert> : null}
+            {saveMutation.isError ? <ErrorAlert>{saveMutation.error instanceof APIError && saveMutation.error.message === "rbac role code already exists" ? "角色编码已存在，请更换编码" : saveMutation.error.message}</ErrorAlert> : null}
             <Field className="justify-end" orientation="horizontal">
               <Button disabled={saveMutation.isPending} onClick={closeForm} type="button" variant="outline">取消</Button>
               <Button disabled={saveMutation.isPending} type="submit">保存角色</Button>

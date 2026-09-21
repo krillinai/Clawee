@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -117,6 +119,10 @@ func (s *Service) DeleteUnpublished(ctx context.Context, skillID string) error {
 }
 
 func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVersionInput) (MutationResult, error) {
+	if input.Origin == "admin_upload" {
+		input.Version = textutil.CleanInputIdentifier(input.Version)
+		input.Changelog = textutil.TrimInput(input.Changelog)
+	}
 	input.CreatedBy = strings.TrimSpace(input.CreatedBy)
 	input.SpaceID = strings.TrimSpace(input.SpaceID)
 	if input.SpaceID == "" {

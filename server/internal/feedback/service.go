@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
+	"github.com/krillinai/Clawee/server/internal/textutil"
 	_ "golang.org/x/image/webp"
 )
 
@@ -492,6 +493,9 @@ func (s *Service) Get(ctx context.Context, a Actor, id string) (map[string]any, 
 	return out, err
 }
 func (s *Service) List(ctx context.Context, a Actor, f Filter) ([]map[string]any, string, error) {
+	f.Keyword = textutil.TrimInput(f.Keyword)
+	f.Source = textutil.TrimInput(f.Source)
+	f.Version = textutil.TrimInput(f.Version)
 	if e := s.check(ctx, a, "read"); e != nil {
 		return nil, "", e
 	}
@@ -563,6 +567,12 @@ func eventResult(id string, e Event) map[string]any {
 	return map[string]any{"report_id": id, "processing_status": e.AfterStatus, "version": e.VersionAfter, "resolved_at": e.CreatedAt, "actor": e.Actor}
 }
 func (s *Service) Operate(ctx context.Context, a Actor, id, op string, in OperationInput) (out map[string]any, err error) {
+	in.ResolutionSummary = textutil.TrimInput(in.ResolutionSummary)
+	in.Verification = textutil.TrimInput(in.Verification)
+	in.PublicResolutionSummary = textutil.TrimInput(in.PublicResolutionSummary)
+	in.FixCommit = textutil.CleanInputIdentifier(in.FixCommit)
+	in.FixedVersion = textutil.CleanInputIdentifier(in.FixedVersion)
+	in.Reason = textutil.TrimInput(in.Reason)
 	if op != "investigate" && op != "resolve" && op != "reopen" {
 		return nil, fail(400, "feedback_invalid_operation")
 	}

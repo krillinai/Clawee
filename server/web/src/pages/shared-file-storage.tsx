@@ -24,6 +24,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 import {
   activateStorageProfile,
   cancelStorageMigration,
@@ -43,6 +44,14 @@ import {
 } from "@/lib/shared-file-storage-api";
 
 type ProfileForm = OSSProfileInput & { profileId: string; mode: "create" | "edit"; locationLocked: boolean };
+
+function normalizeProfile(form: ProfileForm): ProfileForm {
+  return {
+    ...form,
+    name: trimInput(form.name), endpoint: trimInput(form.endpoint),
+    region: cleanInputIdentifier(form.region), bucket: cleanInputIdentifier(form.bucket)
+  };
+}
 
 const emptyForm: ProfileForm = {
   profileId: "",
@@ -66,6 +75,9 @@ export function SharedFileStoragePage() {
   const canMigrate = hasMigratePermission && migrationsEnabled;
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ProfileForm | null>(null);
+  const credentialError = form?.credentialMode === "access_key" && form.credentialAction === "replace" &&
+    ([form.accessKeyId, form.accessKeySecret].some((value) => value && value !== trimInput(value)))
+    ? "AccessKey 首尾不能包含空格或不可见字符" : null;
   const [tested, setTested] = useState(false);
   const [activateTarget, setActivateTarget] = useState<StorageProfile | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -96,7 +108,7 @@ export function SharedFileStoragePage() {
   const testMutation = useMutation({
     mutationFn: (value: ProfileForm) => value.mode === "edit" && value.credentialAction === "keep"
       ? probeStorageProfile(value.profileId)
-      : testOSSProfile(value),
+      : testOSSProfile(normalizeProfile(value)),
     onSuccess: () => {
       setTested(true);
       setNotice("OSS 读写与删除测试通过");
@@ -104,8 +116,8 @@ export function SharedFileStoragePage() {
   });
   const saveMutation = useMutation({
     mutationFn: (value: ProfileForm) => value.mode === "create"
-      ? createOSSProfile(value)
-      : updateOSSProfile(value.profileId, value),
+      ? createOSSProfile(normalizeProfile(value))
+      : updateOSSProfile(value.profileId, normalizeProfile(value)),
     onSuccess: (profile) => {
       setForm(null);
       setTested(false);
@@ -293,9 +305,10 @@ export function SharedFileStoragePage() {
               {form.credentialAction === "replace" ? <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="access-key-id">AccessKey ID</FieldLabel><Input autoComplete="off" id="access-key-id" required type="password" value={form.accessKeyId ?? ""} onChange={(event) => updateForm({ accessKeyId: event.target.value })} /></Field><Field><FieldLabel htmlFor="access-key-secret">AccessKey Secret</FieldLabel><Input autoComplete="new-password" id="access-key-secret" required type="password" value={form.accessKeySecret ?? ""} onChange={(event) => updateForm({ accessKeySecret: event.target.value })} /></Field></div> : null}
             </> : null}
           </FieldGroup>
+          {credentialError ? <ErrorAlert>{credentialError}</ErrorAlert> : null}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="outline" disabled={!form || testMutation.isPending} onClick={() => form && testMutation.mutate(form)}><TestTube2 data-icon="inline-start" />测试连接</Button>
-            <Button type="submit" disabled={!tested || saveMutation.isPending}>保存</Button>
+            <Button type="button" variant="outline" disabled={!form || Boolean(credentialError) || testMutation.isPending} onClick={() => form && testMutation.mutate(form)}><TestTube2 data-icon="inline-start" />测试连接</Button>
+            <Button type="submit" disabled={!tested || Boolean(credentialError) || saveMutation.isPending}>保存</Button>
           </div>
         </form>
       </ModalShell>

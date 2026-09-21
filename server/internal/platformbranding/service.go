@@ -7,10 +7,11 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 type Service struct {
@@ -51,12 +52,12 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration,
 			labels[key] = nil
 			continue
 		}
-		for _, character := range *value {
+		normalized := textutil.TrimInput(*value)
+		for _, character := range normalized {
 			if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) || character == '\u2028' || character == '\u2029' {
 				return Configuration{}, fmt.Errorf("%w: %s 名称不能包含换行或控制字符", ErrInvalidMenuLabel, key)
 			}
 		}
-		normalized := strings.TrimSpace(*value)
 		if !utf8.ValidString(normalized) || utf8.RuneCountInString(normalized) < 1 || utf8.RuneCountInString(normalized) > 10 {
 			return Configuration{}, fmt.Errorf("%w: %s 名称必须为 1～10 个字符", ErrInvalidMenuLabel, key)
 		}

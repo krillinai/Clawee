@@ -28,6 +28,34 @@ describe("SkillSourceForm", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ branch: "" }));
   });
 
+  it("清理仓库地址和分支编码，但保留扫描路径原样", () => {
+    const onSubmit = vi.fn();
+    render(<SkillSourceForm onCancel={vi.fn()} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("GitHub 仓库地址"), { target: { value: "\u200b https://github.com/acme/skills \ufeff" } });
+    fireEvent.change(screen.getByLabelText("分支"), { target: { value: "\u200brele\u200dase\ufeff" } });
+    fireEvent.change(screen.getByLabelText("扫描根目录"), { target: { value: " packages " } });
+    fireEvent.change(screen.getByLabelText("排除前缀"), { target: { value: " archive " } });
+    fireEvent.click(screen.getByRole("button", { name: "创建来源" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      repositoryOwner: "acme", repositoryName: "skills", branch: "release",
+      scanRoot: " packages ", excludePaths: [" archive "]
+    }));
+  });
+
+  it("拒绝 Token 边界字符并提示具体原因", () => {
+    const onSubmit = vi.fn();
+    render(<SkillSourceForm onCancel={vi.fn()} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByLabelText("GitHub 仓库地址"), { target: { value: "https://github.com/acme/skills" } });
+    fireEvent.change(screen.getByLabelText("访问 Token"), { target: { value: "\u200bghp_secret " } });
+    fireEvent.click(screen.getByRole("button", { name: "创建来源" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("访问 Token 首尾不能包含空格或不可见字符");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("rejects a repository URL outside GitHub", () => {
     const onSubmit = vi.fn();
     render(<SkillSourceForm onCancel={vi.fn()} onSubmit={onSubmit} />);

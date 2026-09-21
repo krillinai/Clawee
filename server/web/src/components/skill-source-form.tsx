@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GitHubSource, SkillSpace } from "@/lib/skillhub-api";
+import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 export type SkillSourceFormInput = {
   spaceId: string;
@@ -21,7 +22,7 @@ export type SkillSourceFormInput = {
 
 function parseGitHubRepositoryURL(value: string) {
   try {
-    const url = new URL(value.trim());
+    const url = new URL(trimInput(value));
     if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "github.com" || url.port || url.username || url.password || url.search || url.hash) return null;
 
     const match = url.pathname.replace(/\/$/, "").match(/^\/([^/]+)\/([^/]+)$/);
@@ -57,20 +58,25 @@ export function SkillSourceForm({
   const [scanRoot, setScanRoot] = useState(source?.scanRoot ?? ".");
   const [excludePrefixes, setExcludePrefixes] = useState(source?.excludePaths.join("\n") ?? "");
   const [token, setToken] = useState(initialToken);
+  const [tokenError, setTokenError] = useState("");
   const [schedule, setSchedule] = useState(source?.schedule ?? "manual");
   const repository = parseGitHubRepositoryURL(repositoryURL);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (token && token !== trimInput(token)) {
+      setTokenError("访问 Token 首尾不能包含空格或不可见字符");
+      return;
+    }
     if (pending || !repository || !spaceId) return;
     onSubmit({
       spaceId,
       repositoryOwner: repository.repositoryOwner,
       repositoryName: repository.repositoryName,
-      branch: branch.trim(),
-      scanRoot: scanRoot.trim(),
-      excludePaths: excludePrefixes.split("\n").map((item) => item.trim()).filter(Boolean),
-      ...(token.trim() ? { token: token.trim() } : {}),
+      branch: cleanInputIdentifier(branch),
+      scanRoot,
+      excludePaths: excludePrefixes.split("\n").filter(Boolean),
+      ...(token ? { token } : {}),
       autoPublish: false,
       schedule
     });
@@ -90,14 +96,14 @@ export function SkillSourceForm({
         <Field>
           <FieldLabel htmlFor="source-repository-url">GitHub 仓库地址</FieldLabel>
           <Input
-            aria-invalid={repositoryURL.trim() !== "" && !repository}
+            aria-invalid={trimInput(repositoryURL) !== "" && !repository}
             disabled={isEditing}
             id="source-repository-url"
             placeholder="https://github.com/acme/skills"
             required
             type="url"
             value={repositoryURL}
-            onChange={(event) => setRepositoryURL(event.target.value)}
+            onChange={(event) => setRepositoryURL(trimInput(event.target.value))}
           />
           {!isEditing ? <FieldDescription>填写完整的 GitHub 仓库地址，例如 https://github.com/acme/skills。</FieldDescription> : null}
         </Field>
@@ -117,7 +123,8 @@ export function SkillSourceForm({
         </Field>
         <Field>
           <FieldLabel htmlFor="source-token">访问 Token</FieldLabel>
-          <Input autoComplete="new-password" id="source-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} />
+          <Input autoComplete="new-password" id="source-token" type="password" value={token} onChange={(event) => { setToken(event.target.value); setTokenError(""); }} />
+          {tokenError ? <FieldDescription role="alert">{tokenError}</FieldDescription> : null}
           <FieldDescription>
             {isEditing ? "留空将保留现有 Token。" : "可选，用于访问私有 GitHub 仓库。"}{" "}
             <a href="https://github.com/settings/personal-access-tokens/new" rel="noreferrer" target="_blank">前往 GitHub 创建 Token</a>，并授予目标仓库 Contents 只读权限。

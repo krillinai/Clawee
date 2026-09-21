@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/krillinai/Clawee/server/internal/textutil"
 )
 
 func (s *Service) SetSpaceApprover(ctx context.Context, spaceID, userID, operator string) error {
@@ -16,7 +18,7 @@ func (s *Service) SetSpaceApprover(ctx context.Context, spaceID, userID, operato
 
 func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string) (Version, error) {
 	store, ok := s.store.(ReviewStore)
-	comment = strings.TrimSpace(comment)
+	comment = textutil.TrimInput(comment)
 	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(reviewer) == "" || len([]rune(comment)) > 2000 {
 		return Version{}, ErrInvalidRequest
 	}

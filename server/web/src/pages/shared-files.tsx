@@ -26,6 +26,7 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
+import { trimInput } from "@/lib/text";
 import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import {
   addSharedSpaceMember,
@@ -71,8 +72,8 @@ export function SharedFilesPage() {
 
   const saveSpace = useMutation({
     mutationFn: (value: SpaceForm) => value.mode === "create"
-      ? createSharedSpace({ name: value.name.trim(), description: value.description.trim() })
-      : updateSharedSpace({ spaceId: value.spaceId, name: value.name.trim(), description: value.description.trim() }),
+      ? createSharedSpace({ name: trimInput(value.name), description: trimInput(value.description) })
+      : updateSharedSpace({ spaceId: value.spaceId, name: trimInput(value.name), description: trimInput(value.description) }),
     onSuccess: (space, input) => {
       setForm(null);
       setSelectedId(space.spaceId);
@@ -100,7 +101,7 @@ export function SharedFilesPage() {
 
   function submitSpace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form || !form.name.trim() || saveSpace.isPending) return;
+    if (!form || !trimInput(form.name) || saveSpace.isPending) return;
     saveSpace.mutate(form);
   }
 
@@ -206,7 +207,7 @@ export function SharedFilesPage() {
           {saveSpace.isError ? <ErrorAlert>{saveSpace.error.message}</ErrorAlert> : null}
           <FieldGroup><Field><FieldLabel htmlFor="space-name">空间名称</FieldLabel><Input id="space-name" maxLength={100} required value={form?.name ?? ""} onChange={(event) => setForm((value) => value ? { ...value, name: event.target.value } : value)} /></Field>
           <Field><FieldLabel htmlFor="space-description">空间说明</FieldLabel><Textarea id="space-description" maxLength={500} value={form?.description ?? ""} onChange={(event) => setForm((value) => value ? { ...value, description: event.target.value } : value)} /><FieldDescription>最多 500 个字符。</FieldDescription></Field></FieldGroup>
-          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setForm(null)} disabled={saveSpace.isPending}>取消</Button><Button type="submit" disabled={saveSpace.isPending || !form?.name.trim()}>保存</Button></div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setForm(null)} disabled={saveSpace.isPending}>取消</Button><Button type="submit" disabled={saveSpace.isPending || !trimInput(form?.name ?? "")}>保存</Button></div>
         </form>
       </ModalShell>
 

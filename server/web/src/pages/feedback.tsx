@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { feedbackAdminApi, type FeedbackPage } from '@/lib/feedback-admin-api';
 import { APIError } from '@/lib/api';
 import { permissions } from '@/lib/rbac-api';
+import { trimInput } from '@/lib/text';
 
 const statuses: Record<string, string> = { open: '待处理', investigating: '处理中', resolved: '已处理', all: '全部' };
 function useFocused() { const [focused, setFocused] = useState(document.hasFocus()); useEffect(() => { const update = () => setFocused(document.hasFocus() && !document.hidden); window.addEventListener('focus', update); window.addEventListener('blur', update); document.addEventListener('visibilitychange', update); return () => { window.removeEventListener('focus', update); window.removeEventListener('blur', update); document.removeEventListener('visibilitychange', update); }; }, []); return focused; }
@@ -94,12 +95,13 @@ export function FeedbackDetailPage() {
   const r = query.data; const ready = r?.upload_state === 'ready' && r.security_state === 'normal' && Date.parse(r.expires_at) > Date.now();
   const submittedRequest = useRef<{ content: string; input: Record<string, unknown> } | undefined>(undefined);
   const start = (op: string) => { submittedRequest.current = undefined; setOperation(op); setEditingVersion(r!.version); setValues({}); setError(''); };
-  const content = JSON.stringify({ ...values, expected_version: editingVersion });
+  const normalizedValues = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, trimInput(value)]));
+  const content = JSON.stringify({ ...normalizedValues, expected_version: editingVersion });
   const retryingSameRequest = submittedRequest.current?.content === content;
   const submit = async () => {
     if (!r || busy) return;
     setBusy(true); setError('');
-    if (submittedRequest.current?.content !== content) submittedRequest.current = { content, input: { ...values, expected_version: editingVersion, idempotency_key: crypto.randomUUID() } };
+    if (submittedRequest.current?.content !== content) submittedRequest.current = { content, input: { ...normalizedValues, expected_version: editingVersion, idempotency_key: crypto.randomUUID() } };
     try {
       await feedbackAdminApi.operate(id, operation, submittedRequest.current.input);
       setOperation('');
@@ -125,7 +127,7 @@ export function FeedbackDetailPage() {
 }
 function FeedbackRecords({ id, kind, artifacts }: { id: string; kind: 'conversation' | 'logs'; artifacts: Array<{ artifact_id: string; name: string }> }) {
   const [aid, setAid] = useState(artifacts[0]?.artifact_id ?? ''); const [filters, setFilters] = useState<Record<string, string>>({}); const [pages, setPages] = useState<FeedbackPage[]>([]); const [cursor, setCursor] = useState('');
-  const params = new URLSearchParams({ ...filters, ...(aid ? { artifact_id: aid } : {}), cursor });
+  const params = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).map(([key, value]) => [key, trimInput(value)])), ...(aid ? { artifact_id: aid } : {}), cursor });
   const query = useQuery({ queryKey: ['feedback-read', id, kind, params.toString()], queryFn: () => feedbackAdminApi.read(id, kind, params) });
   useEffect(() => { if (query.data) setPages(old => cursor ? [...old, query.data] : [query.data]); }, [query.data]);
   const reset = () => { setCursor(''); setPages([]); };

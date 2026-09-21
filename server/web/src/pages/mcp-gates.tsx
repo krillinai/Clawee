@@ -47,7 +47,7 @@ import {
   riskLevelLabel
 } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
-import { truncateText } from "@/lib/text";
+import { trimInput, truncateText } from "@/lib/text";
 
 type GateDialogState =
   | { kind: "accept"; gate: MCPGate }
@@ -166,7 +166,7 @@ export function MCPGatesPage() {
       acceptMutation.mutate(dialog.gate.id);
       return;
     }
-    rejectMutation.mutate({ gateId: dialog.gate.id, reason: rejectReason });
+    rejectMutation.mutate({ gateId: dialog.gate.id, reason: trimInput(rejectReason) });
   }
 
   return (
@@ -699,7 +699,7 @@ function GateDecisionDialog({
 }
 
 function filterGates(gates: MCPGate[], filters: { search: string; type: string; status: string; risk: string }) {
-  const query = filters.search.trim().toLowerCase();
+  const query = trimInput(filters.search).toLowerCase();
 
   return gates.filter((gate) => {
     return (

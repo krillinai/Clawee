@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { truncateMiddle, truncateText } from "./text";
+import { cleanInputIdentifier, trimInput, truncateMiddle, truncateText } from "./text";
+
+describe("input normalization", () => {
+  it("clears boundary spaces and invisible characters while preserving content", () => {
+    expect(trimInput(" \u200C标题 👩‍💻\n \u2060")).toBe("标题 👩‍💻");
+    expect(trimInput("第一行\n第二行")).toBe("第一行\n第二行");
+  });
+
+  it("removes invisible characters inside identifiers", () => {
+    expect(cleanInputIdentifier("  skill\u200Creviewer \uFEFF")).toBe("skillreviewer");
+  });
+});
 
 describe("text truncation", () => {
   it("truncates plain and Chinese text without changing short values", () => {

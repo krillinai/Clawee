@@ -29,7 +29,6 @@ func ValidateGitBranch(value string) error {
 }
 
 func NormalizeRepositoryRelativePath(value string, allowRoot bool) (string, error) {
-	value = strings.TrimSpace(value)
 	if value == "" || value == "." || value == "./" {
 		if allowRoot {
 			return ".", nil

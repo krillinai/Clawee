@@ -23,6 +23,16 @@ func TestServiceRejectsUnknownPermissionCode(t *testing.T) {
 	}
 }
 
+func TestCreateRoleNormalizesPastedCodeAndName(t *testing.T) {
+	service, _, _ := newTestService(t)
+	role, err := service.CreateRole(context.Background(), "usr_admin", CreateRoleInput{
+		Code: " skill\u200creviewer ", Name: " \u200c技能审核员\u2060 ",
+	})
+	if err != nil || role.Code != "skillreviewer" || role.Name != "技能审核员" {
+		t.Fatalf("CreateRole() = %#v, error = %v", role, err)
+	}
+}
+
 func TestServiceCombinesRolesAndExpandsManagePermission(t *testing.T) {
 	service, _, accountService := newTestService(t)
 	ctx := context.Background()
