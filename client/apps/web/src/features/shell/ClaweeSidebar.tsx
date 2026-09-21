@@ -19,6 +19,7 @@ import {
   LibraryBig,
   Link2,
   LayoutDashboard,
+  Workflow,
   LoaderCircle,
   MoreHorizontal,
   Pin,
@@ -159,7 +160,8 @@ export function ClaweeSidebar(props: {
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
     { label: props.sidebarMenuLabels?.knowledge ?? '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
     { label: props.sidebarMenuLabels?.drive ?? '共享网盘', icon: HardDrive, view: 'drive', onClick: () => props.onOpenView('drive') },
-    { label: '定时任务', icon: Clock3, view: 'schedules', onClick: () => props.onOpenView('schedules') }
+    { label: '定时任务', icon: Clock3, view: 'schedules', onClick: () => props.onOpenView('schedules') },
+    { label: '工作流', icon: Workflow, view: 'workflow', onClick: () => props.onOpenView('workflow') }
   ];
   const selectedTaskThread = props.tasks.some(
     task => task.threadId === props.selectedConversationId

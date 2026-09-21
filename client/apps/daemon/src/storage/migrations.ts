@@ -77,6 +77,15 @@ export function migrate(db: Database.Database): void {
       UNIQUE(run_id, seq)
     );
 
+    CREATE TABLE IF NOT EXISTS enterprise_workflow_runs (
+      task_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      complete_key TEXT NOT NULL,
+      state TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -474,6 +483,7 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, 'runs', 'timeout_ms', 'timeout_ms INTEGER');
   ensureColumn(db, 'runs', 'public_prompt', 'public_prompt TEXT');
   ensureColumn(db, 'runs', 'triggered_at', 'triggered_at TEXT');
+  ensureColumn(db, 'enterprise_workflow_runs', 'user_id', "user_id TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'attachments', 'run_id', 'run_id TEXT');
   ensureColumn(db, 'codex_session_sources', 'head_size', 'head_size INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'codex_session_sources', 'head_hash', "head_hash TEXT NOT NULL DEFAULT ''");

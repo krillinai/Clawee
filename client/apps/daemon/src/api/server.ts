@@ -202,6 +202,7 @@ import {
   registerEnterpriseBusinessDashboardRoutes
 } from './routes.enterprise-business-dashboard-2026-08-30.js';
 import { registerEnterprisePlatformBrandingRoutes } from './routes.enterprise-platform-branding.js';
+import { registerEnterpriseWorkflowRoutes } from './routes.enterprise-workflow.js';
 
 export type BuildServerInput = {
   token: string;
@@ -914,6 +915,14 @@ export async function buildServer(input: BuildServerInput) {
     sessionManager: enterpriseSessionManager,
     skillManager: enterpriseSkillManager,
     mcpManager: enterpriseMcpManager
+  });
+  await registerEnterpriseWorkflowRoutes(server, {
+    session: enterpriseSessionManager,
+    http: enterpriseHttpClient,
+    runs: runManager,
+    db,
+    origin: () => enterpriseOrigin.origin,
+    canExecute: () => !input.serverDeployment && (input.modelServiceRuntime?.ready() ?? true)
   });
   await registerGatewayRoutes(server, {
     configPath: input.enterpriseConfigPath,

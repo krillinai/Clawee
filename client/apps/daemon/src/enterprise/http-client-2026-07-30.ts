@@ -887,6 +887,7 @@ export type EnterpriseSharedFileUploadInput = {
 };
 
 export type EnterpriseHttpClient = {
+  workflowRequest?(accessToken: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ data: unknown; meta?: unknown }>;
   register(input: EnterpriseRegisterRequest, agentId: string): Promise<void>;
   login(input: EnterpriseLoginRequest, agentId: string): Promise<EnterpriseLoginResult>;
   prepareDingTalkAuthorization?(
@@ -1212,6 +1213,15 @@ export function createEnterpriseHttpClient(input: {
   }
 
   return {
+    workflowRequest(accessToken, method, path, body) {
+      if (!path.startsWith('/api/v1/app/workflow-')) {
+        throw new Error('Invalid workflow path');
+      }
+      return requestJson({
+        accessToken, method, path, body,
+        schema: z.object({ data: z.unknown(), meta: z.unknown().optional() })
+      }).then(response => ({ data: response.data, meta: response.meta }));
+    },
     async register(request, agentId) {
       await requestWithoutResult({
         body: {

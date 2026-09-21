@@ -117,6 +117,9 @@ const (
 	PermissionPlatformBrandingUpdate          = "console:platform_branding:update"
 	PermissionClientDownloadsRead             = "console:client_downloads:read"
 	PermissionClientDownloadsUpdate           = "console:client_downloads:update"
+	PermissionWorkflowTemplateManage          = "console:workflow:template_manage"
+	PermissionWorkflowInstanceRead            = "console:workflow:instance_read"
+	PermissionWorkflowInstanceTerminate       = "console:workflow:instance_terminate"
 )
 
 type Permission struct {
@@ -239,6 +242,9 @@ var permissionCatalog = []Permission{
 	{PermissionPlatformBrandingUpdate, "platform_branding", "update", "更新平台外观", "修改客户端平台外观"},
 	{PermissionClientDownloadsRead, "client_downloads", "read", "客户端发布查看", "查看客户端发布配置"},
 	{PermissionClientDownloadsUpdate, "client_downloads", "update", "更新客户端发布", "修改客户端发布配置"},
+	{PermissionWorkflowTemplateManage, "workflow", "template_manage", "工作流模板管理", "创建、编辑和启停工作流模板"},
+	{PermissionWorkflowInstanceRead, "workflow", "instance_read", "工作流实例查看", "查看全部工作流实例"},
+	{PermissionWorkflowInstanceTerminate, "workflow", "instance_terminate", "工作流实例终止", "终止运行中的工作流实例"},
 }
 
 func PermissionCatalog() []Permission {

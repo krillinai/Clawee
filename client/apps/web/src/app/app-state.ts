@@ -11,6 +11,7 @@ export type ActiveView =
   | 'plugins'
   | 'connections'
   | 'knowledge'
+  | 'workflow'
   | 'drive'
   | 'account'
   | 'settings'

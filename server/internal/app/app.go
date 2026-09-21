@@ -51,6 +51,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/skillhub"
 	"github.com/krillinai/Clawee/server/internal/store"
 	"github.com/krillinai/Clawee/server/internal/sub2api"
+	"github.com/krillinai/Clawee/server/internal/workflow"
 )
 
 type App struct {
@@ -405,6 +406,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		Config: cfg,
 		Logger: log,
 		Router: server.NewRouter(server.Options{
+			WorkflowService:            &workflow.Service{DB: pool},
 			ProxyGateway:               proxyGateway,
 			AgentProvisioningService:   agentProvisioner,
 			AccountService:             accountSvc,

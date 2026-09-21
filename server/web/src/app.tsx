@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AdminLayout } from "./components/admin-layout";
 import { AppLayout } from "./components/app-layout";
 import { AuthGate } from "./components/auth-gate";
+import { isForbiddenError } from "./lib/api";
 import { permissions } from "./lib/rbac-api";
 import { NotFoundPage } from "./pages/not-found";
 
@@ -99,6 +100,8 @@ const DataResourceGrantsPage = lazy(() => import("./pages/data-resource-grants")
 const PlatformBrandingPage = lazy(() => import("./pages/platform-branding").then((module) => ({ default: module.PlatformBrandingPage })));
 const ClientDownloadsPage = lazy(() => import("./pages/client-downloads").then((module) => ({ default: module.ClientDownloadsPage })));
 const DownloadsPage = lazy(() => import("./pages/downloads").then((module) => ({ default: module.DownloadsPage })));
+const WorkflowTemplatesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowTemplatesPage })));
+const WorkflowInstancesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstancesPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
@@ -115,7 +118,7 @@ export function App() {
         defaultOptions: {
           queries: {
             refetchOnWindowFocus: false,
-            retry: 1
+            retry: (failureCount, error) => !isForbiddenError(error) && failureCount < 1
           }
         }
       })
@@ -172,6 +175,8 @@ export function App() {
               }
             >
               <Route path="/admin" element={<AdminOverviewPage />} />
+              <Route path="/admin/workflow-templates" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplatesPage />)} />
+              <Route path="/admin/workflow-instances" element={adminPage(permissions.workflowInstanceRead, <WorkflowInstancesPage />)} />
               <Route path="/admin/accounts" element={adminPage(permissions.accountRead, <UsersPage />)} />
               <Route path="/admin/rbac/roles" element={adminPage(permissions.rbacRead, <RBACRolesPage />)} />
               <Route path="/admin/rbac/permissions" element={adminPage(permissions.rbacRead, <RBACPermissionsPage />)} />

@@ -160,6 +160,7 @@ import { createConnectionService, type ConnectionState } from '../services/conne
 import { createCleanupService } from '../services/cleanup-service.js';
 import { createDiagnosticsService } from '../services/diagnostics-service.js';
 import { createEnterpriseService } from '../services/enterprise-service-2026-07-30.js';
+import { createWorkflowService } from '../services/workflow-service.js';
 import { createMockFileService } from '../services/file-service.js';
 import type { FileTreeNode, WorkspaceFile } from '../services/file-service.js';
 import { createProjectService } from '../services/project-service.js';
@@ -300,6 +301,10 @@ const KnowledgePage = lazy(async () => {
 const SharedDrivePage = lazy(async () => {
   const module = await import('../features/drive/SharedDrivePage.js');
   return { default: module.SharedDrivePage };
+});
+const WorkflowPage = lazy(async () => {
+  const module = await import('../features/workflow/WorkflowPage.js');
+  return { default: module.WorkflowPage };
 });
 const DashboardPage = lazy(async () => {
   const module = await import('../features/dashboard/DashboardPage.js');
@@ -716,6 +721,10 @@ export function AppController(props: AppControllerProps) {
   );
   const enterpriseService = useMemo(
     () => runtimeClient === null ? null : createEnterpriseService(runtimeClient),
+    [runtimeClient]
+  );
+  const workflowService = useMemo(
+    () => runtimeClient === null ? null : createWorkflowService(runtimeClient),
     [runtimeClient]
   );
   const handleEnterpriseSessionExpired = useCallback(() => {
@@ -3795,6 +3804,7 @@ export function AppController(props: AppControllerProps) {
       case 'plugins':
       case 'connections':
       case 'knowledge':
+      case 'workflow':
       case 'drive':
       case 'account':
       case 'settings':
@@ -6324,6 +6334,15 @@ export function AppController(props: AppControllerProps) {
       onSelectKnowledgeBase={selectEnterpriseKnowledgeBase}
       onUpload={file => void uploadEnterpriseKnowledgeDocument(file)}
     />
+  ) : state.activeView === 'workflow' ? (
+    <WorkflowPage
+      key={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : 'signed-out'}
+      service={workflowService}
+      signedIn={enterpriseSession.status === 'signed_in'}
+      online={connectionState.status === 'connected'}
+      userId={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined}
+      cwd={currentProject?.cwd}
+    />
   ) : state.activeView === 'drive' ? (
     <SharedDrivePage
       connected={connectionState.status === 'connected'}
@@ -6903,6 +6922,7 @@ function createInitialState(
     case 'plugins':
     case 'connections':
     case 'knowledge':
+    case 'workflow':
     case 'drive':
     case 'account':
     case 'settings':
@@ -6948,6 +6968,8 @@ function routeForActiveView(activeView: ActiveView, selectedThreadId?: string): 
       return { view: 'connections' };
     case 'knowledge':
       return { view: 'knowledge' };
+    case 'workflow':
+      return { view: 'workflow' };
     case 'drive':
       return { view: 'drive' };
     case 'account':

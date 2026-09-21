@@ -13,6 +13,7 @@ import {
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  Workflow,
   PackageOpen,
   Palette,
   Radio,
@@ -70,6 +71,13 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { label: "智能体管理", href: "/admin/mcp/agents", icon: KeyRound, permissions: [permissions.agentRead, permissions.mcpGrantRead] },
       { label: "智能体活动", href: "/admin/activity", icon: Radio, permission: permissions.activityRead }
+    ]
+  },
+  {
+    label: "工作台",
+    items: [
+      { label: "工作流模板", href: "/admin/workflow-templates", icon: Workflow, permission: permissions.workflowTemplateManage },
+      { label: "工作流实例", href: "/admin/workflow-instances", icon: ListChecks, permission: permissions.workflowInstanceRead }
     ]
   },
   {

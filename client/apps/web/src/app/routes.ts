@@ -11,6 +11,7 @@ export type AppRoute =
   | { view: 'plugins'; source?: 'enterprise' | 'public' }
   | { view: 'connections' }
   | { view: 'knowledge' }
+  | { view: 'workflow' }
   | { view: 'drive' }
   | { view: 'account' }
   | { view: 'capabilities' }
@@ -62,6 +63,7 @@ export function parseRoute(hash: string): AppRoute {
   }
   if (path === '#/connections') return { view: 'connections' };
   if (path === '#/knowledge') return { view: 'knowledge' };
+  if (path === '#/workflow') return { view: 'workflow' };
   if (path === '#/drive') return { view: 'drive' };
   if (path === '#/account') return { view: 'account' };
   if (path === '#/capabilities') return { view: 'capabilities' };
@@ -115,6 +117,8 @@ export function formatRoute(route: AppRoute): string {
       return '#/connections';
     case 'knowledge':
       return '#/knowledge';
+    case 'workflow':
+      return '#/workflow';
     case 'drive':
       return '#/drive';
     case 'account':

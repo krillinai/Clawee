@@ -13,9 +13,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/buildinfo"
 	"github.com/krillinai/Clawee/server/internal/mcpauth"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
+	"github.com/krillinai/Clawee/server/internal/workflow"
 )
 
 type GateToolInput struct {
@@ -124,6 +126,8 @@ func firstNonEmptyString(values ...string) string {
 type Options struct {
 	ProxyGateway     *mcpgateway.Service
 	UpstreamServerID string
+	Workflow         *workflow.Service
+	Accounts         *accounts.Service
 }
 
 func New(opts Options, r *http.Request) *mcp.Server {
@@ -133,6 +137,9 @@ func New(opts Options, r *http.Request) *mcp.Server {
 	)
 
 	addProxyTools(server, opts, r)
+	if opts.UpstreamServerID == "" && opts.Workflow != nil && opts.Workflow.DB != nil {
+		addWorkflowTools(server, opts)
+	}
 
 	return server
 }

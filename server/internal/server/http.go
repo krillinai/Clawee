@@ -32,6 +32,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
+	"github.com/krillinai/Clawee/server/internal/workflow"
 )
 
 type Options struct {
@@ -83,6 +84,7 @@ type Options struct {
 	SharedFileStorageService   *sharedfiles.StorageConfigurationService
 	SharedFileMigrationService *sharedfiles.StorageMigrationService
 	PlatformBrandingService    *platformbranding.Service
+	WorkflowService            *workflow.Service
 	DingTalkAuth               DingTalkAuthOptions
 	BilibiliIntegration        BilibiliIntegration
 	BilibiliSyncRequester      BilibiliSyncRequester
@@ -224,6 +226,7 @@ func NewRouter(opts Options) http.Handler {
 	}
 	mountClientDownloadsRoutes(api, adminAPI, opts)
 	mountSkillHubRoutes(appAPI, adminAPI, opts)
+	mountWorkflowRoutes(appAPI, adminAPI, opts)
 	status := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service":              "clawee-gateway",
