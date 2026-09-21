@@ -121,7 +121,7 @@ function PublishedSkillList() {
       />
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
       <div className="mb-3 max-w-64"><FilterSelect ariaLabel="筛选技能空间" value={spaceId} onChange={setSpaceId}><option value="all">全部空间</option>{(spacesQuery.data ?? []).map((space) => <option key={space.spaceId} value={space.spaceId}>{space.name}</option>)}</FilterSelect></div>
-      {pendingQuery.isError ? <ErrorAlert>待发布版本加载失败：{errorMessage(pendingQuery.error)}</ErrorAlert> : null}
+      {pendingQuery.isError ? <ErrorAlert error={pendingQuery.error}>待发布版本加载失败：{errorMessage(pendingQuery.error)}</ErrorAlert> : null}
       {pendingItems.length > 0 ? <section className="mb-6" aria-label="待发布版本">
         <h2 className="mb-3 text-base font-semibold">待发布版本</h2>
         <DataTableShell dense minWidth={600}>
@@ -133,7 +133,7 @@ function PublishedSkillList() {
         <TableHeader><TableRow><TableHead>技能</TableHead><TableHead>空间</TableHead><TableHead>版本</TableHead><TableHead>说明</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
         <TableBody>
           {query.isLoading ? <TableStateRow colSpan={5}><LoadingState label="正在加载技能" /></TableStateRow> : null}
-          {query.isError ? <TableStateRow colSpan={5} tone="danger"><ErrorAlert>技能加载失败</ErrorAlert></TableStateRow> : null}
+          {query.isError ? <TableStateRow colSpan={5} tone="danger"><ErrorAlert error={query.error}>技能加载失败</ErrorAlert></TableStateRow> : null}
           {!query.isLoading && !query.isError && items.length === 0 ? <TableStateRow colSpan={5}><EmptyState title="暂无已发布技能" description="当前账户没有可用的已发布技能。" /></TableStateRow> : null}
           {items.map((item) => <TableRow key={item.skillId}><TableCell className="font-medium">{item.name}</TableCell><TableCell><Badge variant="outline">{item.spaceName}</Badge></TableCell><TableCell><Badge variant="secondary">v{item.version}</Badge></TableCell><TableCell className="max-w-96 text-muted-foreground"><span className="block truncate">{item.description}</span></TableCell><TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link to={`/app/skills/detail?skill_id=${encodeURIComponent(item.skillId)}`}>查看</Link></Button></TableCell></TableRow>)}
         </TableBody>
@@ -169,7 +169,7 @@ function PublishedSkillList() {
               <Input id="app-skill-package" aria-label="Skill ZIP 包" accept=".zip,application/zip" required type="file" onChange={selectPackage} />
               <FieldDescription>原始文件最大 50 MiB</FieldDescription>
             </Field>
-            {uploadMutation.isError ? <ErrorAlert>上传失败：{errorMessage(uploadMutation.error)}</ErrorAlert> : null}
+            {uploadMutation.isError ? <ErrorAlert error={uploadMutation.error}>上传失败：{errorMessage(uploadMutation.error)}</ErrorAlert> : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={uploadMutation.isPending} onClick={closeUpload} type="button" variant="outline">取消</Button>
               <Button disabled={uploadMutation.isPending || !uploadSpaceId || !version.trim() || !packageFile} type="submit" variant="primary">
@@ -186,7 +186,7 @@ function PublishedSkillList() {
 function PublishedSkillDetail({ skillId }: { skillId: string }) {
   const query = useQuery({ queryKey: ["app-skill", skillId], queryFn: () => getPublishedSkill(skillId) });
   if (query.isLoading) return <PageShell><LoadingState label="正在加载技能" /></PageShell>;
-  if (query.isError || !query.data) return <PageShell><ErrorAlert>技能不存在或尚未发布</ErrorAlert></PageShell>;
+  if (query.isError || !query.data) return <PageShell><ErrorAlert error={query.error}>技能不存在或尚未发布</ErrorAlert></PageShell>;
   const item = query.data;
   const detail: SkillDetailData = {
     skill: {

@@ -34,7 +34,7 @@ export function DownloadsPage() {
   const query = useQuery({ queryKey: ["public", "client-downloads"], queryFn: clientDownloads, retry: false });
   const [copied, setCopied] = useState(false);
   if (query.isLoading) return <DownloadsFrame><PageShell><LoadingState label="正在读取下载配置" /></PageShell></DownloadsFrame>;
-  if (query.isError || !query.data) return <DownloadsFrame><PageShell><PageHeader actions={<AdminReturnButton />} title="下载客户端" /><ErrorAlert>客户端下载清单暂时不可用，请稍后重试。</ErrorAlert></PageShell></DownloadsFrame>;
+  if (query.isError || !query.data) return <DownloadsFrame><PageShell><PageHeader actions={<AdminReturnButton />} title="下载客户端" /><ErrorAlert error={query.error}>客户端下载清单暂时不可用，请稍后重试。</ErrorAlert></PageShell></DownloadsFrame>;
 
   const data = query.data;
   const gateway = data.gateway_url || window.location.origin;

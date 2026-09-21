@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
+import { ErrorAlert } from "@/components/governance-ui";
+import { isForbiddenError } from "@/lib/api";
 
 import {
   currentAccount,
@@ -41,6 +43,9 @@ export function AuthGate({ requireAdmin = false, requiredPermission, requiredAny
     );
   }
 
+  if (isForbiddenError(authQuery.error)) {
+    return <main className="mx-auto max-w-xl p-6"><ErrorAlert error={authQuery.error}>暂无访问权限</ErrorAlert></main>;
+  }
   if (authQuery.isError || !authQuery.data) {
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
@@ -57,6 +62,9 @@ export function AuthGate({ requireAdmin = false, requiredPermission, requiredAny
     );
   }
   if (requireAdmin && adminSessionQuery.isError) {
+    if (isForbiddenError(adminSessionQuery.error)) {
+      return <main className="mx-auto max-w-xl p-6"><ErrorAlert error={adminSessionQuery.error}>暂无访问权限</ErrorAlert></main>;
+    }
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
   if (requiredPermission && !hasAdminPermission(account, requiredPermission)) {

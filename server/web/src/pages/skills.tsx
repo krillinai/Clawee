@@ -484,7 +484,7 @@ export function SkillsPage() {
             <Button size="sm" variant="outline" onClick={() => setSearchParams({})}><ArrowLeft data-icon="inline-start" aria-hidden="true" />返回空间列表</Button>
             <h2 className="text-lg font-semibold">{selectedSpace?.name ?? "技能空间"} · Skill 列表</h2>
           </div>
-          {!spacesQuery.isLoading && !selectedSpace ? <ErrorAlert>技能空间不存在，请返回空间列表。</ErrorAlert> : null}
+          {!spacesQuery.isLoading && !selectedSpace ? <ErrorAlert error={spacesQuery.error}>技能空间不存在，请返回空间列表。</ErrorAlert> : null}
           <section aria-label="Skill 列表" className="grid gap-4">
             <FilterRow compact>
               <FilterSearchField
@@ -526,7 +526,7 @@ export function SkillsPage() {
               <TableBody>
                 {skillsQuery.isLoading ? <TableStateRow colSpan={canSelectSkills ? 9 : 8}><LoadingState label="正在加载 Skill" /></TableStateRow> : null}
                 {skillsQuery.isError ? (
-                  <TableStateRow colSpan={canSelectSkills ? 9 : 8} tone="danger"><ErrorAlert>Skill 加载失败：{errorMessage(skillsQuery.error)}。请稍后重试。</ErrorAlert></TableStateRow>
+                  <TableStateRow colSpan={canSelectSkills ? 9 : 8} tone="danger"><ErrorAlert error={skillsQuery.error}>Skill 加载失败：{errorMessage(skillsQuery.error)}。请稍后重试。</ErrorAlert></TableStateRow>
                 ) : null}
                 {!skillsQuery.isLoading && !skillsQuery.isError && filtered.length === 0 ? (
                   <TableStateRow colSpan={canSelectSkills ? 9 : 8}>
@@ -611,7 +611,7 @@ export function SkillsPage() {
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "审批通过" : "驳回版本"} contextLabel={reviewTarget?.skill.name}>
         <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}>
           <FieldGroup><Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-            {reviewMutation.isError ? <ErrorAlert>审批失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
+            {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审批失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
             <Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" disabled={reviewMutation.isPending} onClick={() => setReviewTarget(null)}>取消</Button><Button type="submit" variant="primary" disabled={reviewMutation.isPending}>{reviewTarget?.decision === "approved" ? "确认通过" : "确认驳回"}</Button></Field>
           </FieldGroup>
         </form>
@@ -648,7 +648,7 @@ export function SkillsPage() {
               <Input id="skill-package" aria-label="Skill ZIP 包" disabled={uploadMutation.isPending} accept=".zip,application/zip" required type="file" onChange={selectPackage} />
               <FieldDescription>原始文件最大 50 MiB</FieldDescription>
             </Field>
-            {uploadMutation.isError ? <ErrorAlert>上传失败：{errorMessage(uploadMutation.error)}。请检查版本号和 ZIP 包后重试。</ErrorAlert> : null}
+            {uploadMutation.isError ? <ErrorAlert error={uploadMutation.error}>上传失败：{errorMessage(uploadMutation.error)}。请检查版本号和 ZIP 包后重试。</ErrorAlert> : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={uploadMutation.isPending} onClick={closeUpload} type="button" variant="outline">取消</Button>
               <Button disabled={uploadMutation.isPending || !uploadSpaceId || !version || !packageFile} type="submit" variant="primary">
@@ -679,7 +679,7 @@ export function SkillsPage() {
                 已选择 {selectedSkills.length} 个 Skill，来自 {selectedSpaceCount} 个技能空间；实际调整 {moveCandidateCount} 个。
               </FieldDescription>
             </Field>
-            {batchSpaceMutation.isError ? <ErrorAlert>调整失败：{errorMessage(batchSpaceMutation.error)}。本次未调整任何 Skill。</ErrorAlert> : null}
+            {batchSpaceMutation.isError ? <ErrorAlert error={batchSpaceMutation.error}>调整失败：{errorMessage(batchSpaceMutation.error)}。本次未调整任何 Skill。</ErrorAlert> : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={batchSpaceMutation.isPending} onClick={closeBatchSpace} type="button" variant="outline">取消</Button>
               <Button disabled={batchSpaceMutation.isPending || !targetSpaceId || moveCandidateCount === 0} type="submit" variant="primary">
@@ -705,7 +705,7 @@ export function SkillsPage() {
           spaces={spacesQuery.data ?? []}
           initialToken={editingToken}
         />
-        {sourceMutation.isError ? <ErrorAlert>保存失败：{errorMessage(sourceMutation.error)}</ErrorAlert> : null}
+        {sourceMutation.isError ? <ErrorAlert error={sourceMutation.error}>保存失败：{errorMessage(sourceMutation.error)}</ErrorAlert> : null}
       </ModalShell>
       <ConfirmDialog
         confirmLabel={batchPublishMutation.isPending ? "发布中..." : `确认发布 ${selectedSkills.length} 个`}

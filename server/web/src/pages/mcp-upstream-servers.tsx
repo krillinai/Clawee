@@ -394,7 +394,7 @@ export function MCPUpstreamServersPage() {
       </PageHeader>
 
       {hasLoadError ? (
-        <ErrorAlert>
+        <ErrorAlert error={[serversQuery.error, capabilitiesQuery.error, grantsQuery.error, auditsQuery.error]}>
           MCP 上游服务加载失败：无法加载上游服务、工具、授权或代理审计数据。
         </ErrorAlert>
       ) : null}
@@ -668,7 +668,7 @@ export function MCPUpstreamServersPage() {
                   ]}
                 />
                 {syncMutation.isError || statusMutation.isError ? (
-                  <ErrorAlert>
+                  <ErrorAlert error={[syncMutation.error, statusMutation.error]}>
                     {syncMutation.error?.message || statusMutation.error?.message || "上游服务操作失败"}
                   </ErrorAlert>
                 ) : null}
@@ -930,7 +930,7 @@ export function MCPUpstreamServersPage() {
             <ErrorAlert>{stdioFormError}</ErrorAlert>
           ) : null}
           {createMutation.isError || updateMutation.isError ? (
-            <ErrorAlert>
+            <ErrorAlert error={[createMutation.error, updateMutation.error]}>
               {createMutation.error?.message || updateMutation.error?.message || "上游服务保存失败"}
             </ErrorAlert>
           ) : null}
@@ -969,7 +969,7 @@ export function MCPUpstreamServersPage() {
               ]}
             />
             {deleteMutation.isError || statusMutation.isError ? (
-              <ErrorAlert>
+              <ErrorAlert error={[deleteMutation.error, statusMutation.error]}>
                 {deleteMutation.error?.message || statusMutation.error?.message || "上游服务删除失败"}
               </ErrorAlert>
             ) : null}

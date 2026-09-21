@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { feedbackAdminApi, type FeedbackPage } from '@/lib/feedback-admin-api';
-import { APIError } from '@/lib/api';
+import { APIError, isForbiddenError } from '@/lib/api';
 import { permissions } from '@/lib/rbac-api';
 import { trimInput } from '@/lib/text';
 
@@ -21,7 +21,7 @@ const statuses: Record<string, string> = { open: '待处理', investigating: '�
 function useFocused() { const [focused, setFocused] = useState(document.hasFocus()); useEffect(() => { const update = () => setFocused(document.hasFocus() && !document.hidden); window.addEventListener('focus', update); window.addEventListener('blur', update); document.addEventListener('visibilitychange', update); return () => { window.removeEventListener('focus', update); window.removeEventListener('blur', update); document.removeEventListener('visibilitychange', update); }; }, []); return focused; }
 export function FeedbackPageView() {
   const [params, setParams] = useSearchParams(); const focused = useFocused();
-  const query = useQuery({ queryKey: ['feedback-list', params.toString()], queryFn: () => feedbackAdminApi.list(params), refetchInterval: focused ? 15000 : false });
+  const query = useQuery({ queryKey: ['feedback-list', params.toString()], queryFn: () => feedbackAdminApi.list(params), refetchInterval: current => focused && !isForbiddenError(current.state.error) ? 15000 : false });
   const change = (key: string, value: string) => { const next = new URLSearchParams(params); next.delete('cursor'); if (value) next.set(key, value); else next.delete(key); setParams(next); };
   const position = useRef(Number(sessionStorage.getItem(`feedback-scroll:${params}`) ?? 0));
   useEffect(() => { if (query.data) window.scrollTo(0, position.current); }, [Boolean(query.data)]);
@@ -58,7 +58,7 @@ export function FeedbackPageView() {
             <TableBody>
               {query.isPending ? <TableStateRow colSpan={8}><LoadingState label="正在加载反馈" /></TableStateRow> : query.isError ? (
                 <TableStateRow colSpan={8} tone="danger">
-                  <ErrorAlert>反馈列表加载失败 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></ErrorAlert>
+                  <ErrorAlert error={query.error}>反馈列表加载失败 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></ErrorAlert>
                 </TableStateRow>
               ) : !query.data?.items.length ? (
                 <TableStateRow colSpan={8}><EmptyState title="没有符合条件的反馈" /></TableStateRow>
@@ -89,7 +89,7 @@ export function FeedbackPageView() {
 }
 export function FeedbackDetailPage() {
   const { id = '' } = useParams(); const [params] = useSearchParams(); const focused = useFocused(); const cache = useQueryClient();
-  const query = useQuery({ queryKey: ['feedback-report', id], queryFn: () => feedbackAdminApi.get(id), refetchInterval: focused ? 15000 : false });
+  const query = useQuery({ queryKey: ['feedback-report', id], queryFn: () => feedbackAdminApi.get(id), refetchInterval: current => focused && !isForbiddenError(current.state.error) ? 15000 : false });
   const [operation, setOperation] = useState(''); const [editingVersion, setEditingVersion] = useState(0); const [values, setValues] = useState<Record<string, string>>({}); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [image, setImage] = useState(''); const [tab, setTab] = useState('conversation');
   const canInvestigate = useAdminPermission(permissions.feedbackInvestigate); const canResolve = useAdminPermission(permissions.feedbackResolve); const canReopen = useAdminPermission(permissions.feedbackReopen); const canDownload = useAdminPermission(permissions.feedbackDownload);
   const r = query.data; const ready = r?.upload_state === 'ready' && r.security_state === 'normal' && Date.parse(r.expires_at) > Date.now();
@@ -110,10 +110,10 @@ export function FeedbackDetailPage() {
     } catch (e) {
       const conflict = e instanceof APIError && e.status === 409;
       if (conflict) submittedRequest.current = undefined;
-      setError(conflict ? '反馈版本或状态已变更，请关闭表单并重新读取。' : '操作失败，请重试。');
+      setError(conflict ? '反馈版本或状态已变更，请关闭表单并重新读取。' : isForbiddenError(e) ? e.message : '操作失败，请重试。');
     } finally { setBusy(false); }
   };
-  if (query.isPending) return <p>正在加载…</p>; if (query.isError || !r) return <p role="alert">反馈不可用 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></p>;
+  if (query.isPending) return <p>正在加载…</p>; if (query.isError || !r) return <p role="alert">{isForbiddenError(query.error) ? query.error.message : '反馈不可用'} {!isForbiddenError(query.error) ? <Button variant="outline" onClick={() => void query.refetch()}>重试</Button> : null}</p>;
   return <main className="min-w-0 space-y-5"><Link className="inline-flex items-center gap-2" to={`/admin/feedback?${params}`}><ArrowLeft size={16} />返回列表</Link><div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{r.display_number}</h1><div className="flex flex-wrap gap-2">{ready && canInvestigate && r.processing_status === 'open' ? <Button variant="outline" onClick={() => start('investigate')}><Play size={16} />开始处理</Button> : null}{ready && canResolve && r.processing_status !== 'resolved' ? <Button onClick={() => start('resolve')}><Check size={16} />标记已处理</Button> : null}{ready && canReopen && r.processing_status === 'resolved' ? <Button variant="outline" onClick={() => start('reopen')}><RotateCcw size={16} />重新打开</Button> : null}</div></div>
     <p>{statuses[r.processing_status]} · {r.completeness} · {r.upload_state} · {r.security_state} · 版本 {r.version}</p><p className="whitespace-pre-wrap break-all">{r.description}</p>{r.reproduction_steps ? <p className="whitespace-pre-wrap break-all">{r.reproduction_steps}</p> : null}
     {!ready ? <p role="alert">材料尚未就绪、已隔离或已过期，不能读取正文与处理。</p> : null}
@@ -131,5 +131,5 @@ function FeedbackRecords({ id, kind, artifacts }: { id: string; kind: 'conversat
   const query = useQuery({ queryKey: ['feedback-read', id, kind, params.toString()], queryFn: () => feedbackAdminApi.read(id, kind, params) });
   useEffect(() => { if (query.data) setPages(old => cursor ? [...old, query.data] : [query.data]); }, [query.data]);
   const reset = () => { setCursor(''); setPages([]); };
-  return <div className="min-w-0 space-y-3">{kind === 'logs' ? <><select className="max-w-full rounded border bg-background p-2 text-sm" aria-label="日志附件" value={aid} onChange={e => { setAid(e.target.value); reset(); }}>{artifacts.map(a => <option key={a.artifact_id} value={a.artifact_id}>{a.name}</option>)}</select><div className="flex flex-wrap gap-2">{[['keyword', '关键词'], ['level', '级别'], ['run_id', 'Run'], ['from', '开始时间'], ['to', '结束时间']].map(([key, label]) => <Input key={key} className="w-40" aria-label={label} placeholder={label} value={filters[key] ?? ''} onChange={e => { setFilters(old => ({ ...old, [key]: e.target.value })); reset(); }} />)}</div></> : null}{query.isPending ? <p>正在读取…</p> : null}{query.isError ? <p role="alert">材料读取失败或附件缺失 <Button variant="outline" onClick={() => void query.refetch()}>重试</Button></p> : null}<pre className="max-h-[60vh] max-w-full overflow-auto whitespace-pre-wrap break-all text-xs">{pages.flatMap(page => page.records).map((record, index) => <span key={index}>{record.continuation || record.fragment_offset ? `[分段 ${record.fragment_offset}] ` : ''}{record.text}{'\n'}</span>)}</pre>{query.data?.has_next ? <Button variant="outline" disabled={query.isFetching} onClick={() => setCursor(query.data!.next_cursor)}>继续读取</Button> : null}</div>;
+  return <div className="min-w-0 space-y-3">{kind === 'logs' ? <><select className="max-w-full rounded border bg-background p-2 text-sm" aria-label="日志附件" value={aid} onChange={e => { setAid(e.target.value); reset(); }}>{artifacts.map(a => <option key={a.artifact_id} value={a.artifact_id}>{a.name}</option>)}</select><div className="flex flex-wrap gap-2">{[['keyword', '关键词'], ['level', '级别'], ['run_id', 'Run'], ['from', '开始时间'], ['to', '结束时间']].map(([key, label]) => <Input key={key} className="w-40" aria-label={label} placeholder={label} value={filters[key] ?? ''} onChange={e => { setFilters(old => ({ ...old, [key]: e.target.value })); reset(); }} />)}</div></> : null}{query.isPending ? <p>正在读取…</p> : null}{query.isError ? <p role="alert">{isForbiddenError(query.error) ? query.error.message : '材料读取失败或附件缺失'} {!isForbiddenError(query.error) ? <Button variant="outline" onClick={() => void query.refetch()}>重试</Button> : null}</p> : null}{!isForbiddenError(query.error) ? <pre className="max-h-[60vh] max-w-full overflow-auto whitespace-pre-wrap break-all text-xs">{pages.flatMap(page => page.records).map((record, index) => <span key={index}>{record.continuation || record.fragment_offset ? `[分段 ${record.fragment_offset}] ` : ''}{record.text}{'\n'}</span>)}</pre> : null}{!isForbiddenError(query.error) && query.data?.has_next ? <Button variant="outline" disabled={query.isFetching} onClick={() => setCursor(query.data!.next_cursor)}>继续读取</Button> : null}</div>;
 }

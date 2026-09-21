@@ -157,7 +157,7 @@ export function SkillDetailPage() {
   }
 
   if (detailQuery.isError) {
-    return <PageShell><ErrorAlert>详情加载失败：{errorMessage(detailQuery.error)}。请返回技能中心后重试。</ErrorAlert></PageShell>;
+    return <PageShell><ErrorAlert error={detailQuery.error}>详情加载失败：{errorMessage(detailQuery.error)}。请返回技能中心后重试。</ErrorAlert></PageShell>;
   }
 
   const detail = detailQuery.data;
@@ -199,7 +199,7 @@ export function SkillDetailPage() {
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "通过版本审批" : "驳回版本"} contextLabel={`版本 ${reviewTarget?.version.version ?? ""}`}>
         <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}><FieldGroup>
           <Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-          {reviewMutation.isError ? <ErrorAlert>审核失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
+          {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审核失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
           <Field className="justify-end" orientation="horizontal"><Button disabled={reviewMutation.isPending} type="button" variant="outline" onClick={() => setReviewTarget(null)}>取消</Button><Button disabled={reviewMutation.isPending} type="submit" variant={reviewTarget?.decision === "rejected" ? "destructive" : "primary"}>{reviewMutation.isPending ? "提交中..." : "确认"}</Button></Field>
         </FieldGroup></form>
       </ModalShell>
@@ -457,7 +457,7 @@ export function SkillDetailView({
 
 function OverviewContent({ content, error, loading, missing }: { content?: string; error: unknown; loading: boolean; missing: boolean }) {
   if (loading) return <LoadingState label="正在加载 Skill 概述" />;
-  if (error) return <ErrorAlert>概述加载失败：{errorMessage(error)}。</ErrorAlert>;
+  if (error) return <ErrorAlert error={error}>概述加载失败：{errorMessage(error)}。</ErrorAlert>;
   const body = stripFrontmatter(content ?? "");
   if (missing || !body) return <EmptyState title="暂无概述" description="该版本未提供可展示的 SKILL.md 正文。" />;
 
@@ -518,7 +518,7 @@ function FileBrowser({
   selectedFile: SkillVersionFile | null;
 }) {
   if (filesLoading) return <LoadingState label="正在加载版本文件" />;
-  if (filesError) return <ErrorAlert>文件列表加载失败：{errorMessage(filesError)}。</ErrorAlert>;
+  if (filesError) return <ErrorAlert error={filesError}>文件列表加载失败：{errorMessage(filesError)}。</ErrorAlert>;
   if (files.length === 0) return <EmptyState title="暂无文件" description="该版本的 ZIP 包中没有可展示文件。" />;
 
   return (
@@ -590,7 +590,7 @@ function FilePreview({ content, error, file, loading }: { content?: string; erro
           description={file.size > previewSizeLimit ? "文件超过在线预览大小限制，请下载 ZIP 包后查看。" : "二进制文件请下载 ZIP 包后查看。"}
         />
       ) : loading ? <LoadingState label="正在加载文件内容" />
-        : error ? <ErrorAlert>文件预览加载失败：{errorMessage(error)}。</ErrorAlert>
+        : error ? <ErrorAlert error={error}>文件预览加载失败：{errorMessage(error)}。</ErrorAlert>
           : <pre className="max-h-[560px] min-h-[360px] overflow-auto rounded-md border border-border bg-muted/35 p-4 font-mono text-xs leading-6"><code>{content ?? ""}</code></pre>
       }
     </div>

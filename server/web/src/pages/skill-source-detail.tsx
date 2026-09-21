@@ -84,7 +84,7 @@ export function SkillSourceDetailPage() {
 
   if (!sourceId) return <PageShell><ErrorAlert>缺少来源 ID。请返回技能中心后重新选择 GitHub 来源。</ErrorAlert></PageShell>;
   if (sourceQuery.isLoading) return <PageShell><LoadingState label="正在加载 GitHub 来源详情" /></PageShell>;
-  if (sourceQuery.isError || !sourceQuery.data) return <PageShell><ErrorAlert>来源详情加载失败：{errorMessage(sourceQuery.error)}。</ErrorAlert></PageShell>;
+  if (sourceQuery.isError || !sourceQuery.data) return <PageShell><ErrorAlert error={sourceQuery.error}>来源详情加载失败：{errorMessage(sourceQuery.error)}。</ErrorAlert></PageShell>;
 
   const { source, items, manualClone } = sourceQuery.data;
   const skills = skillsQuery.data ?? [];
@@ -124,7 +124,7 @@ export function SkillSourceDetailPage() {
         /> : null}
 
         {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
-        {bindMutation.isError ? <ErrorAlert>绑定失败：{errorMessage(bindMutation.error)}。</ErrorAlert> : null}
+        {bindMutation.isError ? <ErrorAlert error={bindMutation.error}>绑定失败：{errorMessage(bindMutation.error)}。</ErrorAlert> : null}
 
         <section className="grid gap-3" aria-labelledby="source-items-title">
           <div>
@@ -149,7 +149,7 @@ export function SkillSourceDetailPage() {
             <TableHeader><TableRow><TableHead>触发方式</TableHead><TableHead>仓库模式</TableHead><TableHead>状态</TableHead><TableHead>前序 Commit</TableHead><TableHead>目标 Commit</TableHead><TableHead>发现</TableHead><TableHead>新版本</TableHead><TableHead>已发布</TableHead><TableHead>冲突</TableHead><TableHead>失败</TableHead><TableHead>错误</TableHead><TableHead>开始时间</TableHead><TableHead>结束时间</TableHead></TableRow></TableHeader>
             <TableBody>
               {runsQuery.isLoading ? <TableStateRow colSpan={13}><LoadingState label="正在加载同步运行记录" /></TableStateRow> : null}
-              {runsQuery.isError ? <TableStateRow colSpan={13} tone="danger"><ErrorAlert>同步运行记录加载失败：{errorMessage(runsQuery.error)}。</ErrorAlert></TableStateRow> : null}
+              {runsQuery.isError ? <TableStateRow colSpan={13} tone="danger"><ErrorAlert error={runsQuery.error}>同步运行记录加载失败：{errorMessage(runsQuery.error)}。</ErrorAlert></TableStateRow> : null}
               {!runsQuery.isLoading && !runsQuery.isError && (runsQuery.data ?? []).length === 0 ? <TableStateRow colSpan={13}><EmptyState title="暂无同步运行记录" /></TableStateRow> : null}
               {(runsQuery.data ?? []).map((run) => <SyncRunRow key={run.runId} run={run} />)}
             </TableBody>

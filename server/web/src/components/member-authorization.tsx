@@ -249,7 +249,7 @@ export function MemberAuthorizationDrawer({
           </TableHeader>
           <TableBody>
             {membersQuery.isLoading ? <TableStateRow colSpan={hasActions ? 4 : 3}><LoadingState label="正在加载授权成员" /></TableStateRow> : null}
-            {membersQuery.isError ? <TableStateRow colSpan={hasActions ? 4 : 3} tone="danger"><ErrorAlert>成员授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
+            {membersQuery.isError ? <TableStateRow colSpan={hasActions ? 4 : 3} tone="danger"><ErrorAlert error={membersQuery.error}>成员授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
             {!membersQuery.isLoading && !membersQuery.isError && members.length === 0 ? (
               <TableStateRow colSpan={hasActions ? 4 : 3}>
                 <EmptyState title={memberQuery ? "暂无匹配成员" : "暂无成员授权"} description={memberQuery ? "请调整搜索条件。" : "添加成员后即可配置当前资源的访问权限。"} />
@@ -300,8 +300,8 @@ export function MemberAuthorizationDrawer({
           event.preventDefault();
           if (selectedCandidateList.length > 0) addMutation.mutate({ candidates: selectedCandidateList, actions: formActions });
         }}>
-          {addMutation.isError ? <ErrorAlert>添加失败：{errorText(addMutation.error)}</ErrorAlert> : null}
-          {candidatesQuery.isError ? <ErrorAlert>候选成员加载失败：{errorText(candidatesQuery.error)}</ErrorAlert> : null}
+          {addMutation.isError ? <ErrorAlert error={addMutation.error}>添加失败：{errorText(addMutation.error)}</ErrorAlert> : null}
+          {candidatesQuery.isError ? <ErrorAlert error={candidatesQuery.error}>候选成员加载失败：{errorText(candidatesQuery.error)}</ErrorAlert> : null}
           <FieldGroup>
             <Field>
               <FieldLabel>成员</FieldLabel>
@@ -369,7 +369,7 @@ export function MemberAuthorizationDrawer({
           event.preventDefault();
           if (memberToEdit) updateMutation.mutate({ member: memberToEdit, actions: formActions });
         }}>
-          {updateMutation.isError ? <ErrorAlert>更新失败：{errorText(updateMutation.error)}</ErrorAlert> : null}
+          {updateMutation.isError ? <ErrorAlert error={updateMutation.error}>更新失败：{errorText(updateMutation.error)}</ErrorAlert> : null}
           <FieldGroup>
             <Field>
               <FieldLabel>账号 ID</FieldLabel>

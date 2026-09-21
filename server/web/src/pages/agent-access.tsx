@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { isForbiddenError } from "@/lib/api";
 import {
   deleteMyAgent,
   getMyAccountToken,
@@ -53,7 +54,7 @@ export function AgentAccessPage() {
   const [editingName, setEditingName] = useState("");
   const [deletingAgent, setDeletingAgent] = useState<MCPAgent | null>(null);
 
-  const agentsQuery = useQuery({ queryKey: accessQueryKey, queryFn: listMyAgents, refetchInterval: 30_000 });
+  const agentsQuery = useQuery({ queryKey: accessQueryKey, queryFn: listMyAgents, refetchInterval: query => isForbiddenError(query.state.error) ? false : 30_000 });
   const tokenQuery = useQuery({ queryKey: tokenQueryKey, queryFn: getMyAccountToken, retry: false });
   const catalogQuery = useQuery({ queryKey: catalogQueryKey, queryFn: () => listMyMCPCatalog() });
   const agents = useMemo(() => (agentsQuery.data ?? []).map(mapUserAgent), [agentsQuery.data]);
@@ -146,7 +147,7 @@ export function AgentAccessPage() {
       <Card>
         <CardHeader><CardTitle>智能体列表</CardTitle><p className="mt-1 text-sm text-muted-foreground">选择 Agent 生成包含其 X-Claw-Agent-ID 的 MCP 配置。</p></CardHeader>
         <CardContent>
-          {agentsQuery.isError || catalogQuery.isError ? <ErrorAlert>加载智能体接入信息失败</ErrorAlert> : null}
+          {agentsQuery.isError || catalogQuery.isError ? <ErrorAlert error={[agentsQuery.error, catalogQuery.error]}>加载智能体接入信息失败</ErrorAlert> : null}
           <MCPAgentTokenTable
             agents={agents}
             isLoading={agentsQuery.isLoading || catalogQuery.isLoading}

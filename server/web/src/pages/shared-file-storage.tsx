@@ -22,6 +22,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { isForbiddenError } from "@/lib/api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
 import { cleanInputIdentifier, trimInput } from "@/lib/text";
@@ -90,7 +91,7 @@ export function SharedFileStoragePage() {
     queryKey: ["shared-file-storage-migration", migrationId],
     queryFn: () => getStorageMigration(migrationId),
     enabled: Boolean(migrationId) && canMigrate,
-    refetchInterval: (query) => shouldPollMigration(query.state.data?.status) ? 1500 : false
+    refetchInterval: (query) => !isForbiddenError(query.state.error) && shouldPollMigration(query.state.data?.status) ? 1500 : false
   });
   const state = stateQuery.data;
   const profiles = state?.profiles ?? [];

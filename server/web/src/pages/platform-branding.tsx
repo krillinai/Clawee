@@ -62,7 +62,7 @@ export function PlatformBrandingPage() {
 
   if (query.isLoading) return <PageShell><LoadingState label="正在加载平台外观" /></PageShell>;
   if (query.isError || !query.data) {
-    return <PageShell><ErrorAlert>平台外观加载失败，请稍后重试。</ErrorAlert></PageShell>;
+    return <PageShell><ErrorAlert error={query.error}>平台外观加载失败，请稍后重试。</ErrorAlert></PageShell>;
   }
 
   const branding = query.data;

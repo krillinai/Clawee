@@ -33,6 +33,10 @@ describe("shared files api", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: { code: "preview_too_large", message: "文件超过预览大小限制" } }, 413)));
     await expect(getSharedFilePreview("file")).rejects.toMatchObject({ code: "preview_too_large", message: "文件超过预览大小限制" });
   });
+  it("shows permission guidance for a forbidden preview", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: { code: "shared_file_forbidden", message: "请求未完成" } }, 403)));
+    await expect(getSharedFilePreview("file")).rejects.toMatchObject({ status: 403, code: "shared_file_forbidden", message: "暂无访问权限，请联系管理员开通相应权限。" });
+  });
 
   it("maps paged spaces and uses the documented admin routes", async () => {
     const fetchMock = vi.fn()

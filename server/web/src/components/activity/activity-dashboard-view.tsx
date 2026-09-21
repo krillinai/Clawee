@@ -5,6 +5,7 @@ import { EmptyState, ErrorAlert, PageHeader, PageShell } from "@/components/gove
 import { useDashboardFilters } from "@/hooks/useDashboardFilters";
 import { useOfficeSnapshot } from "@/hooks/useOfficeSnapshot";
 import { useRealtimeEvents } from "@/hooks/useRealtimeEvents";
+import { isForbiddenError } from "@/lib/api";
 import type { AgentListItem } from "@/lib/office-api";
 
 import { ActivityFilters } from "./activity-filters";
@@ -41,7 +42,7 @@ export function ActivityDashboardView({ navigation, scope = "admin" }: { navigat
       {navigation}
       <PageHeader title="智能体活动" />
 
-      {officeQuery.isError ? <ErrorAlert>智能体活动加载失败</ErrorAlert> : null}
+      {officeQuery.isError ? <ErrorAlert error={officeQuery.error}>智能体活动加载失败</ErrorAlert> : null}
 
       <ActivitySummaryCards isLoading={officeQuery.isLoading} summary={officeQuery.data?.summary} />
 
@@ -64,7 +65,7 @@ export function ActivityDashboardView({ navigation, scope = "admin" }: { navigat
             {officeQuery.isLoading ? (
               <div className="text-sm text-muted-foreground">智能体活动加载中</div>
             ) : officeQuery.isError ? (
-              <EmptyState title="智能体活动加载失败" description="请稍后刷新重试。" />
+              isForbiddenError(officeQuery.error) ? null : <EmptyState title="智能体活动加载失败" description="请稍后刷新重试。" />
             ) : filteredAgents.length === 0 ? (
               <EmptyState title={agents.length === 0 ? "还没有智能体状态" : "没有匹配的智能体"} />
             ) : (

@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode, WheelEvent } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
+import { firstRequestError, isForbiddenError } from "@/lib/api";
 
 import {
   ConfirmDialog,
@@ -245,6 +246,7 @@ export function MCPAgentsGrantsPage() {
     (canReadUpstreams && serversQuery.isLoading) ||
     (canReadActivity && officeAgentsQuery.isLoading);
   const hasLoadError = agentsQuery.isError || grantsQuery.isError || capabilitiesQuery.isError || serversQuery.isError || officeAgentsQuery.isError;
+  const loadFailure = firstRequestError(agentsQuery.error, grantsQuery.error, capabilitiesQuery.error, serversQuery.error, officeAgentsQuery.error);
   const domainOptions = useMemo(() => uniqueOptions(servers.map((server) => server.domain)), [servers]);
   const typeOptions = useMemo(() => uniqueOptions(capabilities.map((capability) => capability.type)), [capabilities]);
   const statusOptions = useMemo(() => uniqueOptions(capabilities.map((capability) => capability.status)), [capabilities]);
@@ -501,7 +503,9 @@ export function MCPAgentsGrantsPage() {
       </PageHeader>
       {hasLoadError ? (
         <ErrorBlock>
-          智能体管理加载失败：无法加载运行实例、治理身份、授权、能力或上游服务数据。
+          {isForbiddenError(loadFailure)
+            ? loadFailure.message
+            : "智能体管理加载失败：无法加载运行实例、治理身份、授权、能力或上游服务数据。"}
         </ErrorBlock>
       ) : null}
       {unbindAgentMutation.isError ? <ErrorBlock>解除关联失败：{unbindAgentMutation.error.message}</ErrorBlock> : null}

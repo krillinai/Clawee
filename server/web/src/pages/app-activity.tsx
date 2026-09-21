@@ -81,7 +81,7 @@ function ActivityStatisticsView() {
 
   if (dataViewsQuery.isLoading) return <ActivityPageSkeleton />;
   if (dataViewsQuery.isError) {
-    return <PageShell><ErrorAlert>数据视图权限加载失败，请稍后重试。</ErrorAlert></PageShell>;
+    return <PageShell><ErrorAlert error={dataViewsQuery.error}>数据视图权限加载失败，请稍后重试。</ErrorAlert></PageShell>;
   }
   if (!authorized) {
     return (
@@ -114,9 +114,9 @@ function ActivityStatisticsView() {
       </PageHeader>
 
       {statisticsQuery.isLoading ? <ActivityContentSkeleton /> : null}
-      {statisticsQuery.isError ? <ErrorAlert>Agent 动态加载失败，请稍后重试。</ErrorAlert> : null}
+      {statisticsQuery.isError ? <ErrorAlert error={statisticsQuery.error}>Agent 动态加载失败，请稍后重试。</ErrorAlert> : null}
       {billingQuery.isLoading ? <BillingOverviewSkeleton /> : null}
-      {billingQuery.isError && !isBillingNotManaged(billingQuery.error) ? <ErrorAlert>账户额度暂不可用，请稍后重试。</ErrorAlert> : null}
+      {billingQuery.isError && !isBillingNotManaged(billingQuery.error) ? <ErrorAlert error={billingQuery.error}>账户额度暂不可用，请稍后重试。</ErrorAlert> : null}
       {billingQuery.data ? <BillingSummary data={billingQuery.data} /> : null}
       {statisticsQuery.data ? (
         <ActivityContent

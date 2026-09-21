@@ -184,6 +184,16 @@ describe("App", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
   });
 
+  it("shows permission guidance for a forbidden account instead of redirecting to login", async () => {
+    currentAccountMock.mockRejectedValue(new APIError("请求失败", 403, "account_forbidden"));
+    window.history.pushState({}, "", "/admin");
+
+    renderApp();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂无访问权限，请联系管理员开通相应权限");
+    expect(window.location.pathname).toBe("/admin");
+  });
+
   it("redirects admin visits to login when the admin cookie is missing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "未认证" } }), {
       status: 401,

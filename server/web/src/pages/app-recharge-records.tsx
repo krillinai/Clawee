@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { isForbiddenError } from "@/lib/api";
 import { isBillingNotManaged, listRechargeOrders, type RechargeOrder, type RechargeOrderStatus } from "@/lib/billing-api";
 import { canReadAgentActivity, listMyDataViews } from "@/lib/data-views-api";
 import { formatBeijingDateTime } from "@/lib/datetime";
@@ -37,7 +38,7 @@ export function AppRechargeRecordsPage() {
     retry: false,
     refetchOnWindowFocus: true,
     placeholderData: (previous) => previous,
-    refetchInterval: (query) => query.state.data?.items.some((order) => order.status === "crediting" || order.status === "refunding") ? 5_000 : false,
+    refetchInterval: (query) => !isForbiddenError(query.state.error) && query.state.data?.items.some((order) => order.status === "crediting" || order.status === "refunding") ? 5_000 : false,
   });
 
   if (dataViewsQuery.isLoading) return <RechargeRecordsPageSkeleton />;
@@ -46,7 +47,7 @@ export function AppRechargeRecordsPage() {
       <PageShell>
         <RechargeRecordsBackLink />
         <PageHeader title="充值记录" />
-        <ErrorAlert>数据视图权限加载失败，请稍后重试</ErrorAlert>
+        <ErrorAlert error={dataViewsQuery.error}>数据视图权限加载失败，请稍后重试</ErrorAlert>
       </PageShell>
     );
   }
@@ -77,18 +78,18 @@ export function AppRechargeRecordsPage() {
     <PageShell>
       <RechargeRecordsBackLink />
       <PageHeader
-        actions={(
+        actions={!recordsQuery.isError || !isForbiddenError(recordsQuery.error) ? (
           <Button disabled={recordsQuery.isFetching} onClick={() => void recordsQuery.refetch()} size="sm" variant="outline">
             <RefreshCw data-icon="inline-start" />刷新
           </Button>
-        )}
+        ) : undefined}
         title="充值记录"
       >
         企业账户充值订单及到账结果
       </PageHeader>
 
       {recordsQuery.isError ? (
-        <ErrorAlert>
+        <ErrorAlert error={recordsQuery.error}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>充值记录暂不可用，请稍后重试</span>
             <Button onClick={() => void recordsQuery.refetch()} size="sm" variant="outline">重试</Button>

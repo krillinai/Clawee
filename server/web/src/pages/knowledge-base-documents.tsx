@@ -178,7 +178,7 @@ export function KnowledgeBaseDocumentsPage() {
 
       {basesQuery.isLoading ? <LoadingState label="正在加载知识库" /> : null}
       {basesQuery.isError ? (
-        <ErrorAlert>知识库加载失败：{errorMessage(basesQuery.error)}。请稍后重试。</ErrorAlert>
+        <ErrorAlert error={basesQuery.error}>知识库加载失败：{errorMessage(basesQuery.error)}。请稍后重试。</ErrorAlert>
       ) : null}
       {!basesQuery.isLoading && !basesQuery.isError && !knowledgeBase ? (
         <ErrorAlert>未找到知识库“{knowledgeBaseId}”，请返回知识库列表重新选择。</ErrorAlert>
@@ -203,7 +203,7 @@ export function KnowledgeBaseDocumentsPage() {
           ) : null}
 
           {syncMutation.isError ? (
-            <ErrorAlert>同步失败：{errorMessage(syncMutation.error)}。本地状态未变更，请检查 Provider 后重试。</ErrorAlert>
+            <ErrorAlert error={syncMutation.error}>同步失败：{errorMessage(syncMutation.error)}。本地状态未变更，请检查 Provider 后重试。</ErrorAlert>
           ) : null}
           {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
 
@@ -233,7 +233,7 @@ export function KnowledgeBaseDocumentsPage() {
                 ) : null}
                 {documentsQuery.isError ? (
                   <TableStateRow colSpan={6} tone="danger">
-                    <ErrorAlert>文档加载失败：{errorMessage(documentsQuery.error)}。请稍后重试。</ErrorAlert>
+                    <ErrorAlert error={documentsQuery.error}>文档加载失败：{errorMessage(documentsQuery.error)}。请稍后重试。</ErrorAlert>
                   </TableStateRow>
                 ) : null}
                 {!documentsQuery.isLoading && !documentsQuery.isError && documents.length === 0 ? (
@@ -283,7 +283,7 @@ export function KnowledgeBaseDocumentsPage() {
       >
         <form className="flex flex-col gap-4" onSubmit={submitUpload}>
           {uploadMutation.isError ? (
-            <ErrorAlert>上传失败：{errorMessage(uploadMutation.error)}。请检查文件格式和大小后重试。</ErrorAlert>
+            <ErrorAlert error={uploadMutation.error}>上传失败：{errorMessage(uploadMutation.error)}。请检查文件格式和大小后重试。</ErrorAlert>
           ) : null}
           <FieldGroup>
             <Field>

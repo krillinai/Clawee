@@ -287,7 +287,7 @@ export function KnowledgeBasesPage() {
             ) : null}
             {basesQuery.isError ? (
               <TableStateRow colSpan={8} tone="danger">
-                <ErrorAlert>知识库加载失败：{errorMessage(basesQuery.error)}。请稍后重试。</ErrorAlert>
+                <ErrorAlert error={basesQuery.error}>知识库加载失败：{errorMessage(basesQuery.error)}。请稍后重试。</ErrorAlert>
               </TableStateRow>
             ) : null}
             {!basesQuery.isLoading && !basesQuery.isError && filtered.length === 0 ? (
@@ -465,7 +465,7 @@ export function KnowledgeBasesPage() {
                 <FieldDescription id="knowledge-edit-description-description">可选，最多 1000 字</FieldDescription>
               </Field>
               {updateMutation.isError ? (
-                <ErrorAlert>保存失败：{errorMessage(updateMutation.error)}。请检查名称和说明后重试。</ErrorAlert>
+                <ErrorAlert error={updateMutation.error}>保存失败：{errorMessage(updateMutation.error)}。请检查名称和说明后重试。</ErrorAlert>
               ) : null}
               <Field className="flex-wrap justify-end" orientation="horizontal">
                 <Button disabled={updateMutation.isPending} onClick={closeEditKnowledgeBase} type="button" variant="outline">取消</Button>
@@ -514,7 +514,7 @@ export function KnowledgeBasesPage() {
               <FieldDescription id="knowledge-description-description">可选，最多 1000 字</FieldDescription>
             </Field>
             {createMutation.isError ? (
-              <ErrorAlert>创建失败：{errorMessage(createMutation.error)}。请检查名称和说明后重试。</ErrorAlert>
+              <ErrorAlert error={createMutation.error}>创建失败：{errorMessage(createMutation.error)}。请检查名称和说明后重试。</ErrorAlert>
             ) : null}
             <Field className="flex-wrap justify-end" orientation="horizontal">
               <Button disabled={createMutation.isPending} onClick={closeCreate} type="button" variant="outline">取消</Button>

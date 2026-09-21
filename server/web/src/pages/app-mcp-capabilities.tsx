@@ -32,7 +32,7 @@ export function AppMCPCapabilitiesPage() {
         <LoadingState label="正在加载 MCP 能力目录" />
       ) : null}
       {agentsQuery.isError || catalogQuery.isError ? (
-        <ErrorAlert>MCP 能力目录加载失败</ErrorAlert>
+        <ErrorAlert error={[agentsQuery.error, catalogQuery.error]}>MCP 能力目录加载失败</ErrorAlert>
       ) : null}
       {!agentsQuery.isLoading && !agentsQuery.isError && agents.length === 0 ? (
         <EmptyState title="暂无可用 Agent" />

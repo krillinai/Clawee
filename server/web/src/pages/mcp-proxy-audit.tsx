@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useAdminPermission } from "@/components/admin-permissions";
 import { Button } from "@/components/ui/button";
+import { isForbiddenError } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -266,7 +267,7 @@ export function MCPProxyAuditPage() {
               {isLoading ? <TableStateRow colSpan={12}>代理审计加载中</TableStateRow> : null}
               {!isLoading && hasLoadError ? (
                 <TableStateRow colSpan={12} tone="danger">
-                  代理审计加载失败
+                  {isForbiddenError(auditsQuery.error) ? auditsQuery.error.message : "代理审计加载失败"}
                 </TableStateRow>
               ) : null}
               {!isLoading && !hasLoadError && visibleAudits.length === 0 ? (

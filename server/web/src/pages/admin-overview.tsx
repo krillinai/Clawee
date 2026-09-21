@@ -346,14 +346,14 @@ export function AdminOverviewPage() {
         ) : null}
 
         {features.isPending ? <LoadingState label="正在检查功能状态" /> : null}
-        {features.isError ? <ErrorAlert>功能状态暂时不可用，请稍后重试。 <Button variant="outline" onClick={() => void features.refetch()}>重试</Button></ErrorAlert> : null}
+        {features.isError ? <ErrorAlert error={features.error}>功能状态暂时不可用，请稍后重试。 <Button variant="outline" onClick={() => void features.refetch()}>重试</Button></ErrorAlert> : null}
         {disabledFeatures.length > 0 ? <Alert><AlertDescription>{disabledFeatures.map(name => `${name}：功能未开启`).join("；")}</AlertDescription></Alert> : null}
         {mcpSummaryQuery.isError ? (
-          <ErrorAlert>MCP 治理数据加载失败：无法加载上游服务、能力、Agent、授权或代理审计。</ErrorAlert>
+          <ErrorAlert error={mcpSummaryQuery.error}>MCP 治理数据加载失败：无法加载上游服务、能力、Agent、授权或代理审计。</ErrorAlert>
         ) : null}
-        {canReadActivity && officeActivityQuery.isError ? <ErrorAlert>Agent 运行状态加载失败。</ErrorAlert> : null}
-        {canReadGates && pendingGatesQuery.isError ? <ErrorAlert>门禁待办加载失败。</ErrorAlert> : null}
-        {hasEnterpriseAccess && enterpriseResourcesQuery.isError ? <ErrorAlert>企业资源状态加载失败。</ErrorAlert> : null}
+        {canReadActivity && officeActivityQuery.isError ? <ErrorAlert error={officeActivityQuery.error}>Agent 运行状态加载失败。</ErrorAlert> : null}
+        {canReadGates && pendingGatesQuery.isError ? <ErrorAlert error={pendingGatesQuery.error}>门禁待办加载失败。</ErrorAlert> : null}
+        {hasEnterpriseAccess && enterpriseResourcesQuery.isError ? <ErrorAlert error={enterpriseResourcesQuery.error}>企业资源状态加载失败。</ErrorAlert> : null}
 
         {hasMetricAccess ? (
           <OverviewSection

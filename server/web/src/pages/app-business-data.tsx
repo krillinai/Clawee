@@ -121,7 +121,7 @@ export function AppBusinessDataPage({ requestedView }: { requestedView?: Busines
     return (
       <PageShell>
         <PageHeader title="数据看板" />
-        <ErrorAlert>数据视图权限加载失败，请稍后重试。</ErrorAlert>
+        <ErrorAlert error={dataViewsQuery.error}>数据视图权限加载失败，请稍后重试。</ErrorAlert>
       </PageShell>
     );
   }
@@ -265,7 +265,7 @@ function StandardBusinessDashboardView({
     ) {
       return <DashboardPermissionRevoked />;
     }
-    return <ErrorAlert>业务数据加载失败，请稍后重试。</ErrorAlert>;
+    return <ErrorAlert error={dashboardQuery.error}>业务数据加载失败，请稍后重试。</ErrorAlert>;
   }
 
   const data = dashboardQuery.data;
@@ -404,7 +404,7 @@ function BilibiliOperationView({
         <ErrorAlert>{operationError.message}</ErrorAlert>
       ) : null}
       {sourcesQuery.isError ? (
-        <ErrorAlert>账号列表加载失败，请稍后重试。</ErrorAlert>
+        <ErrorAlert error={sourcesQuery.error}>账号列表加载失败，请稍后重试。</ErrorAlert>
       ) : null}
       {syncSucceeded ? (
         <Alert variant="success">
@@ -510,7 +510,7 @@ function BilibiliOperationView({
         dashboardQuery.error.code === "business_data_view_forbidden" ? (
         <DashboardPermissionRevoked />
       ) : dashboardQuery.error ? (
-        <ErrorAlert>业务数据加载失败，请稍后重试。</ErrorAlert>
+        <ErrorAlert error={dashboardQuery.error}>业务数据加载失败，请稍后重试。</ErrorAlert>
       ) : sourcesQuery.isError ? null : !selectedSource ? (
         <BilibiliStateView status="unconfigured" />
       ) : dashboardQuery.data && dashboardQuery.data.status !== "available" ? (

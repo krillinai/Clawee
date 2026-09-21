@@ -1,4 +1,4 @@
-import { adminApi } from "./api";
+import { adminApi, APIError } from "./api";
 import { trimInput } from "./text";
 
 export type SharedSpace = {
@@ -271,8 +271,10 @@ function mapFile(item: SharedFileResponse): SharedFile {
 async function sharedFileError(response: Response) {
   try {
     const body = await response.json() as { error?: { code?: string; message?: string } };
+    if (response.status === 403) return new APIError(body.error?.message ?? "无权限", 403, body.error?.code ?? "request_failed");
     return new SharedFileAPIError(body.error?.code ?? "request_failed", body.error?.message ?? `文件上传失败（${response.status}）`);
   } catch {
+    if (response.status === 403) return new APIError("无权限", 403, "request_failed");
     return new SharedFileAPIError("request_failed", `文件上传失败（${response.status}）`);
   }
 }

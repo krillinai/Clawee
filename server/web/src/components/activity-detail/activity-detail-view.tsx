@@ -2,6 +2,7 @@ import { EmptyState, ErrorAlert, PageShell } from "@/components/governance-ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { TurnGroupList } from "@/components/activity/turn-group-list";
 import { useAgentDetail } from "@/hooks/useAgentDetail";
+import { isForbiddenError } from "@/lib/api";
 import type { ReactNode } from "react";
 
 import { ActivityDetailHero } from "./activity-detail-hero";
@@ -35,8 +36,8 @@ export function ActivityDetailView({
     return (
       <PageShell>
         {navigation}
-        <ErrorAlert>智能体活动详情加载失败</ErrorAlert>
-        <EmptyState title="未找到该智能体" description="请返回活动列表重新选择。" />
+        <ErrorAlert error={detailQuery.error}>智能体活动详情加载失败</ErrorAlert>
+        {!isForbiddenError(detailQuery.error) ? <EmptyState title="未找到该智能体" description="请返回活动列表重新选择。" /> : null}
       </PageShell>
     );
   }

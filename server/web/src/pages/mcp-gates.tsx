@@ -177,7 +177,7 @@ export function MCPGatesPage() {
       </PageHeader>
 
       {hasLoadError ? (
-        <ErrorAlert>MCP 门禁加载失败：无法加载门禁队列。</ErrorAlert>
+        <ErrorAlert error={gatesQuery.error}>MCP 门禁加载失败：无法加载门禁队列。</ErrorAlert>
       ) : null}
       {shouldLoadRouteGate && routeGateQuery.isLoading ? (
         <Alert variant="muted">
@@ -185,7 +185,7 @@ export function MCPGatesPage() {
         </Alert>
       ) : null}
       {shouldLoadRouteGate && routeGateQuery.isError ? (
-        <ErrorAlert>门禁详情加载失败：无法加载 {gateID}。</ErrorAlert>
+        <ErrorAlert error={routeGateQuery.error}>门禁详情加载失败：无法加载 {gateID}。</ErrorAlert>
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -257,7 +257,7 @@ export function MCPGatesPage() {
               ) : null}
               {!gatesQuery.isLoading && hasLoadError ? (
                 <TableStateRow colSpan={12} tone="danger">
-                  <ErrorAlert>MCP 门禁加载失败</ErrorAlert>
+                  <ErrorAlert error={gatesQuery.error}>MCP 门禁加载失败</ErrorAlert>
                 </TableStateRow>
               ) : null}
               {!gatesQuery.isLoading && !hasLoadError && filteredGates.length === 0 ? (

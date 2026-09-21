@@ -20,8 +20,14 @@ import {
 } from "@/components/governance-ui";
 import { TableBody } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { APIError } from "@/lib/api";
 
 describe("governance ui components", () => {
+  it("shows permission guidance instead of a retry action for 403", () => {
+    render(<ErrorAlert error={new APIError("请求失败", 403, "request_failed")}>加载失败 <Button>重试</Button></ErrorAlert>);
+    expect(screen.getByRole("alert")).toHaveTextContent("暂无访问权限，请联系管理员开通相应权限");
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
   it("renders shared error, empty, loading, and table states", () => {
     render(
       <div>

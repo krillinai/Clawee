@@ -23,9 +23,23 @@ export class APIError extends Error {
     public readonly code: string,
     public readonly details: APIErrorDetail[] = []
   ) {
-    super(message);
+    super(status === 403 ? forbiddenMessage(code) : message);
     this.name = "APIError";
   }
+}
+
+function forbiddenMessage(code: string) {
+  return code === "feedback_forbidden"
+    ? "暂无反馈查看权限，请联系管理员开通问题反馈查看权限及全部反馈数据授权。"
+    : "暂无访问权限，请联系管理员开通相应权限。";
+}
+
+export function isForbiddenError(error: unknown): error is APIError {
+  return error instanceof APIError && error.status === 403;
+}
+
+export function firstRequestError(...errors: unknown[]) {
+  return errors.find(isForbiddenError) ?? errors.find(Boolean);
 }
 
 function scopedURL(basePath: string, path: string) {

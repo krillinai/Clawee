@@ -36,6 +36,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { firstRequestError, isForbiddenError } from "@/lib/api";
 import type { DecisionVariant, LifecycleStep } from "@/lib/governance-ui";
 import { cn } from "@/lib/utils";
 
@@ -278,10 +279,11 @@ export function TableStateRow({
   );
 }
 
-export function ErrorAlert({ children }: { children: ReactNode }) {
+export function ErrorAlert({ children, error }: { children: ReactNode; error?: unknown }) {
+  const failure = Array.isArray(error) ? firstRequestError(...error) : error;
   return (
     <Alert variant="destructive">
-      <AlertDescription>{children}</AlertDescription>
+      <AlertDescription>{isForbiddenError(failure) ? failure.message : children}</AlertDescription>
     </Alert>
   );
 }

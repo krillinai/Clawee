@@ -73,6 +73,18 @@ it('来源、版本与日期筛选保留其他条件，清空条件并重置分�
 it('详情安全显示正文和partial，日志切换后才读取，处理冲突不覆盖', async () => { vi.mocked(feedbackAdminApi.operate).mockRejectedValue(new APIError('conflict', 409, 'feedback_version_conflict')); page('/admin/feedback/fb_test0001'); expect(await screen.findByText(report.description!)).toBeInTheDocument(); expect(screen.getByText('desktop:unavailable')).toBeInTheDocument(); expect(document.querySelector('img')).toBeNull(); fireEvent.click(screen.getByRole('button', { name: '标记已处理' })); fireEvent.change(screen.getByLabelText('内部处理结论（必填）'), { target: { value: '已定位' } }); fireEvent.change(screen.getByLabelText('验证方法与结果（必填）'), { target: { value: '测试通过，未发布' } }); fireEvent.click(screen.getByRole('button', { name: '确认' })); expect(await screen.findByText('反馈版本或状态已变更，请关闭表单并重新读取。')).toBeInTheDocument(); expect(vi.mocked(feedbackAdminApi.operate).mock.calls[0]?.[2]).toMatchObject({ expected_version: 1, resolution_summary: '已定位', verification: '测试通过，未发布' }); });
 it('只读账号隐藏处理操作，quarantine不读取正文', async () => { access.allowed = false; vi.mocked(feedbackAdminApi.get).mockResolvedValue({ ...report, security_state: 'quarantine', description: undefined, manifest: undefined }); page('/admin/feedback/fb_test0001'); expect(await screen.findByText('材料尚未就绪、已隔离或已过期，不能读取正文与处理。')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: '标记已处理' })).not.toBeInTheDocument(); expect(feedbackAdminApi.read).not.toHaveBeenCalled(); });
 it('列表网络错误提供重试', async () => { vi.mocked(feedbackAdminApi.list).mockRejectedValue(new Error('offline')); page('/admin/feedback'); expect(await screen.findByRole('alert')).toHaveTextContent('反馈列表加载失败'); expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument(); });
+it('反馈列表和详情遇到403提示授权且不提供重试', async () => {
+  vi.mocked(feedbackAdminApi.list).mockRejectedValue(new APIError('反馈请求未完成', 403, 'feedback_forbidden'));
+  page('/admin/feedback');
+  expect(await screen.findByRole('alert')).toHaveTextContent('请联系管理员开通问题反馈查看权限及全部反馈数据授权');
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+});
+it('反馈详情遇到403不误报为不可用', async () => {
+  vi.mocked(feedbackAdminApi.get).mockRejectedValue(new APIError('反馈请求未完成', 403, 'feedback_forbidden'));
+  page('/admin/feedback/fb_test0001');
+  expect(await screen.findByRole('alert')).toHaveTextContent('全部反馈数据授权');
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+});
 it('包含异常材料筛选保存在URL并显示材料状态', async () => {
   vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [{ ...report, upload_state: 'uploading', security_state: 'quarantine', description: undefined }], meta: { next_cursor: '', has_next: false } });
   page('/admin/feedback?status=all');

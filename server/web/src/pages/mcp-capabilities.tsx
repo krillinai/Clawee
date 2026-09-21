@@ -310,7 +310,7 @@ export function MCPCapabilitiesPage() {
       </PageHeader>
 
       {hasLoadError ? (
-        <ErrorAlert>MCP 能力加载失败：无法加载能力、上游服务或授权数据。</ErrorAlert>
+        <ErrorAlert error={[capabilitiesQuery.error, serversQuery.error, grantsQuery.error]}>MCP 能力加载失败：无法加载能力、上游服务或授权数据。</ErrorAlert>
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -479,7 +479,7 @@ export function MCPCapabilitiesPage() {
               ) : null}
               {!isLoading && hasLoadError ? (
                 <TableStateRow colSpan={16} tone="danger">
-                  <ErrorAlert>能力加载失败。</ErrorAlert>
+                  <ErrorAlert error={[capabilitiesQuery.error, serversQuery.error, grantsQuery.error]}>能力加载失败。</ErrorAlert>
                 </TableStateRow>
               ) : null}
               {!isLoading && !hasLoadError && filteredRows.length === 0 ? (
