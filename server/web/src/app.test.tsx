@@ -18,6 +18,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { permissions } from "@/lib/rbac-api";
 import { APIError } from "@/lib/api";
 import { getSharedSpace, listSharedFiles } from "@/lib/shared-files-api";
+import { workflowAdmin } from "@/lib/workflow-api";
 
 import { App } from "./app";
 
@@ -222,6 +223,21 @@ describe("App", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/app/agents"));
     expect(screen.queryByRole("link", { name: "进入管理后台" })).not.toBeInTheDocument();
+  });
+
+  it("opens the workflow template editor by URL", async () => {
+    const template = vi.spyOn(workflowAdmin, "template").mockResolvedValue({
+      id: "template-1", name: "选题", description: "", status: "draft", revision: 1, created_at: "", nodes: []
+    });
+    try {
+      window.history.pushState({}, "", "/admin/workflow-templates/template-1");
+      renderApp();
+      expect(await screen.findByRole("heading", { name: "编辑工作流模板" })).toBeInTheDocument();
+      expect(await screen.findByDisplayValue("选题")).toBeInTheDocument();
+      expect(template).toHaveBeenCalledWith("template-1");
+    } finally {
+      template.mockRestore();
+    }
   });
 
   it("keeps the frontend application layout when switching tabs", async () => {

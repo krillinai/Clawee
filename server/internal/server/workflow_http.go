@@ -87,7 +87,7 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, workflow.ErrInvalid)
 			return
 		}
-		rows, err := s.DB.Query(c.Request.Context(), `SELECT user_id,name,email FROM accounts WHERE status='active' AND ($1='' OR user_id ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%') ORDER BY name,user_id LIMIT 50`, query)
+		rows, err := s.DB.Query(c.Request.Context(), `SELECT user_id,name,email FROM accounts WHERE status='active' AND ($1='' OR user_id ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%') ORDER BY CASE WHEN user_id=$1 THEN 0 ELSE 1 END,name,user_id LIMIT 50`, query)
 		if err != nil {
 			workflowError(c, err)
 			return
