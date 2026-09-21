@@ -52,6 +52,29 @@ LEFT JOIN mcp_agents ma ON ma.agent_id = a.mcp_agent_id
 	if err := agentRows.Err(); err != nil {
 		return activity.ActivitySnapshot{}, err
 	}
+	err = s.db.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT source_event_key) FILTER (WHERE event_type = 'skill.created'),
+       COUNT(DISTINCT source_event_key) FILTER (WHERE event_type = 'skill.version_uploaded')
+FROM employee_ai_activity_facts
+WHERE occurred_at >= $1 AND occurred_at < $2 AND actor_kind = 'user'
+  AND origin IN ('app_upload', 'admin_upload')`, start, end).Scan(
+		&result.SkillContributions.CreatedCount, &result.SkillContributions.UpdatedCount)
+	if err != nil {
+		return activity.ActivitySnapshot{}, err
+	}
+	err = s.db.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id, e.skill_key)) FILTER (WHERE e.evidence = 'explicit_request'),
+       COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id, e.skill_key)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run')),
+       COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id, e.skill_key)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run') AND e.invocation = 'explicit'),
+       COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id, e.skill_key)) FILTER (WHERE e.evidence IN ('skill_file_read', 'skill_resource_run') AND e.invocation = 'implicit')
+FROM office_agent_skill_evidence e
+JOIN office_collector_tokens ct ON ct.collector_id = e.collector_id
+WHERE ct.user_id IS NOT NULL AND e.occurred_at >= $1 AND e.occurred_at < $2`, start, end).Scan(
+		&result.SkillUsageTotals.RequestedSkillRuns, &result.SkillUsageTotals.ObservedSkillRuns,
+		&result.SkillUsageTotals.ExplicitSkillRuns, &result.SkillUsageTotals.ImplicitSkillRuns)
+	if err != nil {
+		return activity.ActivitySnapshot{}, err
+	}
 	skillRows, err := s.db.QueryContext(ctx, `
 SELECT MAX(e.skill_id), MAX(e.skill_name), e.skill_key, e.source,
   COUNT(DISTINCT (e.collector_id, e.agent_id, e.run_id)) FILTER (WHERE e.evidence = 'explicit_request'),

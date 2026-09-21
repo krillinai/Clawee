@@ -935,6 +935,7 @@ function activeMeResult(): EnterpriseMeResult {
 
 function createActivityReporter(): EnterpriseActivityReporter {
   return {
+    isActive: vi.fn(() => false),
     registerRun: vi.fn(),
     enqueue: vi.fn(),
     recordSkillEvidence: vi.fn(),

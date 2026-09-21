@@ -380,6 +380,7 @@ func (s *SourceSyncService) createVersion(ctx context.Context, source GitHubSour
 	return s.versionService.CreateVersionFromPackage(ctx, CreateVersionInput{
 		SpaceID: source.SpaceID, Version: "git-" + commitSHA, Package: file, CreatedBy: source.CreatedBy, Publish: source.AutoPublish,
 		Resolution: resolution, TargetSkillID: targetSkillID,
+		Origin: "source_sync",
 		Source: &VersionSourceEvidence{
 			SourceID: source.SourceID, RepositoryOwner: source.RepositoryOwner, RepositoryName: source.RepositoryName,
 			Path: candidate.skill.Path, CommitSHA: commitSHA, ContentSHA256: candidate.contentSHA256,

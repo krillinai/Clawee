@@ -136,6 +136,10 @@ func TestSkillSelfPublishHTTPChecksUploader(t *testing.T) {
 }
 
 func uploadApprovedVersionForTest(service *skillhub.Service, ctx context.Context, input skillhub.UploadVersionInput) (skillhub.MutationResult, error) {
+	input.Origin = "admin_upload"
+	if input.UploadedByUserID == "" {
+		input.UploadedByUserID = "test-admin"
+	}
 	result, err := service.UploadVersion(ctx, input)
 	if err != nil {
 		return result, err

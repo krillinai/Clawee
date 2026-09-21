@@ -45,6 +45,7 @@ type CreateVersionOptions struct {
 	Publish       bool
 	Resolution    string
 	TargetSkillID string
+	Origin        string
 }
 
 type MemoryStore struct {

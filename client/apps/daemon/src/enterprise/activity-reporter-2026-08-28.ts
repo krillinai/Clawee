@@ -27,6 +27,7 @@ type QueuedEvent = {
 };
 
 export type EnterpriseActivityReporter = {
+  isActive(): boolean;
   registerRun(input: {
     runId: string;
     threadId?: string;
@@ -182,6 +183,9 @@ export function createEnterpriseActivityReporter(input: {
   }
 
   return {
+    isActive() {
+      return !paused && !closed;
+    },
     registerRun(run) {
       if (paused || closed) return;
       const context = { sessionId: run.threadId ?? run.runId, turnId: run.runId };

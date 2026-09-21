@@ -29,14 +29,73 @@ func TestPostgresStoreCreateVersionAndLoadAdminDetail(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO skill_versions`).
 		WithArgs(version.VersionID, skill.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, version.UploadedByUserID, nil, version.UploadedByName, skill.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "user", version.UploadedByUserID, "admin_upload", skill.SkillID, skill.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
-	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName})
+	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName, Origin: "admin_upload"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotSkill.Description != version.Description || gotSkill.CurrentVersionID != nil || gotVersion.ApprovalStatus != "pending" || gotVersion.SkillID != skill.SkillID {
 		t.Fatalf("result = %#v %#v", gotSkill, gotVersion)
+	}
+}
+
+func TestPostgresStoreContributionFactIsAtomic(t *testing.T) {
+	for _, tc := range []struct {
+		name, resolution, origin, event, actor string
+		inserted, failFact                     bool
+	}{
+		{"new-app", VersionResolutionByName, "app_upload", "skill.created", "user", true, false},
+		{"existing-unpublished", VersionResolutionByName, "admin_upload", "skill.version_uploaded", "user", false, false},
+		{"new-source", VersionResolutionByName, "source_sync", "skill.created", "system", true, false},
+		{"fact-fails", VersionResolutionByName, "app_upload", "skill.created", "user", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newPGXMock(t)
+			store := NewPostgresStore(mock)
+			now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+			skill := Skill{SkillID: "new", SpaceID: DefaultSpaceID, Name: "report", CreatedBy: "uploader", CreatedByUserID: "user-1", CreatedAt: now, UpdatedAt: now}
+			version := Version{VersionID: "ver-1", Version: "1", PackagePath: "ver-1.zip", PackageSHA256: "hash", CreatedAt: now, UploadedByUserID: "user-1"}
+			if tc.origin == "source_sync" {
+				version.UploadedByUserID = ""
+			}
+			mock.ExpectBegin()
+			count := int64(0)
+			storedID := "existing"
+			if tc.inserted {
+				count, storedID = 1, "new"
+			}
+			mock.ExpectExec(`INSERT INTO skills`).WithArgs(skill.SkillID, skill.SpaceID, skill.Name, skill.CreatedBy, now, now, skill.CreatedByUserID).WillReturnResult(pgxmock.NewResult("INSERT", count))
+			mock.ExpectQuery(`SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE name`).WithArgs("report").
+				WillReturnRows(skillRows().AddRow(storedID, DefaultSpaceID, "report", nil, "uploader", now, now))
+			mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs(version.VersionID, storedID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, nullableText(version.UploadedByUserID), nil, version.UploadedByName, skill.Name).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+			actor := any("user-1")
+			if tc.actor == "system" {
+				actor = nil
+			}
+			fact := mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), tc.event, tc.actor, actor, tc.origin, storedID, "report", "ver-1")
+			if tc.failFact {
+				fact.WillReturnError(errors.New("fact write failed"))
+				mock.ExpectRollback()
+			} else {
+				fact.WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectCommit()
+			}
+			_, _, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Resolution: tc.resolution, Origin: tc.origin})
+			if (err != nil) != tc.failFact {
+				t.Fatalf("CreateVersion() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPostgresStoreRejectsMissingContributionOrigin(t *testing.T) {
+	mock := newPGXMock(t)
+	store := NewPostgresStore(mock)
+	_, _, err := store.CreateVersion(context.Background(), Skill{}, Version{}, CreateVersionOptions{Resolution: VersionResolutionByName})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateVersion() error = %v, want ErrInvalidRequest", err)
 	}
 }
 
@@ -55,9 +114,10 @@ func TestPostgresStoreReplacementRenameIsTransactional(t *testing.T) {
 				mock.ExpectRollback()
 			} else {
 				insert.WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "original", "old-name", "v2").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 				mock.ExpectCommit()
 			}
-			skill, _, err := store.CreateVersion(context.Background(), Skill{Name: "new-name", SpaceID: DefaultSpaceID}, Version{VersionID: "v2", Version: "2", PackagePath: "v2.zip", PackageSHA256: "hash", CreatedAt: now}, CreateVersionOptions{Resolution: VersionResolutionReplace, TargetSkillID: "original", Publish: true})
+			skill, _, err := store.CreateVersion(context.Background(), Skill{Name: "new-name", SpaceID: DefaultSpaceID}, Version{VersionID: "v2", Version: "2", PackagePath: "v2.zip", PackageSHA256: "hash", CreatedAt: now}, CreateVersionOptions{Resolution: VersionResolutionReplace, TargetSkillID: "original", Publish: true, Origin: "admin_upload"})
 			if conflict {
 				if !errors.Is(err, ErrConflict) {
 					t.Fatalf("conflict = %v", err)
@@ -116,9 +176,10 @@ func TestPostgresStoreCreateVersionPreservesCurrentUntilApproval(t *testing.T) {
 		WillReturnRows(skillRows().AddRow("skill-1", proposed.SpaceID, proposed.Name, current, "original-admin", now.Add(-time.Hour), now.Add(-time.Hour)))
 	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs(version.VersionID, "skill-1", version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
-	skill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName})
+	skill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName, Origin: "admin_upload"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +204,7 @@ func TestPostgresStoreCreateVersionConflictRollsBackWithoutChangingCurrent(t *te
 		WillReturnError(&pgconn.PgError{Code: "23505"})
 	mock.ExpectRollback()
 
-	if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName}); !errors.Is(err, ErrConflict) {
+	if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName, Origin: "admin_upload"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("CreateVersion() error = %v, want ErrConflict", err)
 	}
 }
@@ -160,7 +221,7 @@ func TestPostgresStoreCreateVersionMapsMissingSpace(t *testing.T) {
 		WillReturnError(&pgconn.PgError{Code: "23503", ConstraintName: "skills_space_id_fkey"})
 	mock.ExpectRollback()
 
-	if _, _, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Resolution: VersionResolutionByName}); !errors.Is(err, ErrSpaceNotFound) {
+	if _, _, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Resolution: VersionResolutionByName, Origin: "admin_upload"}); !errors.Is(err, ErrSpaceNotFound) {
 		t.Fatalf("CreateVersion(missing space) error=%v, want ErrSpaceNotFound", err)
 	}
 }
@@ -179,9 +240,10 @@ func TestPostgresStoreCreateVersionCreateOnlyStoresSourceWithoutPublishing(t *te
 	mock.ExpectExec(`INSERT INTO skill_versions`).
 		WithArgs(version.VersionID, proposed.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, source.SourceID, source.Path, source.CommitSHA, source.ContentSHA256, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "system", nil, "source_sync", proposed.SkillID, proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
-	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: false, Resolution: VersionResolutionCreateOnly})
+	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: false, Resolution: VersionResolutionCreateOnly, Origin: "source_sync"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,9 +265,10 @@ func TestPostgresStoreCreateVersionTargetDoesNotBypassApproval(t *testing.T) {
 		WillReturnRows(skillRows().AddRow("skill-1", "skillspace-moved", proposed.Name, current, "original", now.Add(-time.Hour), now.Add(-time.Hour)))
 	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs(version.VersionID, "skill-1", version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
-	gotSkill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionTarget, TargetSkillID: "skill-1"})
+	gotSkill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionTarget, TargetSkillID: "skill-1", Origin: "admin_upload"})
 	if err != nil || gotSkill.SkillID != "skill-1" || gotSkill.SpaceID != "skillspace-moved" || gotSkill.CurrentVersionID == nil || *gotSkill.CurrentVersionID != current {
 		t.Fatalf("CreateVersion() = %#v, %v", gotSkill, err)
 	}
@@ -262,7 +325,7 @@ func TestPostgresStoreCreateVersionRejectsCreateOnlyAndMismatchedTarget(t *testi
 		mock.ExpectQuery(`SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE name=\$1 FOR UPDATE`).WithArgs(proposed.Name).
 			WillReturnRows(skillRows().AddRow("skill-1", proposed.SpaceID, proposed.Name, nil, "original", now, now))
 		mock.ExpectRollback()
-		if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Resolution: VersionResolutionCreateOnly}); !errors.Is(err, ErrConflict) {
+		if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Resolution: VersionResolutionCreateOnly, Origin: "admin_upload"}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("CreateVersion() error = %v, want ErrConflict", err)
 		}
 	})
@@ -274,7 +337,7 @@ func TestPostgresStoreCreateVersionRejectsCreateOnlyAndMismatchedTarget(t *testi
 		mock.ExpectQuery(`SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=\$1 FOR UPDATE`).WithArgs("skill-other").
 			WillReturnRows(skillRows().AddRow("skill-other", proposed.SpaceID, "other", nil, "original", now, now))
 		mock.ExpectRollback()
-		if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Resolution: VersionResolutionTarget, TargetSkillID: "skill-other"}); !errors.Is(err, ErrConflict) {
+		if _, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Resolution: VersionResolutionTarget, TargetSkillID: "skill-other", Origin: "admin_upload"}); !errors.Is(err, ErrConflict) {
 			t.Fatalf("CreateVersion() error = %v, want ErrConflict", err)
 		}
 	})

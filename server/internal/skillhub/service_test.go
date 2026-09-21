@@ -255,6 +255,7 @@ func TestServiceCreateVersionFromPackageCreatesUnpublishedVersionWithSource(t *t
 		Publish:    false,
 		Resolution: VersionResolutionCreateOnly,
 		Source:     source,
+		Origin:     "source_sync",
 	})
 	if err != nil {
 		t.Fatalf("CreateVersionFromPackage() error = %v", err)
@@ -301,7 +302,7 @@ func TestServiceCreateVersionFromPackageRejectsIncompleteSourceBeforePackageWrit
 			_, err := service.CreateVersionFromPackage(context.Background(), CreateVersionInput{
 				Version:   "git-0123456789012345678901234567890123456789",
 				Package:   bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})),
-				CreatedBy: "平台管理员", Resolution: VersionResolutionCreateOnly, Source: &tt.source,
+				CreatedBy: "平台管理员", Resolution: VersionResolutionCreateOnly, Source: &tt.source, Origin: "source_sync",
 			})
 			if !errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("CreateVersionFromPackage() error = %v, want ErrInvalidRequest", err)
@@ -333,6 +334,7 @@ func TestServiceCreateVersionFromPackageTargetPreservesOrPublishesCurrent(t *tes
 		Package:   bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})),
 		CreatedBy: "平台管理员", Publish: false, Resolution: VersionResolutionTarget, TargetSkillID: initial.Skill.SkillID,
 		Source: &VersionSourceEvidence{SourceID: "source-1", RepositoryOwner: "acme", RepositoryName: "skills", Path: "skills/code-review", CommitSHA: strings.Repeat("1", 40), ContentSHA256: strings.Repeat("b", 64)},
+		Origin: "source_sync",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -346,6 +348,7 @@ func TestServiceCreateVersionFromPackageTargetPreservesOrPublishesCurrent(t *tes
 		Package:   bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("code-review")}})),
 		CreatedBy: "平台管理员", Publish: true, Resolution: VersionResolutionTarget, TargetSkillID: initial.Skill.SkillID,
 		Source: &VersionSourceEvidence{SourceID: "source-1", RepositoryOwner: "acme", RepositoryName: "skills", Path: "skills/code-review", CommitSHA: strings.Repeat("2", 40), ContentSHA256: strings.Repeat("c", 64)},
+		Origin: "source_sync",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -368,7 +371,7 @@ func TestServiceCreateVersionFromPackageCreateOnlyRejectsExistingName(t *testing
 	}
 	_, err := service.CreateVersionFromPackage(context.Background(), CreateVersionInput{
 		Version: "git-0123456789012345678901234567890123456789", Package: bytes.NewReader(data), CreatedBy: "平台管理员",
-		Resolution: VersionResolutionCreateOnly,
+		Resolution: VersionResolutionCreateOnly, Origin: "admin_upload", UploadedByUserID: "test-admin",
 	})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("CreateVersionFromPackage() error = %v, want ErrConflict", err)
@@ -395,7 +398,7 @@ func TestServiceCreateVersionFromPackageTargetRequiresExistingMatchingSkill(t *t
 		t.Fatal(err)
 	}
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})
-	input := CreateVersionInput{Version: "2", Package: bytes.NewReader(data), CreatedBy: "admin", Resolution: VersionResolutionTarget, TargetSkillID: two.Skill.SkillID}
+	input := CreateVersionInput{Version: "2", Package: bytes.NewReader(data), CreatedBy: "admin", Resolution: VersionResolutionTarget, TargetSkillID: two.Skill.SkillID, Origin: "admin_upload", UploadedByUserID: "test-admin"}
 	if _, err := service.CreateVersionFromPackage(context.Background(), input); !errors.Is(err, ErrConflict) {
 		t.Fatalf("mismatched target error = %v, want ErrConflict", err)
 	}
@@ -644,6 +647,15 @@ func TestServiceValidatesUploadFields(t *testing.T) {
 	for _, input := range tests {
 		if _, err := uploadApprovedVersion(service, context.Background(), input); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatalf("UploadVersion(%#v) error = %v, want ErrInvalidRequest", input, err)
+		}
+	}
+	for _, origin := range []string{"", "unregistered"} {
+		_, err := service.UploadVersion(context.Background(), UploadVersionInput{
+			Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin",
+			UploadedByUserID: "test-admin", Origin: origin,
+		})
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("origin %q error = %v, want ErrInvalidRequest", origin, err)
 		}
 	}
 	if _, err := service.SetCurrentVersion(context.Background(), "", ""); !errors.Is(err, ErrInvalidRequest) {

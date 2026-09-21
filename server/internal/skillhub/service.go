@@ -95,6 +95,7 @@ func (s *Service) UploadVersion(ctx context.Context, input UploadVersionInput) (
 		SpaceID: input.SpaceID, Version: input.Version, Changelog: input.Changelog, Package: input.Package,
 		CreatedBy: input.CreatedBy, Resolution: resolution, TargetSkillID: input.TargetSkillID,
 		UploadedByUserID: input.UploadedByUserID, UploadedByAgentID: input.UploadedByAgentID,
+		Origin: input.Origin,
 	})
 }
 
@@ -125,7 +126,11 @@ func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVers
 	if s == nil || s.store == nil || s.packageRoot == "" || input.Package == nil || input.CreatedBy == "" ||
 		!versionPattern.MatchString(input.Version) || len([]rune(input.Changelog)) > MaxChangelogRunes ||
 		(input.Resolution != VersionResolutionByName && input.Resolution != VersionResolutionCreateOnly && input.Resolution != VersionResolutionTarget && input.Resolution != VersionResolutionReplace) ||
-		((input.Resolution == VersionResolutionTarget || input.Resolution == VersionResolutionReplace) && input.TargetSkillID == "") || !validVersionSourceEvidence(input.Source) {
+		((input.Resolution == VersionResolutionTarget || input.Resolution == VersionResolutionReplace) && input.TargetSkillID == "") || !validVersionSourceEvidence(input.Source) ||
+		(input.Origin != "app_upload" && input.Origin != "admin_upload" && input.Origin != "source_sync") ||
+		(input.Origin == "source_sync") != (input.Source != nil) ||
+		(input.Origin == "source_sync" && input.UploadedByUserID != "") ||
+		(input.Origin != "source_sync" && strings.TrimSpace(input.UploadedByUserID) == "") {
 		return MutationResult{}, ErrInvalidRequest
 	}
 
@@ -210,7 +215,7 @@ func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVers
 		return MutationResult{}, err
 	}
 	storedSkill, storedVersion, err := s.store.CreateVersion(ctx, skill, version, CreateVersionOptions{
-		Publish: input.Publish, Resolution: input.Resolution, TargetSkillID: input.TargetSkillID,
+		Publish: input.Publish, Resolution: input.Resolution, TargetSkillID: input.TargetSkillID, Origin: input.Origin,
 	})
 	if err != nil {
 		_ = os.Remove(finalPath)

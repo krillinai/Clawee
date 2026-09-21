@@ -128,6 +128,7 @@ import {
   createEnterpriseSkillManager,
   type EnterpriseSkillManager
 } from '../enterprise/skill-manager-2026-07-30.js';
+import { computeEnterpriseSkillContentDigest } from '../enterprise/skill-content-digest-2026-07-30.js';
 import {
   createEnterpriseKnowledgeManager,
   type EnterpriseKnowledgeManager
@@ -638,9 +639,15 @@ export async function buildServer(input: BuildServerInput) {
       persistentAppServerExecutor,
       serverDeployment: input.serverDeployment,
       activityReporter,
-      enterpriseSkillVersion: name => {
+      enterpriseSkillVersion: async (name, directory) => {
         const record = enterpriseInstallRecords.getByName(name);
-        return record === undefined ? undefined : { skillId: record.skillId, versionId: record.versionId };
+        if (record === undefined) return undefined;
+        try {
+          if (await computeEnterpriseSkillContentDigest(directory) !== record.installedContentSha256) return undefined;
+        } catch {
+          return undefined;
+        }
+        return { skillId: record.skillId, versionId: record.versionId };
       },
       onBeforeCodexWritableRequest:
         input.onBeforeCodexWritableRequest,

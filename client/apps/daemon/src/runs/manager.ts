@@ -117,7 +117,7 @@ export type RunManagerOptions = {
     thread: RuntimeThread;
   }): Promise<void>;
   activityReporter?: EnterpriseActivityReporter;
-  enterpriseSkillVersion?(name: string): { skillId: string; versionId: string } | undefined;
+  enterpriseSkillVersion?(name: string, directory: string): Promise<{ skillId: string; versionId: string } | undefined>;
 };
 
 export type RuntimeRun = {
@@ -167,6 +167,8 @@ const INTERACTIVE_RUN_TIMEOUT_MS = MCP_TASK_MAX_EXECUTION_MS;
 const SCHEDULED_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const EXEC_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
 const EXEC_SPAWN_TIMEOUT_MS = 30_000;
+const SKILL_TRACKER_INIT_TIMEOUT_MS = 5_000;
+const ACTIVITY_CLOSE_TIMEOUT_MS = 500;
 export const DEFAULT_CODEX_THREAD_ROTATION_RUN_THRESHOLD = 50;
 const CODEX_THREAD_ID_MISSING_MESSAGE = 'Codex stream ended without thread.started thread_id';
 
@@ -231,10 +233,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   const subscribers = new Map<string, Set<RunEventSubscriber>>();
   const logWriters = new Map<string, OrderedLogWriter>();
   const skillTrackers = new Map<string, {
-    tracker: ReturnType<typeof createSkillUsageTracker>;
+    tracker: Awaited<ReturnType<typeof createSkillUsageTracker>>;
     commands: Map<string, string>;
     seen: Set<string>;
   }>();
+  const skillTrackerInit = new Map<string, Promise<void>>();
+  const activityWork = new Map<string, Promise<void>>();
   let closing = false;
   let closeWork: Promise<void> | undefined;
   const runningPersistentRunIds = new Set<string>();
@@ -254,44 +258,47 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         // Subscriber failures must not affect durable Run processing.
       }
     }
-    void logWrite.then(
-      () => {
-        try {
-          options.activityReporter?.enqueue(event);
-          const state = skillTrackers.get(event.runId);
-          if (state !== undefined) {
-            const payload = event.payload as Record<string, unknown>;
-            if (event.type === 'tool_use' && payload.name === 'command_execution') {
-              const toolCallId = payload.toolCallId;
-              const input = payload.input as Record<string, unknown> | undefined;
-              if (typeof toolCallId === 'string' && typeof input?.command === 'string') {
-                state.commands.set(toolCallId, input.command);
-              }
-            } else if (event.type === 'tool_result') {
-              const toolCallId = payload.toolCallId;
-              const command = typeof toolCallId === 'string' ? state.commands.get(toolCallId) : undefined;
-              if (typeof toolCallId === 'string') state.commands.delete(toolCallId);
-              if (command !== undefined && payload.isError !== true && payload.exitCode === 0) {
-                for (const evidence of state.tracker.observeCommand(command, 0)) {
-                  const key = `${evidence.skillKey}:${evidence.evidence}`;
-                  if (state.seen.has(key)) continue;
-                  state.seen.add(key);
-                  options.activityReporter?.recordSkillEvidence({
-                    runId: event.runId, eventId: `evt_${event.runId}_skill_${nanoid(12)}`,
-                    sequence: event.seq, occurredAt: event.ts, evidence
-                  });
-                }
-              }
-            } else if (event.type === 'done') {
-              skillTrackers.delete(event.runId);
+    if (options.activityReporter !== undefined) {
+      const previous = activityWork.get(event.runId) ?? Promise.resolve();
+      const next = previous.then(() => logWrite).then(async () => {
+        const trackerReady = skillTrackerInit.get(event.runId);
+        if (trackerReady !== undefined) await trackerReady;
+        options.activityReporter?.enqueue(event);
+        const state = skillTrackers.get(event.runId);
+        if (state !== undefined) {
+          const payload = event.payload as Record<string, unknown>;
+          if (event.type === 'tool_use' && payload.name === 'command_execution') {
+            const toolCallId = payload.toolCallId;
+            const input = payload.input as Record<string, unknown> | undefined;
+            if (typeof toolCallId === 'string' && typeof input?.command === 'string') {
+              state.commands.set(toolCallId, input.command);
             }
+          } else if (event.type === 'tool_result') {
+            const toolCallId = payload.toolCallId;
+            const command = typeof toolCallId === 'string' ? state.commands.get(toolCallId) : undefined;
+            if (typeof toolCallId === 'string') state.commands.delete(toolCallId);
+            if (command !== undefined && payload.isError !== true && payload.exitCode === 0) {
+              for (const evidence of state.tracker.observeCommand(command, 0)) {
+                const key = `${evidence.skillKey}:${evidence.evidence}`;
+                if (state.seen.has(key)) continue;
+                state.seen.add(key);
+                options.activityReporter?.recordSkillEvidence({
+                  runId: event.runId, eventId: `evt_${event.runId}_skill_${nanoid(12)}`,
+                  sequence: event.seq, occurredAt: event.ts, evidence
+                });
+              }
+            }
+          } else if (event.type === 'done') {
+            skillTrackers.delete(event.runId);
           }
-        } catch {
-          console.warn('Enterprise activity enqueue failed');
         }
-      },
-      () => undefined
-    );
+        if (event.type === 'done') skillTrackerInit.delete(event.runId);
+      }).catch(() => {
+        console.warn('Enterprise activity enqueue failed');
+      });
+      activityWork.set(event.runId, next);
+      if (event.type === 'done') void next.then(() => activityWork.delete(event.runId));
+    }
     return logWrite;
   };
 
@@ -660,6 +667,15 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           const writerResults = await Promise.allSettled(
             [...logWriters.values()].map(writer => writer.close())
           );
+          try {
+            await withTimeout(
+              Promise.allSettled([...activityWork.values()]),
+              ACTIVITY_CLOSE_TIMEOUT_MS,
+              'Enterprise activity queue shutdown timed out'
+            );
+          } catch {
+            console.warn('Enterprise activity queue shutdown timed out');
+          }
           const reporterResult = await Promise.allSettled([
             options.activityReporter?.close() ?? Promise.resolve()
           ]);
@@ -1887,18 +1903,30 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         workspaceName: basename(canonicalCwd),
         createdAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at)
       });
-      if (options.activityReporter !== undefined) {
-        const tracker = createSkillUsageTracker({
-          codexHome: options.codexHome, cwd: canonicalCwd, homeDir: options.homeDir ?? homedir(),
-          enterpriseVersion: options.enterpriseSkillVersion
-        });
-        skillTrackers.set(id, { tracker, commands: new Map(), seen: new Set() });
-        for (const evidence of tracker.explicitRequests(input.prompt)) {
-          options.activityReporter.recordSkillEvidence({
-            runId: id, eventId: `evt_${id}_skill_${nanoid(12)}`,
-            sequence: 0, occurredAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at), evidence
-          });
-        }
+      if (options.activityReporter?.isActive()) {
+        const ready = (async () => {
+          try {
+            const tracker = await withTimeout(
+              createSkillUsageTracker({
+                codexHome: options.codexHome, cwd: canonicalCwd, homeDir: options.homeDir ?? homedir(),
+                enterpriseVersion: options.enterpriseSkillVersion
+              }),
+              SKILL_TRACKER_INIT_TIMEOUT_MS,
+              'Enterprise skill usage initialization timed out'
+            );
+            if (!options.activityReporter?.isActive()) return;
+            skillTrackers.set(id, { tracker, commands: new Map(), seen: new Set() });
+            for (const evidence of tracker.explicitRequests(input.prompt)) {
+              options.activityReporter?.recordSkillEvidence({
+                runId: id, eventId: `evt_${id}_skill_${nanoid(12)}`,
+                sequence: 0, occurredAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at), evidence
+              });
+            }
+          } catch {
+            console.warn('Enterprise skill usage initialization failed');
+          }
+        })();
+        skillTrackerInit.set(id, ready);
       }
     } catch {
       console.warn('Enterprise activity run registration failed');

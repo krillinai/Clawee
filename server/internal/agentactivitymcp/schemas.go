@@ -107,6 +107,24 @@ func outputSchemas() map[string]mcpgateway.JSONMap {
 					},
 				},
 			},
+			"skill_contributions": mcpgateway.JSONMap{
+				"type": "object", "additionalProperties": false,
+				"required": []any{"created_count", "updated_count"},
+				"properties": mcpgateway.JSONMap{
+					"created_count": mcpgateway.JSONMap{"type": "integer"},
+					"updated_count": mcpgateway.JSONMap{"type": "integer"},
+				},
+			},
+			"skill_usage_totals": mcpgateway.JSONMap{
+				"type": "object", "additionalProperties": false,
+				"required": []any{"requested_skill_runs", "observed_skill_runs", "explicit_skill_runs", "implicit_skill_runs"},
+				"properties": mcpgateway.JSONMap{
+					"requested_skill_runs": mcpgateway.JSONMap{"type": "integer"},
+					"observed_skill_runs":  mcpgateway.JSONMap{"type": "integer"},
+					"explicit_skill_runs":  mcpgateway.JSONMap{"type": "integer"},
+					"implicit_skill_runs":  mcpgateway.JSONMap{"type": "integer"},
+				},
+			},
 		},
 	}
 	summaryProperties["trend"] = mcpgateway.JSONMap{

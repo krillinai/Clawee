@@ -21,7 +21,6 @@ func TestServiceTracksCreatorAndDistinctContributors(t *testing.T) {
 		{"3", "contributor-2", "参与者二"},
 		{"4", "contributor-1", "参与者一的新名字"},
 		{"5", "creator", "创建者的新名字"},
-		{"6", "", "自动同步"},
 	} {
 		result, err := uploadApprovedVersion(service, ctx, UploadVersionInput{Version: upload.version, Package: bytes.NewReader(data), CreatedBy: upload.name, UploadedByUserID: upload.userID})
 		if err != nil {
@@ -44,12 +43,17 @@ func TestServiceTracksCreatorAndDistinctContributors(t *testing.T) {
 
 func TestServiceLegacyCreatorIsNotReplacedByLaterUploader(t *testing.T) {
 	ctx := context.Background()
-	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	store := NewMemoryStore()
+	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
 	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("legacy-participants")}})
 	first, err := uploadApprovedVersion(service, ctx, UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "历史创建者"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacy := store.skills[first.Skill.SkillID]
+	legacy.CreatedByUserID = ""
+	store.skills[first.Skill.SkillID] = legacy
+	store.versions[first.Skill.SkillID][0].UploadedByUserID = ""
 	_, err = uploadApprovedVersion(service, ctx, UploadVersionInput{Version: "2", Package: bytes.NewReader(data), CreatedBy: "更新者", UploadedByUserID: "updater"})
 	if err != nil {
 		t.Fatal(err)

@@ -590,6 +590,11 @@ func handleSkillUpload(service *skillhub.Service, client bool) gin.HandlerFunc {
 			SpaceID:       firstSkillFormValue(form.Value, "space_id"), Version: form.Value["version"][0], Changelog: changelog,
 			Package: file, CreatedBy: account.DisplayName(), UploadedByUserID: account.UserID,
 		}
+		if client {
+			input.Origin = "app_upload"
+		} else {
+			input.Origin = "admin_upload"
+		}
 		var result skillhub.MutationResult
 		if client {
 			principal, _ := currentPrincipal(c)

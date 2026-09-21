@@ -98,6 +98,9 @@ func TestActivityHTTPRequiresCurrentAccountDataViewGrant(t *testing.T) {
 	if recorder := request("/api/v1/app/activity/statistics?range=7d&user_id=other"); recorder.Code != http.StatusOK {
 		t.Fatalf("statistics status=%d body=%s", recorder.Code, recorder.Body.String())
 	} else {
+		if !strings.Contains(recorder.Body.String(), `"skill_contributions":{"created_count":0,"updated_count":0}`) || !strings.Contains(recorder.Body.String(), `"skill_usage_totals":{"explicit_skill_runs":0,"implicit_skill_runs":0,"observed_skill_runs":0,"requested_skill_runs":0}`) {
+			t.Fatalf("statistics missing skill totals: %s", recorder.Body.String())
+		}
 		if strings.Contains(strings.ToLower(recorder.Body.String()), "sub2api") {
 			t.Fatalf("statistics leaked upstream brand: %s", recorder.Body.String())
 		}

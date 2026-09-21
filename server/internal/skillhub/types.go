@@ -147,6 +147,7 @@ type UploadVersionInput struct {
 	CreatedBy         string
 	UploadedByUserID  string
 	UploadedByAgentID string
+	Origin            string
 }
 
 type CreateVersionInput struct {
@@ -161,6 +162,7 @@ type CreateVersionInput struct {
 	Source            *VersionSourceEvidence
 	UploadedByUserID  string
 	UploadedByAgentID string
+	Origin            string
 }
 
 type Space struct {

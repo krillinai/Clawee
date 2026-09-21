@@ -183,17 +183,85 @@ describe('run manager', () => {
       requireAccessToken: async () => 'test-token'
     });
     activityReporter.resume();
+    let finishValidation!: () => void;
+    const validation = new Promise<void>(resolve => { finishValidation = resolve; });
     const manager = createRunManager({
-      db, dataDir: tempDir, codexBin: fake.bin, codexHome: join(tempDir, 'codex-home'), homeDir: tempDir, activityReporter
+      db, dataDir: tempDir, codexBin: fake.bin, codexHome: join(tempDir, 'codex-home'), homeDir: tempDir, activityReporter,
+      enterpriseSkillVersion: async () => {
+        await validation;
+        return { skillId: 'enterprise_reports', versionId: 'version_1' };
+      }
     });
-    const run = await manager.createAndRun({
+    const run = manager.startRun({
       prompt: '使用 $reports', cwd: tempDir, profile: 'default', sandbox: 'read-only'
     });
-    await activityReporter.close();
+    try {
+      await waitForRunStatus(manager, run.id, 'succeeded');
+    } finally {
+      finishValidation();
+    }
+    await manager.close();
     const evidence = batches.flatMap(batch => batch.events).filter(event => event.event_type === 'skill_evidence' && event.run_id === run.id);
     expect(evidence.map(event => event.payload.evidence)).toEqual(['explicit_request', 'skill_file_read']);
     expect(evidence[1]?.payload.invocation).toBe('explicit');
+    expect(evidence[0]?.payload.source).toBe('enterprise');
     expect(JSON.stringify(evidence)).not.toContain(skillPath);
+  });
+  it('skips Skill validation while activity reporting is disabled', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-manager-skill-disabled-'));
+    const skillPath = join(tempDir, 'codex-home', 'skills', 'reports');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: reports\ndescription: reports\n---\n');
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const activityReporter = createEnterpriseActivityReporter({
+      httpClient: { reportAgentActivity: async () => undefined },
+      requireAccessToken: async () => 'test-token'
+    });
+    let validations = 0;
+    const manager = createRunManager({
+      db, dataDir: tempDir, codexBin: createFakeCodex(tempDir, { stdoutLines: [
+        { type: 'thread.started', thread_id: 'codex_thread_1' },
+        { type: 'turn.completed' }
+      ] }).bin, codexHome: join(tempDir, 'codex-home'), homeDir: tempDir, activityReporter,
+      enterpriseSkillVersion: async () => {
+        validations += 1;
+        return undefined;
+      }
+    });
+    await manager.createAndRun({ prompt: '使用 $reports', cwd: tempDir, profile: 'default', sandbox: 'read-only' });
+    expect(validations).toBe(0);
+    await activityReporter.close();
+  });
+  it('does not wait indefinitely for Skill validation when closing', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-manager-skill-close-'));
+    const skillPath = join(tempDir, 'codex-home', 'skills', 'reports');
+    mkdirSync(skillPath, { recursive: true });
+    writeFileSync(join(skillPath, 'SKILL.md'), '---\nname: reports\ndescription: reports\n---\n');
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const activityReporter = createEnterpriseActivityReporter({
+      httpClient: { reportAgentActivity: async () => undefined },
+      requireAccessToken: async () => 'test-token'
+    });
+    activityReporter.resume();
+    let finishValidation!: () => void;
+    const validation = new Promise<void>(resolve => { finishValidation = resolve; });
+    const manager = createRunManager({
+      db, dataDir: tempDir, codexBin: createFakeCodex(tempDir, { stdoutLines: [
+        { type: 'thread.started', thread_id: 'codex_thread_1' },
+        { type: 'turn.completed' }
+      ] }).bin, codexHome: join(tempDir, 'codex-home'), homeDir: tempDir, activityReporter,
+      enterpriseSkillVersion: async () => {
+        await validation;
+        return undefined;
+      }
+    });
+    try {
+      const run = manager.startRun({ prompt: '$reports', cwd: tempDir, profile: 'default', sandbox: 'read-only' });
+      await waitForRunStatus(manager, run.id, 'succeeded');
+      await expect(manager.close()).resolves.toBeUndefined();
+    } finally {
+      finishValidation();
+    }
   });
   it('maps a canceled Codex fallback error to user cancellation', () => {
     expect(errorToTerminationReason(new CodexExecError({

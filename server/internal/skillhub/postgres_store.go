@@ -26,6 +26,9 @@ func NewPostgresStore(pool postgresPool) *PostgresStore {
 }
 
 func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, version Version, options CreateVersionOptions) (Skill, Version, error) {
+	if options.Origin != "app_upload" && options.Origin != "admin_upload" && options.Origin != "source_sync" {
+		return Skill{}, Version{}, ErrInvalidRequest
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return Skill{}, Version{}, err
@@ -33,12 +36,15 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 	defer tx.Rollback(ctx)
 
 	skill := Skill{}
+	newSkill := false
 	switch options.Resolution {
 	case VersionResolutionByName:
-		_, err = tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at,created_by_user_id) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7) ON CONFLICT (name) DO NOTHING`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt, nullableText(proposed.CreatedByUserID))
+		inserted, insertErr := tx.Exec(ctx, `INSERT INTO skills (skill_id,space_id,name,current_version_id,created_by,created_at,updated_at,created_by_user_id) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7) ON CONFLICT (name) DO NOTHING`, proposed.SkillID, proposed.SpaceID, proposed.Name, proposed.CreatedBy, proposed.CreatedAt, proposed.UpdatedAt, nullableText(proposed.CreatedByUserID))
+		err = insertErr
 		if err != nil {
 			return Skill{}, Version{}, mapSkillCreateError(err)
 		}
+		newSkill = inserted.RowsAffected() == 1
 		err = scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE name=$1 FOR UPDATE`, proposed.Name), &skill)
 		if err != nil {
 			return Skill{}, Version{}, err
@@ -59,6 +65,7 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 			return Skill{}, Version{}, mapSkillCreateError(err)
 		}
 		skill = proposed
+		newSkill = true
 	case VersionResolutionTarget, VersionResolutionReplace:
 		err = scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=$1 FOR UPDATE`, options.TargetSkillID), &skill)
 		if err != nil {
@@ -97,6 +104,19 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName, version.SkillName)
 	if err != nil {
 		return Skill{}, Version{}, mapStoreError(err)
+	}
+	eventType, actorKind := "skill.version_uploaded", "user"
+	var actorUserID any = version.UploadedByUserID
+	if newSkill {
+		eventType = "skill.created"
+	}
+	if options.Origin == "source_sync" {
+		actorKind, actorUserID = "system", nil
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO employee_ai_activity_facts (fact_id,event_type,actor_kind,actor_user_id,origin,target_id,target_name,source_system,source_event_key) VALUES ($1,$2,$3,$4,$5,$6,$7,'skillhub',$8)`,
+		newID("fact"), eventType, actorKind, actorUserID, options.Origin, skill.SkillID, skill.Name, version.VersionID)
+	if err != nil {
+		return Skill{}, Version{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Skill{}, Version{}, mapStoreError(err)

@@ -299,6 +299,7 @@ func TestSourceSyncServiceReusesVersionForSamePathAndCommitRetry(t *testing.T) {
 	created, err := fixture.versionService.CreateVersionFromPackage(context.Background(), CreateVersionInput{
 		Version: "git-" + commit, Package: bytes.NewReader(packageData), CreatedBy: "admin", Resolution: VersionResolutionCreateOnly,
 		Source: &VersionSourceEvidence{SourceID: fixture.source.SourceID, RepositoryOwner: "acme", RepositoryName: "skills", Path: "skills/one", CommitSHA: commit, ContentSHA256: strings.Repeat("a", 64)},
+		Origin: "source_sync",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +466,7 @@ func TestSourceSyncServiceDoesNotTreatUnrelatedVersionConflictAsNameChange(t *te
 	}
 	_, err = fixture.versionService.CreateVersionFromPackage(context.Background(), CreateVersionInput{
 		Version: "git-" + fixture.head(), Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("one")}})),
-		CreatedBy: "admin", Resolution: VersionResolutionTarget, TargetSkillID: initial.Skill.SkillID,
+		CreatedBy: "admin", Resolution: VersionResolutionTarget, TargetSkillID: initial.Skill.SkillID, Origin: "admin_upload", UploadedByUserID: "test-admin",
 	})
 	if err != nil {
 		t.Fatal(err)

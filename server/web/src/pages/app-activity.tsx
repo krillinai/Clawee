@@ -228,6 +228,20 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
         />
       </section>
 
+      <section aria-label="Skill 汇总" className="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2 xl:grid-cols-3">
+        {[
+          { label: "新增 Skill", value: data.organization.skill_contributions?.created_count },
+          { label: "Skill 更新", value: data.organization.skill_contributions?.updated_count },
+          { label: "明确请求 Skill-任务数", value: data.organization.skill_usage_totals?.requested_skill_runs },
+          { label: "观测使用 Skill-任务数", value: data.organization.skill_usage_totals?.observed_skill_runs },
+          { label: "其中显式 Skill-任务数", value: data.organization.skill_usage_totals?.explicit_skill_runs },
+          { label: "其中隐式 Skill-任务数", value: data.organization.skill_usage_totals?.implicit_skill_runs },
+        ].map(item => <div className="min-w-0 bg-card p-4" key={item.label}>
+          <span className="text-xs text-muted-foreground">{item.label}</span>
+          <strong className="mt-2 block font-mono text-2xl">{item.value == null ? "--" : formatInteger(item.value)}</strong>
+        </div>)}
+      </section>
+
       <SkillEvidenceTable items={data.organization.skill_usage ?? []} />
 
       <AgentActivityTable agents={data.agents} />
@@ -248,9 +262,8 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
 function SkillEvidenceTable({ items }: { items: ActivitySkillUsage[] }) {
   return (
     <section aria-label="Skill 证据统计">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+      <div className="mb-3">
         <h2 className="text-base font-semibold">Skill 使用证据</h2>
-        <span className="text-xs text-muted-foreground">按任务与 Skill 去重；未观测到不代表未使用</span>
       </div>
       {items.length === 0 ? <EmptyState title="当前范围内暂无 Skill 使用证据" /> : (
         <Table aria-label="Skill 使用证据">

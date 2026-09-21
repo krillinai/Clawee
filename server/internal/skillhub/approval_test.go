@@ -8,6 +8,10 @@ import (
 )
 
 func uploadApprovedVersion(service *Service, ctx context.Context, input UploadVersionInput) (MutationResult, error) {
+	input.Origin = "admin_upload"
+	if input.UploadedByUserID == "" {
+		input.UploadedByUserID = "test-admin"
+	}
 	result, err := service.UploadVersion(ctx, input)
 	if err != nil {
 		return result, err
@@ -25,7 +29,7 @@ func TestSelfPublishRequiresUploaderAndDisabledApproval(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
 	result, err := service.UploadVersion(ctx, UploadVersionInput{
-		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id",
+		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id", Origin: "app_upload",
 		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("self-publish")}})),
 	})
 	if err != nil {
@@ -61,7 +65,7 @@ func TestOwnPendingVersionsRequireWriteAccessAndDisabledApproval(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
 	result, err := service.UploadVersion(ctx, UploadVersionInput{
-		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id",
+		Version: "1", CreatedBy: "writer", UploadedByUserID: "writer-id", Origin: "app_upload",
 		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("pending-own")}})),
 	})
 	if err != nil {
@@ -105,7 +109,7 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 		if target != "" {
 			resolution = VersionResolutionReplace
 		}
-		result, err := service.CreateVersionFromPackage(ctx, CreateVersionInput{Version: version, TargetSkillID: target, Resolution: resolution, Publish: autoPublish, CreatedBy: "writer", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD(name)}}))})
+		result, err := service.CreateVersionFromPackage(ctx, CreateVersionInput{Version: version, TargetSkillID: target, Resolution: resolution, Publish: autoPublish, CreatedBy: "writer", UploadedByUserID: "writer-id", Origin: "admin_upload", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD(name)}}))})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -67,6 +67,13 @@ export type ActivityStatistics = {
     completed_turns: number;
     mcp_distribution: ActivityMCPUsage[];
     skill_usage: ActivitySkillUsage[];
+    skill_contributions?: { created_count: number; updated_count: number };
+    skill_usage_totals?: {
+      requested_skill_runs: number;
+      observed_skill_runs: number;
+      explicit_skill_runs: number;
+      implicit_skill_runs: number;
+    };
   };
   trend: {
     granularity: "hour" | "day";
