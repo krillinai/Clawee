@@ -23,6 +23,25 @@ function renderTemplates(path = "/admin/workflow-templates") {
 }
 
 describe("WorkflowTemplatesPage", () => {
+  it("shows both editor sections before nodes are added and after the last node is removed", () => {
+    renderTemplates("/admin/workflow-templates/new");
+    expect(screen.getByRole("heading", { name: "执行顺序" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "节点配置" })).toBeInTheDocument();
+    expect(screen.getByText("暂无执行节点")).toBeInTheDocument();
+    expect(screen.getByText("暂无节点配置")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }));
+    expect(screen.queryByText("暂无执行节点")).not.toBeInTheDocument();
+    expect(screen.queryByText("暂无节点配置")).not.toBeInTheDocument();
+    expect(screen.getByText("第 1 步")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /未命名节点/ })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByLabelText("标题")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除节点" }));
+    expect(screen.getByText("暂无执行节点")).toBeInTheDocument();
+    expect(screen.getByText("暂无节点配置")).toBeInTheDocument();
+  });
+
   it("adds distinct nodes when randomUUID is unavailable", async () => {
     const browserCrypto = globalThis.crypto;
     vi.stubGlobal("crypto", { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) });
@@ -59,6 +78,8 @@ describe("WorkflowTemplatesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "添加节点" }));
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "第二步" } });
     fireEvent.click(screen.getByRole("button", { name: "上移节点" }));
+    expect(screen.getByText("第 1 步")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /第二步/ })).toHaveAttribute("aria-current", "step");
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(workflowAdmin.save).toHaveBeenCalledWith(expect.objectContaining({
       nodes: [expect.objectContaining({ title: "第二步", order: 0 }), expect.objectContaining({ title: "第一步", order: 1 })]
@@ -111,10 +132,13 @@ describe("WorkflowInstancesPage", () => {
 
   it("shows the handler and completion time", async () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [{ id: "instance-1", template_id: "template-1", template_revision: 1, nodes: [], status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z" }], meta: { next_cursor: "" } });
-    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "a", input: {}, output: { text: "完成" }, handled_by: "a", completed_at: "2026-09-21T01:00:00Z" }] });
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "a", input: { text: "初始内容", internal: "不展示" }, output: { text: "完成", internal: "也不展示" }, handled_by: "a", completed_at: "2026-09-21T01:00:00Z" }] });
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><WorkflowInstancesPage /></QueryClientProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /instance-1/ }));
     expect(await screen.findByText(/处理人：a/)).toBeInTheDocument();
+    expect(screen.getByText("初始内容")).toBeInTheDocument();
+    expect(screen.getByText("完成")).toBeInTheDocument();
+    expect(screen.queryByText(/internal|不展示|也不展示|"text"/)).not.toBeInTheDocument();
   });
 
   it("confirms before terminating a running instance", async () => {

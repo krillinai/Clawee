@@ -919,6 +919,7 @@ export async function buildServer(input: BuildServerInput) {
     session: enterpriseSessionManager,
     http: enterpriseHttpClient,
     runs: runManager,
+    threads: threadManager,
     db,
     origin: () => enterpriseOrigin.origin,
     canExecute: () => !input.serverDeployment && (input.modelServiceRuntime?.ready() ?? true)

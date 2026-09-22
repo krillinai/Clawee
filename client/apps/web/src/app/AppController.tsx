@@ -6341,7 +6341,14 @@ export function AppController(props: AppControllerProps) {
       signedIn={enterpriseSession.status === 'signed_in'}
       online={connectionState.status === 'connected'}
       userId={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined}
-      cwd={currentProject?.cwd}
+      projectId={currentProject?.id}
+      onExecutionStarted={threadId => {
+        if (threadService === null) return;
+        void threadService.getThread(threadId).then(response => {
+          setRuntimeThreads(previous => upsertThread(previous, response.thread));
+          void refreshThreadRunState(threadId);
+        }).catch(() => undefined);
+      }}
     />
   ) : state.activeView === 'drive' ? (
     <SharedDrivePage

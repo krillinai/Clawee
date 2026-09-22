@@ -8,6 +8,7 @@ import type { EnterpriseHttpClient } from '../enterprise/http-client-2026-07-30.
 import { EnterpriseHttpError } from '../enterprise/http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from '../enterprise/session-manager-2026-07-30.js';
 import type { RunManager } from '../runs/manager.js';
+import type { ThreadManager } from '../threads/types.js';
 import { apiError } from './errors.js';
 
 const objectSchema = z.record(z.string(), z.unknown()).refine(value =>
@@ -15,13 +16,14 @@ const objectSchema = z.record(z.string(), z.unknown()).refine(value =>
 );
 const startSchema = z.object({ initialInput: objectSchema, idempotencyKey: z.string().min(1).max(200) }).strict();
 const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().max(4096), idempotencyKey: z.string().min(1).max(200) }).strict();
-const executeSchema = z.object({ cwd: z.string().min(1) }).strict();
+const executeSchema = z.object({ projectId: z.string().min(1) }).strict();
 type Association = { task_id: string; user_id: string; run_id: string; complete_key: string; state: string };
 
 export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, options: {
   session: EnterpriseSessionManager;
   http: EnterpriseHttpClient;
   runs: RunManager;
+  threads: ThreadManager;
   db: Database.Database;
   origin(): string;
   canExecute(): boolean;
@@ -129,20 +131,32 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
     const existing = read.get(request.params.id);
     const userId = session.getSnapshot().account?.subjectId;
     if (!userId) return reply.code(401).send(apiError('ENTERPRISE_UNAUTHORIZED', '企业会话不可用'));
-    if (existing && existing.user_id === userId && existing.state === 'pending') return { runId: existing.run_id, status: 'pending' };
+    if (existing && existing.user_id === userId && existing.state === 'pending') return { runId: existing.run_id, threadId: runs.getRun(existing.run_id)?.threadId, status: 'pending' };
     try {
       const task = await callTool('workflow_get_task', { task_id: request.params.id });
       // The read and start below are synchronous on the daemon event loop.
       const concurrent = read.get(request.params.id);
       if (concurrent && concurrent.user_id === userId && concurrent.state === 'pending') {
-        return { runId: concurrent.run_id, status: 'pending' };
+        return { runId: concurrent.run_id, threadId: runs.getRun(concurrent.run_id)?.threadId, status: 'pending' };
       }
-      const run = runs.startRun({
-        prompt: `${String(task.instruction)}\n\n输入（JSON）：\n${JSON.stringify(task.input)}`,
-        cwd: parsed.data.cwd, profile: 'default', sandbox: 'workspace-write'
+      const input = task.input as { text?: unknown } | undefined;
+      const thread = options.threads.createConversationThread({
+        projectId: parsed.data.projectId,
+        title: `工作流 · ${String(task.instruction).trim().slice(0, 60)}`,
+        profile: 'default', sandbox: 'danger-full-access'
       });
+      let run;
+      try {
+        run = runs.startRun({
+          prompt: `${String(task.instruction)}\n\n输入：\n${typeof input?.text === 'string' ? input.text : ''}`,
+          cwd: thread.cwd, profile: thread.profile, sandbox: thread.sandbox, threadId: thread.id
+        });
+      } catch (error) {
+        options.threads.deleteThread(thread.id);
+        throw error;
+      }
       save.run(request.params.id, userId, run.id, randomUUID(), 'pending');
-      return reply.code(202).send({ runId: run.id, status: run.status });
+      return reply.code(202).send({ runId: run.id, threadId: thread.id, status: run.status });
     } catch (error) {
       return reply.code(409).send(apiError('VALIDATION_FAILED', error instanceof Error ? error.message : '任务不可执行'));
     }
