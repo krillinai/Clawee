@@ -103,6 +103,7 @@ const DownloadsPage = lazy(() => import("./pages/downloads").then((module) => ({
 const WorkflowTemplatesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowTemplatesPage })));
 const WorkflowTemplateEditorPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowTemplateEditorPage })));
 const WorkflowInstancesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstancesPage })));
+const WorkflowInstanceDetailPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstanceDetailPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
@@ -180,6 +181,7 @@ export function App() {
               <Route path="/admin/workflow-templates/new" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplateEditorPage />)} />
               <Route path="/admin/workflow-templates/:id" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplateEditorPage />)} />
               <Route path="/admin/workflow-instances" element={adminPage(permissions.workflowInstanceRead, <WorkflowInstancesPage />)} />
+              <Route path="/admin/workflow-instances/:id" element={adminPage(permissions.workflowInstanceRead, <WorkflowInstanceDetailPage />)} />
               <Route path="/admin/accounts" element={adminPage(permissions.accountRead, <UsersPage />)} />
               <Route path="/admin/rbac/roles" element={adminPage(permissions.rbacRead, <RBACRolesPage />)} />
               <Route path="/admin/rbac/permissions" element={adminPage(permissions.rbacRead, <RBACPermissionsPage />)} />

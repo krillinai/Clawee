@@ -1,20 +1,23 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronsUpDown, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, ChevronsUpDown, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import ReactMarkdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import remarkGfm from "remark-gfm";
 
 import { useAdminPermission } from "@/components/admin-permissions";
-import { ConfirmDialog, DataTableShell, DetailDrawer, EmptyState, ErrorAlert, FilterRow, FilterSelect, LoadingState, PageHeader, PageShell, TableStateRow } from "@/components/governance-ui";
+import { ConfirmDialog, DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSelect, LoadingState, PageHeader, PageShell, TableStateRow } from "@/components/governance-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { permissions } from "@/lib/rbac-api";
-import { workflowAdmin, type WorkflowAssignee, type WorkflowInstance, type WorkflowNode, type WorkflowTemplate } from "@/lib/workflow-api";
+import { workflowAdmin, type WorkflowAssignee, type WorkflowInstance, type WorkflowNode, type WorkflowTask, type WorkflowTemplate } from "@/lib/workflow-api";
 
 const emptyTemplate = (): WorkflowTemplate => ({ id: "", name: "", description: "", status: "draft", revision: 0, nodes: [], created_at: "" });
 const nodeID = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -37,21 +40,45 @@ function nodeError(nodes: WorkflowNode[]) {
   return null;
 }
 
-function WorkflowSteps({ nodes, instance }: { nodes: WorkflowNode[]; instance?: WorkflowInstance }) {
-  return <ol className="space-y-0">
-    {nodes.map((node, index) => {
-      const task = instance?.tasks?.find((item) => item.node_id === node.node_id);
-      return <li className="relative flex gap-4 pb-5 last:pb-0" key={node.node_id}>
-        {index < nodes.length - 1 && <span aria-hidden="true" className="absolute bottom-0 left-[15px] top-8 w-px bg-border" />}
-        <span className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border bg-background text-xs font-medium">{index + 1}</span>
-        <div className="min-w-0 flex-1 border-b pb-4 last:border-0">
-          <div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{node.title || `节点 ${index + 1}`}</strong><Badge variant="outline">{node.type === "agent" ? "Agent" : "审批"}</Badge>{task && <StatusBadge status={task.status} />}{instance?.current_node_id === node.node_id && <Badge variant="accent">当前节点</Badge>}</div>
-          <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">负责人：{node.assignee_user_id} · {node.instruction}</p>
-          {task && <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><div><span className="text-muted-foreground">输入</span><pre className="mt-1 overflow-auto whitespace-pre-wrap break-words rounded border bg-muted/40 p-2">{typeof task.input?.text === "string" ? task.input.text : ""}</pre></div>{task.output && <div><span className="text-muted-foreground">输出</span><pre className="mt-1 overflow-auto whitespace-pre-wrap break-words rounded border bg-muted/40 p-2">{typeof task.output.text === "string" ? task.output.text : ""}</pre></div>}{task.decision && <p>审批：{task.decision === "approve" ? "批准" : "驳回"} {task.comment}</p>}{task.completed_at && <p>处理人：{task.handled_by || task.assignee_user_id} · {new Date(task.completed_at).toLocaleString()}</p>}</div>}
-        </div>
-      </li>;
-    })}
-  </ol>;
+function WorkflowText({ label, value }: { label: string; value?: Record<string, unknown> }) {
+  const content = typeof value?.text === "string" ? value.text || "（空文本）" : "暂无文本";
+  return <div className="min-w-0"><h4 className="text-xs font-medium text-muted-foreground">{label}</h4><div className="mt-2 min-w-0 border-l-2 border-border pl-3 text-sm leading-6 [overflow-wrap:anywhere]">
+    <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
+      h1: ({ children }) => <h5 className="my-2 font-semibold">{children}</h5>,
+      h2: ({ children }) => <h5 className="my-2 font-semibold">{children}</h5>,
+      h3: ({ children }) => <h5 className="my-2 font-semibold">{children}</h5>,
+      p: ({ children }) => <p className="my-2 whitespace-pre-wrap">{children}</p>,
+      ul: ({ children }) => <ul className="my-2 list-disc pl-5">{children}</ul>,
+      ol: ({ children }) => <ol className="my-2 list-decimal pl-5">{children}</ol>,
+      a: ({ children, href }) => <a className="text-primary underline underline-offset-4" href={href} rel="noreferrer" target="_blank">{children}</a>,
+      pre: ({ children }) => <pre className="my-2 overflow-auto border border-border bg-muted/35 p-3 text-xs">{children}</pre>
+    }}>{content}</ReactMarkdown>
+  </div></div>;
+}
+
+function WorkflowStep({ node, task, index, current, last }: { node: WorkflowNode; task?: WorkflowTask; index: number; current: boolean; last: boolean }) {
+  const [open, setOpen] = useState(false);
+  const title = node.title || `节点 ${index + 1}`;
+  return <li className="relative flex min-w-0 gap-4 pb-6 last:pb-0">
+    {!last && <span aria-hidden="true" className="absolute bottom-0 left-[15px] top-8 w-px bg-border" />}
+    <span className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border bg-background text-xs font-medium">{index + 1}</span>
+    <div className="min-w-0 flex-1 border-b border-border pb-5 last:border-0">
+      <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{title}</h3><Badge variant="outline">{node.type === "agent" ? "Agent" : "审批"}</Badge>{task && <StatusBadge status={task.status} />}{current && <Badge variant="accent">当前节点</Badge>}</div>
+      <p className="mt-1 break-all text-xs text-muted-foreground">负责人：{node.assignee_user_id}</p>
+      {task?.completed_at && <p className="mt-1 break-all text-xs text-muted-foreground">处理人：{task.handled_by || task.assignee_user_id} · {new Date(task.completed_at).toLocaleString()}</p>}
+      <Collapsible onOpenChange={setOpen} open={open}>
+        <CollapsibleTrigger asChild><Button aria-label={`${open ? "收起" : "展开"}节点“${title}”的内容`} className="mt-2" size="sm" variant="ghost"><ChevronDown aria-hidden="true" className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />{open ? "收起内容" : "查看内容"}</Button></CollapsibleTrigger>
+        <CollapsibleContent className="mt-3 space-y-4 border-t border-border pt-4">
+          <div><h4 className="text-xs font-medium text-muted-foreground">说明 / 任务指令</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6">{node.instruction}</p></div>
+          {task && <><WorkflowText label="输入" value={task.input} />{task.output && <WorkflowText label="输出" value={task.output} />}{task.decision && <p className="text-sm">审批：{task.decision === "approve" ? "批准" : "驳回"}{task.comment && ` · ${task.comment}`}</p>}</>}
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  </li>;
+}
+
+function WorkflowSteps({ instance }: { instance: WorkflowInstance }) {
+  return <ol className="space-y-0">{instance.nodes.map((node, index) => <WorkflowStep current={instance.current_node_id === node.node_id} index={index} key={node.node_id} last={index === instance.nodes.length - 1} node={node} task={instance.tasks?.find((item) => item.node_id === node.node_id)} />)}</ol>;
 }
 
 function AssigneePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
@@ -176,24 +203,10 @@ export function WorkflowTemplateEditorPage() {
 }
 
 export function WorkflowInstancesPage() {
-  const canTerminate = useAdminPermission(permissions.workflowInstanceTerminate);
-  const cache = useQueryClient();
   const [status, setStatus] = useState("all");
   const [cursor, setCursor] = useState("");
   const [history, setHistory] = useState<string[]>([]);
-  const [selectedID, setSelectedID] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const instances = useQuery({ queryKey: ["workflow-instances", status, cursor], queryFn: () => workflowAdmin.instances(status, cursor) });
-  const detail = useQuery({ queryKey: ["workflow-instance", selectedID], queryFn: () => workflowAdmin.instance(selectedID!), enabled: Boolean(selectedID) });
-  async function terminate() {
-    if (!selectedID || !reason.trim()) return;
-    setBusy(true); setError("");
-    try { await workflowAdmin.terminate(selectedID, reason); setReason(""); setConfirmOpen(false); void cache.invalidateQueries({ queryKey: ["workflow-instances"] }); void cache.invalidateQueries({ queryKey: ["workflow-instance", selectedID] }); }
-    catch (e) { setError(message(e)); } finally { setBusy(false); }
-  }
   return <PageShell><PageHeader title="工作流实例" />
     <FilterRow><FilterSelect ariaLabel="状态筛选" value={status} onChange={(value) => { setStatus(value); setCursor(""); setHistory([]); }}><option value="all">全部状态</option>{["running", "succeeded", "rejected", "terminated"].map((value) => <option key={value} value={value}>{statusNames[value]}</option>)}</FilterSelect></FilterRow>
     <DataTableShell dense minWidth={800}>
@@ -202,22 +215,52 @@ export function WorkflowInstancesPage() {
         {instances.isLoading && <TableStateRow colSpan={6}><LoadingState label="正在加载工作流实例" /></TableStateRow>}
         {instances.isError && <TableStateRow colSpan={6} tone="danger"><ErrorAlert error={instances.error}>实例加载失败：{message(instances.error)}</ErrorAlert></TableStateRow>}
         {!instances.isLoading && !instances.isError && !instances.data?.items.length && <TableStateRow colSpan={6}><EmptyState title="暂无工作流实例" /></TableStateRow>}
-        {instances.data?.items.map((item) => <TableRow data-state={selectedID === item.id ? "selected" : undefined} key={item.id}>
+        {instances.data?.items.map((item) => <TableRow key={item.id}>
           <TableCell className="max-w-48 truncate font-mono text-xs" title={item.id}>{item.id}</TableCell>
           <TableCell className="max-w-56 truncate font-medium" title={item.nodes[0]?.title}>{item.nodes[0]?.title || "未命名节点"}</TableCell>
           <TableCell><StatusBadge status={item.status} /></TableCell>
           <TableCell className="max-w-40 truncate" title={item.started_by}>{item.started_by}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(item.started_at).toLocaleString()}</TableCell>
-          <TableCell className="text-right"><Button aria-label={`查看实例 ${item.id} 详情`} onClick={() => { setSelectedID(item.id); setError(""); }} size="sm" variant="secondary">查看详情</Button></TableCell>
+          <TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link aria-label={`查看实例 ${item.id} 详情`} to={`/admin/workflow-instances/${encodeURIComponent(item.id)}`}>查看详情</Link></Button></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
     {(instances.data?.meta.next_cursor || history.length > 0) && <div className="flex gap-2"><Button disabled={!history.length} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }} size="sm" variant="outline">上一页</Button><Button disabled={!instances.data?.meta.next_cursor} onClick={() => { setHistory([...history, cursor]); setCursor(instances.data!.meta.next_cursor); }} size="sm" variant="outline">下一页</Button></div>}
-    <DetailDrawer contextLabel="工作流实例" onClose={() => { setSelectedID(null); setReason(""); setError(""); }} open={Boolean(selectedID)} subtitle={detail.data ? `模板版本 ${detail.data.template_revision} · 发起人 ${detail.data.started_by}` : "实例详情"} title="实例详情" titleAction={detail.data && <StatusBadge status={detail.data.status} />}>
-      {detail.isLoading && <LoadingState label="正在加载实例详情" />}
-      {detail.isError && <ErrorAlert error={detail.error}>实例详情加载失败：{message(detail.error)}</ErrorAlert>}
-      {detail.data && <><p className="break-all font-mono text-xs text-muted-foreground">实例 ID：{detail.data.id}</p><WorkflowSteps nodes={detail.data.nodes} instance={detail.data} />{canTerminate && detail.data.status === "running" && <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row"><Input aria-label="终止原因" onChange={(e) => setReason(e.target.value)} placeholder="终止原因" value={reason} /><Button disabled={busy || !reason.trim()} onClick={() => setConfirmOpen(true)} variant="destructive">终止实例</Button></div>}{error && !confirmOpen && <ErrorAlert>{error}</ErrorAlert>}</>}
-    </DetailDrawer>
+  </PageShell>;
+}
+
+export function WorkflowInstanceDetailPage() {
+  const { id } = useParams();
+  const canTerminate = useAdminPermission(permissions.workflowInstanceTerminate);
+  const cache = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const detail = useQuery({ queryKey: ["workflow-instance", id], queryFn: () => workflowAdmin.instance(id!), enabled: Boolean(id) });
+  async function terminate() {
+    if (!id || !reason.trim()) return;
+    setBusy(true); setError("");
+    try { await workflowAdmin.terminate(id, reason); setReason(""); setConfirmOpen(false); void cache.invalidateQueries({ queryKey: ["workflow-instances"] }); void cache.invalidateQueries({ queryKey: ["workflow-instance", id] }); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  return <PageShell><PageHeader title="实例详情" actions={<Button asChild variant="outline"><Link to="/admin/workflow-instances"><ArrowLeft className="size-4" />返回列表</Link></Button>} />
+    {detail.isLoading && <LoadingState label="正在加载实例详情" />}
+    {detail.isError && <ErrorAlert error={detail.error}>实例详情加载失败：{message(detail.error)}</ErrorAlert>}
+    {detail.data && <div className="min-w-0 space-y-6">
+      <section className="min-w-0 border-b border-border pb-5">
+        <div className="flex flex-wrap items-center gap-3"><h2 className="min-w-0 break-all text-base font-semibold">实例 {detail.data.id}</h2><StatusBadge status={detail.data.status} /></div>
+        <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div className="min-w-0"><dt className="text-muted-foreground">模板 ID / 版本</dt><dd className="break-all">{detail.data.template_id} · {detail.data.template_revision}</dd></div>
+          <div className="min-w-0"><dt className="text-muted-foreground">发起人</dt><dd className="break-all">{detail.data.started_by}</dd></div>
+          <div><dt className="text-muted-foreground">开始时间</dt><dd>{new Date(detail.data.started_at).toLocaleString()}</dd></div>
+          {detail.data.ended_at && <div><dt className="text-muted-foreground">结束时间</dt><dd>{new Date(detail.data.ended_at).toLocaleString()}</dd></div>}
+        </dl>
+      </section>
+      <section className="min-w-0"><h2 className="mb-5 text-sm font-semibold">执行节点</h2>{detail.data.nodes.length ? <WorkflowSteps instance={detail.data} /> : <EmptyState title="暂无执行节点" />}</section>
+      {canTerminate && detail.data.status === "running" && <section className="flex flex-col gap-2 border-t border-border pt-5 sm:flex-row"><Input aria-label="终止原因" className="sm:max-w-md" onChange={(e) => setReason(e.target.value)} placeholder="终止原因" value={reason} /><Button disabled={busy || !reason.trim()} onClick={() => setConfirmOpen(true)} variant="destructive">终止实例</Button></section>}
+      {error && !confirmOpen && <ErrorAlert>{error}</ErrorAlert>}
+    </div>}
     <ConfirmDialog open={confirmOpen} title="终止工作流实例" description="终止后将无法继续执行，确定要终止此实例吗？" confirmLabel="确认终止" variant="destructive" pending={busy} error={error} onClose={() => { setConfirmOpen(false); setError(""); }} onConfirm={terminate} />
   </PageShell>;
 }

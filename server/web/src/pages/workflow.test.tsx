@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { workflowAdmin, type WorkflowTemplate } from "@/lib/workflow-api";
-import { WorkflowInstancesPage, WorkflowTemplateEditorPage, WorkflowTemplatesPage } from "./workflow";
+import { WorkflowInstanceDetailPage, WorkflowInstancesPage, WorkflowTemplateEditorPage, WorkflowTemplatesPage } from "./workflow";
 
 vi.mock("@/lib/workflow-api", () => ({
   workflowAdmin: {
@@ -18,6 +18,15 @@ function renderTemplates(path = "/admin/workflow-templates") {
       <Route element={<WorkflowTemplatesPage />} path="/admin/workflow-templates" />
       <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/new" />
       <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/:id" />
+    </Routes></MemoryRouter>
+  </QueryClientProvider>);
+}
+
+function renderInstances(path = "/admin/workflow-instances") {
+  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter initialEntries={[path]}><Routes>
+      <Route element={<WorkflowInstancesPage />} path="/admin/workflow-instances" />
+      <Route element={<WorkflowInstanceDetailPage />} path="/admin/workflow-instances/:id" />
     </Routes></MemoryRouter>
   </QueryClientProvider>);
 }
@@ -126,19 +135,50 @@ describe("WorkflowTemplatesPage", () => {
 describe("WorkflowInstancesPage", () => {
   it("shows an empty state when no instances match", async () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [], meta: { next_cursor: "" } });
-    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><WorkflowInstancesPage /></QueryClientProvider>);
+    renderInstances();
     expect(await screen.findByText("暂无工作流实例")).toBeInTheDocument();
   });
 
   it("shows the handler and completion time", async () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [{ id: "instance-1", template_id: "template-1", template_revision: 1, nodes: [], status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z" }], meta: { next_cursor: "" } });
-    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "a", input: { text: "初始内容", internal: "不展示" }, output: { text: "完成", internal: "也不展示" }, handled_by: "a", completed_at: "2026-09-21T01:00:00Z" }] });
-    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><WorkflowInstancesPage /></QueryClientProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: /instance-1/ }));
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "a", input: { text: "初始内容", internal: "不展示" }, output: { text: "**完成**\n\n[参考](https://example.com)\n<script>unsafe()</script>", internal: "也不展示" }, handled_by: "a", completed_at: "2026-09-21T01:00:00Z" }] });
+    renderInstances();
+    fireEvent.click(await screen.findByRole("link", { name: /查看实例 instance-1 详情/ }));
+    expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回列表" })).toHaveAttribute("href", "/admin/workflow-instances");
     expect(await screen.findByText(/处理人：a/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开节点“生成”的内容" }));
     expect(screen.getByText("初始内容")).toBeInTheDocument();
     expect(screen.getByText("完成")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "参考" })).toHaveAttribute("href", "https://example.com");
+    expect(screen.queryByText("unsafe()")).not.toBeInTheDocument();
     expect(screen.queryByText(/internal|不展示|也不展示|"text"/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "收起节点“生成”的内容" }));
+    expect(screen.queryByText("初始内容")).not.toBeInTheDocument();
+  });
+
+  it("loads an instance directly from its detail URL", async () => {
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-direct", template_id: "template-1", template_revision: 2, nodes: [], status: "rejected", started_by: "a", started_at: "2026-09-21T00:00:00Z" });
+    vi.mocked(workflowAdmin.instances).mockClear();
+    renderInstances("/admin/workflow-instances/instance-direct");
+    expect(await screen.findByRole("heading", { name: "实例 instance-direct" })).toBeInTheDocument();
+    expect(workflowAdmin.instance).toHaveBeenCalledWith("instance-direct");
+    expect(workflowAdmin.instances).not.toHaveBeenCalled();
+  });
+
+  it("shows approval input, output and comment as text when expanded", async () => {
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-approval", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "approve", order: 0, type: "approval", title: "确认内容", instruction: "确认后继续", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "approve", status: "completed", assignee_user_id: "a", input: { text: "待审核正文" }, output: { text: "待审核正文" }, decision: "approve", comment: "通过验收" }] });
+    renderInstances("/admin/workflow-instances/instance-approval");
+    fireEvent.click(await screen.findByRole("button", { name: "展开节点“确认内容”的内容" }));
+    expect(screen.getByText("确认后继续")).toBeInTheDocument();
+    expect(screen.getAllByText("待审核正文")).toHaveLength(2);
+    expect(screen.getByText("审批：批准 · 通过验收")).toBeInTheDocument();
+  });
+
+  it("shows an error when an instance cannot be loaded", async () => {
+    vi.mocked(workflowAdmin.instance).mockRejectedValue(new Error("实例不存在"));
+    renderInstances("/admin/workflow-instances/missing");
+    expect(await screen.findByText("实例详情加载失败：实例不存在")).toBeInTheDocument();
   });
 
   it("confirms before terminating a running instance", async () => {
@@ -146,8 +186,8 @@ describe("WorkflowInstancesPage", () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [instance], meta: { next_cursor: "" } });
     vi.mocked(workflowAdmin.instance).mockResolvedValue(instance);
     vi.mocked(workflowAdmin.terminate).mockResolvedValue({ ...instance, status: "terminated" });
-    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><WorkflowInstancesPage /></QueryClientProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "查看实例 instance-2 详情" }));
+    renderInstances();
+    fireEvent.click(await screen.findByRole("link", { name: "查看实例 instance-2 详情" }));
     fireEvent.change(await screen.findByLabelText("终止原因"), { target: { value: "停止测试" } });
     fireEvent.click(screen.getByRole("button", { name: "终止实例" }));
     expect(workflowAdmin.terminate).not.toHaveBeenCalled();

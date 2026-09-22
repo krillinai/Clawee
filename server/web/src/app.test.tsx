@@ -240,6 +240,21 @@ describe("App", () => {
     }
   });
 
+  it("opens a workflow instance detail by URL", async () => {
+    const instance = vi.spyOn(workflowAdmin, "instance").mockResolvedValue({
+      id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "usr_admin", started_at: "2026-09-21T00:00:00Z", nodes: []
+    });
+    try {
+      window.history.pushState({}, "", "/admin/workflow-instances/instance-1");
+      renderApp();
+      expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "实例 instance-1" })).toBeInTheDocument();
+      expect(instance).toHaveBeenCalledWith("instance-1");
+    } finally {
+      instance.mockRestore();
+    }
+  });
+
   it("keeps the frontend application layout when switching tabs", async () => {
     window.history.pushState({}, "", "/app/agents");
     const view = renderApp();
