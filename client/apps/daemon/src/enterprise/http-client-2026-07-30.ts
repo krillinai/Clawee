@@ -1229,7 +1229,8 @@ export function createEnterpriseHttpClient(input: {
           ...(request.name === undefined ? {} : { name: request.name }),
           password: request.password,
           client_id: 'clawee-agent',
-          agent_id: agentId
+          agent_id: agentId,
+          account_scoped_agent: true
         },
         method: 'POST',
         path: '/api/v1/auth/register'
@@ -1242,7 +1243,8 @@ export function createEnterpriseHttpClient(input: {
           email: request.email,
           password: request.password,
           client_id: 'clawee-agent',
-          agent_id: agentId
+          agent_id: agentId,
+          account_scoped_agent: true
         },
         method: 'POST',
         path: '/api/v1/auth/login',
@@ -1277,7 +1279,8 @@ export function createEnterpriseHttpClient(input: {
         redirect_uri: request.redirectUri,
         code_challenge: request.codeChallenge,
         code_challenge_method: 'S256',
-        state: request.state
+        state: request.state,
+        account_scoped_agent: 'true'
       });
       return new URL(
         `/api/v1/auth/dingtalk/clawee/start?${query.toString()}`,
@@ -1291,6 +1294,7 @@ export function createEnterpriseHttpClient(input: {
           grant_type: 'authorization_code',
           client_id: 'clawee-agent',
           agent_id: request.agentId,
+          account_scoped_agent: true,
           code: request.code,
           redirect_uri: request.redirectUri,
           code_verifier: request.codeVerifier
@@ -1314,7 +1318,8 @@ export function createEnterpriseHttpClient(input: {
         body: {
           provider: request.provider,
           client_id: 'clawee-agent',
-          agent_id: agentId
+          agent_id: agentId,
+          account_scoped_agent: true
         },
         method: 'POST',
         path: '/api/v1/auth/qr-login',
@@ -1331,7 +1336,7 @@ export function createEnterpriseHttpClient(input: {
     },
 
     async pollQrLogin(requestId, agentId) {
-      const query = new URLSearchParams({ agent_id: agentId });
+      const query = new URLSearchParams({ agent_id: agentId, account_scoped_agent: 'true' });
       const response = await requestJson({
         method: 'GET',
         path: `/api/v1/auth/qr-login/${encodeURIComponent(requestId)}?${query.toString()}`,

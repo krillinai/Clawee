@@ -583,6 +583,62 @@ func TestDingTalkClaweeTokenMapsAgentConflictAndConsumesCode(t *testing.T) {
 	}
 }
 
+func TestDingTalkClaweeTokenUsesAccountScopedAgent(t *testing.T) {
+	ctx := context.Background()
+	accountSvc := accounts.NewService(accounts.Config{Store: accounts.NewMemoryStore(), JWTSigningKey: []byte(testJWTKey)})
+	owner, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: "owner@example.com", Name: "Owner", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requester, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: "requester@example.com", Name: "Requester", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyGateway := testProxyGateway(newClaweeOwnedAgentStore(accountSvc))
+	installationID := "clawee_550e8400-e29b-41d4-a716-446655440000"
+	createOwnedAgentForCatalogTest(t, ctx, accountSvc, proxyGateway, owner.Account.UserID, installationID)
+	router := newTestRouter(t, server.Options{
+		AccountService: accountSvc, ProxyGateway: proxyGateway,
+		DingTalkAuth: server.DingTalkAuthOptions{Enabled: true, Client: fakeDingTalkClient{}},
+	})
+	code := dingTalkTestSecret('a')
+	verifier := dingTalkTestSecret('v')
+	digest := sha256.Sum256([]byte(verifier))
+	redirectURI := "http://127.0.0.1:49152/enterprise/dingtalk/callback"
+	if err := accountSvc.SaveOAuthAuthorizationCode(ctx, accounts.OAuthAuthorizationCode{
+		CodeHash: dingTalkTestHash(code), UserID: requester.Account.UserID, AgentID: installationID,
+		AccountScopedAgent: true, RedirectURI: redirectURI,
+		PKCEChallenge: base64.RawURLEncoding.EncodeToString(digest[:]),
+		CreatedAt:     time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response := postDingTalkClaweeToken(t, router, map[string]any{
+		"grant_type": "authorization_code", "client_id": "clawee-agent", "agent_id": installationID,
+		"account_scoped_agent": true, "code": code, "redirect_uri": redirectURI, "code_verifier": verifier,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("token status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Data struct {
+			Agent struct {
+				AgentID string `json:"agent_id"`
+			} `json:"agent"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Data.Agent.AgentID == installationID || result.Data.Agent.AgentID == "" {
+		t.Fatalf("scoped agent=%q", result.Data.Agent.AgentID)
+	}
+	account, err := accountSvc.AccountForAgent(ctx, result.Data.Agent.AgentID)
+	if err != nil || account.UserID != requester.Account.UserID {
+		t.Fatalf("owner=%#v err=%v", account, err)
+	}
+}
+
 func TestDingTalkClaweeTokenRejectsMismatchedAndExpiredGrants(t *testing.T) {
 	ctx := context.Background()
 	accountSvc := accounts.NewService(accounts.Config{Store: accounts.NewMemoryStore(), JWTSigningKey: []byte(testJWTKey)})
@@ -724,7 +780,7 @@ func claweeDingTalkStartURL(agentID, redirectURI, challenge, method, state strin
 	return "/api/v1/auth/dingtalk/clawee/start?" + query.Encode()
 }
 
-func postDingTalkClaweeToken(t *testing.T, router http.Handler, body map[string]string) *httptest.ResponseRecorder {
+func postDingTalkClaweeToken(t *testing.T, router http.Handler, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {

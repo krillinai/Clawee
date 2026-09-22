@@ -134,26 +134,28 @@ type AccountIdentity struct {
 }
 
 type OAuthLoginState struct {
-	StateHash     string
-	ProviderType  string
-	ProviderKey   string
-	Intent        string
-	RedirectTo    string
-	BindUserID    string
-	AgentID       string
-	PKCEChallenge string
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
+	StateHash          string
+	ProviderType       string
+	ProviderKey        string
+	Intent             string
+	RedirectTo         string
+	BindUserID         string
+	AgentID            string
+	AccountScopedAgent bool
+	PKCEChallenge      string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
 }
 
 type OAuthAuthorizationCode struct {
-	CodeHash      string
-	UserID        string
-	AgentID       string
-	RedirectURI   string
-	PKCEChallenge string
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
+	CodeHash           string
+	UserID             string
+	AgentID            string
+	AccountScopedAgent bool
+	RedirectURI        string
+	PKCEChallenge      string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
 }
 
 type OAuthAuthorizationCodeConsumeRequest struct {

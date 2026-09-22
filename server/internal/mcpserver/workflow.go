@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/krillinai/Clawee/server/internal/mcpauth"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
 	"github.com/krillinai/Clawee/server/internal/workflow"
@@ -26,6 +28,20 @@ type workflowCompleteInput struct {
 type workflowListOutput struct {
 	Tasks      []workflow.Task `json:"tasks"`
 	NextCursor string          `json:"next_cursor"`
+}
+
+func workflowObjectSchema[T any](nullable bool) *jsonschema.Schema {
+	rawSchema := &jsonschema.Schema{Type: "object"}
+	if nullable {
+		rawSchema = &jsonschema.Schema{Types: []string{"object", "null"}}
+	}
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[json.RawMessage](): rawSchema,
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return schema
 }
 
 func workflowToolError(err error) *mcp.CallToolResult {
@@ -65,7 +81,7 @@ func workflowIdentity(ctx context.Context, req *mcp.CallToolRequest, opts Option
 }
 
 func addWorkflowTools(server *mcp.Server, opts Options) {
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow_list_tasks", Description: "列出当前账号的 Agent 工作流待办"}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowListInput) (*mcp.CallToolResult, *workflowListOutput, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow_list_tasks", Description: "列出当前账号的 Agent 工作流待办", OutputSchema: workflowObjectSchema[workflowListOutput](true)}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowListInput) (*mcp.CallToolResult, *workflowListOutput, error) {
 		identity, err := workflowIdentity(ctx, req, opts)
 		if err != nil {
 			return workflowToolError(err), nil, nil
@@ -79,7 +95,7 @@ func addWorkflowTools(server *mcp.Server, opts Options) {
 		}
 		return nil, &workflowListOutput{Tasks: items, NextCursor: next}, nil
 	})
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow_get_task", Description: "读取本人当前 Agent 节点的指令和输入"}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowGetInput) (*mcp.CallToolResult, *workflow.Task, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow_get_task", Description: "读取本人当前 Agent 节点的指令和输入", OutputSchema: workflowObjectSchema[workflow.Task](true)}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowGetInput) (*mcp.CallToolResult, *workflow.Task, error) {
 		identity, err := workflowIdentity(ctx, req, opts)
 		if err != nil {
 			return workflowToolError(err), nil, nil
@@ -90,7 +106,7 @@ func addWorkflowTools(server *mcp.Server, opts Options) {
 		}
 		return nil, &item, nil
 	})
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow_complete_task", Description: "提交本人 Agent 节点的 JSON 对象输出"}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowCompleteInput) (*mcp.CallToolResult, *workflow.Result, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow_complete_task", Description: "提交本人 Agent 节点的 JSON 对象输出", InputSchema: workflowObjectSchema[workflowCompleteInput](false), OutputSchema: workflowObjectSchema[workflow.Result](true)}, func(ctx context.Context, req *mcp.CallToolRequest, input workflowCompleteInput) (*mcp.CallToolResult, *workflow.Result, error) {
 		identity, err := workflowIdentity(ctx, req, opts)
 		if err != nil {
 			return workflowToolError(err), nil, nil

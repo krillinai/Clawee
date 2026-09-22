@@ -30,6 +30,46 @@ afterEach(() => {
 });
 
 describe('enterprise session manager', () => {
+  it('reuses an account-specific Agent after switching A to B and back', async () => {
+    const otherAgentId = 'clawee_123e4567-e89b-42d3-a456-426614174000';
+    const identityStore: EnterpriseAgentIdentityStore = {
+      getOrCreate: vi.fn(async () => agentId)
+    };
+    const client = createClient({
+      login: vi.fn(async (request, installationId) => ({
+        account: { subjectId: request.email, email: request.email, name: request.email },
+        agentId: request.email === 'a@example.com' ? agentId : otherAgentId,
+        accessToken: request.email,
+        tokenType: 'Bearer' as const,
+        expiresAt: credential.expiresAt
+      })),
+      getMe: vi.fn(async token => ({
+        account: { subjectId: token, email: token, name: token },
+        agentId: token === 'a@example.com' ? agentId : otherAgentId,
+        status: 'active', frontendAllowed: true
+      }))
+    });
+    const store = createStore();
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: identityStore,
+      credentialStore: store, httpClient: client, transportSecurity: 'secure_https'
+    });
+    for (const [email, expected] of [
+      ['a@example.com', agentId], ['b@example.com', otherAgentId], ['a@example.com', agentId]
+    ] as const) {
+      await manager.login({ email, password: 'passw0rd!' });
+      expect(manager.getSnapshot()).toMatchObject({ status: 'signed_in', agentId: expected });
+      await manager.logout();
+    }
+    expect(vi.mocked(client.login).mock.calls.map(call => call[1])).toEqual([agentId, agentId, agentId]);
+    const restored = createEnterpriseSessionManager({
+      agentIdentityStore: identityStore,
+      credentialStore: createStore({ accessToken: 'b@example.com', expiresAt: credential.expiresAt }),
+      httpClient: client, transportSecurity: 'secure_https'
+    });
+    await restored.refresh();
+    expect(restored.getSnapshot()).toMatchObject({ status: 'signed_in', agentId: otherAgentId });
+  });
   it('requires a fully signed-in session before exposing its access token', async () => {
     const me = deferred<EnterpriseMeResult>();
     const manager = createEnterpriseSessionManager({

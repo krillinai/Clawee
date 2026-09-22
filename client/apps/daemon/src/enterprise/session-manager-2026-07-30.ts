@@ -365,7 +365,8 @@ export function createEnterpriseSessionManager(input: {
   async function validateAuthenticatedSession(request: {
     operationGeneration: number;
     credential: EnterpriseCredential;
-    expectedAgentId: string;
+    expectedAgentId?: string;
+    expectedUserId?: string;
     persist: boolean;
     notifySignedIn: boolean;
   }): Promise<EnterpriseSessionResponse> {
@@ -434,7 +435,8 @@ export function createEnterpriseSessionManager(input: {
       throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
     }
 
-    if (me.agentId !== request.expectedAgentId) {
+    if ((request.expectedAgentId !== undefined && me.agentId !== request.expectedAgentId)
+      || (request.expectedUserId !== undefined && me.account.subjectId !== request.expectedUserId)) {
       await rejectUnusableCredential(request);
       throw new EnterpriseSessionError(
         'ENTERPRISE_PROTOCOL_ERROR',
@@ -524,11 +526,12 @@ export function createEnterpriseSessionManager(input: {
     if (request.operationGeneration === generation) {
       credential = request.credential;
       accountCache = me.account;
+      agentIdCache = me.agentId;
     }
     const next: EnterpriseSessionResponse = {
       externalFeedbackAllowed: me.externalFeedbackAllowed,
       status: 'signed_in',
-      agentId: request.expectedAgentId,
+      agentId: me.agentId,
       account: me.account,
       expiresAt: request.credential.expiresAt,
       transportSecurity: input.transportSecurity
@@ -563,30 +566,16 @@ export function createEnterpriseSessionManager(input: {
         500
       );
     }
-    return authenticateLoginResult(operationGeneration, login, agentId);
+    return authenticateLoginResult(operationGeneration, login);
   }
 
   async function authenticateLoginResult(
     operationGeneration: number,
-    login: EnterpriseLoginResult,
-    agentId: string
+    login: EnterpriseLoginResult
   ): Promise<EnterpriseSessionResponse> {
     if (closed || operationGeneration !== generation) {
       await revokeQuietly(login.accessToken);
       throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
-    }
-    if (login.agentId !== agentId) {
-      await revokeQuietly(login.accessToken);
-      publish(operationGeneration, signedOutSnapshot());
-      throw new EnterpriseSessionError(
-        'ENTERPRISE_PROTOCOL_ERROR',
-        502,
-        {
-          reason: 'agent_id_mismatch',
-          expectedAgentId: agentId,
-          receivedAgentId: login.agentId
-        }
-      );
     }
     return validateAuthenticatedSession({
       operationGeneration,
@@ -594,7 +583,8 @@ export function createEnterpriseSessionManager(input: {
         accessToken: login.accessToken,
         expiresAt: login.expiresAt
       },
-      expectedAgentId: agentId,
+      expectedAgentId: login.agentId,
+      expectedUserId: login.account.subjectId,
       persist: true,
       notifySignedIn: true
     });
@@ -609,11 +599,10 @@ export function createEnterpriseSessionManager(input: {
       publish(operationGeneration, next);
       return next;
     }
-    const agentId = await readAgentId(operationGeneration);
+    await readAgentId(operationGeneration);
     return validateAuthenticatedSession({
       operationGeneration,
       credential: stored,
-      expectedAgentId: agentId,
       persist: false,
       notifySignedIn: true
     });
@@ -890,8 +879,7 @@ export function createEnterpriseSessionManager(input: {
     try {
       await authenticateLoginResult(
         pending.generation,
-        login,
-        pending.agentId
+        login
       );
       logDingTalkAuth({
         stage: 'session_validation',
@@ -1041,8 +1029,7 @@ export function createEnterpriseSessionManager(input: {
       const authenticationGeneration = beginOperation();
       const session = await authenticateLoginResult(
         authenticationGeneration,
-        result.login,
-        agentId
+        result.login
       );
       return {
         requestId: result.requestId,
@@ -1133,23 +1120,21 @@ export function createEnterpriseSessionManager(input: {
         publish(operationGeneration, signedOutSnapshot());
         throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
       }
-      const agentId = await readAgentId(operationGeneration);
       const verified = await validateAuthenticatedSession({
         operationGeneration,
         credential: stored,
-        expectedAgentId: agentId,
         persist: false,
         notifySignedIn: false
       });
       if (operationGeneration !== generation) {
         throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
       }
-      if (verified.status !== 'signed_in' || verified.account === undefined) {
+      if (verified.status !== 'signed_in' || verified.account === undefined || verified.agentId === undefined) {
         throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
       }
       return {
         subjectId: verified.account.subjectId,
-        agentId,
+        agentId: verified.agentId,
         accessToken: stored.accessToken
       };
     },

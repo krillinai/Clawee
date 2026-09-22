@@ -310,6 +310,7 @@ describe('enterprise runtime API', () => {
         login: loginResult
       }))
     });
+    const enterpriseMcpManager = createMcpManager();
     server = await buildServer({
       token: 'secret',
       dataDir: tempDir,
@@ -317,6 +318,7 @@ describe('enterprise runtime API', () => {
       enterpriseAgentIdentityStore: createAgentIdentityStore(),
       enterpriseCredentialStore: createStore(),
       enterpriseHttpClient: client,
+      enterpriseMcpManager,
       enterpriseOrigin: 'https://enterprise.example'
     });
 
@@ -338,6 +340,7 @@ describe('enterprise runtime API', () => {
       session: { status: 'signed_in' }
     });
     expect(JSON.stringify(qrStatus.json())).not.toContain('enterprise-token');
+    expect(enterpriseMcpManager.handleSessionAuthenticated).toHaveBeenCalledOnce();
   });
 
   it('uses the listening socket for DingTalk prepare and exempts only the exact GET callback', async () => {

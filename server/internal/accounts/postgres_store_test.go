@@ -262,6 +262,7 @@ func openAccountsTestPool(t *testing.T) *pgxpool.Pool {
 				agent_id TEXT NOT NULL,
 				redirect_uri TEXT NOT NULL,
 				pkce_challenge TEXT NOT NULL,
+				account_scoped_agent BOOLEAN NOT NULL DEFAULT FALSE,
 				created_at TIMESTAMPTZ NOT NULL,
 				expires_at TIMESTAMPTZ NOT NULL
 			)

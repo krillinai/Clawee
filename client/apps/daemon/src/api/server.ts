@@ -552,7 +552,6 @@ export async function buildServer(input: BuildServerInput) {
     input.enterpriseMcpManager ??
     createEnterpriseMcpManager({
       get enterpriseOrigin() { return enterpriseOrigin.origin; },
-      agentIdentityStore: enterpriseAgentIdentityStore,
       sessionManager: enterpriseSessionManager,
       httpClient: enterpriseHttpClient,
       mcpManager,

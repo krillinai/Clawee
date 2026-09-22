@@ -158,7 +158,7 @@ export async function registerEnterpriseRoutes(
         });
       }
       const result = await callback(parsed.data);
-      if (result.signedIn) input.mcpManager.handleSessionAuthenticated();
+      if (result.signedIn) await input.mcpManager.handleSessionAuthenticated();
       return sendDingTalkCallbackPage(reply, result);
     }
   );
@@ -188,7 +188,7 @@ export async function registerEnterpriseRoutes(
     }
     try {
       const session = await input.sessionManager.login(parsed.data);
-      input.mcpManager.handleSessionAuthenticated();
+      await input.mcpManager.handleSessionAuthenticated();
       return session;
     } catch (error) {
       return sendEnterpriseError(reply, error);
@@ -204,7 +204,7 @@ export async function registerEnterpriseRoutes(
     }
     try {
       const session = await input.sessionManager.register(parsed.data);
-      input.mcpManager.handleSessionAuthenticated();
+      await input.mcpManager.handleSessionAuthenticated();
       return session;
     } catch (error) {
       return sendEnterpriseError(reply, error);
@@ -245,7 +245,9 @@ export async function registerEnterpriseRoutes(
         );
       }
       try {
-        return await input.sessionManager.pollQrLogin(parsed.data);
+        const result = await input.sessionManager.pollQrLogin(parsed.data);
+        if (result.status === 'signed_in') await input.mcpManager.handleSessionAuthenticated();
+        return result;
       } catch (error) {
         return sendEnterpriseError(reply, error);
       }

@@ -71,6 +71,179 @@ func TestFirstRegisterIsAdminAndCanAccessAdminAPI(t *testing.T) {
 	}
 }
 
+func TestClaweeAccountScopedAgentSurvivesAccountSwitch(t *testing.T) {
+	ctx := context.Background()
+	accountStore := accounts.NewMemoryStore()
+	accountSvc := newTestAccountService(accountStore)
+	var firstID string
+	for _, email := range []string{"first@example.com", "second@example.com"} {
+		result, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: email, Name: email, Password: "passw0rd!"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if email == "first@example.com" {
+			firstID = result.Account.UserID
+		}
+	}
+	installationID := "clawee_550e8400-e29b-41d4-a716-446655440000"
+	proxyStore := newClaweeOwnedAgentStore(accountSvc)
+	proxyStore.SetOwnedAgentRemover(accountStore.DeleteAccountAgent)
+	proxyGateway := testProxyGateway(proxyStore)
+	createOwnedAgentForCatalogTest(t, ctx, accountSvc, proxyGateway, firstID, installationID)
+	router := newTestRouter(t, server.Options{
+		AccountService: accountSvc, ProxyGateway: proxyGateway,
+	})
+	login := func(email string) (string, string) {
+		t.Helper()
+		body := `{"email":"` + email + `","password":"passw0rd!","client_id":"clawee-agent","agent_id":"` + installationID + `","account_scoped_agent":true}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("login %s status=%d body=%s", email, rec.Code, rec.Body.String())
+		}
+		var result struct {
+			Data struct {
+				Agent struct {
+					AgentID string `json:"agent_id"`
+				} `json:"agent"`
+				AccessToken string `json:"access_token"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Data.Agent.AgentID, result.Data.AccessToken
+	}
+	firstID, firstToken := login("first@example.com")
+	secondID, secondToken := login("second@example.com")
+	if firstID != installationID || secondID == firstID || secondID == "" {
+		t.Fatalf("first=%q second=%q", firstID, secondID)
+	}
+	if again, _ := login("first@example.com"); again != firstID {
+		t.Fatalf("first re-login=%q", again)
+	}
+	if again, _ := login("second@example.com"); again != secondID {
+		t.Fatalf("second re-login=%q", again)
+	}
+	for _, item := range []struct{ id, token string }{{firstID, firstToken}, {secondID, secondToken}} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.Header.Set("Authorization", "Bearer "+item.token)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"agent_id":"`+item.id+`"`) {
+			t.Fatalf("me agent=%s status=%d body=%s", item.id, rec.Code, rec.Body.String())
+		}
+	}
+	if old := loginClawee(t, router, "second@example.com", "passw0rd!", installationID); old.ErrorCode != "agent_id_conflict" {
+		t.Fatalf("legacy login=%#v", old)
+	}
+	if err := proxyStore.DeleteAgent(ctx, installationID); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := login("first@example.com"); again == installationID || again == secondID {
+		t.Fatalf("first after deletion=%q, second=%q", again, secondID)
+	}
+	if again, _ := login("second@example.com"); again != secondID {
+		t.Fatalf("second after deletion=%q, want %q", again, secondID)
+	}
+}
+
+func TestClaweeAccountScopedFirstLoginsDoNotClaimInstallationID(t *testing.T) {
+	ctx := context.Background()
+	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	for _, email := range []string{"first@example.com", "second@example.com"} {
+		if _, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: email, Name: email, Password: "passw0rd!"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := newTestRouter(t, server.Options{
+		AccountService: accountSvc, ProxyGateway: testProxyGateway(newClaweeOwnedAgentStore(accountSvc)),
+	})
+	installationID := "clawee_550e8400-e29b-41d4-a716-446655440000"
+	type loginResult struct {
+		email, agentID string
+		status         int
+	}
+	results := make(chan loginResult, 2)
+	for _, email := range []string{"first@example.com", "second@example.com"} {
+		go func(email string) {
+			body := `{"email":"` + email + `","password":"passw0rd!","client_id":"clawee-agent","agent_id":"` + installationID + `","account_scoped_agent":true}`
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			var result struct {
+				Data struct {
+					Agent struct {
+						AgentID string `json:"agent_id"`
+					} `json:"agent"`
+				} `json:"data"`
+			}
+			_ = json.Unmarshal(rec.Body.Bytes(), &result)
+			results <- loginResult{email, result.Data.Agent.AgentID, rec.Code}
+		}(email)
+	}
+	ids := make(map[string]string)
+	for range 2 {
+		result := <-results
+		if result.status != http.StatusOK || result.agentID == "" || result.agentID == installationID {
+			t.Fatalf("first login=%+v", result)
+		}
+		ids[result.email] = result.agentID
+	}
+	if ids["first@example.com"] == ids["second@example.com"] {
+		t.Fatalf("accounts share Agent ID: %#v", ids)
+	}
+}
+
+func TestClaweeAccountScopedRegistrationKeepsExistingOwner(t *testing.T) {
+	ctx := context.Background()
+	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	proxyGateway := testProxyGateway(newClaweeOwnedAgentStore(accountSvc))
+	owner, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: "first@example.com", Name: "First", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installationID := "clawee_550e8400-e29b-41d4-a716-446655440000"
+	createOwnedAgentForCatalogTest(t, ctx, accountSvc, proxyGateway, owner.Account.UserID, installationID)
+	router := newTestRouter(t, server.Options{AccountService: accountSvc, ProxyGateway: proxyGateway})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(
+		`{"email":"second@example.com","name":"Second","password":"passw0rd!","client_id":"clawee-agent","agent_id":"`+installationID+`","account_scoped_agent":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Data struct {
+			Account struct {
+				UserID string `json:"user_id"`
+			} `json:"account"`
+			Agent struct {
+				AgentID string `json:"agent_id"`
+			} `json:"agent"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Data.Agent.AgentID == installationID || result.Data.Agent.AgentID == "" {
+		t.Fatalf("new Agent ID=%q", result.Data.Agent.AgentID)
+	}
+	for _, item := range []struct{ id, owner string }{
+		{installationID, owner.Account.UserID},
+		{result.Data.Agent.AgentID, result.Data.Account.UserID},
+	} {
+		account, err := accountSvc.AccountForAgent(ctx, item.id)
+		if err != nil || account.UserID != item.owner {
+			t.Fatalf("agent=%s owner=%#v err=%v", item.id, account, err)
+		}
+	}
+}
+
 func TestRegisterRejectsBlankAndAllowsDuplicateNames(t *testing.T) {
 	accountSvc := newTestAccountService(accounts.NewMemoryStore())
 	router := newTestRouter(t, server.Options{

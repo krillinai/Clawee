@@ -40,12 +40,13 @@ const (
 )
 
 type dingtalkClaweeTokenRequest struct {
-	GrantType    string `json:"grant_type"`
-	ClientID     string `json:"client_id"`
-	AgentID      string `json:"agent_id"`
-	Code         string `json:"code"`
-	RedirectURI  string `json:"redirect_uri"`
-	CodeVerifier string `json:"code_verifier"`
+	GrantType          string `json:"grant_type"`
+	ClientID           string `json:"client_id"`
+	AgentID            string `json:"agent_id"`
+	Code               string `json:"code"`
+	RedirectURI        string `json:"redirect_uri"`
+	CodeVerifier       string `json:"code_verifier"`
+	AccountScopedAgent bool   `json:"account_scoped_agent"`
 }
 
 type dingtalkUnbindRequest struct {
@@ -104,7 +105,8 @@ func handleDingTalkClaweeStart(opts Options, cookies authCookieConfig) gin.Handl
 		if err := opts.AccountService.SaveOAuthLoginState(c.Request.Context(), accounts.OAuthLoginState{
 			StateHash: hashOAuthState(state), ProviderType: dingtalkProviderType, ProviderKey: config.ProviderKey,
 			Intent: intentClaweeLogin, RedirectTo: redirectURI, AgentID: agentID, PKCEChallenge: challenge,
-			CreatedAt: now, ExpiresAt: now.Add(config.StateTTL),
+			AccountScopedAgent: c.Query("account_scoped_agent") == "true",
+			CreatedAt:          now, ExpiresAt: now.Add(config.StateTTL),
 		}); err != nil {
 			dingtalkJSONError(c, http.StatusInternalServerError, "internal_error", "登录失败，请稍后重试")
 			return
@@ -310,7 +312,8 @@ func handleDingTalkClaweeCallback(c *gin.Context, opts Options, state accounts.O
 	}
 	if err := opts.AccountService.SaveOAuthAuthorizationCode(c.Request.Context(), accounts.OAuthAuthorizationCode{
 		CodeHash: hashOAuthState(code), UserID: account.UserID, AgentID: state.AgentID,
-		RedirectURI: state.RedirectTo, PKCEChallenge: state.PKCEChallenge,
+		AccountScopedAgent: state.AccountScopedAgent,
+		RedirectURI:        state.RedirectTo, PKCEChallenge: state.PKCEChallenge,
 		CreatedAt: now, ExpiresAt: now.Add(authorizationCodeTTL),
 	}); err != nil {
 		rejectTrustedDingTalkLogin(c, opts, state, rawState, "internal_error", providerSubject)
@@ -368,6 +371,17 @@ func handleDingTalkClaweeToken(opts Options) gin.HandlerFunc {
 		if account.Status != accounts.StatusActive {
 			rejectDingTalkClaweeToken(c, opts, http.StatusForbidden, "account_disabled", "账户不可用", account.UserID, agentID)
 			return
+		}
+		if req.AccountScopedAgent != code.AccountScopedAgent {
+			rejectDingTalkClaweeToken(c, opts, http.StatusBadRequest, "invalid_grant", "授权请求无效或已失效", account.UserID, agentID)
+			return
+		}
+		if code.AccountScopedAgent {
+			agentID, err = accountScopedAgentID(c.Request.Context(), opts.AccountService, account.UserID, agentID)
+			if err != nil {
+				rejectDingTalkClaweeToken(c, opts, http.StatusInternalServerError, "internal_error", "认证服务错误", account.UserID, agentID)
+				return
+			}
 		}
 		result, err := issueClaweeSession(c.Request.Context(), opts.AccountService, opts.AgentProvisioningService, account, agentID)
 		if err != nil {

@@ -94,6 +94,16 @@ describe('enterprise agent identity store', () => {
     expect(readEnterpriseClientConfig(configPath).agentId).toBe(firstAgentId);
   });
 
+  it('ignores a previous account mapping without replacing the installation ID', async () => {
+    const dataDir = createTempDirectory();
+    const configPath = writeConfig(dataDir);
+    const store = createEnterpriseAgentIdentityStore({ configPath, generateId: () => firstAgentId });
+    await store.getOrCreate();
+    writeFileSync(join(dataDir, 'enterprise-agent-accounts.json'), '{invalid');
+
+    const restored = createEnterpriseAgentIdentityStore({ configPath });
+    await expect(restored.getOrCreate()).resolves.toBe(firstAgentId);
+  });
 });
 
 function createTempDirectory(): string {

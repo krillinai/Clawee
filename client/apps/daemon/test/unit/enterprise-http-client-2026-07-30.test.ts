@@ -192,7 +192,8 @@ describe('enterprise HTTP client', () => {
         name: 'User',
         password: 'password-123',
         client_id: 'clawee-agent',
-        agent_id: AGENT_ID
+        agent_id: AGENT_ID,
+        account_scoped_agent: true
       });
       return new Response(JSON.stringify({
         data: {
@@ -236,7 +237,8 @@ describe('enterprise HTTP client', () => {
         email: 'user@example.com',
         password: 'password-123',
         client_id: 'clawee-agent',
-        agent_id: AGENT_ID
+        agent_id: AGENT_ID,
+        account_scoped_agent: true
       });
       return jsonResponse({
         data: {
@@ -398,7 +400,8 @@ describe('enterprise HTTP client', () => {
       redirect_uri: redirectUri,
       code_challenge: challenge,
       code_challenge_method: 'S256',
-      state
+      state,
+      account_scoped_agent: 'true'
     });
   });
 
@@ -431,6 +434,7 @@ describe('enterprise HTTP client', () => {
         grant_type: 'authorization_code',
         client_id: 'clawee-agent',
         agent_id: AGENT_ID,
+        account_scoped_agent: true,
         code: 'a'.repeat(43),
         redirect_uri: 'http://127.0.0.1:49152/enterprise/dingtalk/callback',
         code_verifier: 'v'.repeat(43)
@@ -520,12 +524,13 @@ describe('enterprise HTTP client', () => {
 
     expect(fetch.mock.calls.map(call => String(call[0]))).toEqual([
       `${ORIGIN}/api/v1/auth/qr-login`,
-      `${ORIGIN}/api/v1/auth/qr-login/qr_1?agent_id=${encodeURIComponent(AGENT_ID)}`
+      `${ORIGIN}/api/v1/auth/qr-login/qr_1?agent_id=${encodeURIComponent(AGENT_ID)}&account_scoped_agent=true`
     ]);
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
       provider: 'feishu',
       client_id: 'clawee-agent',
-      agent_id: AGENT_ID
+      agent_id: AGENT_ID,
+      account_scoped_agent: true
     });
   });
 

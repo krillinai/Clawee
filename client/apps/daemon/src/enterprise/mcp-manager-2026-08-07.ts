@@ -11,9 +11,6 @@ import type { McpManager } from '../codex/mcp/manager.js';
 import { MCP_TOOL_TIMEOUT_SEC } from '../task-mcp/constants.js';
 import type { RuntimeThread } from '../threads/types.js';
 import type {
-  EnterpriseAgentIdentityStore
-} from './agent-identity-2026-08-02.js';
-import type {
   EnterpriseAccountMcpToken,
   EnterpriseHttpClient,
   EnterpriseRemoteMcpCatalog
@@ -41,7 +38,7 @@ export type EnterpriseMcpManager = {
     thread: RuntimeThread;
     createdBy: 'api' | 'schedule';
   }): Promise<AgentToolRunInjection | undefined>;
-  handleSessionAuthenticated(): void;
+  handleSessionAuthenticated(): Promise<void>;
   handleSessionSignedOut(): Promise<void>;
 };
 
@@ -69,7 +66,6 @@ type TokenRefreshResult = {
 
 export function createEnterpriseMcpManager(input: {
   enterpriseOrigin?: string;
-  agentIdentityStore: EnterpriseAgentIdentityStore;
   sessionManager: EnterpriseSessionManager;
   httpClient: EnterpriseHttpClient;
   mcpManager: Pick<
@@ -98,9 +94,11 @@ export function createEnterpriseMcpManager(input: {
   let tokenSynchronizationRequired = false;
 
   async function refreshRemote(forceNativeRefresh = false): Promise<CatalogCache> {
+    if (sessionSignOutWork !== undefined) await sessionSignOutWork;
     refreshWork ??= (async () => {
       const accessToken = await input.sessionManager.requireAccessToken();
-      const agentId = await input.agentIdentityStore.getOrCreate();
+      const agentId = input.sessionManager.getSnapshot().agentId;
+      if (agentId === undefined) throw new EnterpriseMcpManagerError('ENTERPRISE_UNAUTHORIZED', 401);
       const previousCatalog = cache?.catalog;
       try {
         const catalog = await input.httpClient.getMcpCatalog(accessToken);
@@ -127,7 +125,7 @@ export function createEnterpriseMcpManager(input: {
         }
         return next;
       } catch (error) {
-        await handleRemoteFailure(error);
+        await handleRemoteFailure(error, accessToken);
         throw mapManagerError(error);
       }
     })().finally(() => {
@@ -205,7 +203,8 @@ export function createEnterpriseMcpManager(input: {
   }
 
   async function currentCache(): Promise<CatalogCache> {
-    return cache ?? refreshRemote();
+    if (cache !== undefined && cache.agentId === input.sessionManager.getSnapshot().agentId) return cache;
+    return refreshRemote();
   }
 
   async function responseFrom(current: CatalogCache) {
@@ -417,7 +416,7 @@ export function createEnterpriseMcpManager(input: {
   }
 
   async function ensureRuntimeToken(current: CatalogCache): Promise<void> {
-    const agentId = await input.agentIdentityStore.getOrCreate();
+    const agentId = current.agentId;
     const token = currentToken;
     if (
       token !== undefined
@@ -451,8 +450,9 @@ export function createEnterpriseMcpManager(input: {
       }
       return;
     }
+    let accessToken: string | undefined;
     try {
-      const accessToken = await input.sessionManager.requireAccessToken();
+      accessToken = await input.sessionManager.requireAccessToken();
       const refresh = await refreshToken(
         accessToken,
         agentId,
@@ -471,16 +471,20 @@ export function createEnterpriseMcpManager(input: {
         );
       }
     } catch (error) {
-      await handleRemoteFailure(error);
+      await handleRemoteFailure(error, accessToken);
       throw mapManagerError(error);
     }
   }
 
-  async function handleRemoteFailure(error: unknown): Promise<void> {
+  async function handleRemoteFailure(error: unknown, accessToken?: string): Promise<void> {
     if (
       !(error instanceof EnterpriseHttpError)
       || error.code !== 'ENTERPRISE_UNAUTHORIZED'
     ) {
+      return;
+    }
+    if (accessToken !== undefined
+      && await input.sessionManager.requireAccessToken().catch(() => undefined) !== accessToken) {
       return;
     }
     const previousCatalog = cache?.catalog;
@@ -651,15 +655,24 @@ export function createEnterpriseMcpManager(input: {
       await ensureRuntimeToken(current);
       return undefined;
     },
-    handleSessionAuthenticated() {
+    async handleSessionAuthenticated() {
+      const signedOutCleanupPending = sessionSignOutWork !== undefined;
+      await sessionSignOutWork;
+      await refreshWork?.catch(() => undefined);
+      const previousCatalog = cache?.catalog;
+      const agentId = input.sessionManager.getSnapshot().agentId;
+      if (currentAgentId !== undefined && currentAgentId !== agentId && !signedOutCleanupPending) {
+        await clearManagedBearerTokens(previousCatalog);
+        currentToken = undefined;
+        currentAgentId = undefined;
+      }
       cache = undefined;
-      currentToken = undefined;
-      currentAgentId = undefined;
       tokenSynchronizationRequired = false;
       input.onRuntimeConfigurationChanged?.('enterprise_session_changed');
     },
     async handleSessionSignedOut() {
       sessionSignOutWork ??= (async () => {
+        await refreshWork?.catch(() => undefined);
         const previousCatalog = cache?.catalog;
         const hadCachedConfiguration = cache !== undefined;
         const hadToken = currentToken !== undefined;

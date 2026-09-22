@@ -420,10 +420,10 @@ func (s *PostgresStore) SaveOAuthLoginState(ctx context.Context, state OAuthLogi
 	}
 	_, err := runner.Exec(ctx, `
 		INSERT INTO oauth_login_states (
-			state_hash, provider_type, provider_key, intent, redirect_to, bind_user_id, agent_id, pkce_challenge, created_at, expires_at
-		) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9, $10)
+			state_hash, provider_type, provider_key, intent, redirect_to, bind_user_id, agent_id, pkce_challenge, created_at, expires_at, account_scoped_agent
+		) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9, $10, $11)
 	`, state.StateHash, state.ProviderType, state.ProviderKey, state.Intent, state.RedirectTo, state.BindUserID,
-		state.AgentID, state.PKCEChallenge, state.CreatedAt, state.ExpiresAt)
+		state.AgentID, state.PKCEChallenge, state.CreatedAt, state.ExpiresAt, state.AccountScopedAgent)
 	return err
 }
 
@@ -437,9 +437,9 @@ func (s *PostgresStore) ConsumeOAuthLoginState(ctx context.Context, stateHash st
 		DELETE FROM oauth_login_states
 		WHERE state_hash = $1 AND expires_at > $2
 		RETURNING state_hash, provider_type, provider_key, intent, redirect_to, COALESCE(bind_user_id, ''),
-			COALESCE(agent_id, ''), COALESCE(pkce_challenge, ''), created_at, expires_at
+			COALESCE(agent_id, ''), COALESCE(pkce_challenge, ''), created_at, expires_at, account_scoped_agent
 	`, stateHash, now).Scan(&state.StateHash, &state.ProviderType, &state.ProviderKey, &state.Intent, &state.RedirectTo,
-		&state.BindUserID, &state.AgentID, &state.PKCEChallenge, &state.CreatedAt, &state.ExpiresAt)
+		&state.BindUserID, &state.AgentID, &state.PKCEChallenge, &state.CreatedAt, &state.ExpiresAt, &state.AccountScopedAgent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OAuthLoginState{}, ErrOAuthLoginStateNotFound
 	}
@@ -462,9 +462,9 @@ func (s *PostgresStore) SaveOAuthAuthorizationCode(ctx context.Context, code OAu
 	}
 	_, err := runner.Exec(ctx, `
 		INSERT INTO oauth_authorization_codes (
-			code_hash, user_id, agent_id, redirect_uri, pkce_challenge, created_at, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, code.CodeHash, code.UserID, code.AgentID, code.RedirectURI, code.PKCEChallenge, code.CreatedAt, code.ExpiresAt)
+			code_hash, user_id, agent_id, redirect_uri, pkce_challenge, created_at, expires_at, account_scoped_agent
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, code.CodeHash, code.UserID, code.AgentID, code.RedirectURI, code.PKCEChallenge, code.CreatedAt, code.ExpiresAt, code.AccountScopedAgent)
 	return err
 }
 
@@ -481,9 +481,9 @@ func (s *PostgresStore) ConsumeOAuthAuthorizationCode(ctx context.Context, req O
 		  AND redirect_uri = $3
 		  AND pkce_challenge = $4
 		  AND expires_at > $5
-		RETURNING code_hash, user_id, agent_id, redirect_uri, pkce_challenge, created_at, expires_at
+		RETURNING code_hash, user_id, agent_id, redirect_uri, pkce_challenge, created_at, expires_at, account_scoped_agent
 	`, req.CodeHash, req.AgentID, req.RedirectURI, req.PKCEChallenge, req.Now).Scan(
-		&code.CodeHash, &code.UserID, &code.AgentID, &code.RedirectURI, &code.PKCEChallenge, &code.CreatedAt, &code.ExpiresAt,
+		&code.CodeHash, &code.UserID, &code.AgentID, &code.RedirectURI, &code.PKCEChallenge, &code.CreatedAt, &code.ExpiresAt, &code.AccountScopedAgent,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OAuthAuthorizationCode{}, ErrOAuthAuthorizationCodeNotFound

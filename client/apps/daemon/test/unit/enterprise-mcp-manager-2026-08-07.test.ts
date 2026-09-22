@@ -410,7 +410,86 @@ describe('enterprise MCP manager', () => {
     );
   });
 
-  it('refreshes the Agent header when the local identity changes', async () => {
+  it('clears a delayed old token before refreshing the next account', async () => {
+    let releaseOldToken!: (token: ReturnType<typeof accountMcpToken>) => void;
+    const oldToken = new Promise<ReturnType<typeof accountMcpToken>>(resolve => {
+      releaseOldToken = resolve;
+    });
+    const fixture = createFixture({
+      nativeServers: [nativeServer({ name: nativeName, url: endpoint })],
+      revealAccountMcpToken: vi.fn()
+        .mockImplementationOnce(async () => oldToken)
+        .mockResolvedValue({ ...accountMcpToken(), token: 'next-account-secret' })
+    });
+    const oldRefresh = fixture.manager.refreshConnections();
+    await vi.waitFor(() => expect(fixture.revealAccountMcpToken).toHaveBeenCalledTimes(1));
+    vi.mocked(fixture.sessionManager.getSnapshot).mockReturnValue({
+      status: 'signed_out', agentId, transportSecurity: 'secure_https'
+    });
+    const signOut = fixture.manager.handleSessionSignedOut();
+    vi.mocked(fixture.sessionManager.getSnapshot).mockReturnValue({
+      status: 'signed_in', agentId: 'clawee_next',
+      account: { subjectId: 'usr_next', email: 'next@example.com', name: 'Next' },
+      transportSecurity: 'secure_https'
+    });
+    vi.mocked(fixture.sessionManager.requireAccessToken).mockResolvedValue('next-session-token');
+    const signedIn = fixture.manager.handleSessionAuthenticated();
+    const nextRefresh = fixture.manager.refreshConnections();
+    releaseOldToken(accountMcpToken());
+    await Promise.all([oldRefresh, signOut, signedIn, nextRefresh]);
+
+    expect(fixture.mcpManager.clearServerBearerTokens).toHaveBeenCalledOnce();
+    expect(fixture.mcpManager.setServerBearerToken).toHaveBeenLastCalledWith(
+      nativeName, 'next-account-secret', 'clawee_next', true
+    );
+  });
+
+  it('does not invalidate a new session when an old catalog request returns 401', async () => {
+    let rejectOldCatalog!: (error: Error) => void;
+    const oldCatalog = new Promise<never>((_resolve, reject) => { rejectOldCatalog = reject; });
+    const fixture = createFixture();
+    const client = fixture.manager;
+    const oldRequest = vi.mocked(fixture.getMcpCatalog).mockImplementationOnce(async () => oldCatalog);
+    const refresh = client.refreshConnections();
+    await vi.waitFor(() => expect(oldRequest).toHaveBeenCalledOnce());
+    vi.mocked(fixture.sessionManager.getSnapshot).mockReturnValue({
+      status: 'signed_in', agentId: 'clawee_next',
+      account: { subjectId: 'usr_next', email: 'next@example.com', name: 'Next' },
+      transportSecurity: 'secure_https'
+    });
+    vi.mocked(fixture.sessionManager.requireAccessToken).mockResolvedValue('next-session-token');
+    const signedIn = client.handleSessionAuthenticated();
+    rejectOldCatalog(new EnterpriseHttpError('ENTERPRISE_UNAUTHORIZED', 'response', 401, 'unauthorized'));
+    await expect(refresh).rejects.toMatchObject({ code: 'ENTERPRISE_UNAUTHORIZED' });
+    await signedIn;
+    expect(fixture.sessionManager.invalidateUnauthorized).not.toHaveBeenCalled();
+    expect(fixture.sessionManager.getSnapshot().status).toBe('signed_in');
+  });
+
+  it('clears the previous account token on direct account switching', async () => {
+    const fixture = createFixture({
+      nativeServers: [nativeServer({ name: nativeName, url: endpoint })]
+    });
+    await fixture.manager.listConnections();
+    vi.mocked(fixture.sessionManager.getSnapshot).mockReturnValue({
+      status: 'signed_in', agentId: 'clawee_next',
+      account: { subjectId: 'usr_next', email: 'next@example.com', name: 'Next' },
+      transportSecurity: 'secure_https'
+    });
+    await fixture.manager.handleSessionAuthenticated();
+    expect(fixture.mcpManager.clearServerBearerTokens).toHaveBeenCalledOnce();
+    expect(fixture.mcpManager.setServerBearerToken).toHaveBeenLastCalledWith(
+      nativeName, 'agent-mcp-secret', agentId, true
+    );
+  });
+
+  it('does not require an MCP runtime for initial authentication', async () => {
+    const fixture = createFixture({ runtimeAvailable: false });
+    await expect(fixture.manager.handleSessionAuthenticated()).resolves.toBeUndefined();
+    expect(fixture.mcpManager.clearServerBearerTokens).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the Agent header when the signed-in identity changes', async () => {
     const fixture = createFixture({
       nativeServers: [nativeServer({
         name: nativeName,
@@ -420,7 +499,12 @@ describe('enterprise MCP manager', () => {
     });
     await fixture.manager.listConnections();
     fixture.onRuntimeConfigurationChanged.mockClear();
-    fixture.agentIdentityStore.getOrCreate.mockResolvedValue('clawee_replaced');
+    vi.mocked(fixture.sessionManager.getSnapshot).mockReturnValue({
+      status: 'signed_in',
+      agentId: 'clawee_replaced',
+      account: { subjectId: 'usr_2', email: 'other@example.com', name: 'Other' },
+      transportSecurity: 'secure_https'
+    });
 
     await fixture.manager.prepareRuntime({
       runId: 'run_2',
@@ -542,6 +626,7 @@ function createFixture(options: {
   const sessionManager = {
     getSnapshot: vi.fn(() => ({
       status: 'signed_in' as const,
+      agentId,
       account: { email: 'member@example.com', name: 'Member' },
       transportSecurity: 'secure_https' as const
     })),
@@ -669,12 +754,8 @@ function createFixture(options: {
       return existed;
     })
   } as unknown as EnterpriseMcpPreferenceRepository;
-  const agentIdentityStore = {
-    getOrCreate: vi.fn(async () => agentId)
-  };
   const manager = createEnterpriseMcpManager({
     enterpriseOrigin: 'https://enterprise.example',
-    agentIdentityStore,
     sessionManager,
     httpClient: {
       getMcpCatalog,
@@ -690,7 +771,8 @@ function createFixture(options: {
     mcpManager,
     legacyPreferences,
     onRuntimeConfigurationChanged,
-    agentIdentityStore,
+    sessionManager,
+    getMcpCatalog,
     revealAccountMcpToken
   };
 }

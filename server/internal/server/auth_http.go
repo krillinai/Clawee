@@ -31,11 +31,12 @@ var (
 )
 
 type authRequest struct {
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Password string `json:"password"`
-	ClientID string `json:"client_id"`
-	AgentID  string `json:"agent_id"`
+	Email              string `json:"email"`
+	Name               string `json:"name"`
+	Password           string `json:"password"`
+	ClientID           string `json:"client_id"`
+	AgentID            string `json:"agent_id"`
+	AccountScopedAgent bool   `json:"account_scoped_agent"`
 }
 
 type authCookieConfig struct {
@@ -80,6 +81,13 @@ func handleRegister(accountSvc *accounts.Service, rbacSvc *rbac.Service, provisi
 			bootstrapped = true
 		}
 		if clientID == accounts.ClientClaweeAgent {
+			if req.AccountScopedAgent {
+				req.AgentID, err = accountScopedAgentID(c.Request.Context(), accountSvc, result.Account.UserID, req.AgentID)
+				if err != nil {
+					authRegistrationError(c, err, rollbackRegistration(c.Request.Context(), accountSvc, rbacSvc, result, bootstrapped))
+					return
+				}
+			}
 			if provisioner == nil {
 				authRegistrationError(c, errAgentProvisioningServiceUnavailable, rollbackRegistration(c.Request.Context(), accountSvc, rbacSvc, result, bootstrapped))
 				return
@@ -160,6 +168,13 @@ func handleLogin(accountSvc *accounts.Service, rbacSvc *rbac.Service, provisione
 			return
 		}
 		if clientID == accounts.ClientClaweeAgent {
+			if req.AccountScopedAgent {
+				req.AgentID, err = accountScopedAgentID(c.Request.Context(), accountSvc, account.UserID, req.AgentID)
+				if err != nil {
+					authError(c, err)
+					return
+				}
+			}
 			result, err := issueClaweeSession(c.Request.Context(), accountSvc, provisioner, account, req.AgentID)
 			if err != nil {
 				authError(c, err)
