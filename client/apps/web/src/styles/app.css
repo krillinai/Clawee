@@ -1067,6 +1067,39 @@ select:focus-visible {
   font: 500 12px/1.4 var(--font-mono);
 }
 
+.timeline-workflow_start .timeline-avatar,
+.timeline-workflow_status .timeline-avatar {
+  color: var(--accent);
+}
+
+.timeline-workflow_start .timeline-bubble,
+.timeline-workflow_status .timeline-bubble {
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  background: var(--surface-2);
+}
+
+.timeline-workflow-content {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-workflow-content small,
+.timeline-workflow-input span {
+  color: var(--muted);
+}
+
+.timeline-workflow-input pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 4px 0 0;
+  font: inherit;
+}
+
+.timeline-workflow-status {
+  margin: 0;
+}
+
 .timeline-message-attachments {
   width: min(360px, 100%);
   min-width: 0;
@@ -3598,6 +3631,14 @@ html.is-pane-resizing * {
   font-size: 14px;
   line-height: 22px;
 }
+
+.composer-workflow-draft { display: grid; gap: 7px; min-width: 0; padding: 4px 16px 10px; font-size: 12px; color: var(--muted); }
+.composer-workflow-draft details { min-width: 0; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.composer-workflow-draft summary { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.composer-workflow-draft summary > span:first-child { flex: none; color: var(--text); }
+.composer-workflow-summary { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer-workflow-draft pre { max-height: 180px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: inherit; }
+.composer-workflow-draft label { color: var(--text); }
 
 .conversation-page.is-empty .clawee-composer textarea {
   min-height: 72px;

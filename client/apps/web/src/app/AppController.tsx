@@ -496,6 +496,10 @@ export function AppController(props: AppControllerProps) {
   const [pendingComposerDraft, setPendingComposerDraft] = useState<
     { threadId: string; request: ComposerDraftRequest } | undefined
   >();
+  const [workflowDraft, setWorkflowDraft] = useState<{
+    taskId: string; threadId: string; instruction: string; input: string; firstNode: boolean;
+  }>();
+  useEffect(() => { setWorkflowDraft(undefined); }, [enterpriseSession.account?.subjectId]);
   const [pendingComposerSkill, setPendingComposerSkill] = useState<{
     projectId: string | undefined;
     threadId: string | undefined;
@@ -2505,6 +2509,47 @@ export function AppController(props: AppControllerProps) {
     threadHistory.threadId
   ]);
 
+  const workflowPendingRunIds = timelineItems.filter(item => item.kind === 'workflow_start'
+    && !timelineItems.some(status =>
+      status.kind === 'workflow_status' && status.runId === item.runId
+      && ['completed', 'failed', 'sync_failed', 'conflict'].includes(status.status)
+    )).map(item => item.runId).join(',');
+  useEffect(() => {
+    const threadId = state.selectedThreadId;
+    const starts = timelineItemsRef.current.filter(item => item.kind === 'workflow_start');
+    const active = starts.filter(start => !timelineItemsRef.current.some(item =>
+      item.kind === 'workflow_status' && item.runId === start.runId
+      && ['completed', 'failed', 'sync_failed', 'conflict'].includes(item.status)
+    ));
+    if (!threadId || !workflowService || connectionState.status !== 'connected' || active.length === 0) return;
+    let canceled = false;
+    const check = async () => {
+      for (const start of active) {
+        try {
+          const result = await workflowService.execution(start.taskId);
+          if (canceled || selectedThreadIdRef.current !== threadId || result.runId !== start.runId) continue;
+          const status = result.status === 'pending'
+            ? result.runStatus === 'succeeded' ? 'syncing'
+              : ['failed', 'canceled', 'orphaned'].includes(result.runStatus ?? '') ? 'failed' : undefined
+            : result.status === 'failed' && result.runStatus === 'succeeded' ? 'sync_failed' : result.status;
+          if (!status || status === 'idle') continue;
+          updateTimelineItemsForThread(threadId, items => {
+            const id = `workflow-status:${start.runId}`;
+            const previous = items.find(item => item.id === id);
+            if (previous?.kind === 'workflow_status' && previous.status === status) return items;
+            return [...items.filter(item => item.id !== id), {
+              kind: 'workflow_status', id, runId: start.runId,
+              taskId: start.taskId, status, timestamp: new Date().toISOString(), source: 'runtime'
+            }];
+          });
+        } catch { /* Keep the last confirmed status until the next poll. */ }
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 3000);
+    return () => { canceled = true; window.clearInterval(timer); };
+  }, [state.selectedThreadId, workflowPendingRunIds, workflowService, connectionState.status]);
+
   useEffect(() => {
     let canceled = false;
     const controller = new AbortController();
@@ -3257,6 +3302,30 @@ export function AppController(props: AppControllerProps) {
     attachments: ComposerAttachment[] = [],
     submissionMode?: RunSubmissionMode
   ): Promise<boolean> {
+    if (workflowDraft !== undefined && workflowDraft.threadId === state.selectedThreadId) {
+      const draft = workflowDraft;
+      if (!workflowService || !currentProject || attachments.length > 0 || submissionMode) return false;
+      try {
+        const result = await workflowService.execute(draft.taskId, currentProject.id, draft.threadId, prompt, config?.model, config?.reasoning);
+        setWorkflowDraft(undefined);
+        setThreadHistoryReloadKey(previous => previous + 1);
+        if (result.runId && runService && connectionConfigRef.current) {
+          void runService.getRun(result.runId).then(run => {
+            handleRunStarted(run);
+            const connection = connectionConfigRef.current;
+            if (connection) subscribeToRunEvents(run.id, draft.threadId, connection);
+          }).catch(() => void refreshThreadRunState(draft.threadId));
+        }
+        return true;
+      } catch (error) {
+        appendTimelineItemsForThread(draft.threadId, [{
+          kind: 'diagnostic', id: createTimelineId('workflow_error'), severity: 'error',
+          message: getRuntimeErrorMessage(error, '发起任务失败，请重试'),
+          content: getRuntimeErrorMessage(error, '发起任务失败，请重试'), source: 'runtime'
+        }]);
+        return false;
+      }
+    }
     if (
       connectionState.status === 'connected'
       && runService !== null
@@ -6073,7 +6142,7 @@ export function AppController(props: AppControllerProps) {
           projectId={currentProject?.id ?? ''}
           projectName={currentProjectName}
           projects={projects}
-          showProjectSelector={shouldShowComposerProjectSelector({
+          showProjectSelector={workflowDraft?.threadId === state.selectedThreadId ? false : shouldShowComposerProjectSelector({
             conversationEmpty: conversationConfirmedEmpty,
             threadPurpose: selectedThread?.purpose
           })}
@@ -6089,7 +6158,7 @@ export function AppController(props: AppControllerProps) {
           disabledReason={composerDisabledReason}
           running={currentRunBusy}
           canceling={currentRunCanceling}
-          permissionChangeDisabled={selectedThread !== undefined && currentRunBusy}
+          permissionChangeDisabled={workflowDraft?.threadId === state.selectedThreadId || selectedThread !== undefined && currentRunBusy}
           modelChangeDisabled={currentRunBusy}
           slashCommands={slashCommands}
           slashCommandsLoading={capabilitiesLoading}
@@ -6137,6 +6206,7 @@ export function AppController(props: AppControllerProps) {
           onPermissionChange={handleComposerPermissionChange}
           onModelConfigChange={handleComposerModelConfigChange}
           initialPrompt={composerPromptByScope[composerAttachmentScope] ?? ''}
+          workflowDraft={workflowDraft?.threadId === state.selectedThreadId ? workflowDraft : undefined}
           onPromptChange={handleComposerPromptChange}
           onDraftApplied={handleComposerDraftApplied}
           onSkillApplied={handleComposerSkillApplied}
@@ -6146,7 +6216,7 @@ export function AppController(props: AppControllerProps) {
           onCancel={() => void cancelActiveRun()}
           onCancelQueuedRun={(runId) => void cancelQueuedRun(runId)}
           onSteerQueuedRun={(runId) => void steerQueuedRun(runId)}
-          onUploadAttachment={async file => {
+          onUploadAttachment={workflowDraft?.threadId === state.selectedThreadId ? undefined : async file => {
             if (attachmentService === null) throw new Error('附件服务暂不可用');
             const response = await attachmentService.upload({
               file,
@@ -6154,7 +6224,7 @@ export function AppController(props: AppControllerProps) {
             });
             return response.attachment;
           }}
-          onDeleteAttachment={async attachment => {
+          onDeleteAttachment={workflowDraft?.threadId === state.selectedThreadId ? undefined : async attachment => {
             if (attachmentService === null || attachment.draftId === undefined) return;
             await attachmentService.delete({
               id: attachment.id,
@@ -6342,11 +6412,15 @@ export function AppController(props: AppControllerProps) {
       online={connectionState.status === 'connected'}
       userId={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined}
       projectId={currentProject?.id}
-      onExecutionStarted={threadId => {
+      onTaskPrepared={(taskId, draft) => {
+        setWorkflowDraft({ taskId, threadId: draft.threadId, instruction: draft.instruction, input: draft.input, firstNode: draft.firstNode });
+        nextComposerDraftIdRef.current += 1;
+        setPendingComposerDraft({ threadId: draft.threadId, request: { id: nextComposerDraftIdRef.current, text: draft.customInput } });
+        selectConversation(draft.threadId);
         if (threadService === null) return;
-        void threadService.getThread(threadId).then(response => {
+        void threadService.getThread(draft.threadId).then(response => {
           setRuntimeThreads(previous => upsertThread(previous, response.thread));
-          void refreshThreadRunState(threadId);
+          void refreshThreadRunState(draft.threadId);
         }).catch(() => undefined);
       }}
     />
@@ -7822,6 +7896,19 @@ function mapHistoryItemToTimelineItem(item: ThreadHistoryItem, fallbackRunId?: s
   };
 
   switch (item.type) {
+    case 'workflow_start':
+      return {
+        ...base, kind: 'workflow_start', runId: item.runId, taskId: item.taskId,
+        instanceId: item.instanceId, workflowName: item.workflowName,
+        nodeTitle: item.nodeTitle, nodeOrder: item.nodeOrder,
+        instruction: item.instruction, input: item.input,
+        customInput: item.customInput, source: 'runtime'
+      };
+    case 'workflow_status':
+      return {
+        ...base, kind: 'workflow_status', runId: item.runId, taskId: item.taskId,
+        status: item.status, source: 'runtime'
+      };
     case 'user_message':
       return {
         ...base,

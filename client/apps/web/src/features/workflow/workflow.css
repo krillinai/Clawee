@@ -22,12 +22,21 @@
 .workflow-steps li { display: flex; gap: 14px; padding-bottom: 24px; }
 .workflow-steps li > div { flex: 1; min-width: 0; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
 .workflow-index { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border: 1px solid var(--border); border-radius: 50%; font-size: 12px; }
+.workflow-step-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.workflow-step-status { font-size: 11px; font-weight: 600; }
+.workflow-steps li[data-state='upcoming'] { color: var(--muted); }
+.workflow-steps li[data-state='upcoming'] .workflow-index { background: var(--surface); }
+.workflow-steps li[data-state='completed'] .workflow-index { border-color: var(--success); color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--bg)); }
+.workflow-steps li[data-state='completed'] .workflow-step-status { color: var(--success); }
+.workflow-steps li[data-state='stopped'] .workflow-index, .workflow-steps li[data-state='stopped'] .workflow-step-status { border-color: var(--danger); color: var(--danger); }
+.workflow-steps li[data-state='current'] .workflow-index { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.workflow-steps li[data-state='current'] .workflow-step-status { color: var(--accent-strong); }
 .workflow-steps strong, .workflow-steps small { display: block; }
 .workflow-steps p { margin: 8px 0 0; font-size: 13px; overflow-wrap: anywhere; }
 .workflow-data { display: grid; gap: 5px; margin-top: 15px; font-size: 12px; }
 .workflow-data span { color: var(--muted); }
 .workflow-data pre { margin: 0 0 8px; padding: 9px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
-.workflow-actions { display: grid; gap: 12px; max-width: 520px; padding-top: 14px; border-top: 1px solid var(--border); }
+.workflow-actions { display: grid; gap: 12px; max-width: 520px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 .workflow-actions label { display: grid; gap: 8px; font-size: 13px; }
 .workflow-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: fit-content; margin-right: 8px; padding: 8px 15px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
 .workflow-actions button:disabled { opacity: .5; cursor: not-allowed; }

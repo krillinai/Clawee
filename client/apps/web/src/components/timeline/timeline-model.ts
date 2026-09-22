@@ -8,6 +8,15 @@ import type {
 
 export type TimelineItem =
   | {
+      kind: 'workflow_start'; id: string; runId: string; taskId: string;
+      instanceId: string; workflowName: string; nodeTitle: string; nodeOrder: number;
+      instruction: string; input: string; customInput?: string; timestamp: string; source: 'runtime';
+    }
+  | {
+      kind: 'workflow_status'; id: string; runId: string; taskId: string;
+      status: string; timestamp: string; source: 'runtime';
+    }
+  | {
       kind: 'user_message';
       id: string;
       timestamp?: string;

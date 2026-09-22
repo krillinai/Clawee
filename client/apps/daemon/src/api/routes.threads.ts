@@ -50,6 +50,7 @@ export async function registerThreadRoutes(
     profileValidator?: ProfileValidator;
     attachmentService?: AttachmentService;
     readThreadHistory?: ReadThreadHistory;
+    workflowHistoryItems?(runs: readonly RuntimeRun[]): ThreadHistoryItem[];
     onPerformanceEvent?(event: ThreadRoutePerformanceEvent): void;
   } = {}
 ): Promise<void> {
@@ -254,6 +255,14 @@ export async function registerThreadRoutes(
         historyRunIds,
         runId => runManager.listEvents!(runId)
       );
+    }
+    if (query.value.before === undefined) {
+      const workflowItems = options.workflowHistoryItems?.(eventRuns) ?? [];
+      items = [...items, ...workflowItems].sort((left, right) => {
+        const time = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+        if (time !== 0) return time;
+        return (left.type === 'workflow_start' ? -1 : 0) - (right.type === 'workflow_start' ? -1 : 0);
+      });
     }
     history = { ...history, items };
 

@@ -774,6 +774,11 @@ const MAX_SEARCH_BACKFILL_ITEM_JSON_LENGTH = MAX_SEARCHABLE_TEXT_LENGTH + 4_096;
 function searchContentForHistoryItem(item: ThreadHistoryItem): string | undefined {
   let value: string | undefined;
   switch (item.type) {
+    case 'workflow_start':
+      value = `${item.workflowName} ${item.nodeTitle} ${item.instruction} ${item.input} ${item.customInput ?? ''}`;
+      break;
+    case 'workflow_status':
+      return undefined;
     case 'user_message':
     case 'schedule_trigger':
     case 'assistant_message':

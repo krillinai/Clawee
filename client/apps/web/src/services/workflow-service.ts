@@ -16,7 +16,8 @@ export function createWorkflowService(client: Pick<RuntimeClient, 'get' | 'post'
     instance: (id: string) => client.get<{ data: Instance }>(`/enterprise/workflow-instances/${encodeURIComponent(id)}`),
     tasks: (cursor = '') => client.get<Page<Task>>(`/enterprise/workflow-tasks?cursor=${encodeURIComponent(cursor)}`),
     decide: (id: string, decision: 'approve' | 'reject', comment: string, idempotencyKey: string) => client.post<{ data: Result }>(`/enterprise/workflow-tasks/${encodeURIComponent(id)}/decision`, { decision, comment, idempotencyKey }),
-    execute: (id: string, projectId: string) => client.post<{ runId: string; threadId?: string; status: string }>(`/enterprise/workflow-tasks/${encodeURIComponent(id)}/execute`, { projectId }),
+    prepare: (id: string, projectId: string) => client.post<{ threadId: string; instruction: string; input: string; firstNode: boolean }>(`/enterprise/workflow-tasks/${encodeURIComponent(id)}/prepare`, { projectId }),
+    execute: (id: string, projectId: string, threadId: string, customInput: string, model?: string | null, reasoning?: string | null) => client.post<{ runId: string; threadId?: string; status: string }>(`/enterprise/workflow-tasks/${encodeURIComponent(id)}/execute`, { projectId, threadId, customInput, model, reasoning }),
     execution: (id: string) => client.get<{ status: string; runId?: string; runStatus?: string }>(`/enterprise/workflow-tasks/${encodeURIComponent(id)}/execution`),
     capability: () => client.get<{ canExecute: boolean }>('/enterprise/workflow-capability')
   };

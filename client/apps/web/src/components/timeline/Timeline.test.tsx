@@ -11,6 +11,25 @@ afterEach(() => {
 });
 
 describe('Timeline', () => {
+  it('shows workflow context and confirmed node synchronization separately', () => {
+    render(<Timeline items={[
+      {
+        kind: 'workflow_start', id: 'workflow-start:run-1', runId: 'run-1', taskId: 'task-1',
+        instanceId: 'instance-1', workflowName: '每日热点', nodeTitle: '热点整理',
+        nodeOrder: 0, instruction: '选出最值得读的三条新闻', input: '今天的 AI 新闻',
+        timestamp: '2026-09-22T00:00:00.000Z', source: 'runtime'
+      },
+      {
+        kind: 'workflow_status', id: 'workflow-status:run-1', runId: 'run-1', taskId: 'task-1',
+        status: 'completed', timestamp: '2026-09-22T00:01:00.000Z', source: 'runtime'
+      }
+    ]} />);
+    expect(screen.getByText('每日热点 · 热点整理')).toBeInTheDocument();
+    expect(screen.getByText('选出最值得读的三条新闻')).toBeInTheDocument();
+    expect(screen.getByText('今天的 AI 新闻')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('节点已完成');
+  });
+
   it('renders and targets a public schedule trigger without exposing execution rules', () => {
     const { container } = render(
       <Timeline

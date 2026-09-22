@@ -162,6 +162,7 @@ export function Composer(props: {
   onToggleConnector?(connectorId: string, enabled: boolean): Promise<ComposerConnector[]>;
   queuedItems?: ComposerQueuedItem[];
   draftRequest?: ComposerDraftRequest;
+  workflowDraft?: { instruction: string; input: string; firstNode: boolean };
   skillRequest?: ComposerSkillRequest;
   focusRequestId?: number;
   imageInputSupported?: boolean;
@@ -537,7 +538,7 @@ export function Composer(props: {
     !props.disabled
     && !submitting
     && !modelUpdating
-    && trimmedPrompt.length > 0
+    && (trimmedPrompt.length > 0 || props.workflowDraft !== undefined)
     && attachmentsSettled
     && attachmentsSupportedByModel;
   const showStopAction = props.running === true && !canSubmit;
@@ -1231,6 +1232,17 @@ export function Composer(props: {
         className={`composer-input-wrap${selectedSkillCommand === undefined ? '' : ' has-skill-chip'}`}
         data-composer-menu-root="slash"
       >
+        {props.workflowDraft && <div className="composer-workflow-draft">
+          <details>
+            <summary><span>节点任务预设描述</span><span className="composer-workflow-summary">{props.workflowDraft.instruction}</span></summary>
+            <pre>{props.workflowDraft.instruction}</pre>
+          </details>
+          {!props.workflowDraft.firstNode && props.workflowDraft.input && <details>
+            <summary><span>上一步输入</span><span className="composer-workflow-summary">{props.workflowDraft.input}</span></summary>
+            <pre>{props.workflowDraft.input}</pre>
+          </details>}
+          <label htmlFor="composer-workflow-input">任务要求</label>
+        </div>}
         {selectedSkillCommand ? (
           <span className="composer-skill-chip" aria-label={`已选择 Skill ${selectedSkillCommand.label}`}>
             <Sparkles aria-hidden="true" size={15} />
@@ -1239,7 +1251,8 @@ export function Composer(props: {
         ) : null}
         <textarea
           ref={textareaRef}
-          aria-label="输入任务"
+          aria-label={props.workflowDraft ? '任务要求' : '输入任务'}
+          id={props.workflowDraft ? 'composer-workflow-input' : undefined}
           aria-autocomplete="list"
           aria-controls={slashMenuOpen ? 'composer-slash-menu' : undefined}
           aria-activedescendant={slashMenuOpen && filteredSlashCommands.length > 0
@@ -1259,7 +1272,7 @@ export function Composer(props: {
           placeholder={
             props.disabled
               ? props.disabledReason ?? '当前对话不可用'
-              : hasComposerContent ? '' : '输入 / 调用插件'
+              : props.workflowDraft ? '补充本节点的任务要求' : hasComposerContent ? '' : '输入 / 调用插件'
           }
         />
         {slashMenuOpen ? (

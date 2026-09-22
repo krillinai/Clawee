@@ -203,6 +203,7 @@ import {
 } from './routes.enterprise-business-dashboard-2026-08-30.js';
 import { registerEnterprisePlatformBrandingRoutes } from './routes.enterprise-platform-branding.js';
 import { registerEnterpriseWorkflowRoutes } from './routes.enterprise-workflow.js';
+import { createWorkflowRunHistory } from '../enterprise/workflow-run-history.js';
 
 export type BuildServerInput = {
   token: string;
@@ -1045,9 +1046,13 @@ export async function buildServer(input: BuildServerInput) {
     provider: codexSessionProvider,
     threadManager
   });
+  const workflowRunHistory = createWorkflowRunHistory(db);
   await registerThreadRoutes(server, threadManager, runManager, {
     profileValidator: profileManager,
     attachmentService,
+    workflowHistoryItems: runs => workflowRunHistory.items(
+      runs, enterpriseSessionManager.getSnapshot().account?.subjectId
+    ),
     readThreadHistory(codexThreadId, options) {
       return codexSessionProvider.listTurns({
         codexThreadId,

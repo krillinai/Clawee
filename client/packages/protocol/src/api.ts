@@ -715,6 +715,30 @@ export type ThreadRunsResponse = {
 export type ThreadHistoryItem =
   | {
       id: string;
+      type: 'workflow_start';
+      runId: string;
+      taskId: string;
+      instanceId: string;
+      workflowName: string;
+      nodeTitle: string;
+      nodeOrder: number;
+      instruction: string;
+      input: string;
+      customInput?: string;
+      createdAt: string;
+      turnId?: string;
+    }
+  | {
+      id: string;
+      type: 'workflow_status';
+      runId: string;
+      taskId: string;
+      status: string;
+      createdAt: string;
+      turnId?: string;
+    }
+  | {
+      id: string;
       type: 'user_message';
       text: string;
       createdAt: string;

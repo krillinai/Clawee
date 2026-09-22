@@ -1,20 +1,21 @@
 import { ArrowRight, Play, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Instance, Node, Task, Template, WorkflowService } from '../../services/workflow-service.js';
 import './workflow.css';
 
 const labels: Record<string, string> = { running: '运行中', succeeded: '已完成', rejected: '已驳回', terminated: '已终止', pending: '待处理', completed: '已完成', cancelled: '已取消' };
+const executionLabels: Record<string, string> = { idle: 'Agent 任务尚未启动', pending: '已提交，等待状态更新', queued: '等待执行', running: 'Agent 正在执行', succeeded: '执行完成，正在同步结果', completed: '执行已完成', failed: '执行失败，可重试', canceled: '执行已取消', conflict: '任务状态已变化，请刷新' };
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败';
 const textValue = (value?: Record<string, unknown>) => typeof value?.text === 'string' ? value.text : '';
 type View = 'templates' | 'instances' | 'tasks';
 
-export function WorkflowPage({ service, signedIn, online, userId, projectId, onExecutionStarted }: {
+export function WorkflowPage({ service, signedIn, online, userId, projectId, onTaskPrepared }: {
   service: WorkflowService | null;
   signedIn: boolean;
   online: boolean;
   userId?: string;
   projectId?: string;
-  onExecutionStarted?(threadId: string): void;
+  onTaskPrepared?(taskId: string, draft: { threadId: string; instruction: string; input: string; firstNode: boolean; customInput: string }): void;
 }) {
   const [tab, setTab] = useState<View>('tasks');
   const [status, setStatus] = useState('running');
@@ -24,6 +25,7 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onE
   const [selected, setSelected] = useState<Instance | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [input, setInput] = useState('');
+  const [customInput, setCustomInput] = useState('');
   const [comment, setComment] = useState('');
   const [retryDecision, setRetryDecision] = useState<'approve' | 'reject' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,8 +89,10 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onE
   useEffect(() => {
     if (!template || !userId) return;
     const saved = sessionStorage.getItem(`workflow:start:${userId}:${template.id}:input`);
-    if (saved !== null) setInput(textValue(JSON.parse(saved) as Record<string, unknown>));
+    setInput(saved === null ? '' : textValue(JSON.parse(saved) as Record<string, unknown>));
   }, [template?.id, userId]);
+
+  useEffect(() => { setCustomInput(''); }, [selected?.id, selected?.current_node_id]);
 
   useEffect(() => {
     if (!selected || !userId) { setRetryDecision(null); return; }
@@ -124,7 +128,12 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onE
     const savedInput = sessionStorage.getItem(payloadName);
     sessionStorage.setItem(keyName, key);
     if (savedInput === null) sessionStorage.setItem(payloadName, JSON.stringify(initialInput));
-    try { const result = await service.start(template.id, savedInput ? JSON.parse(savedInput) as Record<string, unknown> : initialInput, key); sessionStorage.removeItem(keyName); sessionStorage.removeItem(payloadName); await refresh(); await openInstance(result.data.instance_id); setTab('instances'); }
+    try {
+      const result = await service.start(template.id, savedInput ? JSON.parse(savedInput) as Record<string, unknown> : initialInput, key);
+      sessionStorage.removeItem(keyName); sessionStorage.removeItem(payloadName);
+      await refresh(); await openInstance(result.data.instance_id); setTab('instances');
+      if (result.data.task_id && template.nodes[0]?.type === 'agent' && canExecute && projectId) await prepare(result.data.task_id, input);
+    }
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   async function decide(task: Task, decision: 'approve' | 'reject') {
@@ -139,10 +148,10 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onE
     try { const payload = saved ? JSON.parse(saved) as { decision: 'approve' | 'reject'; comment: string } : { decision, comment }; await service.decide(task.task_id, payload.decision, payload.comment, key); sessionStorage.removeItem(keyName); sessionStorage.removeItem(payloadName); setRetryDecision(null); setComment(''); await refresh(); }
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
-  async function execute(task: Task) {
+  async function prepare(taskId: string, personalized = '') {
     if (!service || !online || !projectId || busy) return;
     setBusy(true); setError('');
-    try { const result = await service.execute(task.task_id, projectId); setExecution(previous => ({ ...previous, [task.task_id]: 'running' })); if (result.threadId) onExecutionStarted?.(result.threadId); }
+    try { const result = await service.prepare(taskId, projectId); onTaskPrepared?.(taskId, { ...result, customInput: personalized }); }
     catch (err) { setError(errorText(err)); await refresh(); } finally { setBusy(false); }
   }
 
@@ -163,16 +172,20 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onE
       {online && nextCursors[tab] && <button onClick={() => changePage(tab, nextCursors[tab])} type="button">下一页 <ArrowRight size={14} /></button>}
       {tab === 'tasks' && tasks.length === 0 && <p className="workflow-muted">暂无待办</p>}
     </section><section aria-label="工作流详情" className="workflow-detail">
-      {template && <><h2>{template.name}</h2><p className="workflow-muted">{template.description}</p><WorkflowSteps nodes={template.nodes} />{online && template.nodes[0]?.assignee_user_id === userId && <div className="workflow-actions"><label>初始输入<textarea disabled={Boolean(retryStart)} onChange={event => setInput(event.target.value)} rows={5} value={input} /></label>{retryStart && <p className="workflow-muted">上次发起尚未确认，仅可用原输入重试。</p>}<button disabled={busy} onClick={() => void start()} type="button">{retryStart ? '重试发起' : '发起实例'}</button></div>}</>}
-      {selected && <><h2>实例 {selected.id}</h2><p className="workflow-muted">{labels[selected.status]}</p><WorkflowSteps nodes={selected.nodes} tasks={selected.tasks} current={selected.current_node_id} />{online && currentTask?.type === 'approval' && <div className="workflow-actions"><label>审批意见<textarea disabled={retryDecision !== null} onChange={event => setComment(event.target.value)} rows={3} value={comment} /></label>{retryDecision && <p className="workflow-muted">上次提交尚未确认，仅可用原决定重试。</p>}<div><button disabled={busy || retryDecision === 'reject'} onClick={() => void decide(currentTask, 'approve')} type="button">{retryDecision === 'approve' ? '重试批准' : '批准'}</button><button disabled={busy || retryDecision === 'approve'} onClick={() => void decide(currentTask, 'reject')} type="button">{retryDecision === 'reject' ? '重试驳回' : '驳回'}</button></div></div>}{online && currentTask?.type === 'agent' && canExecute && projectId && <div className="workflow-actions"><button disabled={busy || execution[currentTask.task_id] === 'running' || execution[currentTask.task_id] === 'queued'} onClick={() => void execute(currentTask)} type="button"><Play size={15} />执行 Agent 任务</button>{execution[currentTask.task_id] && <span>{execution[currentTask.task_id]}</span>}</div>}</>}
+      {template && <><h2>{template.name}</h2><p className="workflow-muted">{template.description}</p><WorkflowSteps nodes={template.nodes} action={online && template.nodes[0]?.assignee_user_id === userId ? <div className="workflow-actions"><label>任务要求<textarea disabled={Boolean(retryStart)} onChange={event => setInput(event.target.value)} rows={5} value={input} /></label>{retryStart && <p className="workflow-muted">上次发起尚未确认，仅可用原输入重试。</p>}<button disabled={busy || template.nodes[0]?.type === 'agent' && (!canExecute || !projectId)} onClick={() => void start()} type="button">{retryStart ? '重试发起' : '发起任务'}</button></div> : null} /></>}
+      {selected && <><h2>实例 {selected.id}</h2><p className="workflow-muted">{labels[selected.status]}</p><WorkflowSteps nodes={selected.nodes} tasks={selected.tasks} current={selected.current_node_id} execution={execution} action={online && currentTask?.type === 'approval' ? <div className="workflow-actions"><label>审批意见<textarea disabled={retryDecision !== null} onChange={event => setComment(event.target.value)} rows={3} value={comment} /></label>{retryDecision && <p className="workflow-muted">上次提交尚未确认，仅可用原决定重试。</p>}<div><button disabled={busy || retryDecision === 'reject'} onClick={() => void decide(currentTask, 'approve')} type="button">{retryDecision === 'approve' ? '重试批准' : '批准'}</button><button disabled={busy || retryDecision === 'approve'} onClick={() => void decide(currentTask, 'reject')} type="button">{retryDecision === 'reject' ? '重试驳回' : '驳回'}</button></div></div> : online && currentTask?.type === 'agent' && canExecute && projectId ? <div className="workflow-actions"><label>任务要求<textarea onChange={event => setCustomInput(event.target.value)} rows={3} value={customInput} /></label><button disabled={busy || execution[currentTask.task_id] === 'running' || execution[currentTask.task_id] === 'queued'} onClick={() => void prepare(currentTask.task_id, customInput)} type="button"><Play size={15} />发起 Agent 执行</button>{execution[currentTask.task_id] && <span>{executionLabels[execution[currentTask.task_id] ?? ''] ?? '执行状态待更新'}</span>}</div> : null} /></>}
       {!template && !selected && <p className="workflow-muted">选择一项查看详情</p>}
     </section></div>
   </main>;
 }
 
-function WorkflowSteps({ nodes, tasks, current }: { nodes: Node[]; tasks?: Task[]; current?: string }) {
+function WorkflowSteps({ nodes, tasks, current, execution, action }: { nodes: Node[]; tasks?: Task[]; current?: string; execution?: Record<string, string>; action?: ReactNode }) {
   return <ol className="workflow-steps">{nodes.map((node, index) => {
     const task = tasks?.find(item => item.node_id === node.node_id);
-    return <li key={node.node_id}><span className="workflow-index">{index + 1}</span><div><strong>{node.title}</strong><small>{node.type === 'agent' ? 'Agent' : '审批'} · {node.assignee_user_id}{current === node.node_id ? ' · 当前' : ''}</small><p>{node.instruction}</p>{task && <div className="workflow-data"><span>输入</span><pre>{textValue(task.input)}</pre>{task.output && <><span>输出</span><pre>{textValue(task.output)}</pre></>}{task.decision && <p>{task.decision === 'approve' ? '批准' : '驳回'} · {task.comment}</p>}</div>}</div></li>;
+    const isCurrent = current === node.node_id;
+    const phase = !tasks ? 'template' : task && task.status !== 'pending' ? task.status === 'completed' || task.status === 'succeeded' ? 'completed' : 'stopped' : isCurrent ? 'current' : 'upcoming';
+    const runStatus = task && execution?.[task.task_id];
+    const status = phase === 'upcoming' ? '未执行' : phase === 'completed' || phase === 'stopped' ? labels[task?.status ?? ''] ?? '已处理' : runStatus === 'running' || runStatus === 'queued' ? '执行中' : node.type === 'approval' ? '待审批' : '待执行';
+    return <li data-state={phase} key={node.node_id}><span className="workflow-index">{index + 1}</span><div><div className="workflow-step-heading"><strong>{node.title}</strong>{tasks && <span className="workflow-step-status">{status}</span>}</div><small>{node.type === 'agent' ? 'Agent' : '审批'} · {node.assignee_user_id}</small><p>{node.instruction}</p>{task && <div className="workflow-data"><span>输入</span><pre>{textValue(task.input)}</pre>{task.output && <><span>输出</span><pre>{textValue(task.output)}</pre></>}{task.decision && <p>{task.decision === 'approve' ? '批准' : '驳回'} · {task.comment}</p>}</div>}{(isCurrent || !tasks && index === 0) && action}</div></li>;
   })}</ol>;
 }

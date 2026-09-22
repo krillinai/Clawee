@@ -9,6 +9,7 @@ import {
   FileText,
   FileSpreadsheet,
   FilePenLine,
+  GitBranch,
   Globe2,
   Image as ImageIcon,
   LoaderCircle,
@@ -94,6 +95,9 @@ function getTimelineTitle(item: TimelineItem): string {
       return '你';
     case 'schedule_trigger':
       return '定时执行';
+    case 'workflow_start':
+    case 'workflow_status':
+      return '工作流';
     case 'assistant_message':
       return 'Clawee';
     case 'change_card':
@@ -126,6 +130,9 @@ function renderTimelineAvatar(item: TimelineItem) {
   }
   if (item.kind === 'schedule_trigger') {
     return <Clock3 aria-hidden="true" size={14} />;
+  }
+  if (item.kind === 'workflow_start' || item.kind === 'workflow_status') {
+    return <GitBranch aria-hidden="true" size={14} />;
   }
 
   return getTimelineAvatar(item);
@@ -1097,6 +1104,24 @@ function renderTimelineItemContent(
   }
 ) {
   switch (item.kind) {
+    case 'workflow_start':
+      return <div className="timeline-workflow-content">
+        <strong>{item.workflowName} · {item.nodeTitle}</strong>
+        <small>第 {item.nodeOrder + 1} 个节点 · 实例 {item.instanceId}</small>
+        <MarkdownRenderer text={item.instruction} variant="user" />
+        {item.input && <div className="timeline-workflow-input"><span>工作流输入</span><pre>{item.input}</pre></div>}
+        {item.customInput && item.customInput !== item.input && <div className="timeline-workflow-input"><span>本次要求</span><pre>{item.customInput}</pre></div>}
+      </div>;
+    case 'workflow_status': {
+      const label = {
+        syncing: 'Agent 已完成，正在同步节点',
+        completed: '节点已完成',
+        failed: 'Agent 执行失败，节点未更新',
+        sync_failed: '节点同步失败，结果尚未写回工作流',
+        conflict: '节点状态已变化，未能同步结果'
+      }[item.status] ?? '节点状态待确认';
+      return <p className="timeline-workflow-status" role="status">{label}</p>;
+    }
     case 'user_message':
     case 'assistant_message':
       return renderMessageContent(item, onOpenFile, onEditUserMessage);

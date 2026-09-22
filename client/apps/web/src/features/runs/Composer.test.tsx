@@ -895,6 +895,18 @@ describe('Composer', () => {
     expect(textbox).toHaveValue('');
   });
 
+  it('keeps a workflow preset collapsed and waits for manual submission of personalized input', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<Composer {...defaultProps} onSubmit={onSubmit} workflowDraft={{ instruction: '很长的预设任务描述'.repeat(30), input: '上一步产物', firstNode: false }} />);
+    expect(screen.getByText('节点任务预设描述').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('上一步输入').closest('details')).not.toHaveAttribute('open');
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.type(screen.getByRole('textbox', { name: '任务要求' }), '只选三条');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit).toHaveBeenCalledWith('只选三条', expect.any(Object), []);
+  });
+
   it('auto-sizes the textbox to its content and resets after submit', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
