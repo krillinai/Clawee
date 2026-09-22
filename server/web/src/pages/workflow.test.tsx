@@ -139,14 +139,17 @@ describe("WorkflowInstancesPage", () => {
     expect(await screen.findByText("暂无工作流实例")).toBeInTheDocument();
   });
 
-  it("shows the handler and completion time", async () => {
-    vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [{ id: "instance-1", template_id: "template-1", template_revision: 1, nodes: [], status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z" }], meta: { next_cursor: "" } });
-    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "a" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "a", input: { text: "初始内容", internal: "不展示" }, output: { text: "**完成**\n\n[参考](https://example.com)\n<script>unsafe()</script>", internal: "也不展示" }, handled_by: "a", completed_at: "2026-09-21T01:00:00Z" }] });
+  it("shows the assignee and completion time without a separate handler", async () => {
+    vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [{ id: "instance-1", template_id: "template-1", template_revision: 1, nodes: [], status: "succeeded", started_by: "a", user_names: { a: "发起人姓名" }, started_at: "2026-09-21T00:00:00Z" }], meta: { next_cursor: "" } });
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", user_names: { a: "发起人姓名", b: "负责人姓名", c: "处理人姓名" }, started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "b" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "b", input: { text: "初始内容", internal: "不展示" }, output: { text: "**完成**\n\n[参考](https://example.com)\n<script>unsafe()</script>", internal: "也不展示" }, handled_by: "c", completed_at: "2026-09-21T01:00:00Z" }] });
     renderInstances();
+    expect(await screen.findByText("发起人姓名")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("link", { name: /查看实例 instance-1 详情/ }));
     expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回列表" })).toHaveAttribute("href", "/admin/workflow-instances");
-    expect(await screen.findByText(/处理人：a/)).toBeInTheDocument();
+    expect(await screen.findByText(/负责人：负责人姓名 · 完成于 /)).toBeInTheDocument();
+    expect(screen.queryByText(/处理人：/)).not.toBeInTheDocument();
+    expect(screen.getByText("发起人姓名")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开节点“生成”的内容" }));
     expect(screen.getByText("初始内容")).toBeInTheDocument();
     expect(screen.getByText("完成")).toBeInTheDocument();

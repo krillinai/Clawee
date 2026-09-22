@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,8 +36,12 @@ func TestWorkflowHTTPAndMCPTaskAuthorization(t *testing.T) {
 	})
 	users := []struct{ email, agent string }{{"workflow-a@example.com", "workflow-agent-a"}, {"workflow-b@example.com", "workflow-agent-b"}}
 	ids := make([]string, 0, len(users))
+	var adminCookies []*http.Cookie
 	for _, user := range users {
 		cookies := register(t, router, `{"email":"`+user.email+`","name":"Workflow User","password":"passw0rd!"}`)
+		if adminCookies == nil {
+			adminCookies = cookies
+		}
 		createWebAgent(t, router, cookies, user.agent)
 		account, err := accountsService.AuthenticateCredentials(ctx, accounts.LoginRequest{Email: user.email, Password: "passw0rd!"})
 		if err != nil {
@@ -86,5 +91,38 @@ func TestWorkflowHTTPAndMCPTaskAuthorization(t *testing.T) {
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "workflow_get_task", Arguments: map[string]any{"task_id": started.TaskID}})
 	if err != nil || !result.IsError || len(result.Content) == 0 {
 		t.Fatalf("other user's MCP task: result=%#v err=%v", result, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE accounts SET status='disabled' WHERE user_id=$1`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/admin/workflow-instances", "/api/v1/admin/workflow-instances/" + started.InstanceID} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.AddCookie(adminCookie(t, adminCookies))
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("instance status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var body struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		var items []workflow.Instance
+		if path == "/api/v1/admin/workflow-instances" {
+			if err := json.Unmarshal(body.Data, &items); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			var item workflow.Instance
+			if err := json.Unmarshal(body.Data, &item); err != nil {
+				t.Fatal(err)
+			}
+			items = []workflow.Instance{item}
+		}
+		if len(items) != 1 || items[0].UserNames[ids[0]] != "Workflow User" || items[0].UserNames[ids[1]] != "Workflow User" {
+			t.Fatalf("instance names missing: %+v", items)
+		}
 	}
 }

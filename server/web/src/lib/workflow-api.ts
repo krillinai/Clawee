@@ -4,7 +4,7 @@ export type WorkflowNode = { node_id: string; order: number; type: "agent" | "ap
 export type WorkflowAssignee = { user_id: string; name: string; email: string };
 export type WorkflowTemplate = { id: string; name: string; description: string; status: "draft" | "enabled" | "disabled"; revision: number; nodes: WorkflowNode[]; created_at: string };
 export type WorkflowTask = { task_id: string; node_id: string; status: string; assignee_user_id: string; input: Record<string, unknown>; output?: Record<string, unknown>; decision?: string; comment?: string; handled_by?: string; completed_at?: string };
-export type WorkflowInstance = { id: string; template_id: string; template_revision: number; nodes: WorkflowNode[]; status: string; current_node_id?: string; started_by: string; started_at: string; ended_at?: string | null; tasks?: WorkflowTask[] };
+export type WorkflowInstance = { id: string; template_id: string; template_revision: number; nodes: WorkflowNode[]; status: string; current_node_id?: string; started_by: string; user_names?: Record<string, string>; started_at: string; ended_at?: string | null; tasks?: WorkflowTask[] };
 type Page<T> = { items: T[]; meta: { next_cursor: string } };
 
 export const workflowAdmin = {

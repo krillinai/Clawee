@@ -30,6 +30,9 @@ function StatusBadge({ status }: { status: string }) {
 function assigneeName(account?: WorkflowAssignee) {
   return account?.name || account?.email || "未命名账号";
 }
+function instanceUserName(instance: WorkflowInstance, id: string) {
+  return instance.user_names?.[id] || "账号已删除";
+}
 function nodeError(nodes: WorkflowNode[]) {
   if (nodes.length === 0) return { index: 0, message: "至少添加一个节点" };
   for (const [index, node] of nodes.entries()) {
@@ -56,7 +59,7 @@ function WorkflowText({ label, value }: { label: string; value?: Record<string, 
   </div></div>;
 }
 
-function WorkflowStep({ node, task, index, current, last }: { node: WorkflowNode; task?: WorkflowTask; index: number; current: boolean; last: boolean }) {
+function WorkflowStep({ instance, node, task, index, current, last }: { instance: WorkflowInstance; node: WorkflowNode; task?: WorkflowTask; index: number; current: boolean; last: boolean }) {
   const [open, setOpen] = useState(false);
   const title = node.title || `节点 ${index + 1}`;
   return <li className="relative flex min-w-0 gap-4 pb-6 last:pb-0">
@@ -64,8 +67,7 @@ function WorkflowStep({ node, task, index, current, last }: { node: WorkflowNode
     <span className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border bg-background text-xs font-medium">{index + 1}</span>
     <div className="min-w-0 flex-1 border-b border-border pb-5 last:border-0">
       <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{title}</h3><Badge variant="outline">{node.type === "agent" ? "Agent" : "审批"}</Badge>{task && <StatusBadge status={task.status} />}{current && <Badge variant="accent">当前节点</Badge>}</div>
-      <p className="mt-1 break-all text-xs text-muted-foreground">负责人：{node.assignee_user_id}</p>
-      {task?.completed_at && <p className="mt-1 break-all text-xs text-muted-foreground">处理人：{task.handled_by || task.assignee_user_id} · {new Date(task.completed_at).toLocaleString()}</p>}
+      <p className="mt-1 break-all text-xs text-muted-foreground">负责人：{instanceUserName(instance, node.assignee_user_id)}{task?.completed_at && ` · 完成于 ${new Date(task.completed_at).toLocaleString()}`}</p>
       <Collapsible onOpenChange={setOpen} open={open}>
         <CollapsibleTrigger asChild><Button aria-label={`${open ? "收起" : "展开"}节点“${title}”的内容`} className="mt-2" size="sm" variant="ghost"><ChevronDown aria-hidden="true" className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />{open ? "收起内容" : "查看内容"}</Button></CollapsibleTrigger>
         <CollapsibleContent className="mt-3 space-y-4 border-t border-border pt-4">
@@ -78,7 +80,7 @@ function WorkflowStep({ node, task, index, current, last }: { node: WorkflowNode
 }
 
 function WorkflowSteps({ instance }: { instance: WorkflowInstance }) {
-  return <ol className="space-y-0">{instance.nodes.map((node, index) => <WorkflowStep current={instance.current_node_id === node.node_id} index={index} key={node.node_id} last={index === instance.nodes.length - 1} node={node} task={instance.tasks?.find((item) => item.node_id === node.node_id)} />)}</ol>;
+  return <ol className="space-y-0">{instance.nodes.map((node, index) => <WorkflowStep current={instance.current_node_id === node.node_id} index={index} instance={instance} key={node.node_id} last={index === instance.nodes.length - 1} node={node} task={instance.tasks?.find((item) => item.node_id === node.node_id)} />)}</ol>;
 }
 
 function AssigneePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
@@ -219,7 +221,7 @@ export function WorkflowInstancesPage() {
           <TableCell className="max-w-48 truncate font-mono text-xs" title={item.id}>{item.id}</TableCell>
           <TableCell className="max-w-56 truncate font-medium" title={item.nodes[0]?.title}>{item.nodes[0]?.title || "未命名节点"}</TableCell>
           <TableCell><StatusBadge status={item.status} /></TableCell>
-          <TableCell className="max-w-40 truncate" title={item.started_by}>{item.started_by}</TableCell>
+          <TableCell className="max-w-40 truncate" title={instanceUserName(item, item.started_by)}>{instanceUserName(item, item.started_by)}</TableCell>
           <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(item.started_at).toLocaleString()}</TableCell>
           <TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link aria-label={`查看实例 ${item.id} 详情`} to={`/admin/workflow-instances/${encodeURIComponent(item.id)}`}>查看详情</Link></Button></TableCell>
         </TableRow>)}
@@ -252,7 +254,7 @@ export function WorkflowInstanceDetailPage() {
         <div className="flex flex-wrap items-center gap-3"><h2 className="min-w-0 break-all text-base font-semibold">实例 {detail.data.id}</h2><StatusBadge status={detail.data.status} /></div>
         <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <div className="min-w-0"><dt className="text-muted-foreground">模板 ID / 版本</dt><dd className="break-all">{detail.data.template_id} · {detail.data.template_revision}</dd></div>
-          <div className="min-w-0"><dt className="text-muted-foreground">发起人</dt><dd className="break-all">{detail.data.started_by}</dd></div>
+          <div className="min-w-0"><dt className="text-muted-foreground">发起人</dt><dd className="break-all">{instanceUserName(detail.data, detail.data.started_by)}</dd></div>
           <div><dt className="text-muted-foreground">开始时间</dt><dd>{new Date(detail.data.started_at).toLocaleString()}</dd></div>
           {detail.data.ended_at && <div><dt className="text-muted-foreground">结束时间</dt><dd>{new Date(detail.data.ended_at).toLocaleString()}</dd></div>}
         </dl>

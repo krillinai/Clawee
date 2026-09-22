@@ -63,17 +63,18 @@ type Task struct {
 }
 
 type Instance struct {
-	ID               string          `json:"id"`
-	TemplateID       string          `json:"template_id"`
-	TemplateRevision int             `json:"template_revision"`
-	Nodes            []Node          `json:"nodes"`
-	Status           string          `json:"status"`
-	CurrentNodeID    string          `json:"current_node_id,omitempty"`
-	InitialInput     json.RawMessage `json:"initial_input"`
-	StartedBy        string          `json:"started_by"`
-	StartedAt        time.Time       `json:"started_at"`
-	EndedAt          *time.Time      `json:"ended_at,omitempty"`
-	Tasks            []Task          `json:"tasks,omitempty"`
+	ID               string            `json:"id"`
+	TemplateID       string            `json:"template_id"`
+	TemplateRevision int               `json:"template_revision"`
+	Nodes            []Node            `json:"nodes"`
+	Status           string            `json:"status"`
+	CurrentNodeID    string            `json:"current_node_id,omitempty"`
+	InitialInput     json.RawMessage   `json:"initial_input"`
+	StartedBy        string            `json:"started_by"`
+	UserNames        map[string]string `json:"user_names,omitempty"`
+	StartedAt        time.Time         `json:"started_at"`
+	EndedAt          *time.Time        `json:"ended_at,omitempty"`
+	Tasks            []Task            `json:"tasks,omitempty"`
 }
 
 type Result struct {

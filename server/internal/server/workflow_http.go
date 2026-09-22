@@ -64,6 +64,81 @@ func workflowList(c *gin.Context, data any, cursor string) {
 	c.JSON(200, gin.H{"data": data, "meta": gin.H{"next_cursor": cursor, "has_next": cursor != ""}})
 }
 
+func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow.Instance) bool {
+	ids := make(map[string]struct{})
+	for _, item := range items {
+		if item.StartedBy != "" {
+			ids[item.StartedBy] = struct{}{}
+		}
+		for _, node := range item.Nodes {
+			if node.Assignee != "" {
+				ids[node.Assignee] = struct{}{}
+			}
+		}
+		for _, task := range item.Tasks {
+			if task.Assignee != "" {
+				ids[task.Assignee] = struct{}{}
+			}
+			if task.HandledBy != "" {
+				ids[task.HandledBy] = struct{}{}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return true
+	}
+	userIDs := make([]string, 0, len(ids))
+	for id := range ids {
+		userIDs = append(userIDs, id)
+	}
+	rows, err := s.DB.Query(c.Request.Context(), `SELECT user_id,name,email FROM accounts WHERE user_id = ANY($1)`, userIDs)
+	if err != nil {
+		workflowError(c, err)
+		return false
+	}
+	defer rows.Close()
+	names := make(map[string]string, len(userIDs))
+	for rows.Next() {
+		var id, name, email string
+		if err = rows.Scan(&id, &name, &email); err != nil {
+			workflowError(c, err)
+			return false
+		}
+		if name == "" {
+			name = email
+		}
+		if name == "" {
+			name = "未命名账号"
+		}
+		names[id] = name
+	}
+	if err = rows.Err(); err != nil {
+		workflowError(c, err)
+		return false
+	}
+	for index := range items {
+		items[index].UserNames = make(map[string]string)
+		item := &items[index]
+		if name, ok := names[item.StartedBy]; ok {
+			item.UserNames[item.StartedBy] = name
+		}
+		for _, node := range item.Nodes {
+			if name, ok := names[node.Assignee]; ok {
+				item.UserNames[node.Assignee] = name
+			}
+		}
+		for _, task := range item.Tasks {
+			if name, ok := names[task.Assignee]; ok {
+				item.UserNames[task.Assignee] = name
+			}
+			if name, ok := names[task.HandledBy]; ok {
+				item.UserNames[task.HandledBy] = name
+			}
+		}
+	}
+	return true
+}
+
 func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 	s := opts.WorkflowService
 	if s == nil || s.DB == nil || opts.AccountService == nil {
@@ -160,6 +235,9 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
+		if !workflowInstanceNames(c, s, items) {
+			return
+		}
 		workflowList(c, items, next)
 	})
 	admin.GET("/workflow-instances/:id", requirePermission(opts.RBACService, rbac.PermissionWorkflowInstanceRead), func(c *gin.Context) {
@@ -168,7 +246,11 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
-		c.JSON(200, gin.H{"data": item})
+		items := []workflow.Instance{item}
+		if !workflowInstanceNames(c, s, items) {
+			return
+		}
+		c.JSON(200, gin.H{"data": items[0]})
 	})
 	admin.POST("/workflow-instances/:id/terminate", requirePermission(opts.RBACService, rbac.PermissionWorkflowInstanceTerminate), func(c *gin.Context) {
 		var body struct {
