@@ -403,7 +403,7 @@ describe('FileWorkspaceView', () => {
     expect(service.getMeta).not.toHaveBeenCalledWith(thread.id, 'README.md');
   });
 
-  it('外部路径前缀不一致时使用文件树中的真实路径打开文件', async () => {
+  it('工作区外绝对路径不会通过同名文件绕过路径限制', async () => {
     const thread = createThread();
     const service = createService({
       directories: {
@@ -423,6 +423,7 @@ describe('FileWorkspaceView', () => {
         'xiaodoujia-apple-aso-audit.html': '<h1>ASO Audit</h1>'
       }
     });
+    service.getMeta.mockRejectedValue(new Error('Absolute paths are not allowed.'));
 
     render(
       <FileWorkspaceView
@@ -433,12 +434,12 @@ describe('FileWorkspaceView', () => {
       />
     );
 
-    expect(await screen.findByTitle('xiaodoujia-apple-aso-audit.html HTML 预览')).toBeInTheDocument();
-    expect(service.getMeta).toHaveBeenCalledWith(thread.id, 'xiaodoujia-apple-aso-audit.html');
-    expect(service.getMeta).not.toHaveBeenCalledWith(
+    await waitFor(() => expect(service.getMeta).toHaveBeenCalledWith(
       thread.id,
       '/private/runtime/another-root/xiaodoujia-apple-aso-audit.html'
-    );
+    ));
+    expect(await screen.findByText('Absolute paths are not allowed.')).toBeInTheDocument();
+    expect(screen.queryByTitle('xiaodoujia-apple-aso-audit.html HTML 预览')).not.toBeInTheDocument();
   });
 
   it('点击目录时调用 listDirectory 并合并节点', async () => {

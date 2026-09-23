@@ -138,6 +138,26 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '技能' })).not.toBeInTheDocument();
   });
 
+  it('shows the configured admin link only for an admin session and clears it on sign-out', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/enterprise/session')) return jsonResponse(createEnterpriseSessionResponse({ adminAllowed: true }));
+      if (url.endsWith('/enterprise/platform-branding')) return jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, adminUrl: 'https://gateway.example/admin'
+      });
+      if (url.endsWith('/enterprise/logout')) return jsonResponse(createEnterpriseSessionResponse({ status: 'signed_out', account: undefined }));
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByRole('link', { name: '管理后台' })).toHaveAttribute('href', 'https://gateway.example/admin');
+    fireEvent.click(screen.getByRole('button', { name: 'Member' }));
+    fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+    expect(screen.queryByRole('link', { name: '管理后台' })).not.toBeInTheDocument();
+  });
+
   it.each(['legacy', 'unavailable'])('keeps default names when branding is %s', async mode => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -7793,7 +7813,11 @@ describe('App', () => {
   it('点击聊天回复中的成果卡片会直接打开对应文件', async () => {
     const user = userEvent.setup();
     const hostBridge = createHostBridge();
-    const absoluteChangedPath = '/private/runtime/workspaces/clawee-agent/xiaodoujia-apple-aso-audit.html';
+    const absoluteChangedPath = '/Users/test/develop/clawee/Default%20Project/xiaodoujia-apple-aso-audit.html';
+    const absoluteImagePath = '/Users/test/develop/clawee/Default%20Project/outputs/bridge.png';
+    const createObjectURL = vi.fn(() => 'blob:generated-bridge');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -7810,8 +7834,8 @@ describe('App', () => {
               id: 'thread_files',
               title: '真实文件会话',
               codexThreadId: 'codex-thread-files',
-              cwd: '/Users/test/develop/clawee/clawee-agent',
-              canonicalCwd: '/Users/test/develop/clawee/clawee-agent'
+              cwd: '/Users/test/develop/clawee/Default Project',
+              canonicalCwd: '/Users/test/develop/clawee/Default Project'
             })
           ]
         });
@@ -7824,7 +7848,7 @@ describe('App', () => {
             {
               id: 'history_assistant_1',
               type: 'assistant_message',
-              text: `已生成文件：\n\n\`\`\`text\n${absoluteChangedPath} (311 字节)\n\`\`\``,
+              text: `已生成文件：\n\n\`\`\`text\n${absoluteChangedPath} (311 字节)\n\`\`\`\n\n![大桥](${absoluteImagePath})`,
               format: 'plain_text',
               delivery: 'message',
               createdAt: new Date(0).toISOString()
@@ -7835,8 +7859,8 @@ describe('App', () => {
       if (url.includes('/workspace/files/directory?')) {
         return jsonResponse({
           threadId: 'thread_files',
-          rootName: 'clawee-agent',
-          rootPathLabel: '/Users/test/develop/clawee/clawee-agent',
+          rootName: 'Default Project',
+          rootPathLabel: '/Users/test/develop/clawee/Default Project',
           path: '',
           suggestedOpenPath: 'README.md',
           truncated: false,
@@ -7873,6 +7897,14 @@ describe('App', () => {
               }
             }
           ]
+        });
+      }
+      if (url.includes('/workspace/files/blob?')) {
+        const path = new URL(url).searchParams.get('path');
+        if (path !== 'outputs/bridge.png') throw new Error(`Expected image blob request, got ${path}`);
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' }
         });
       }
       if (url.includes('/workspace/files/meta?')) {
@@ -7926,6 +7958,8 @@ describe('App', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: /真实文件会话/ }));
+    expect(await screen.findByRole('img', { name: 'bridge.png' }))
+      .toHaveAttribute('src', 'blob:generated-bridge');
     await user.click(await screen.findByRole('button', { name: `打开成果 ${absoluteChangedPath}` }));
 
     expect(await screen.findByLabelText('会话和文件工作区')).toBeInTheDocument();

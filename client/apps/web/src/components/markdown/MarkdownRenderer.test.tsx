@@ -235,6 +235,15 @@ describe('MarkdownRenderer', () => {
     )).toEqual(['/workspace/output/pdf/clawee-user-guide.pdf']);
   });
 
+  it('extracts local images from markdown image syntax', () => {
+    expect(extractWorkspaceFilePaths(
+      '![杨泗港大桥](/workspace/Default%20Project/outputs/bridge.png) ![原图](/workspace/Default Project/outputs/other.png)'
+    )).toEqual([
+      '/workspace/Default%20Project/outputs/bridge.png',
+      '/workspace/Default Project/outputs/other.png'
+    ]);
+  });
+
   it('deduplicates file link targets without merging distinct same-name files', () => {
     expect(extractWorkspaceFilePaths(
       '[report.pdf](draft/report.pdf) [report.pdf](final/report.pdf:2:3) `final/report.pdf`'

@@ -410,6 +410,7 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
   const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
   const [platformBrandingUrls, setPlatformBrandingUrls] = useState<PlatformBrandingUrls>({});
+  const [adminUrl, setAdminUrl] = useState<string>();
   const [sidebarMenuLabels, setSidebarMenuLabels] = useState<EnterpriseSidebarMenuLabels>({});
   const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
   const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
@@ -980,6 +981,7 @@ export function AppController(props: AppControllerProps) {
     }
     platformBrandingObjectUrlsRef.current = [];
     setPlatformBrandingUrls({});
+    setAdminUrl(undefined);
     setSidebarMenuLabels({});
 
     if (enterpriseService === null || enterpriseSession.status !== 'signed_in') {
@@ -1008,6 +1010,7 @@ export function AppController(props: AppControllerProps) {
       .then(async branding => {
         if (canceled) return;
         setSidebarMenuLabels(branding.sidebarMenuLabels ?? {});
+        setAdminUrl(branding.adminUrl);
         const [sidebarLogoUrl, sidebarCompactLogoUrl] = await Promise.all([
           loadImage(branding.sidebarLogoConfigured, 'sidebar-logo'),
           loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo')
@@ -5811,6 +5814,19 @@ export function AppController(props: AppControllerProps) {
     });
   }
 
+  const previewTimelineImage = useCallback(async (path: string): Promise<string> => {
+    if (!selectedThread || !workspaceFileService) throw new Error('文件预览不可用');
+    const blob = await workspaceFileService.openBlob(
+      selectedThread.id,
+      toWorkspaceRelativePath(path, selectedThread)
+    );
+    if (!blob.mime.startsWith('image/')) {
+      workspaceFileService.revokeBlob(blob.objectUrl);
+      throw new Error('不支持预览此文件');
+    }
+    return blob.objectUrl;
+  }, [selectedThread, workspaceFileService]);
+
   async function saveCurrentFile() {
     if (currentFile === undefined) return;
     if (savingFilePathsRef.current.has(currentFile.path)) return;
@@ -6095,6 +6111,7 @@ export function AppController(props: AppControllerProps) {
             }
             onLoadOlder={threadHistory.loadOlder}
             onOpenFile={openTimelineFile}
+            onPreviewImage={selectedThread && workspaceFileService ? previewTimelineImage : undefined}
             onEditUserMessage={editUserMessage}
             resolvingApprovalIds={resolvingApprovalIds}
             approvalErrors={approvalErrors}
@@ -6759,6 +6776,7 @@ export function AppController(props: AppControllerProps) {
           sidebarLogoUrl={platformBrandingUrls.sidebarLogoUrl}
           sidebarCompactLogoUrl={platformBrandingUrls.sidebarCompactLogoUrl}
           sidebarMenuLabels={sidebarMenuLabels}
+          adminUrl={adminUrl}
           activityAllowed={enterpriseActivity.capability === 'allowed'}
           onNewConversation={projectId => startNewConversation({ projectId })}
           onSelectProject={selectProject}
@@ -7347,11 +7365,16 @@ function toWorkspaceRelativePath(path: string, thread: ThreadResponse | undefine
   const trimmedPath = path.trim();
   if (trimmedPath.length === 0 || thread === undefined) return trimmedPath;
 
-  return stripWorkspaceRoot(trimmedPath, thread.canonicalCwd)
-    ?? stripWorkspaceRoot(trimmedPath, thread.cwd)
-    ?? stripWorkspaceRootByName(trimmedPath, thread.canonicalCwd)
-    ?? stripWorkspaceRootByName(trimmedPath, thread.cwd)
-    ?? normalizeWorkspacePath(trimmedPath).replace(/^\.\//, '');
+  let decodedPath = trimmedPath;
+  try {
+    decodedPath = decodeURI(trimmedPath);
+  } catch {
+    // 非法转义保留原路径，由文件服务按原有规则处理。
+  }
+
+  return stripWorkspaceRoot(decodedPath, thread.canonicalCwd)
+    ?? stripWorkspaceRoot(decodedPath, thread.cwd)
+    ?? normalizeWorkspacePath(decodedPath).replace(/^\.\//, '');
 }
 
 function stripWorkspaceRoot(path: string, root: string): string | undefined {
@@ -7362,21 +7385,6 @@ function stripWorkspaceRoot(path: string, root: string): string | undefined {
   return normalizedPath.startsWith(`${normalizedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
-}
-
-function stripWorkspaceRootByName(path: string, root: string): string | undefined {
-  const normalizedPath = normalizeWorkspacePath(path);
-  if (!normalizedPath.startsWith('/')) return undefined;
-
-  const normalizedRoot = normalizeWorkspacePath(root).replace(/\/+$/, '');
-  const rootName = normalizedRoot.split('/').at(-1);
-  if (rootName === undefined || rootName.length === 0) return undefined;
-
-  const marker = `/${rootName}/`;
-  const markerIndex = normalizedPath.lastIndexOf(marker);
-  return markerIndex < 0
-    ? undefined
-    : normalizedPath.slice(markerIndex + marker.length);
 }
 
 function normalizeWorkspacePath(path: string): string {

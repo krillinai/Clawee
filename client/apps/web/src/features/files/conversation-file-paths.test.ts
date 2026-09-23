@@ -51,4 +51,13 @@ describe('collectConversationFilePaths', () => {
       source: 'runtime'
     }])).toEqual(['/workspace/output/pdf/clawee-user-guide.pdf']);
   });
+
+  it('includes generated images in the current conversation files', () => {
+    expect(collectConversationFilePaths([{
+      kind: 'assistant_message',
+      id: 'generated-image',
+      text: '![杨泗港大桥](outputs/arose-imagegen/bridge.png)',
+      source: 'runtime'
+    }])).toEqual(['outputs/arose-imagegen/bridge.png']);
+  });
 });

@@ -799,7 +799,8 @@ function MessageAttachment(props: {
 function renderMessageContent(
   item: Extract<TimelineItem, { kind: 'user_message' | 'assistant_message' }>,
   onOpenFile?: (path: string) => void,
-  onEditUserMessage?: (item: Extract<TimelineItem, { kind: 'user_message' }>) => void
+  onEditUserMessage?: (item: Extract<TimelineItem, { kind: 'user_message' }>) => void,
+  onPreviewImage?: (path: string) => Promise<string>
 ) {
   const canOpenWorkspaceFiles = item.kind === 'assistant_message' && onOpenFile !== undefined;
   const artifacts = canOpenWorkspaceFiles
@@ -832,7 +833,9 @@ function renderMessageContent(
       />
       {artifacts.length > 0 ? (
         <div className="timeline-artifacts" aria-label="任务成果">
-          {artifacts.map(path => (
+          {artifacts.map(path => isImageArtifact(path) ? (
+            <ImageArtifact key={path} path={path} onOpenFile={onOpenFile} onPreviewImage={onPreviewImage} />
+          ) : (
             <button
               key={path}
               type="button"
@@ -855,11 +858,67 @@ function renderMessageContent(
 }
 
 const DELIVERABLE_ARTIFACT_EXTENSIONS = new Set([
-  'csv', 'doc', 'docx', 'html', 'htm', 'md', 'markdown', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx'
+  'csv', 'doc', 'docx', 'html', 'htm', 'md', 'markdown', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx',
+  'png', 'jpg', 'jpeg', 'gif', 'webp'
 ]);
 
 function artifactExtension(path: string): string {
   return path.split('.').at(-1)?.toLowerCase() ?? '';
+}
+
+function isImageArtifact(path: string): boolean {
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(artifactExtension(path));
+}
+
+function ImageArtifact(props: {
+  path: string;
+  onOpenFile?: (path: string) => void;
+  onPreviewImage?: (path: string) => Promise<string>;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!props.onPreviewImage) return;
+    let active = true;
+    let objectUrl: string | undefined;
+    setPreviewUrl(undefined);
+    setFailed(false);
+    void props.onPreviewImage(props.path).then(url => {
+      objectUrl = url;
+      if (active) setPreviewUrl(url);
+      else URL.revokeObjectURL(url);
+    }).catch(() => {
+      if (active) setFailed(true);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [props.onPreviewImage, props.path]);
+
+  return (
+    <button
+      type="button"
+      className="timeline-artifact-card timeline-image-artifact"
+      aria-label={`打开成果 ${props.path}`}
+      onClick={() => props.onOpenFile?.(props.path)}
+    >
+      {previewUrl && !failed ? (
+        <img src={previewUrl} alt={artifactFileName(props.path)} onError={() => setFailed(true)} />
+      ) : (
+        <span className="timeline-image-artifact-placeholder">
+          <ImageIcon aria-hidden="true" size={24} />
+          {failed ? '图片预览不可用' : '正在加载图片'}
+        </span>
+      )}
+      <span className="timeline-artifact-copy">
+        <strong>{artifactFileName(props.path)}</strong>
+        <span>图片</span>
+      </span>
+      <span className="timeline-artifact-action">打开</span>
+    </button>
+  );
 }
 
 function isDeliverableArtifact(path: string): boolean {
@@ -1095,6 +1154,7 @@ function renderChangeBlock(
 function renderTimelineItemContent(
   item: TimelineItem,
   onOpenFile?: (path: string) => void,
+  onPreviewImage?: (path: string) => Promise<string>,
   onEditUserMessage?: (item: Extract<TimelineItem, { kind: 'user_message' }>) => void,
   approvalState?: {
     resolving?: boolean;
@@ -1124,7 +1184,7 @@ function renderTimelineItemContent(
     }
     case 'user_message':
     case 'assistant_message':
-      return renderMessageContent(item, onOpenFile, onEditUserMessage);
+      return renderMessageContent(item, onOpenFile, onEditUserMessage, onPreviewImage);
     case 'schedule_trigger':
       return renderScheduleTrigger(item);
     case 'change_card':
@@ -1313,6 +1373,7 @@ type TimelineProps = {
   loadingOlder?: boolean;
   onLoadOlder?(): Promise<void> | void;
   onOpenFile?(path: string): void;
+  onPreviewImage?(path: string): Promise<string>;
   onEditUserMessage?(item: Extract<TimelineItem, { kind: 'user_message' }>): void;
   resolvingApprovalIds?: ReadonlySet<string>;
   approvalErrors?: Readonly<Record<string, string | undefined>>;
@@ -1510,6 +1571,7 @@ export const Timeline = forwardRef<TimelineHandle, TimelineProps>(function Timel
                   props.targetRunId,
                   props.targetApprovalId,
                   props.onOpenFile,
+                  props.onPreviewImage,
                   props.onEditUserMessage,
                   props.resolvingApprovalIds,
                   props.approvalErrors,
@@ -1551,6 +1613,7 @@ function renderTimelineRenderItem(
   targetRunId?: string,
   targetApprovalId?: string,
   onOpenFile?: (path: string) => void,
+  onPreviewImage?: (path: string) => Promise<string>,
   onEditUserMessage?: (item: Extract<TimelineItem, { kind: 'user_message' }>) => void,
   resolvingApprovalIds?: ReadonlySet<string>,
   approvalErrors?: Readonly<Record<string, string | undefined>>,
@@ -1618,6 +1681,7 @@ function renderTimelineRenderItem(
         {renderTimelineItemContent(
           item,
           onOpenFile,
+          onPreviewImage,
           onEditUserMessage,
           item.kind === 'approval'
             && onApproveApproval !== undefined

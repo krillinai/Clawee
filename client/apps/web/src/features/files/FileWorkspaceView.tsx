@@ -685,6 +685,9 @@ function resolveDirectoryFilePath(
   nodes: WorkspaceDirectoryResponse['nodes']
 ): string {
   const normalizedRequestedPath = requestedPath.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (normalizedRequestedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedRequestedPath)) {
+    return normalizedRequestedPath;
+  }
   const exactMatch = nodes.find(node => node.type === 'file' && node.path === normalizedRequestedPath);
   if (exactMatch !== undefined) return exactMatch.path;
 

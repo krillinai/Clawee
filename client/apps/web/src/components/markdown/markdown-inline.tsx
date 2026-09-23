@@ -45,16 +45,15 @@ function getSiteIconUrl(href: string): string | undefined {
 }
 
 export function isWorkspaceFilePath(value: string): boolean {
-  return new RegExp(`^(?:${WORKSPACE_FILE_PATH_SOURCE})$`, 'iu').test(value.trim());
+  return new RegExp(`^(?:${WORKSPACE_FILE_PATH_SOURCE})$`, 'iu').test(value.trim().replace(/ /g, '%20'));
 }
 
 export function extractWorkspaceFilePaths(text: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
   // 文件链接整体匹配，避免把显示标签误当成另一个工作区路径。
-  const regex = new RegExp(`!?\\[[^\\]]*\\]\\(([^)\\s]+)\\)|(${WORKSPACE_FILE_PATH_SOURCE})`, 'giu');
+  const regex = new RegExp(`!?\\[[^\\]]*\\]\\(([^)]+)\\)|(${WORKSPACE_FILE_PATH_SOURCE})`, 'giu');
   for (const match of text.matchAll(regex)) {
-    if (match[0].startsWith('![')) continue;
     if (match[1] !== undefined && /^(?:[a-z][a-z\d+.-]*:|#)/i.test(match[1])) continue;
     const path = match[1] !== undefined
       ? match[1].replace(/:\d+(?::\d+)?$/, '')
@@ -245,8 +244,8 @@ export function renderInlineMarkdown(
   const allowRelative = Boolean(options.onLinkClick);
   const userVariant = options.variant === 'user';
   const regex = userVariant
-    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)/g
-    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
+    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)/g
+    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;

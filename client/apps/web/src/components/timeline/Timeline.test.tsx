@@ -880,6 +880,33 @@ describe('Timeline', () => {
     expect(onOpenFile).toHaveBeenCalledExactlyOnceWith('/workspace/output/pdf/clawee-user-guide.pdf');
   });
 
+  it('previews a generated workspace image and opens its file', async () => {
+    const user = userEvent.setup();
+    const onOpenFile = vi.fn();
+    const onPreviewImage = vi.fn(async () => 'blob:generated-image');
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke });
+    const view = render(
+      <Timeline
+        items={[{
+          kind: 'assistant_message',
+          id: 'generated_image',
+          text: '![杨泗港大桥](outputs/bridge.png)',
+          source: 'runtime'
+        }]}
+        onOpenFile={onOpenFile}
+        onPreviewImage={onPreviewImage}
+      />
+    );
+
+    expect(await screen.findByRole('img', { name: 'bridge.png' })).toHaveAttribute('src', 'blob:generated-image');
+    await user.click(screen.getByRole('button', { name: '打开成果 outputs/bridge.png' }));
+    expect(onOpenFile).toHaveBeenCalledWith('outputs/bridge.png');
+    view.unmount();
+    expect(revoke).toHaveBeenCalledWith('blob:generated-image');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
+  });
+
   it('keeps user messages conservative while still rendering code and safe links', () => {
     render(
       <Timeline
