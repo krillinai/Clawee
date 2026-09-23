@@ -92,7 +92,7 @@ const modelConfigurationSchema = z.object({
 const sidebarMenuLabelSchema = z.string().refine(value =>
   value === value.trim()
   && Array.from(value).length >= 1
-  && Array.from(value).length <= 4
+  && Array.from(value).length <= 10
   && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)
 );
 const platformBrandingSchema = z.object({

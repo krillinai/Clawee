@@ -10,18 +10,23 @@ import type { EnterpriseSessionManager } from '../../src/enterprise/session-mana
 const ORIGIN = 'https://enterprise.example';
 
 describe('enterprise platform branding', () => {
-  it('maps configured menu labels and rejects invalid names', async () => {
+  it('maps configured menu labels up to ten characters with the admin link and rejects invalid names', async () => {
     const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
     const fetch = vi.fn(async () => new Response(JSON.stringify({
-      data: { ...data, sidebar_menu_labels: { skills: '企业技能', drive: '𠮷𠮷𠮷𠮷' } }
+      data: {
+        ...data,
+        admin_url: 'https://gateway.example/admin',
+        sidebar_menu_labels: { skills: '一二三四五六七八九十', drive: '𠮷𠮷𠮷𠮷' }
+      }
     })));
     const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
     await expect(client.getPlatformBranding!('token')).resolves.toEqual({
+      adminUrl: 'https://gateway.example/admin',
       sidebarLogoConfigured: false,
       sidebarCompactLogoConfigured: false,
-      sidebarMenuLabels: { skills: '企业技能', drive: '𠮷𠮷𠮷𠮷' }
+      sidebarMenuLabels: { skills: '一二三四五六七八九十', drive: '𠮷𠮷𠮷𠮷' }
     });
-    for (const value of ['', '一二三四五', 'a\nb', 'a\u200bb', ' 字 ']) {
+    for (const value of ['', '一二三四五六七八九十百', 'a\nb', 'a\u200bb', ' 字 ']) {
       fetch.mockImplementationOnce(async () => new Response(JSON.stringify({
         data: { ...data, sidebar_menu_labels: { skills: value } }
       })));
