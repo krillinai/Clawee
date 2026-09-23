@@ -580,6 +580,18 @@ describe('enterprise HTTP client', () => {
     });
   });
 
+  it('maps admin application access from the current account response', async () => {
+    const fetch = vi.fn(async () => jsonResponse({
+      data: {
+        account: { account_id: 'acct_01JZ8W6A2M4S', email: 'user@example.com', name: 'User', status: 'active' },
+        agent: { agent_id: AGENT_ID, name: 'User' },
+        applications: { frontend: true, admin: true }
+      }
+    }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getMe('enterprise-access-token')).resolves.toMatchObject({ adminAllowed: true });
+  });
+
   it('defaults agent activity reporting to disabled when the server omits the capability', async () => {
     const fetch = vi.fn(async () => jsonResponse({
       data: {

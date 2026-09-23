@@ -14,6 +14,7 @@ import {
   FolderMinus,
   FolderPlus,
   FolderOpen,
+  ExternalLink,
   GripVertical,
   HardDrive,
   LibraryBig,
@@ -68,6 +69,7 @@ export function ClaweeSidebar(props: {
   sidebarLogoUrl?: string;
   sidebarCompactLogoUrl?: string;
   sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
+  adminUrl?: string;
   activityAllowed?: boolean;
   onNewConversation(projectId?: string): void;
   onSelectProject(projectId: string): void;
@@ -1119,7 +1121,7 @@ export function ClaweeSidebar(props: {
         </div>
       )}
 
-      <div className="sidebar-bottom">
+      <div className="sidebar-bottom" data-admin-link={props.enterpriseSession?.adminAllowed === true && props.adminUrl ? 'true' : undefined}>
         <button
           className="sidebar-account-button"
           type="button"
@@ -1135,6 +1137,18 @@ export function ClaweeSidebar(props: {
             <strong>{accountTitle}</strong>
           </span>
         </button>
+        {props.enterpriseSession?.adminAllowed === true && props.adminUrl ? (
+          <a
+            className="sidebar-settings-button sidebar-admin-link"
+            href={props.adminUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="管理后台"
+            title="管理后台"
+          >
+            <ExternalLink size={17} strokeWidth={2} aria-hidden="true" />
+          </a>
+        ) : null}
         <button
           className="sidebar-settings-button"
           type="button"

@@ -116,6 +116,26 @@ func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
 	}
 }
 
+func TestPlatformBrandingAdminURLHTTP(t *testing.T) {
+	service := platformbranding.NewService(platformbranding.NewMemoryStore())
+	router := newTestRouter(t, server.Options{PlatformBrandingService: service})
+	fields := map[string]string{
+		"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep",
+		"admin_url": "https://gateway.example/admin",
+	}
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	app := doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", nil, http.StatusOK)
+	if nestedString(t, app, "data", "admin_url") != fields["admin_url"] {
+		t.Fatalf("client branding=%#v", app)
+	}
+	fields["admin_url"] = "javascript:alert(1)"
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusBadRequest)
+	current, _ := service.Get(context.Background())
+	if current.AdminURL != "https://gateway.example/admin" {
+		t.Fatalf("invalid URL changed configuration: %#v", current)
+	}
+}
+
 func brandingMultipartRequest(t *testing.T, handler http.Handler, fields map[string]string, files map[string][]byte, cookies []*http.Cookie, wantStatus int) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer

@@ -9,6 +9,7 @@ export type PlatformBranding = {
   sidebarCompactLogoConfigured: boolean;
   sidebarCompactLogoUrl: string | null;
   sidebarMenuLabels?: SidebarMenuLabels;
+  adminUrl?: string;
 };
 
 type PlatformBrandingResponse = {
@@ -17,6 +18,7 @@ type PlatformBrandingResponse = {
   sidebar_compact_logo_configured: boolean;
   sidebar_compact_logo_url: string | null;
   sidebar_menu_labels?: SidebarMenuLabels;
+  admin_url?: string;
 };
 
 export type PlatformBrandingAction = "keep" | "replace" | "reset";
@@ -31,6 +33,7 @@ export async function updatePlatformBranding(input: {
   sidebarCompactLogoAction: PlatformBrandingAction;
   sidebarCompactLogo?: File;
   sidebarMenuLabels?: Partial<Record<SidebarMenuKey, string | null>>;
+  adminUrl?: string;
 }): Promise<PlatformBranding> {
   const body = new FormData();
   body.set("sidebar_logo_action", input.sidebarLogoAction);
@@ -38,6 +41,7 @@ export async function updatePlatformBranding(input: {
   if (input.sidebarLogo) body.set("sidebar_logo", input.sidebarLogo);
   if (input.sidebarCompactLogo) body.set("sidebar_compact_logo", input.sidebarCompactLogo);
   if (input.sidebarMenuLabels) body.set("sidebar_menu_labels", JSON.stringify(input.sidebarMenuLabels));
+  if (input.adminUrl !== undefined) body.set("admin_url", input.adminUrl);
   return mapPlatformBranding(await adminApi.putForm<PlatformBrandingResponse>("/platform-branding", body));
 }
 
@@ -47,6 +51,7 @@ function mapPlatformBranding(response: PlatformBrandingResponse): PlatformBrandi
     sidebarLogoUrl: response.sidebar_logo_url,
     sidebarCompactLogoConfigured: response.sidebar_compact_logo_configured,
     sidebarCompactLogoUrl: response.sidebar_compact_logo_url,
-    sidebarMenuLabels: response.sidebar_menu_labels ?? {}
+    sidebarMenuLabels: response.sidebar_menu_labels ?? {},
+    adminUrl: response.admin_url ?? ""
   };
 }

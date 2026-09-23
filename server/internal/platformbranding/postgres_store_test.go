@@ -49,7 +49,7 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql"} {
+	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql", "00063_platform_branding_admin_url.sql"} {
 		raw, err := migrations.FS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -76,13 +76,16 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		t.Fatalf("read configuration=%#v error=%v", current, err)
 	}
 	input.SidebarMenuLabels = nil
+	adminURL := "https://gateway.example/admin"
+	input.AdminURL = &adminURL
 	current, err = service.Update(ctx, input)
-	if err != nil || current.SidebarMenuLabels.Skills != label {
+	if err != nil || current.SidebarMenuLabels.Skills != label || current.AdminURL != adminURL {
 		t.Fatalf("legacy update configuration=%#v error=%v", current, err)
 	}
 	input.SidebarMenuLabels = map[string]*string{"skills": nil}
+	input.AdminURL = nil
 	current, err = service.Update(ctx, input)
-	if err != nil || current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Drive != drive {
+	if err != nil || current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Drive != drive || current.AdminURL != adminURL {
 		t.Fatalf("reset configuration=%#v error=%v", current, err)
 	}
 	var resetIsNull bool

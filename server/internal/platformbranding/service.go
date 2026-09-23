@@ -7,6 +7,8 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/url"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -64,6 +66,16 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration,
 		labels[key] = &normalized
 	}
 	input.SidebarMenuLabels = labels
+	if input.AdminURL != nil {
+		value := strings.TrimSpace(*input.AdminURL)
+		if value != "" {
+			parsed, err := url.Parse(value)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || strings.ContainsAny(value, "\r\n\t ") || len(value) > 2048 {
+				return Configuration{}, ErrInvalidAdminURL
+			}
+		}
+		input.AdminURL = &value
+	}
 	return s.store.Update(ctx, input)
 }
 

@@ -161,6 +161,17 @@ describe("PlatformBrandingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ sidebarMenuLabels: { skills: null } })));
   });
+
+  it("validates and saves the client admin URL", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    const input = screen.getByLabelText("管理后台地址");
+    fireEvent.change(input, { target: { value: "javascript:alert(1)" } });
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    fireEvent.change(input, { target: { value: " https://gateway.example/admin " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ adminUrl: "https://gateway.example/admin" })));
+  });
 });
 
 function renderPage() {

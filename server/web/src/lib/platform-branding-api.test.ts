@@ -29,4 +29,12 @@ describe("平台外观接口", () => {
     const body = vi.mocked(adminApi.putForm).mock.calls[1]![1];
     expect(JSON.parse(String(body.get("sidebar_menu_labels")))).toEqual({ skills: "技能", drive: null });
   });
+
+  it("保存管理后台地址并兼容旧响应", async () => {
+    expect((await getPlatformBranding()).adminUrl).toBe("");
+    vi.mocked(adminApi.get).mockResolvedValue({ ...response, admin_url: "https://gateway.example/admin" });
+    expect((await getPlatformBranding()).adminUrl).toBe("https://gateway.example/admin");
+    await updatePlatformBranding({ sidebarLogoAction: "keep", sidebarCompactLogoAction: "keep", adminUrl: "" });
+    expect(vi.mocked(adminApi.putForm).mock.lastCall?.[1].get("admin_url")).toBe("");
+  });
 });

@@ -25,6 +25,7 @@ var (
 	ErrImageTooLarge    = errors.New("platform branding image is too large")
 	ErrImageNotFound    = errors.New("platform branding image not found")
 	ErrInvalidMenuLabel = errors.New("invalid sidebar menu label")
+	ErrInvalidAdminURL  = errors.New("invalid admin URL")
 )
 
 type Image struct {
@@ -36,6 +37,7 @@ type Configuration struct {
 	SidebarLogo        *Image
 	SidebarCompactLogo *Image
 	SidebarMenuLabels  MenuLabels
+	AdminURL           string
 	UpdatedBy          string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -47,6 +49,7 @@ type UpdateInput struct {
 	SidebarCompactLogoAction Action
 	SidebarCompactLogo       []byte
 	SidebarMenuLabels        map[string]*string
+	AdminURL                 *string
 	UpdatedBy                string
 	UpdatedAt                time.Time
 }

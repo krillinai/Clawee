@@ -36,6 +36,16 @@ function menuLabelError(value: string | null | undefined): string | undefined {
   return length < 1 || length > 10 ? "名称必须为 1～10 个字符" : undefined;
 }
 
+function adminUrlError(value: string): string | undefined {
+  if (!value.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (["http:", "https:"].includes(url.protocol) && url.hostname && !url.username && !url.password
+      && !/\s/.test(value.trim()) && value.trim().length <= 2048) return undefined;
+  } catch { /* Invalid URL. */ }
+  return "请输入有效的 HTTP 或 HTTPS 地址（最多 2048 字符）";
+}
+
 type LogoDraft = {
   action: PlatformBrandingAction;
   file?: File;
@@ -50,6 +60,7 @@ export function PlatformBrandingPage() {
   const [sidebarLogo, setSidebarLogo] = useState<LogoDraft>({ action: "keep" });
   const [compactLogo, setCompactLogo] = useState<LogoDraft>({ action: "keep" });
   const [menuDraft, setMenuDraft] = useState<Partial<Record<SidebarMenuKey, string | null>>>({});
+  const [adminUrlDraft, setAdminUrlDraft] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string }>();
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -66,11 +77,13 @@ export function PlatformBrandingPage() {
   }
 
   const branding = query.data;
-  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0;
+  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0 || adminUrlDraft !== undefined;
   const hasInvalidMenu = Object.values(menuDraft).some(value => menuLabelError(value) !== undefined);
+  const urlError = adminUrlDraft === undefined ? undefined : adminUrlError(adminUrlDraft);
   const hasCustomBranding = hasCustomLogo(sidebarLogo, branding.sidebarLogoConfigured)
     || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured)
-    || sidebarMenus.some(({ key }) => (menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key]) != null);
+    || sidebarMenus.some(({ key }) => (menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key]) != null)
+    || Boolean(adminUrlDraft === undefined ? branding.adminUrl : adminUrlDraft);
 
   function replaceDraft(current: LogoDraft, file: File, update: (draft: LogoDraft) => void) {
     if (!isSupportedImage(file)) {
@@ -96,10 +109,11 @@ export function PlatformBrandingPage() {
     setMenuDraft(current => Object.fromEntries(sidebarMenus
       .filter(({ key }) => current[key] !== undefined || branding.sidebarMenuLabels?.[key] !== undefined)
       .map(({ key }) => [key, null])));
+    if (adminUrlDraft !== undefined || branding.adminUrl) setAdminUrlDraft("");
   }
 
   async function save() {
-    if (hasInvalidMenu) return;
+    if (hasInvalidMenu || urlError) return;
     setSaving(true);
     setNotice(undefined);
     try {
@@ -108,6 +122,7 @@ export function PlatformBrandingPage() {
         sidebarLogo: sidebarLogo.file,
         sidebarCompactLogoAction: compactLogo.action,
         sidebarCompactLogo: compactLogo.file,
+        ...(adminUrlDraft === undefined ? {} : { adminUrl: adminUrlDraft.trim() }),
         ...(Object.keys(menuDraft).length === 0 ? {} : {
           sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value == null ? null : trimInput(value)]))
         })
@@ -117,6 +132,7 @@ export function PlatformBrandingPage() {
       setSidebarLogo({ action: "keep" });
       setCompactLogo({ action: "keep" });
       setMenuDraft({});
+      setAdminUrlDraft(undefined);
       queryClient.setQueryData(["platform-branding"], updated);
       setPreviewRevision((value) => value + 1);
       setNotice({ kind: "success", message: "平台外观已保存。" });
@@ -140,7 +156,7 @@ export function PlatformBrandingPage() {
               <RotateCcw aria-hidden="true" />
               恢复默认配置
             </Button>
-            <Button disabled={!hasChanges || saving || hasInvalidMenu} onClick={() => void save()}>
+            <Button disabled={!hasChanges || saving || hasInvalidMenu || Boolean(urlError)} onClick={() => void save()}>
               <Save aria-hidden="true" />
               {saving ? "保存中" : "保存"}
             </Button>
@@ -232,6 +248,22 @@ export function PlatformBrandingPage() {
             );
           })}
         </div>
+      </section>
+      <section className="mt-6 border-t pt-5" aria-labelledby="admin-url-title">
+        <h2 id="admin-url-title" className="mb-4 text-sm font-semibold">客户端管理后台入口</h2>
+        <Label htmlFor="admin-url">管理后台地址</Label>
+        <Input
+          className="mt-2"
+          id="admin-url"
+          type="url"
+          placeholder="https://example.com/admin"
+          value={adminUrlDraft ?? branding.adminUrl ?? ""}
+          disabled={!canUpdate || saving}
+          aria-invalid={Boolean(urlError)}
+          aria-describedby={urlError ? "admin-url-error" : undefined}
+          onChange={event => setAdminUrlDraft(event.target.value)}
+        />
+        {urlError ? <p id="admin-url-error" className="mt-1 text-xs text-destructive">{urlError}</p> : null}
       </section>
     </PageShell>
   );

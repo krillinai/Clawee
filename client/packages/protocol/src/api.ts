@@ -901,6 +901,7 @@ export type EnterpriseAccountSummary = {
 };
 
 export type EnterpriseSessionResponse = {
+	adminAllowed?: boolean;
 	 externalFeedbackAllowed?: boolean;
   status: EnterpriseSessionStatus;
   agentId?: string;
@@ -915,6 +916,7 @@ export type EnterpriseSidebarMenuLabels = Partial<Record<
 >>;
 
 export type EnterprisePlatformBrandingResponse = {
+  adminUrl?: string;
   sidebarLogoConfigured: boolean;
   sidebarCompactLogoConfigured: boolean;
   sidebarMenuLabels?: EnterpriseSidebarMenuLabels;

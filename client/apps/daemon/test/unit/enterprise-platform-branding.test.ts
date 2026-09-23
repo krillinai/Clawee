@@ -28,6 +28,14 @@ describe('enterprise platform branding', () => {
       await expect(client.getPlatformBranding!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
     }
   });
+  it('accepts only HTTP(S) admin links from the gateway', async () => {
+    const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ data: { ...data, admin_url: 'https://gateway.example/admin' } })));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getPlatformBranding!('token')).resolves.toMatchObject({ adminUrl: 'https://gateway.example/admin' });
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data: { ...data, admin_url: 'javascript:alert(1)' } })));
+    await expect(client.getPlatformBranding!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+  });
   it('validates configuration and proxies image content', async () => {
     const fetch = vi.fn(async (url: string | URL | Request) => {
       const path = new URL(String(url)).pathname;

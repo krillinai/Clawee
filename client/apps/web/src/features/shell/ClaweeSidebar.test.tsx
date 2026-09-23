@@ -66,6 +66,17 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ClaweeSidebar>> 
 }
 
 describe('ClaweeSidebar', () => {
+  it('shows the admin link only with admin access and a configured address', () => {
+    const session = { status: 'signed_in' as const, adminAllowed: true, account: { subjectId: 'u1', email: 'a@example.com', name: 'Admin' }, transportSecurity: 'secure_https' as const };
+    const { rerender } = renderSidebar({ enterpriseSession: session, adminUrl: 'https://gateway.example/admin' });
+    expect(screen.getByRole('link', { name: '管理后台' })).toHaveAttribute('href', 'https://gateway.example/admin');
+    expect(screen.getByRole('link', { name: '管理后台' })).toHaveAttribute('rel', 'noopener noreferrer');
+    rerender(<ClaweeSidebar projects={projects} conversations={conversations} tasks={[]} activeView="conversation"
+      enterpriseSession={{ ...session, adminAllowed: false }} adminUrl="https://gateway.example/admin"
+      onNewConversation={vi.fn()} onSelectProject={vi.fn()} onSelectConversation={vi.fn()} onSelectTask={vi.fn()}
+      onOpenView={vi.fn()} onOpenAccount={vi.fn()} onOpenSettings={vi.fn()} onToggleCollapsed={vi.fn()} />);
+    expect(screen.queryByRole('link', { name: '管理后台' })).not.toBeInTheDocument();
+  });
   it.each([false, true])('uses configured menu names and unchanged routes when collapsed=%s', collapsed => {
     const onOpenView = vi.fn();
     renderSidebar({

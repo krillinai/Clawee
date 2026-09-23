@@ -36,6 +36,9 @@ func (s *MemoryStore) Update(ctx context.Context, input UpdateInput) (Configurat
 	configuration.SidebarLogo = applyAction(configuration.SidebarLogo, input.SidebarLogoAction, input.SidebarLogo)
 	configuration.SidebarCompactLogo = applyAction(configuration.SidebarCompactLogo, input.SidebarCompactLogoAction, input.SidebarCompactLogo)
 	configuration.UpdatedBy = input.UpdatedBy
+	if input.AdminURL != nil {
+		configuration.AdminURL = *input.AdminURL
+	}
 	for key, target := range map[string]*string{
 		"skills":    &configuration.SidebarMenuLabels.Skills,
 		"knowledge": &configuration.SidebarMenuLabels.Knowledge,

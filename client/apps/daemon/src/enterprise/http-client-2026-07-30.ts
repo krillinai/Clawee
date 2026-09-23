@@ -97,6 +97,7 @@ const sidebarMenuLabelSchema = z.string().refine(value =>
 );
 const platformBrandingSchema = z.object({
   data: z.object({
+    admin_url: z.union([z.literal(''), z.string().url().refine(value => /^https?:\/\//.test(value))]).optional(),
     sidebar_logo_configured: z.boolean(),
     sidebar_compact_logo_configured: z.boolean(),
     sidebar_menu_labels: z.object({
@@ -223,7 +224,8 @@ const meResponseSchema = z.object({
     account: accountSchema,
     agent: agentSchema,
     applications: z.object({
-      frontend: z.boolean()
+      frontend: z.boolean(),
+      admin: z.boolean().optional()
     }),
     agent_activity_reporting_enabled: z.boolean().optional().default(false),
     external_feedback_allowed: z.boolean().optional()
@@ -839,6 +841,7 @@ export type EnterpriseQrLoginPollResult = {
 };
 
 export type EnterpriseMeResult = {
+  adminAllowed?: boolean;
   externalFeedbackAllowed?: boolean;
   account: EnterpriseAccountSummary;
   agentId: string;
@@ -1381,6 +1384,7 @@ export function createEnterpriseHttpClient(input: {
         agentId: response.data.agent.agent_id,
         status: response.data.account.status,
         frontendAllowed: response.data.applications.frontend,
+        ...(response.data.applications.admin === true ? { adminAllowed: true } : {}),
         externalFeedbackAllowed: response.data.external_feedback_allowed,
         activityReportingEnabled:
           response.data.agent_activity_reporting_enabled
@@ -1434,6 +1438,7 @@ export function createEnterpriseHttpClient(input: {
         schema: platformBrandingSchema
       });
       return {
+        ...(response.data.admin_url ? { adminUrl: response.data.admin_url } : {}),
         sidebarLogoConfigured: response.data.sidebar_logo_configured,
         sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured,
         ...(response.data.sidebar_menu_labels === undefined

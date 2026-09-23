@@ -155,7 +155,7 @@ describe('App', () => {
     expect(await screen.findByRole('link', { name: '管理后台' })).toHaveAttribute('href', 'https://gateway.example/admin');
     fireEvent.click(screen.getByRole('button', { name: 'Member' }));
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
-    expect(screen.queryByRole('link', { name: '管理后台' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('link', { name: '管理后台' })).not.toBeInTheDocument());
   });
 
   it.each(['legacy', 'unavailable'])('keeps default names when branding is %s', async mode => {

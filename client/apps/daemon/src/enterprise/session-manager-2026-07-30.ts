@@ -529,6 +529,7 @@ export function createEnterpriseSessionManager(input: {
       agentIdCache = me.agentId;
     }
     const next: EnterpriseSessionResponse = {
+      ...(me.adminAllowed === true ? { adminAllowed: true } : {}),
       externalFeedbackAllowed: me.externalFeedbackAllowed,
       status: 'signed_in',
       agentId: me.agentId,

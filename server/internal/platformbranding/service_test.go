@@ -94,6 +94,33 @@ func TestServiceMenuLabelsValidationAndReset(t *testing.T) {
 	}
 }
 
+func TestServiceAdminURLValidationAndReset(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	url := " https://gateway.example/admin "
+	input := UpdateInput{SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep, AdminURL: &url}
+	current, err := service.Update(context.Background(), input)
+	if err != nil || current.AdminURL != "https://gateway.example/admin" {
+		t.Fatalf("admin URL=%q error=%v", current.AdminURL, err)
+	}
+	for _, invalid := range []string{"javascript:alert(1)", "https://user:pass@example.com/admin", "https://", "https://example.com/a b"} {
+		input.AdminURL = &invalid
+		if _, err := service.Update(context.Background(), input); !errors.Is(err, ErrInvalidAdminURL) {
+			t.Fatalf("invalid URL %q error=%v", invalid, err)
+		}
+	}
+	input.AdminURL = nil
+	current, err = service.Update(context.Background(), input)
+	if err != nil || current.AdminURL != "https://gateway.example/admin" {
+		t.Fatalf("omitted URL changed configuration: %#v error=%v", current, err)
+	}
+	empty := ""
+	input.AdminURL = &empty
+	current, err = service.Update(context.Background(), input)
+	if err != nil || current.AdminURL != "" {
+		t.Fatalf("reset URL=%q error=%v", current.AdminURL, err)
+	}
+}
+
 func TestServiceRejectsInvalidImagesWithoutChangingConfiguration(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	original := encodePNG(t, 10, 10)
