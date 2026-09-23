@@ -28,7 +28,7 @@ func TestAdminStatusReportsDisabledFeatures(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	for _, feature := range []string{"feedback", "knowledge", "skills", "skill_sources", "shared_files", "shared_file_storage", "shared_file_migrations", "activity", "agent_management", "account_governance", "mcp", "data_permissions", "platform_branding", "client_downloads"} {
+	for _, feature := range []string{"feedback", "knowledge", "skills", "skill_oa", "skill_sources", "shared_files", "shared_file_storage", "shared_file_migrations", "activity", "agent_management", "account_governance", "mcp", "data_permissions", "platform_branding", "client_downloads"} {
 		if enabled, exists := response.Data.Features[feature]; !exists || enabled {
 			t.Errorf("feature %s = %v, exists = %v; want false", feature, enabled, exists)
 		}
@@ -37,6 +37,43 @@ func TestAdminStatusReportsDisabledFeatures(t *testing.T) {
 		if !response.Data.Features[feature] {
 			t.Errorf("test router feature %s should be enabled", feature)
 		}
+	}
+}
+
+func TestAdminStatusReportsSkillOAAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		client  bool
+		want    bool
+	}{
+		{name: "关闭", client: true},
+		{name: "缺少客户端", enabled: true},
+		{name: "开启且可用", enabled: true, client: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := server.Options{DingTalkAuth: server.DingTalkAuthOptions{OAEnabled: tc.enabled}}
+			if tc.client {
+				opts.DingTalkAuth.OAClient = &fakeApprovalClient{}
+			}
+			router := newTestRouter(t, opts)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+			var response struct {
+				Data struct {
+					Features map[string]bool `json:"features"`
+				} `json:"data"`
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if got := response.Data.Features["skill_oa"]; got != tc.want {
+				t.Fatalf("skill_oa = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

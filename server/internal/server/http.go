@@ -255,6 +255,7 @@ func NewRouter(opts Options) http.Handler {
 				"agent_management":       opts.OfficeManagementAPI != nil,
 				"knowledge":              opts.KnowledgeService != nil,
 				"skills":                 opts.SkillHubService != nil && opts.AccountService != nil,
+				"skill_oa":               opts.DingTalkAuth.OAEnabled && opts.DingTalkAuth.OAClient != nil,
 				"skill_sources":          opts.SkillHubService != nil && opts.AccountService != nil && opts.SkillSourceService != nil,
 				"shared_files":           opts.SharedFilesService != nil,
 				"shared_file_storage":    opts.SharedFileStorageService != nil,

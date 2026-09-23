@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   addSkillSpaceMember,
+  getSkillOAAvailability,
   listSkillSpaceCandidates,
   listSkillSpaceMembers,
   listSkillSpaces,
@@ -21,6 +22,7 @@ vi.mock("@/lib/skillhub-api", async () => {
   return {
     ...actual,
     addSkillSpaceMember: vi.fn(),
+    getSkillOAAvailability: vi.fn(),
     listSkillSpaceCandidates: vi.fn(),
     listSkillSpaceMembers: vi.fn(),
     listSkillSpaces: vi.fn(),
@@ -57,6 +59,30 @@ const member = {
 };
 
 describe("SkillSpacesPanel", () => {
+  it("hides DingTalk OA when disabled", async () => {
+    vi.mocked(getSkillOAAvailability).mockResolvedValue(false);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const dialog = screen.getByRole("dialog", { name: "空间设置" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "审批方式" }));
+    expect(screen.queryByRole("option", { name: "钉钉 OA" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "本地审批" })).toBeInTheDocument();
+  });
+
+  it("allows an existing DingTalk space to switch back without showing an OA option", async () => {
+    vi.mocked(getSkillOAAvailability).mockResolvedValue(false);
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvalProvider: "dingtalk", externalApprovalTemplateId: "PROC-1" }]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const dialog = screen.getByRole("dialog", { name: "空间设置" });
+    expect(within(dialog).getByText("当前为钉钉 OA（已停用）")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("combobox", { name: "审批方式" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "改为本地审批" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", ""));
+  });
+
   it("requires a reviewer when approval is enabled in the settings drawer", async () => {
     renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
     fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
@@ -97,6 +123,7 @@ describe("SkillSpacesPanel", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getSkillOAAvailability).mockResolvedValue(true);
     vi.mocked(listSkillSpaces).mockResolvedValue([space]);
     vi.mocked(listSkillSpaceMembers).mockResolvedValue([member]);
     vi.mocked(listSkillSpaceCandidates).mockResolvedValue([

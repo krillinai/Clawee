@@ -625,6 +625,11 @@ export async function getSkillSourceAvailability() {
   return response.skill_source_enabled;
 }
 
+export async function getSkillOAAvailability() {
+  const response = await adminApi.get<{ features: { skill_oa?: boolean } }>("/status");
+  return response.features.skill_oa === true;
+}
+
 export async function getGitHubSource(sourceId: string): Promise<GitHubSourceDetail> {
   const response = await adminApi.get<GitHubSourceDetailResponse>(`/skill-sources/detail?source_id=${encodeURIComponent(sourceId)}`);
   return {

@@ -8,6 +8,7 @@ import {
 	getGitHubSource,
 	getGitHubSourceToken,
 	getSkillSourceAvailability,
+	getSkillOAAvailability,
 	getPublishedSkillPackageURL,
 	getPublishedSkillVersionFile,
 	getSkillVersionFile,
@@ -58,6 +59,13 @@ describe("skillhub api", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getSkillSourceAvailability()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/admin/status", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("reads skill OA availability from admin status", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { features: { skill_oa: true } } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getSkillOAAvailability()).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/admin/status", expect.objectContaining({ method: "GET" }));
   });
 

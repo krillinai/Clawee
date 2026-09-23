@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   addSkillSpaceMember,
   createSkillSpace,
+  getSkillOAAvailability,
   listSkillSpaceCandidates,
   listSkillSpaceMembers,
   listSkillSpaces,
@@ -45,6 +46,8 @@ export function SkillSpacesPanel({
 }) {
   const queryClient = useQueryClient();
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
+  const oaAvailabilityQuery = useQuery({ queryKey: ["skill-oa-availability"], queryFn: getSkillOAAvailability });
+  const oaEnabled = oaAvailabilityQuery.data === true;
   const [editing, setEditing] = useState<SkillSpace | null | undefined>(undefined);
   const [authorizationId, setAuthorizationId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -139,8 +142,8 @@ export function SkillSpacesPanel({
     <DetailDrawer open={Boolean(approverTarget)} onClose={() => { if (!approverMutation.isPending) setApproverTarget(null); }} title="空间设置" subtitle={approverTarget?.name ?? ""} contextLabel="技能中心">
       <form onSubmit={(event) => { event.preventDefault(); approverMutation.mutate(); }}>
         <FieldGroup>
-          <Field><FieldLabel htmlFor="skill-space-provider">审批方式</FieldLabel><Select value={approvalProvider} onValueChange={(value) => setApprovalProvider(value as "local" | "dingtalk")}><SelectTrigger id="skill-space-provider"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="local">本地审批</SelectItem><SelectItem value="dingtalk">钉钉 OA</SelectItem></SelectContent></Select></Field>
-          {approvalProvider === "dingtalk" ? <Field><FieldLabel htmlFor="skill-space-template">钉钉审批模板 ID（processCode）</FieldLabel><Input id="skill-space-template" maxLength={128} required value={templateId} onChange={(event) => setTemplateId(event.target.value)} /></Field> : null}
+          {!oaEnabled && approvalProvider === "dingtalk" ? <Field><FieldLabel>审批方式</FieldLabel><span>当前为钉钉 OA（已停用）</span><Button type="button" variant="outline" onClick={() => setApprovalProvider("local")}>改为本地审批</Button></Field> : <Field><FieldLabel htmlFor="skill-space-provider">审批方式</FieldLabel><Select value={approvalProvider} onValueChange={(value) => setApprovalProvider(value as "local" | "dingtalk")}><SelectTrigger id="skill-space-provider"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="local">本地审批</SelectItem>{oaEnabled ? <SelectItem value="dingtalk">钉钉 OA</SelectItem> : null}</SelectContent></Select></Field>}
+          {approvalProvider === "dingtalk" && oaEnabled ? <Field><FieldLabel htmlFor="skill-space-template">钉钉审批模板 ID（processCode）</FieldLabel><Input id="skill-space-template" maxLength={128} required value={templateId} onChange={(event) => setTemplateId(event.target.value)} /></Field> : null}
           {approvalProvider === "local" ? <Field orientation="horizontal"><Checkbox id="skill-space-approval" checked={approvalEnabled} onCheckedChange={(checked) => setApprovalEnabled(checked === true)} /><FieldLabel htmlFor="skill-space-approval">开启审批</FieldLabel></Field> : null}
           {approvalProvider === "local" && approvalEnabled ? <Field><FieldLabel htmlFor="skill-space-approver">空间技能审批人</FieldLabel>
             <Select value={approverUserId} onValueChange={setApproverUserId}>
@@ -153,7 +156,7 @@ export function SkillSpacesPanel({
           </Field> : null}
           {approvalProvider === "local" && approvalEnabled && candidatesQuery.isError ? <ErrorAlert>审批人列表加载失败</ErrorAlert> : null}
           {approverMutation.isError ? <ErrorAlert>保存失败：{errorText(approverMutation.error)}</ErrorAlert> : null}
-          <Field className="justify-end" orientation="horizontal"><Button disabled={approverMutation.isPending} type="button" variant="outline" onClick={() => setApproverTarget(null)}>取消</Button><Button disabled={approverMutation.isPending || (approvalProvider === "dingtalk" ? !trimInput(templateId) : approvalEnabled && (approverUserId === "none" || candidatesQuery.isLoading || candidatesQuery.isError))} type="submit" variant="primary">保存</Button></Field>
+          <Field className="justify-end" orientation="horizontal"><Button disabled={approverMutation.isPending} type="button" variant="outline" onClick={() => setApproverTarget(null)}>取消</Button><Button disabled={approverMutation.isPending || (approvalProvider === "dingtalk" ? !oaEnabled || !trimInput(templateId) : approvalEnabled && (approverUserId === "none" || candidatesQuery.isLoading || candidatesQuery.isError))} type="submit" variant="primary">保存</Button></Field>
         </FieldGroup>
       </form>
     </DetailDrawer>
