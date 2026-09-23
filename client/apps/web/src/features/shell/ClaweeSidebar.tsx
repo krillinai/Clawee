@@ -155,6 +155,7 @@ export function ClaweeSidebar(props: {
   }> = [
     { label: '新建会话', icon: SquarePen, onClick: () => props.onNewConversation() },
     { label: props.sidebarMenuLabels?.dashboard ?? '数据看板', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
+    { label: '工作流', icon: Workflow, view: 'workflow', onClick: () => props.onOpenView('workflow') },
     ...(props.activityAllowed === true
       ? [{ label: 'Agent动态', icon: Activity, view: 'activity' as const, onClick: () => props.onOpenView('activity') }]
       : []),
@@ -162,8 +163,7 @@ export function ClaweeSidebar(props: {
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
     { label: props.sidebarMenuLabels?.knowledge ?? '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
     { label: props.sidebarMenuLabels?.drive ?? '共享网盘', icon: HardDrive, view: 'drive', onClick: () => props.onOpenView('drive') },
-    { label: '定时任务', icon: Clock3, view: 'schedules', onClick: () => props.onOpenView('schedules') },
-    { label: '工作流', icon: Workflow, view: 'workflow', onClick: () => props.onOpenView('workflow') }
+    { label: '定时任务', icon: Clock3, view: 'schedules', onClick: () => props.onOpenView('schedules') }
   ];
   const selectedTaskThread = props.tasks.some(
     task => task.threadId === props.selectedConversationId

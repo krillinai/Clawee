@@ -145,10 +145,12 @@ describe('ClaweeSidebar', () => {
     expect(screen.getByRole('button', { name: '收起侧栏' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '数据看板' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '工作流' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Agent动态' })).toBeInTheDocument();
     const primaryActions = screen.getByRole('button', { name: '新建会话' }).parentElement;
     expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '数据看板' }));
-    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: 'Agent动态' }));
+    expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '工作流' }));
+    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: 'Agent动态' }));
     const searchButton = screen.getByRole('button', { name: '搜索' });
     expect(searchButton.nextElementSibling).toBe(screen.getByRole('button', { name: '收起侧栏' }));
     expect(primaryActions).not.toContainElement(searchButton);
