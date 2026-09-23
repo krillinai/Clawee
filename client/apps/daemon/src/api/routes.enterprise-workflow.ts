@@ -207,7 +207,7 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
       let run;
       try {
         run = runs.startRun({
-          prompt: [String(task.instruction), typeof input?.text === 'string' && input.text !== parsed.data.customInput ? `${nodeOrder === 0 ? '初始输入' : '上一步输入'}：\n${input.text}` : '', `个性化任务要求：\n${parsed.data.customInput}`].filter(Boolean).join('\n\n'),
+          prompt: [String(task.instruction), typeof input?.text === 'string' && input.text !== parsed.data.customInput ? `${nodeOrder === 0 ? '初始输入' : '上一步输入'}：\n${input.text}` : '', `${nodeOrder === 0 && input?.text === parsed.data.customInput ? '任务要求' : '个性化任务要求'}：\n${parsed.data.customInput}`].filter(Boolean).join('\n\n'),
           cwd: thread.cwd, profile: thread.profile, sandbox: thread.sandbox, threadId: thread.id,
           model: parsed.data.model ?? undefined, reasoning: parsed.data.reasoning ?? undefined
         });

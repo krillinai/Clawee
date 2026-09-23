@@ -102,17 +102,17 @@ describe('enterprise workflow execution', () => {
       expect(threads.listPublicThreads({ assignment: 'assigned' })).toEqual([
         expect.objectContaining({ id: threadId, projectId: project.id, title: '工作流 · 热点整理', purpose: 'conversation', sandbox: 'danger-full-access' })
       ]);
-      const request = { method: 'POST' as const, url: '/enterprise/workflow-tasks/task-1/execute', payload: { projectId: project.id, threadId, customInput: '需要三条新闻' } };
+      const request = { method: 'POST' as const, url: '/enterprise/workflow-tasks/task-1/execute', payload: { projectId: project.id, threadId, customInput: '测试主题' } };
       const invalid = await server.inject({ method: 'POST', url: request.url, payload: { projectId: project.id, threadId: 'other-thread', customInput: '无效' } });
       expect(invalid.statusCode).toBe(409);
       expect(startRun).not.toHaveBeenCalled();
       const first = await server.inject(request);
       expect(first.statusCode, first.body).toBe(202);
       expect(startRun).toHaveBeenCalledWith(expect.objectContaining({
-        threadId, cwd: directory, sandbox: 'danger-full-access', prompt: '整理内容\n\n初始输入：\n测试主题\n\n个性化任务要求：\n需要三条新闻'
+        threadId, cwd: directory, sandbox: 'danger-full-access', prompt: '整理内容\n\n任务要求：\n测试主题'
       }));
       expect(createWorkflowRunHistory(associationDb).items([run], 'user-1')).toEqual([
-        expect.objectContaining({ type: 'workflow_start', taskId: 'task-1', workflowName: '每日热点', nodeTitle: '热点整理', input: '测试主题', customInput: '需要三条新闻' })
+        expect.objectContaining({ type: 'workflow_start', taskId: 'task-1', workflowName: '每日热点', nodeTitle: '热点整理', input: '测试主题', customInput: '测试主题' })
       ]);
       expect(createWorkflowRunHistory(associationDb).items([run], 'another-user')).toEqual([]);
       const initialHistory = await server.inject(`/threads/${threadId}/history`);

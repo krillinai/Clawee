@@ -1264,6 +1264,7 @@ export function Composer(props: {
           rows={2}
           value={visiblePrompt}
           disabled={props.disabled}
+          readOnly={props.workflowDraft?.firstNode}
           onChange={(event) => updateVisiblePrompt(event.target.value, event.target.selectionStart)}
           onClick={(event) => updatePrompt(
             prompt,

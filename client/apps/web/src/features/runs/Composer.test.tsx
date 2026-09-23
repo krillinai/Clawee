@@ -940,6 +940,17 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('只选三条', expect.any(Object), []);
   });
 
+  it('shows the first workflow requirement as read-only before execution', async () => {
+    const onSubmit = vi.fn();
+    render(<Composer {...defaultProps} initialPrompt="发起时的任务要求" onSubmit={onSubmit} workflowDraft={{ instruction: '节点预设', input: '发起时的任务要求', firstNode: true }} />);
+    const requirement = screen.getByRole('textbox', { name: '任务要求' });
+    expect(requirement).toHaveValue('发起时的任务要求');
+    expect(requirement).toHaveAttribute('readonly');
+    expect(screen.queryByText('上一步输入')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit).toHaveBeenCalledWith('发起时的任务要求', expect.any(Object), []);
+  });
+
   it('auto-sizes the textbox to its content and resets after submit', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

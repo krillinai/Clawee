@@ -140,7 +140,7 @@ describe('WorkflowPage', () => {
     expect(within(third).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('prepares an Agent conversation with separate personalized input without executing it', async () => {
+  it('prepares the first Agent node with its saved requirement without another input', async () => {
     const agentTask: Task = { ...task, type: 'agent', instruction: '生成', node_id: 'agent', input: { text: '主题' } };
     const agentInstance: Instance = { ...instance, current_node_id: 'agent', nodes: [{ node_id: 'agent', order: 0, type: 'agent', title: '生成', assignee_user_id: 'a', instruction: '生成' }, { node_id: 'review', order: 1, type: 'approval', title: '审核', assignee_user_id: 'a', instruction: '审核' }], tasks: [agentTask] };
     const service = serviceFor('a');
@@ -158,12 +158,34 @@ describe('WorkflowPage', () => {
     expect(steps.map(step => step.getAttribute('data-state'))).toEqual(['current', 'upcoming']);
     expect(await within(first).findByText('Agent 任务尚未启动')).toBeInTheDocument();
     expect(within(first).queryByText('idle')).not.toBeInTheDocument();
-    fireEvent.change(within(first).getByRole('textbox', { name: '任务要求' }), { target: { value: '按周汇总' } });
+    expect(within(first).getByText('任务要求')).toBeInTheDocument();
+    expect(within(first).getByText('主题')).toBeInTheDocument();
+    expect(within(first).queryByRole('textbox', { name: '任务要求' })).not.toBeInTheDocument();
     fireEvent.click(within(first).getByRole('button', { name: '发起 Agent 执行' }));
     expect(within(second).queryByRole('button')).not.toBeInTheDocument();
     await waitFor(() => expect(service.prepare).toHaveBeenCalledWith('task-a', 'project-1'));
     expect(service.execute).not.toHaveBeenCalled();
-    expect(onTaskPrepared).toHaveBeenCalledWith('task-a', { threadId: 'thread-1', instruction: '生成', input: '主题', firstNode: true, customInput: '按周汇总' });
+    expect(onTaskPrepared).toHaveBeenCalledWith('task-a', { threadId: 'thread-1', instruction: '生成', input: '主题', firstNode: true, customInput: '主题' });
+  });
+
+  it('keeps the supplemental requirement on a later Agent node', async () => {
+    const agentTask: Task = { ...task, type: 'agent', instruction: '生成', node_id: 'agent', input: { text: '上一步结果' } };
+    const service = serviceFor('a');
+    service.tasks = vi.fn(async () => ({ data: [agentTask], meta }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, current_node_id: 'agent', nodes: [
+      { node_id: 'start', order: 0, type: 'approval' as const, title: '开始', assignee_user_id: 'a', instruction: '确认' },
+      { node_id: 'agent', order: 1, type: 'agent' as const, title: '生成', assignee_user_id: 'a', instruction: '生成' }
+    ], tasks: [agentTask] } }));
+    service.capability = vi.fn(async () => ({ canExecute: true }));
+    service.execution = vi.fn(async () => ({ status: 'idle' }));
+    service.prepare = vi.fn(async () => ({ threadId: 'thread-2', instruction: '生成', input: '上一步结果', firstNode: false }));
+    const onTaskPrepared = vi.fn();
+    render(<WorkflowPage service={service} signedIn online userId="a" projectId="project-1" onTaskPrepared={onTaskPrepared} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Agent · 生成/ }));
+    const second = (await screen.findAllByRole('listitem'))[1] as HTMLElement;
+    fireEvent.change(within(second).getByRole('textbox', { name: '任务要求' }), { target: { value: '只选三条' } });
+    fireEvent.click(within(second).getByRole('button', { name: '发起 Agent 执行' }));
+    await waitFor(() => expect(onTaskPrepared).toHaveBeenCalledWith('task-a', expect.objectContaining({ firstNode: false, customInput: '只选三条' })));
   });
 
   it('opens the first task draft after starting from its node', async () => {

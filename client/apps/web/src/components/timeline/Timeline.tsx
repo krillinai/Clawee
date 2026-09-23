@@ -1109,7 +1109,7 @@ function renderTimelineItemContent(
         <strong>{item.workflowName} · {item.nodeTitle}</strong>
         <small>第 {item.nodeOrder + 1} 个节点 · 实例 {item.instanceId}</small>
         <MarkdownRenderer text={item.instruction} variant="user" />
-        {item.input && <div className="timeline-workflow-input"><span>工作流输入</span><pre>{item.input}</pre></div>}
+        {item.input && <div className="timeline-workflow-input"><span>{item.nodeOrder === 0 ? '任务要求' : '工作流输入'}</span><pre>{item.input}</pre></div>}
         {item.customInput && item.customInput !== item.input && <div className="timeline-workflow-input"><span>本次要求</span><pre>{item.customInput}</pre></div>}
       </div>;
     case 'workflow_status': {

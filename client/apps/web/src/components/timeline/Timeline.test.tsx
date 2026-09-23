@@ -27,6 +27,7 @@ describe('Timeline', () => {
     expect(screen.getByText('每日热点 · 热点整理')).toBeInTheDocument();
     expect(screen.getByText('选出最值得读的三条新闻')).toBeInTheDocument();
     expect(screen.getByText('今天的 AI 新闻')).toBeInTheDocument();
+    expect(screen.getByText('任务要求')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('节点已完成');
   });
 

@@ -3306,7 +3306,7 @@ export function AppController(props: AppControllerProps) {
       const draft = workflowDraft;
       if (!workflowService || !currentProject || attachments.length > 0 || submissionMode) return false;
       try {
-        const result = await workflowService.execute(draft.taskId, currentProject.id, draft.threadId, prompt, config?.model, config?.reasoning);
+        const result = await workflowService.execute(draft.taskId, currentProject.id, draft.threadId, draft.firstNode ? draft.input : prompt, config?.model, config?.reasoning);
         setWorkflowDraft(undefined);
         setThreadHistoryReloadKey(previous => previous + 1);
         if (result.runId && runService && connectionConfigRef.current) {
