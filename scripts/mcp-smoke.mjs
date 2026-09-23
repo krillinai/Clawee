@@ -47,7 +47,7 @@ export async function verifyMcpPermissions(origin, adminCookies, userId, agentId
     const capabilities = await api('capabilities?server_id=smoke-upstream');
     const capability = capabilities.find(item => item.upstream_name === 'echo');
     assert.ok(capability, '上游能力已同步');
-    await api('capabilities', 'PATCH', { capability_id: capability.id, status: 'active' });
+    await api('capabilities', 'PUT', { capability_id: capability.id, status: 'active' });
     const token = await api('accounts/token/rotate', 'POST', { user_id: userId, scopes: ['mcp:call'] });
     await client.connect(new StreamableHTTPClientTransport(new URL(origin + '/mcp'), {
       requestInit: { headers: { Authorization: `Bearer ${token.token}`, 'X-Claw-Agent-ID': agentId } }

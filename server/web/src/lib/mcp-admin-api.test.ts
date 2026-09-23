@@ -204,7 +204,7 @@ describe("mcp-admin-api", () => {
       1,
       "/api/v1/admin/mcp/upstream-servers",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ server_id: "server/one", status: "disabled" })
       })
     );
@@ -263,7 +263,7 @@ describe("mcp-admin-api", () => {
       1,
       "/api/v1/admin/mcp/upstream-servers",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({
           server_id: "server/one",
           name: "Server Updated",
@@ -566,7 +566,7 @@ describe("mcp-admin-api", () => {
       2,
       "/api/v1/admin/mcp/capabilities",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ capability_id: "cap_search", status: "active" })
       })
     );
@@ -575,7 +575,7 @@ describe("mcp-admin-api", () => {
       3,
       "/api/v1/admin/mcp/capabilities",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ capability_id: "crm.customer/search", exposed_name: "crm.customer.lookup" })
       })
     );

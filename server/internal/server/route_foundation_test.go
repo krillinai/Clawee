@@ -169,7 +169,7 @@ func TestTargetAppAgentRoutesShareAuthenticationBoundary(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/api/v1/app/agents"},
-		{http.MethodPatch, "/api/v1/app/agents/name"},
+		{http.MethodPut, "/api/v1/app/agents/name"},
 		{http.MethodPost, "/api/v1/app/agents/remove"},
 		{http.MethodGet, "/api/v1/app/mcp/token"},
 		{http.MethodGet, "/api/v1/app/agents/tools"},
@@ -186,7 +186,7 @@ func TestTargetAppAgentRoutesShareAuthenticationBoundary(t *testing.T) {
 		{http.MethodPost, "/api/v1/app/business-data-sources/bilibili/sync"},
 		{http.MethodGet, "/api/v1/app/business-data-sources/bilibili"},
 		{http.MethodPost, "/api/v1/app/business-data-sources/bilibili/bdsrc_1/sync"},
-		{http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1"},
+		{http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1"},
 		{http.MethodDelete, "/api/v1/app/business-data-sources/bilibili/bdsrc_1"},
 	}
 	for _, route := range routes {
@@ -293,10 +293,10 @@ func TestTargetHumanAPIRoutesShareApplicationAuthenticationBoundaries(t *testing
 		{http.MethodGet, "/api/v1/app/activity/recent?limit=20"},
 		{http.MethodGet, "/api/v1/app/activity/events"},
 		{http.MethodGet, "/api/v1/admin/accounts/detail?user_id=usr_123"},
-		{http.MethodPatch, "/api/v1/admin/accounts"},
+		{http.MethodPut, "/api/v1/admin/accounts"},
 		{http.MethodPost, "/api/v1/admin/accounts/password/reset"},
 		{http.MethodGet, "/api/v1/admin/mcp/upstream-servers/detail?server_id=server_123"},
-		{http.MethodPatch, "/api/v1/admin/mcp/upstream-servers"},
+		{http.MethodPut, "/api/v1/admin/mcp/upstream-servers"},
 		{http.MethodPost, "/api/v1/admin/mcp/upstream-servers/remove"},
 		{http.MethodPost, "/api/v1/admin/mcp/upstream-servers/sync-tools"},
 		{http.MethodGet, "/api/v1/admin/mcp/agents/detail?agent_id=agent_123"},
@@ -305,7 +305,7 @@ func TestTargetHumanAPIRoutesShareApplicationAuthenticationBoundaries(t *testing
 		{http.MethodPost, "/api/v1/admin/mcp/accounts/token/rotate"},
 		{http.MethodPost, "/api/v1/admin/mcp/accounts/token/revoke"},
 		{http.MethodGet, "/api/v1/admin/mcp/capabilities/detail?capability_id=cap_123"},
-		{http.MethodPatch, "/api/v1/admin/mcp/capabilities"},
+		{http.MethodPut, "/api/v1/admin/mcp/capabilities"},
 		{http.MethodPost, "/api/v1/admin/mcp/capabilities/remove"},
 		{http.MethodPut, "/api/v1/admin/mcp/capabilities/gate-policy"},
 		{http.MethodPost, "/api/v1/admin/mcp/grants/remove"},
@@ -325,7 +325,7 @@ func TestTargetHumanAPIRoutesShareApplicationAuthenticationBoundaries(t *testing
 		{http.MethodPost, "/api/v1/admin/activity/mcp-agent-binding/remove"},
 		{http.MethodPost, "/api/v1/admin/activity/agents/remove"},
 		{http.MethodGet, "/api/v1/admin/knowledge-bases/detail?knowledge_base_id=kb_123"},
-		{http.MethodPatch, "/api/v1/admin/knowledge-bases"},
+		{http.MethodPut, "/api/v1/admin/knowledge-bases"},
 		{http.MethodPost, "/api/v1/admin/knowledge-bases/remove"},
 		{http.MethodGet, "/api/v1/admin/knowledge-bases/documents?knowledge_base_id=kb_123"},
 		{http.MethodPost, "/api/v1/admin/knowledge-bases/documents"},
@@ -335,7 +335,7 @@ func TestTargetHumanAPIRoutesShareApplicationAuthenticationBoundaries(t *testing
 		{http.MethodGet, "/api/v1/admin/skills/version-files?skill_id=skill_123&version_id=version_123"},
 		{http.MethodGet, "/api/v1/admin/skills/version-file?skill_id=skill_123&version_id=version_123&path=SKILL.md"},
 		{http.MethodGet, "/api/v1/admin/skills/version-package?skill_id=skill_123&version_id=version_123"},
-		{http.MethodPatch, "/api/v1/admin/skills/space"},
+		{http.MethodPut, "/api/v1/admin/skills/space"},
 		{http.MethodPut, "/api/v1/admin/skills/current-version"},
 		{http.MethodPost, "/api/v1/admin/skills/current-version/remove"},
 	}

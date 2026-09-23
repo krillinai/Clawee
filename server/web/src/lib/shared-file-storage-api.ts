@@ -125,7 +125,7 @@ export async function createOSSProfile(input: OSSProfileInput) {
 }
 
 export async function updateOSSProfile(profileId: string, input: OSSProfileInput) {
-  return mapProfile(await adminApi.patch<ProfileResponse>(
+  return mapProfile(await adminApi.put<ProfileResponse>(
     `${basePath}/oss-profiles/${encodeURIComponent(profileId)}`,
     profileBody(input)
   ));

@@ -44,7 +44,7 @@ func TestRBACAdminAPIAppliesPermissionsOnNextRequest(t *testing.T) {
 	doJSON(t, router, http.MethodGet, "/api/v1/admin/mcp/audits", "", userCookies, http.StatusOK)
 	doJSON(t, router, http.MethodGet, "/api/v1/admin/accounts", "", userCookies, http.StatusForbidden)
 
-	doJSON(t, router, http.MethodPatch, "/api/v1/admin/rbac/roles", `{
+	doJSON(t, router, http.MethodPut, "/api/v1/admin/rbac/roles", `{
 		"role_id":"`+roleID+`",
 		"name":"安全审计员",
 		"permission_codes":[]

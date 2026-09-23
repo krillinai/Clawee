@@ -682,7 +682,7 @@ func mountAgentRoutes(app *gin.RouterGroup, opts Options) {
 
 	app.GET("/agents", list)
 	app.GET("/agents/detail", detail)
-	app.PATCH("/agents/name", updateName)
+	app.PUT("/agents/name", updateName)
 	app.POST("/agents/remove", remove)
 	app.POST("/agents", create)
 	app.GET("/agents/tools", tools)

@@ -272,7 +272,7 @@ func mountKnowledgeAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/knowledge-bases", read, list)
 	admin.GET("/knowledge-bases/detail", read, detail)
 	admin.POST("/knowledge-bases", requirePermission(opts.RBACService, rbac.PermissionKnowledgeCreate), create)
-	admin.PATCH("/knowledge-bases", requirePermission(opts.RBACService, rbac.PermissionKnowledgeUpdate), update)
+	admin.PUT("/knowledge-bases", requirePermission(opts.RBACService, rbac.PermissionKnowledgeUpdate), update)
 	admin.POST("/knowledge-bases/remove", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDelete), remove)
 	admin.GET("/knowledge-bases/documents", read, listDocuments)
 	admin.POST("/knowledge-bases/documents", requirePermission(opts.RBACService, rbac.PermissionKnowledgeDocumentUpload), func(c *gin.Context) { handleKnowledgeDocumentUpload(c, service, nil) })
@@ -399,7 +399,7 @@ func mountKnowledgeDataGrantRoutes(admin *gin.RouterGroup, opts Options, read, m
 	}
 	admin.GET("/knowledge-bases/account-grants", read, list)
 	admin.POST("/knowledge-bases/account-grants", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberCreate), createOrReplace(false))
-	admin.PATCH("/knowledge-bases/account-grants", memberUpdate, createOrReplace(true))
+	admin.PUT("/knowledge-bases/account-grants", memberUpdate, createOrReplace(true))
 	admin.POST("/knowledge-bases/account-grants/remove", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberDelete), remove)
 	admin.GET("/knowledge-bases/members", read, listMembers)
 	admin.GET("/knowledge-bases/member-candidates", requirePermission(opts.RBACService, rbac.PermissionKnowledgeMemberCreate), listCandidates)

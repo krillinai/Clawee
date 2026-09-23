@@ -889,7 +889,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/mcp/upstream-servers", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamCreate), createUpstream)
 	admin.GET("/mcp/upstream-servers", upstreamRead, listUpstreams)
 	admin.GET("/mcp/upstream-servers/detail", upstreamRead, upstreamDetail)
-	admin.PATCH("/mcp/upstream-servers", updateUpstream)
+	admin.PUT("/mcp/upstream-servers", updateUpstream)
 	admin.POST("/mcp/upstream-servers/remove", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamDelete), removeUpstream)
 	admin.POST("/mcp/upstream-servers/sync-tools", requirePermission(opts.RBACService, rbac.PermissionMCPUpstreamSync), syncUpstream)
 
@@ -905,7 +905,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/mcp/capabilities", capabilityRead, listCapabilities)
 	admin.GET("/mcp/capabilities/detail", capabilityRead, capabilityDetail)
 	admin.POST("/mcp/capabilities/remove", requirePermission(opts.RBACService, rbac.PermissionMCPCapabilityDelete), removeCapability)
-	admin.PATCH("/mcp/capabilities", func(c *gin.Context) {
+	admin.PUT("/mcp/capabilities", func(c *gin.Context) {
 		var req updateCapabilityStatusRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

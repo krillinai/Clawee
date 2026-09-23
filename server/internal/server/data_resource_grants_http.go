@@ -107,7 +107,7 @@ func mountDataResourceGrantRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/data-resource-grants/members/search", read, handleDataResourceGrantMembers(opts))
 	admin.POST("/data-resource-grants/member-candidates/search", requireAnyPermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMemberCandidates(opts))
 	admin.POST("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate), handleDataResourceGrantMutation(opts, false))
-	admin.PATCH("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMutation(opts, true))
+	admin.PUT("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMutation(opts, true))
 	admin.POST("/data-resource-grants/remove", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantDelete), handleDataResourceGrantRemove(opts))
 }
 

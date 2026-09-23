@@ -665,7 +665,7 @@ func TestAdminCanCreateAndManageUser(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","name":"  新昵称  "}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","name":"  新昵称  "}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(rec, req)
@@ -678,7 +678,7 @@ func TestAdminCanCreateAndManageUser(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","name":"   "}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","name":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(rec, req)
@@ -687,7 +687,7 @@ func TestAdminCanCreateAndManageUser(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","status":"disabled"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(rec, req)
@@ -828,7 +828,7 @@ func TestAdminAccountWriteRoutesRejectAccountID(t *testing.T) {
 	}{
 		{
 			name:   "update status",
-			method: http.MethodPatch,
+			method: http.MethodPut,
 			path:   "/api/v1/admin/accounts",
 			status: http.StatusBadRequest,
 			body:   func(userID string) string { return `{"account_id":"` + userID + `","status":"disabled"}` },
@@ -1075,7 +1075,7 @@ func TestAdminEnableDisabledAccountDoesNotCreateAgent(t *testing.T) {
 	userID := created["user_id"].(string)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","status":"active"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+userID+`","status":"active"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(rec, req)
@@ -1148,7 +1148,7 @@ func TestAdminCannotDisableLastAdmin(t *testing.T) {
 	adminID := nestedString(t, meResp, "data", "account", "user_id")
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+adminID+`","status":"disabled"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts", strings.NewReader(`{"user_id":"`+adminID+`","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(rec, req)

@@ -299,7 +299,7 @@ func TestAdminMCPGatewayRoutesRegisterServerAndGrantTool(t *testing.T) {
 	}
 	statusBody := strings.NewReader(`{"capability_id":"crm.customer.search","status":"active"}`)
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/capabilities", statusBody)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/capabilities", statusBody)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -308,7 +308,7 @@ func TestAdminMCPGatewayRoutesRegisterServerAndGrantTool(t *testing.T) {
 
 	renameBody := strings.NewReader(`{"capability_id":"crm.customer.search","exposed_name":"crm.customer.lookup"}`)
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/capabilities", renameBody)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/capabilities", renameBody)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -357,7 +357,7 @@ func TestAdminMCPGatewayRoutesRegisterServerAndGrantTool(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/capabilities", strings.NewReader(`{"capability_id":"crm.customer.lookup","exposed_name":"crm.customer.find"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/capabilities", strings.NewReader(`{"capability_id":"crm.customer.lookup","exposed_name":"crm.customer.find"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -401,7 +401,7 @@ func TestAdminMCPGatewayRoutesRegisterServerAndGrantTool(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{"server_id":"crm-main","status":"disabled"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{"server_id":"crm-main","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -582,7 +582,7 @@ func TestAdminMCPGatewayRoutesUpdateStreamableHTTPTokenWithoutReturningPlaintext
 		"token":"configured-token"
 	}`)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers", body)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -600,7 +600,7 @@ func TestAdminMCPGatewayRoutesUpdateStreamableHTTPTokenWithoutReturningPlaintext
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{
 		"server_id":"secure-http",
 		"transport":"collector_pull",
 		"collector_id":"collector-dev"
@@ -642,7 +642,7 @@ func TestAdminMCPGatewayRejectsApplicationManagedBuiltinChanges(t *testing.T) {
 			body   string
 		}{
 			{method: http.MethodPost, path: "/api/v1/admin/mcp/upstream-servers", body: fmt.Sprintf(`{"server_id":%q,"transport":"builtin"}`, serverID)},
-			{method: http.MethodPatch, path: "/api/v1/admin/mcp/upstream-servers", body: fmt.Sprintf(`{"server_id":%q,"status":"disabled"}`, serverID)},
+			{method: http.MethodPut, path: "/api/v1/admin/mcp/upstream-servers", body: fmt.Sprintf(`{"server_id":%q,"status":"disabled"}`, serverID)},
 			{method: http.MethodPost, path: "/api/v1/admin/mcp/upstream-servers/remove", body: fmt.Sprintf(`{"server_id":%q}`, serverID)},
 		} {
 			rec := httptest.NewRecorder()
@@ -704,7 +704,7 @@ func TestAdminMCPUpstreamServerUpdateAndSoftDeleteRoutes(t *testing.T) {
 		"routing_description":"负责研发任务"
 	}`)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers", updateBody)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers", updateBody)
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -737,7 +737,7 @@ func TestAdminMCPUpstreamServerUpdateAndSoftDeleteRoutes(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{"server_id":"crm-main","status":"disabled"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers", strings.NewReader(`{"server_id":"crm-main","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1303,13 +1303,13 @@ func TestAdminMCPGatewayRoutesRejectInvalidInputs(t *testing.T) {
 		},
 		{
 			name:   "empty capability status",
-			method: http.MethodPatch,
+			method: http.MethodPut,
 			path:   "/api/v1/admin/mcp/capabilities",
 			body:   `{"capability_id":"crm.customer.search","status":""}`,
 		},
 		{
 			name:   "upstream status mixed with configuration",
-			method: http.MethodPatch,
+			method: http.MethodPut,
 			path:   "/api/v1/admin/mcp/upstream-servers",
 			body:   `{"server_id":"crm-main","status":"disabled","endpoint":"http://attacker.example/mcp"}`,
 		},
@@ -1389,12 +1389,12 @@ func TestAdminMCPWriteRoutesUseJSONIDs(t *testing.T) {
 		store, router := newRouter(t)
 		seedUpstreams(t, store)
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers?server_id=server_query", strings.NewReader(`{"status":"disabled"}`)))
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers?server_id=server_query", strings.NewReader(`{"status":"disabled"}`)))
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("query-only upstream update = %d body=%s, want 400", rec.Code, rec.Body.String())
 		}
 		rec = httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/upstream-servers?server_id=server_query", strings.NewReader(`{"server_id":"server_body","status":"disabled"}`)))
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/upstream-servers?server_id=server_query", strings.NewReader(`{"server_id":"server_body","status":"disabled"}`)))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("conflicting upstream update = %d body=%s", rec.Code, rec.Body.String())
 		}
@@ -1426,12 +1426,12 @@ func TestAdminMCPWriteRoutesUseJSONIDs(t *testing.T) {
 		store, router := newRouter(t)
 		seedCapabilities(t, store)
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/capabilities?capability_id=cap_query", strings.NewReader(`{"status":"disabled"}`)))
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/capabilities?capability_id=cap_query", strings.NewReader(`{"status":"disabled"}`)))
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("query-only capability status = %d body=%s, want 400", rec.Code, rec.Body.String())
 		}
 		rec = httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/admin/mcp/capabilities?capability_id=cap_query", strings.NewReader(`{"capability_id":"cap_body","status":"disabled"}`)))
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/admin/mcp/capabilities?capability_id=cap_query", strings.NewReader(`{"capability_id":"cap_body","status":"disabled"}`)))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("conflicting capability status = %d body=%s", rec.Code, rec.Body.String())
 		}

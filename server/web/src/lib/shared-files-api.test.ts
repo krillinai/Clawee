@@ -51,7 +51,7 @@ describe("shared files api", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/admin/shared-spaces?limit=50&query=%E5%AD%A3%E5%BA%A6&cursor=cursor", expect.objectContaining({ method: "GET" }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/admin/shared-spaces", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "新空间", description: "说明" }) }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/shared-spaces", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ space_id: "space_1", name: "已更新", description: "说明" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/shared-spaces", expect.objectContaining({ method: "PUT", body: JSON.stringify({ space_id: "space_1", name: "已更新", description: "说明" }) }));
   });
 
   it("uses dedicated member and candidate contracts", async () => {
@@ -72,7 +72,7 @@ describe("shared files api", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/admin/shared-spaces/account-grants?space_id=space%2F1&limit=100&query=%E5%BC%A0&cursor=member-next", expect.objectContaining({ method: "GET" }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/admin/shared-spaces/member-candidates?space_id=space%2F1&limit=100&query=%E6%9D%8E&cursor=candidate-next", expect.objectContaining({ method: "GET" }));
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/shared-spaces/account-grants", expect.objectContaining({ method: "POST", body: JSON.stringify({ space_id: "space/1", user_id: "usr_1", actions: ["read", "write"] }) }));
-    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/v1/admin/shared-spaces/account-grants", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ space_id: "space/1", user_id: "usr_1", actions: ["read"] }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/v1/admin/shared-spaces/account-grants", expect.objectContaining({ method: "PUT", body: JSON.stringify({ space_id: "space/1", user_id: "usr_1", actions: ["read"] }) }));
     expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/v1/admin/shared-spaces/account-grants/remove", expect.objectContaining({ method: "POST" }));
   });
 

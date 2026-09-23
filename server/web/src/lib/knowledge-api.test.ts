@@ -74,7 +74,7 @@ describe("knowledge api", () => {
       description: "新说明"
     })).resolves.toMatchObject({ knowledgeBaseId: "kb-1", name: "新制度库", description: "新说明" });
     expect(fetch).toHaveBeenCalledWith("/api/v1/admin/knowledge-bases", expect.objectContaining({
-      method: "PATCH",
+      method: "PUT",
       body: JSON.stringify({ knowledge_base_id: "kb-1", name: "新制度库", description: "新说明" })
     }));
   });
@@ -107,7 +107,7 @@ describe("knowledge api", () => {
       body: JSON.stringify({ user_id: "usr_1", knowledge_base_id: "kb-1", actions: ["read"] })
     }));
     expect(fetch).toHaveBeenNthCalledWith(3, "/api/v1/admin/knowledge-bases/account-grants", expect.objectContaining({
-      method: "PATCH",
+      method: "PUT",
       body: JSON.stringify({ user_id: "usr_1", knowledge_base_id: "kb-1", actions: ["read", "upload"] })
     }));
     expect(fetch).toHaveBeenNthCalledWith(4, "/api/v1/admin/knowledge-bases/account-grants/remove", expect.objectContaining({ method: "POST" }));

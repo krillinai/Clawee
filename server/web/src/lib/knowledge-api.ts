@@ -117,7 +117,7 @@ export async function createKnowledgeBase(input: { name: string; description: st
 }
 
 export async function updateKnowledgeBase(input: { knowledgeBaseId: string; name: string; description: string }) {
-  return mapKnowledgeBase(await adminApi.patch<KnowledgeBaseResponse>("/knowledge-bases", {
+  return mapKnowledgeBase(await adminApi.put<KnowledgeBaseResponse>("/knowledge-bases", {
     knowledge_base_id: input.knowledgeBaseId,
     name: input.name,
     description: input.description
@@ -217,7 +217,7 @@ export async function replaceKnowledgeAccountGrant(input: {
   knowledgeBaseId: string;
   actions: DataResourceGrant["action"][];
 }): Promise<DataResourceGrant[]> {
-  const response = await adminApi.patch<ListResponse<DataResourceGrantResponse>>(
+  const response = await adminApi.put<ListResponse<DataResourceGrantResponse>>(
     "/knowledge-bases/account-grants",
     knowledgeGrantInput(input)
   );

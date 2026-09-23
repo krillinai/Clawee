@@ -37,7 +37,7 @@ describe("rbac-api", () => {
       body: JSON.stringify({ code: "auditor", name: "审计员", permission_codes: ["console:mcp:audit:read"] })
     }));
     expect(mockFetch).toHaveBeenNthCalledWith(3, "/api/v1/admin/rbac/roles", expect.objectContaining({
-      method: "PATCH",
+      method: "PUT",
       body: JSON.stringify({ role_id: "role_1", name: "安全审计员", permission_codes: [] })
     }));
 	expect(mockFetch).toHaveBeenNthCalledWith(4, "/api/v1/admin/rbac/account-roles?user_id=usr%2F1", expect.objectContaining({ method: "GET" }));

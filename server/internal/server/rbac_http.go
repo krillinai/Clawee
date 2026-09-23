@@ -85,7 +85,7 @@ func mountRBACRoutes(group *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(http.StatusCreated, gin.H{"data": roleResponse(role)})
 	})
-	group.PATCH("/roles", roleUpdate, func(c *gin.Context) {
+	group.PUT("/roles", roleUpdate, func(c *gin.Context) {
 		var request updateRoleRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			rbacError(c, rbac.ErrInvalidRequest)

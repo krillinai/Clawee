@@ -136,7 +136,7 @@ describe("accounts-api", () => {
       1,
       "/api/v1/admin/accounts",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
 		body: JSON.stringify({ user_id: "usr/one", status: "disabled" })
       })
     );
@@ -159,7 +159,7 @@ describe("accounts-api", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/v1/admin/accounts",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ user_id: "usr/one", name: "新昵称" })
       })
     );

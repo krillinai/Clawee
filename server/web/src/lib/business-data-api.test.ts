@@ -100,7 +100,7 @@ describe("business data api", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/v1/app/business-data-sources/bilibili/sync", expect.objectContaining({ method: "POST" }));
     expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/v1/app/business-data-sources/bilibili", expect.objectContaining({ method: "GET" }));
     expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/v1/app/business-data-sources/bilibili/bdsrc%2Fone/sync", expect.objectContaining({ method: "POST" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/v1/app/business-data-sources/bilibili/bdsrc%2Fone", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ sync_enabled: false }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/v1/app/business-data-sources/bilibili/bdsrc%2Fone", expect.objectContaining({ method: "PUT", body: JSON.stringify({ sync_enabled: false }) }));
     expect(fetchMock).toHaveBeenNthCalledWith(10, "/api/v1/app/business-data-sources/bilibili/bdsrc%2Fone", expect.objectContaining({ method: "DELETE", body: undefined }));
   });
 });

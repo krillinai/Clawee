@@ -336,7 +336,7 @@ export async function listMyAgents(): Promise<AgentAccess[]> {
 }
 
 export async function updateMyAgentName(agentId: string, name: string): Promise<AgentAccess> {
-	return mapAgentAccess(await appApi.patch<AgentAccessResponse>("/agents/name", { agent_id: agentId, name }));
+	return mapAgentAccess(await appApi.put<AgentAccessResponse>("/agents/name", { agent_id: agentId, name }));
 }
 
 export function deleteMyAgent(agentId: string) {

@@ -47,14 +47,14 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/skill-spaces", read, handleAdminSkillSpaces(opts.SkillHubService))
 	admin.GET("/skill-spaces/detail", read, handleAdminSkillSpace(opts.SkillHubService))
 	admin.POST("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceCreate), handleAdminCreateSkillSpace(opts.SkillHubService))
-	admin.PATCH("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
+	admin.PUT("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
 	admin.GET("/skill-spaces/approver-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverCandidates(opts.AccountService, opts.RBACService))
 	admin.PUT("/skill-spaces/approver", skillOperationLog(opts.Logger, "skill_space_approver_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApprover(opts.SkillHubService, opts.AccountService, opts.RBACService))
 	admin.PUT("/skill-spaces/approval", skillOperationLog(opts.Logger, "skill_space_approval_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproval(opts))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
 	admin.GET("/skill-spaces/member-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
 	admin.POST("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
-	admin.PATCH("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
+	admin.PUT("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
 	admin.POST("/skill-spaces/account-grants/remove", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberDelete), handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
 }
 

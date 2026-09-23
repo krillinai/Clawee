@@ -186,7 +186,7 @@ export async function createRole(input: { code: string; name: string; permission
 }
 
 export async function updateRole(input: { roleId: string; name: string; permissionCodes: string[] }): Promise<Role> {
-  const response = await publicApi.patch<ItemResponse<RoleResponse>>(`${basePath}/roles`, {
+  const response = await publicApi.put<ItemResponse<RoleResponse>>(`${basePath}/roles`, {
     role_id: input.roleId,
     name: input.name,
     permission_codes: input.permissionCodes

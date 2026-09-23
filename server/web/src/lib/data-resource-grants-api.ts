@@ -236,7 +236,7 @@ export function createDataResourceGrant(input: { userId: string; resourceType: s
 }
 
 export function replaceDataResourceGrant(input: { userId: string; resourceType: string; resourceId: string; actions: string[] }) {
-  return adminApi.patch(`${basePath}`, dataResourceGrantMutationInput(input));
+  return adminApi.put(`${basePath}`, dataResourceGrantMutationInput(input));
 }
 
 export function removeDataResourceGrant(input: { userId: string; resourceType: string; resourceId: string }) {

@@ -179,7 +179,7 @@ func TestKnowledgeAccountGrantAdminLifecycleAndValidation(t *testing.T) {
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"user_id":"`+candidate.Account.UserID+`"`) || !strings.Contains(recorder.Body.String(), `"email":"full.member@example.com"`) || strings.Contains(recorder.Body.String(), "***") {
 		t.Fatalf("list candidates status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	recorder = call(http.MethodPatch, "/api/v1/admin/knowledge-bases/account-grants", prefix+`["read","upload","mcp"]}`)
+	recorder = call(http.MethodPut, "/api/v1/admin/knowledge-bases/account-grants", prefix+`["read","upload","mcp"]}`)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("replace grant status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -416,7 +416,7 @@ func TestKnowledgeBasePatchUpdatesMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := newTestRouter(t, server.Options{KnowledgeService: service})
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`","name":"新制度","description":"新描述"}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`","name":"新制度","description":"新描述"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -430,7 +430,7 @@ func TestKnowledgeBasePatchUpdatesMetadata(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 
-	request = httptest.NewRequest(http.MethodPatch, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`","description":""}`))
+	request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`","description":""}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
@@ -451,7 +451,7 @@ func TestKnowledgeBasePatchRejectsEmptyUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := newTestRouter(t, server.Options{KnowledgeService: service})
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`"}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/knowledge-bases", strings.NewReader(`{"knowledge_base_id":"`+kb.KnowledgeBaseID+`"}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 

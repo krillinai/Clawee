@@ -227,7 +227,7 @@ func TestBilibiliSourceManagementHTTPContract(t *testing.T) {
 	if recorder := request(http.MethodPost, "/api/v1/app/business-data-sources/bilibili/bdsrc_1/sync", ""); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"business_data_connect_forbidden"`) {
 		t.Fatalf("sync forbidden status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if recorder := request(http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":false}`); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"business_data_manage_forbidden"`) {
+	if recorder := request(http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":false}`); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"business_data_manage_forbidden"`) {
 		t.Fatalf("manage forbidden status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if recorder := request(http.MethodDelete, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", ""); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"business_data_manage_forbidden"`) {
@@ -251,30 +251,30 @@ func TestBilibiliSourceManagementHTTPContract(t *testing.T) {
 	}
 	manager.syncErr = nil
 
-	disabled := request(http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":false}`)
+	disabled := request(http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":false}`)
 	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"status_reason":"bilibili_sync_disabled"`) || !strings.Contains(disabled.Body.String(), `"sync_request_status":null`) || manager.syncEnabled {
 		t.Fatalf("disable status=%d body=%s enabled=%v", disabled.Code, disabled.Body.String(), manager.syncEnabled)
 	}
 	manager.change.Source.Status = businessdata.SourceStatusActive
 	manager.change.Source.StatusReason = ""
 	manager.change.QueuedCount = 1
-	enabled := request(http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":true}`)
+	enabled := request(http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":true}`)
 	if enabled.Code != http.StatusOK || !strings.Contains(enabled.Body.String(), `"sync_request_status":"queued"`) || !manager.syncEnabled {
 		t.Fatalf("enable status=%d body=%s enabled=%v", enabled.Code, enabled.Body.String(), manager.syncEnabled)
 	}
 
 	calls := manager.changeCalls
 	for _, body := range []string{"", `{}`, `{"unknown":false}`, `{"sync_enabled":"false"}`, `{"sync_enabled":false}{"sync_enabled":true}`} {
-		recorder := request(http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", body)
+		recorder := request(http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", body)
 		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"invalid_request"`) {
 			t.Fatalf("invalid body %q status=%d response=%s", body, recorder.Code, recorder.Body.String())
 		}
 	}
 	if manager.changeCalls != calls {
-		t.Fatalf("invalid PATCH invoked manager: before=%d after=%d", calls, manager.changeCalls)
+		t.Fatalf("invalid PUT invoked manager: before=%d after=%d", calls, manager.changeCalls)
 	}
 	manager.changeErr = businessdata.ErrBilibiliSourceAuthorizationRequired
-	if recorder := request(http.MethodPatch, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":true}`); recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"bilibili_reauth_required"`) {
+	if recorder := request(http.MethodPut, "/api/v1/app/business-data-sources/bilibili/bdsrc_1", `{"sync_enabled":true}`); recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"bilibili_reauth_required"`) {
 		t.Fatalf("reauth status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	manager.changeErr = nil

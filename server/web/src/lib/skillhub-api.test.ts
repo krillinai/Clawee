@@ -148,7 +148,7 @@ describe("skillhub api", () => {
       unchangedCount: 1
     });
     expect(fetch).toHaveBeenCalledWith("/api/v1/admin/skills/space", expect.objectContaining({
-      method: "PATCH",
+      method: "PUT",
       body: JSON.stringify({ skill_ids: ["skill-1", "skill-2"], target_space_id: "skillspace_product" })
     }));
   });

@@ -227,7 +227,7 @@ func TestSkillSpaceAdminMemberLifecycleAndStrictJSON(t *testing.T) {
 	}
 	recorder = sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skill-spaces/account-grants", prefix+`["read"]}`, adminCookies)
 	assertSkillError(t, recorder, http.StatusConflict, "skill_space_member_exists")
-	recorder = sourceJSONRequest(t, router, http.MethodPatch, "/api/v1/admin/skill-spaces/account-grants", prefix+`["read","write"]}`, adminCookies)
+	recorder = sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/account-grants", prefix+`["read","write"]}`, adminCookies)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"actions":["read","write"]`) {
 		t.Fatalf("update member status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -239,7 +239,7 @@ func TestSkillSpaceAdminMemberLifecycleAndStrictJSON(t *testing.T) {
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("remove member status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	recorder = sourceJSONRequest(t, router, http.MethodPatch, "/api/v1/admin/skill-spaces/account-grants", prefix+`["read"]}`, adminCookies)
+	recorder = sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/account-grants", prefix+`["read"]}`, adminCookies)
 	assertSkillError(t, recorder, http.StatusNotFound, "skill_space_member_not_found")
 	recorder = sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skill-spaces/account-grants", `{"space_id":"`+space.SpaceID+`","user_id":"missing","actions":["read"]}`, adminCookies)
 	assertSkillError(t, recorder, http.StatusNotFound, "skill_space_member_not_found")
@@ -268,7 +268,7 @@ func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := `{"skill_ids":["` + first.Skill.SkillID + `","` + second.Skill.SkillID + `"],"target_space_id":"` + target.SpaceID + `"}`
-	recorder := sourceJSONRequest(t, router, http.MethodPatch, "/api/v1/admin/skills/space", body, adminCookies)
+	recorder := sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/space", body, adminCookies)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"moved_count":1`) || !strings.Contains(recorder.Body.String(), `"unchanged_count":1`) {
 		t.Fatalf("batch move status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -277,12 +277,12 @@ func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 		t.Fatalf("moved skill=%#v, %v", detail, err)
 	}
 
-	recorder = sourceJSONRequest(t, router, http.MethodPatch, "/api/v1/admin/skills/space", `{"skill_ids":["`+first.Skill.SkillID+`","missing"],"target_space_id":"skillspace_default"}`, adminCookies)
+	recorder = sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/space", `{"skill_ids":["`+first.Skill.SkillID+`","missing"],"target_space_id":"skillspace_default"}`, adminCookies)
 	assertSkillError(t, recorder, http.StatusNotFound, "not_found")
 	detail, _ = service.GetAdmin(ctx, first.Skill.SkillID)
 	if detail.Skill.SpaceID != target.SpaceID {
 		t.Fatalf("skill changed after failed batch: %#v", detail.Skill)
 	}
-	recorder = sourceJSONRequest(t, router, http.MethodPatch, "/api/v1/admin/skills/space", `{"skill_ids":["`+first.Skill.SkillID+`"],"target_space_id":"`+target.SpaceID+`","unknown":true}`, adminCookies)
+	recorder = sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/space", `{"skill_ids":["`+first.Skill.SkillID+`"],"target_space_id":"`+target.SpaceID+`","unknown":true}`, adminCookies)
 	assertSkillError(t, recorder, http.StatusBadRequest, "invalid_request")
 }

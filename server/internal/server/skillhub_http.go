@@ -90,7 +90,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/skills/versions/sync-approval", skillOperationLog(opts.Logger, "skill_approval_sync"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSyncSkillApproval(opts))
 	admin.POST("/skills/versions/resolve-approval", skillOperationLog(opts.Logger, "skill_approval_resolve"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleResolveSkillApproval(opts))
 	admin.DELETE("/skills", skillOperationLog(opts.Logger, "skill_delete"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillDelete), handleSkillDelete(opts.SkillHubService))
-	admin.PATCH("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
+	admin.PUT("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
 	admin.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), read, handleSkillPublishOwn(opts.SkillHubService, false))
 	admin.POST("/skills/versions/review", skillOperationLog(opts.Logger, "skill_review"), read, handleSkillReview(opts.SkillHubService))

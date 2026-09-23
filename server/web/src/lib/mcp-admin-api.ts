@@ -813,7 +813,7 @@ export async function createUpstreamServer(input: CreateUpstreamServerInput) {
 }
 
 export async function updateMCPUpstreamServer(serverId: string, input: CreateUpstreamServerInput) {
-  const response = await adminApi.patch<MCPUpstreamServerResponse>("/mcp/upstream-servers", {
+  const response = await adminApi.put<MCPUpstreamServerResponse>("/mcp/upstream-servers", {
     server_id: serverId,
     name: input.name,
     domain: input.domain,
@@ -844,7 +844,7 @@ function mapStdioConfig(config?: MCPStdioConfigResponse): MCPStdioConfig | undef
 }
 
 export async function updateMCPUpstreamServerStatus(serverId: string, status: string) {
-  const response = await adminApi.patch<MCPStatusResponse>("/mcp/upstream-servers", {
+  const response = await adminApi.put<MCPStatusResponse>("/mcp/upstream-servers", {
     server_id: serverId,
     status,
   });
@@ -944,7 +944,7 @@ export function deleteMCPCapability(capabilityId: string) {
 }
 
 export async function updateMCPCapabilityStatus(capabilityId: string, status: string) {
-  const response = await adminApi.patch<MCPCapabilityStatusResponse>("/mcp/capabilities", {
+  const response = await adminApi.put<MCPCapabilityStatusResponse>("/mcp/capabilities", {
     capability_id: capabilityId,
     status
   });
@@ -952,7 +952,7 @@ export async function updateMCPCapabilityStatus(capabilityId: string, status: st
 }
 
 export async function renameMCPCapability(exposedName: string, newExposedName: string) {
-  const response = await adminApi.patch<MCPCapabilityStatusResponse>("/mcp/capabilities", {
+  const response = await adminApi.put<MCPCapabilityStatusResponse>("/mcp/capabilities", {
     capability_id: exposedName,
     exposed_name: newExposedName
   });

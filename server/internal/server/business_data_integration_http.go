@@ -148,7 +148,7 @@ func mountBilibiliAppRoutes(app *gin.RouterGroup, opts Options) {
 		logBilibiliOperation(c, opts, account.UserID, sourceID, "account_sync_requested", status)
 		c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"status": status}})
 	})
-	app.PATCH("/business-data-sources/bilibili/:source_id", func(c *gin.Context) {
+	app.PUT("/business-data-sources/bilibili/:source_id", func(c *gin.Context) {
 		if c.Request.URL.RawQuery != "" {
 			businessDataError(c, http.StatusBadRequest, "invalid_request", "哔哩哔哩账号管理请求无效")
 			return

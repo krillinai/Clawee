@@ -350,14 +350,14 @@ func TestSharedFileAdminRoutesEnforceReadAndManagePermissions(t *testing.T) {
 		t.Fatalf("reader members status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	updateBody := `{"space_id":"` + space.SpaceID + `","user_id":"` + candidate.Account.UserID + `","actions":["read","write"]}`
-	if recorder := request(http.MethodPatch, "/admin/shared-spaces/account-grants", "reader", updateBody); recorder.Code != http.StatusForbidden {
+	if recorder := request(http.MethodPut, "/admin/shared-spaces/account-grants", "reader", updateBody); recorder.Code != http.StatusForbidden {
 		t.Fatalf("reader update member status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if recorder := request(http.MethodPatch, "/admin/shared-spaces/account-grants", "manager", updateBody); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"actions":["read","write"]`) {
+	if recorder := request(http.MethodPut, "/admin/shared-spaces/account-grants", "manager", updateBody); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"actions":["read","write"]`) {
 		t.Fatalf("manager update member status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	invalidBody := `{"space_id":"` + space.SpaceID + `","user_id":"` + candidate.Account.UserID + `","actions":["write"]}`
-	if recorder := request(http.MethodPatch, "/admin/shared-spaces/account-grants", "manager", invalidBody); recorder.Code != http.StatusBadRequest {
+	if recorder := request(http.MethodPut, "/admin/shared-spaces/account-grants", "manager", invalidBody); recorder.Code != http.StatusBadRequest {
 		t.Fatalf("update without read status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -410,7 +410,7 @@ func TestSharedFileMemberMutationPermissionsAreIndependent(t *testing.T) {
 		user   string
 	}{
 		{method: http.MethodPost, path: "/admin/shared-spaces/account-grants", user: "creator"},
-		{method: http.MethodPatch, path: "/admin/shared-spaces/account-grants", user: "updater"},
+		{method: http.MethodPut, path: "/admin/shared-spaces/account-grants", user: "updater"},
 		{method: http.MethodPost, path: "/admin/shared-spaces/account-grants/remove", user: "deleter"},
 	}
 	for _, route := range routes {

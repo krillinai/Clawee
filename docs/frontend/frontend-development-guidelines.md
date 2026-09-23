@@ -30,7 +30,7 @@
 ## 4. API 与服务端状态
 
 - 业务请求优先放在 `src/lib/<domain>-api.ts` 一类现有业务 API 文件中，由页面通过业务函数调用。普通 JSON 请求复用 `src/lib/api.ts` 的 `adminApi`、`appApi`、`authApi` 或 `publicApi`；按访问范围选择，不能一律使用管理接口。
-- 这些客户端是对象，调用形如 `adminApi.get<{ service: string; status: string }>("/status")`。它们分别补全 `/api/v1/admin`、`/api/v1/app`、`/api/v1/auth` 等前缀，支持现有 GET、POST、PATCH、PUT、DELETE 和表单请求；不要照搬其他项目的 `adminApi<T>("/v1/admin/...")` 写法。
+- 这些客户端是对象，调用形如 `adminApi.get<{ service: string; status: string }>("/status")`。它们分别补全 `/api/v1/admin`、`/api/v1/app`、`/api/v1/auth` 等前缀，Gateway 更新接口使用 PUT，不使用 PATCH；原有更新接口仍按请求字段更新，未提供的字段保持不变。客户端支持 GET、POST、PUT、DELETE 和表单请求。不要照搬其他项目的 `adminApi<T>("/v1/admin/...")` 写法。
 - `api.ts` 负责带凭据请求、错误解析和响应解包。文件下载、流式响应、SSE 等与 JSON 协议不同的请求，可沿用仓库现有的业务专用处理；不得在页面散落未审查的裸 `fetch` 或硬编码后端地址。查询参数使用 `URLSearchParams` 等结构化方式编码。
 - 使用 TanStack Query 管理异步数据时，query key 包含会影响结果的参数，mutation 成功后失效受影响的 key；高风险变更以服务端确认结果为准。沿用现有 `QueryClient` 对 403 不重试的配置，不额外发起无效重试。
 - 列表、详情和提交覆盖加载、正常、空数据、失败、提交中及结果反馈；错误信息不能泄露内部地址、异常栈或敏感请求内容。Token、客户数据和审计材料按最小必要原则展示，具体展示规则遵循设计指南与后端权限契约。

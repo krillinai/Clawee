@@ -405,7 +405,7 @@ POST /shared-file-storage/oss/test
 ### 7.3 创建或更新 OSS Profile
 
 - POST /shared-file-storage/oss-profiles
-- PATCH /shared-file-storage/oss-profiles/:profile_id
+- PUT /shared-file-storage/oss-profiles/:profile_id
 
 权限：console:shared_files:storage_manage
 

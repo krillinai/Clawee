@@ -527,7 +527,7 @@ export async function reviewSkillVersion(skillId: string, versionId: string, dec
 }
 
 export async function moveSkillsToSpace(input: { skillIds: string[]; targetSpaceId: string }): Promise<SkillSpaceMoveResult> {
-  const response = await adminApi.patch<SkillSpaceMoveResponse>("/skills/space", {
+  const response = await adminApi.put<SkillSpaceMoveResponse>("/skills/space", {
     skill_ids: input.skillIds,
     target_space_id: input.targetSpaceId
   });
@@ -548,7 +548,7 @@ export async function createSkillSpace(input: { name: string; description: strin
 }
 
 export async function updateSkillSpace(input: { spaceId: string; name: string; description: string }) {
-  return mapSkillSpace(await adminApi.patch<SkillSpaceResponse>("/skill-spaces", { space_id: input.spaceId, name: input.name, description: input.description }));
+  return mapSkillSpace(await adminApi.put<SkillSpaceResponse>("/skill-spaces", { space_id: input.spaceId, name: input.name, description: input.description }));
 }
 
 export async function listSkillSpaceMembers(spaceId: string, query = "") {
@@ -570,7 +570,7 @@ export async function addSkillSpaceMember(input: { spaceId: string; userId: stri
 }
 
 export async function updateSkillSpaceMember(input: { spaceId: string; userId: string; actions: Array<"read" | "write"> }) {
-  return mapSkillSpaceMember(await adminApi.patch<SkillSpaceMemberResponse>("/skill-spaces/account-grants", { space_id: input.spaceId, user_id: input.userId, actions: input.actions }));
+  return mapSkillSpaceMember(await adminApi.put<SkillSpaceMemberResponse>("/skill-spaces/account-grants", { space_id: input.spaceId, user_id: input.userId, actions: input.actions }));
 }
 
 export function removeSkillSpaceMember(input: { spaceId: string; userId: string }) {

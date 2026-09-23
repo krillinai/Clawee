@@ -113,7 +113,7 @@ describe("agent-api", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/app/agents/name",
       expect.objectContaining({
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ agent_id: "agent_1", name: "销售助手" })
       })
     );

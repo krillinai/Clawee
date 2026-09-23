@@ -171,7 +171,7 @@ export async function setBilibiliSourceSyncEnabled(
   sourceID: string,
   syncEnabled: boolean,
 ): Promise<{ source: BilibiliSource; sync_request_status: "queued" | null }> {
-  return appApi.patch<{ source: BilibiliSource; sync_request_status: "queued" | null }>(
+  return appApi.put<{ source: BilibiliSource; sync_request_status: "queued" | null }>(
     `/business-data-sources/bilibili/${encodeURIComponent(sourceID)}`,
     { sync_enabled: syncEnabled },
   );

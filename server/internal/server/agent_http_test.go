@@ -224,7 +224,7 @@ func TestUpdateAgentNameOnlyUpdatesOwnedAgentName(t *testing.T) {
 	request := func(body string) *httptest.ResponseRecorder {
 		t.Helper()
 		recorder := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPatch, "/api/v1/app/agents/name", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/app/agents/name", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: "claw_front_token", Value: tokens.Token(accounts.AudienceFrontend).Token})
 		router.ServeHTTP(recorder, req)

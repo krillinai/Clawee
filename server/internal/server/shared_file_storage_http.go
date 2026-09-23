@@ -29,7 +29,7 @@ func mountSharedFileStorageRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/shared-file-storage", read, handleStorageState(opts.SharedFileStorageService))
 	admin.POST("/shared-file-storage/oss/test", manage, handleTestOSS(opts.SharedFileStorageService))
 	admin.POST("/shared-file-storage/oss-profiles", manage, handleCreateOSSProfile(opts.SharedFileStorageService))
-	admin.PATCH("/shared-file-storage/oss-profiles/:profile_id", manage, handleUpdateOSSProfile(opts.SharedFileStorageService))
+	admin.PUT("/shared-file-storage/oss-profiles/:profile_id", manage, handleUpdateOSSProfile(opts.SharedFileStorageService))
 	admin.POST("/shared-file-storage/profiles/:profile_id/probe", manage, handleProbeStorageProfile(opts.SharedFileStorageService))
 	admin.POST("/shared-file-storage/profiles/:profile_id/retire", manage, handleRetireStorageProfile(opts.SharedFileStorageService))
 	admin.POST("/shared-file-storage/activate", manage, handleActivateStorage(opts.SharedFileStorageService))

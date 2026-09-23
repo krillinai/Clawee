@@ -125,7 +125,7 @@ export async function createSharedSpace(input: { name: string; description: stri
 }
 
 export async function updateSharedSpace(input: { spaceId: string; name: string; description: string }) {
-  return mapSpace(await adminApi.patch<SharedSpaceResponse>("/shared-spaces", {
+  return mapSpace(await adminApi.put<SharedSpaceResponse>("/shared-spaces", {
     space_id: input.spaceId,
     name: input.name,
     description: input.description
@@ -157,7 +157,7 @@ export async function addSharedSpaceMember(input: { spaceId: string; userId: str
 }
 
 export async function updateSharedSpaceMember(input: { spaceId: string; userId: string; actions: Array<"read" | "write"> }) {
-  return mapMember(await adminApi.patch<MemberResponse>("/shared-spaces/account-grants", {
+  return mapMember(await adminApi.put<MemberResponse>("/shared-spaces/account-grants", {
     space_id: input.spaceId,
     user_id: input.userId,
     actions: input.actions

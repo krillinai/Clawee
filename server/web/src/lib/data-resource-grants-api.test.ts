@@ -64,7 +64,7 @@ describe("data resource grants API", () => {
 
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
       ["/api/v1/admin/data-resource-grants", "POST"],
-      ["/api/v1/admin/data-resource-grants", "PATCH"],
+      ["/api/v1/admin/data-resource-grants", "PUT"],
       ["/api/v1/admin/data-resource-grants/remove", "POST"]
     ]);
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({

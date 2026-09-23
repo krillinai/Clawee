@@ -110,13 +110,13 @@ export async function createAccount(input: CreateAccountInput): Promise<Account>
 
 export async function updateAccountStatus(userId: string, status: AccountStatus): Promise<Account> {
   return mapAccount(
-    await adminApi.patch<AccountResponse>("/accounts", { user_id: userId, status })
+    await adminApi.put<AccountResponse>("/accounts", { user_id: userId, status })
   );
 }
 
 export async function updateAccountName(userId: string, name: string): Promise<Account> {
   return mapAccount(
-    await adminApi.patch<AccountResponse>("/accounts", { user_id: userId, name })
+    await adminApi.put<AccountResponse>("/accounts", { user_id: userId, name })
   );
 }
 
