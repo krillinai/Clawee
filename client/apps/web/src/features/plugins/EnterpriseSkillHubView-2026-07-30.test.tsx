@@ -122,7 +122,7 @@ describe('EnterpriseSkillHubView', () => {
         createSkill('invalid', 'invalid', 'unknown', []),
         createSkill('unknown-source', 'installed_unknown_source', 'unknown', ['use']),
         createSkill('name-conflict', 'name_conflict', 'unknown', []),
-        createSkill('installed', 'installed', 'verified', ['use']),
+        createSkill('installed', 'installed', 'verified', ['update', 'use']),
         createSkill('update-ready', 'update_available', 'verified', ['update', 'use']),
         createSkill('unpublished', 'unpublished', 'verified', ['use']),
         createSkill('local-changed', 'update_available', 'local_changed', ['use'])
@@ -133,14 +133,42 @@ describe('EnterpriseSkillHubView', () => {
     expectRow('invalid', []);
     expectRow('unknown-source', ['使用']);
     expectRow('name-conflict', []);
-    expectRow('installed', ['使用']);
-    expectRow('update-ready', ['使用']);
+    expectRow('installed', ['更新', '使用']);
+    expectRow('update-ready', ['更新', '使用']);
     expectRow('unpublished', ['使用']);
     expectRow('local-changed', ['使用']);
     const installed = screen.getByTestId('enterprise-skill-installed');
     const useButton = within(installed).getByRole('button', { name: '使用' });
     expect(useButton).toHaveTextContent('使用');
     expect(useButton.querySelector('svg')).not.toBeInTheDocument();
+  });
+
+  it('updates an available skill directly from its card', async () => {
+    const onUpdate = vi.fn();
+    renderHub({
+      skills: [createSkill('update-ready', 'update_available', 'verified', ['update', 'use'])],
+      onUpdate
+    });
+
+    const row = screen.getByTestId('enterprise-skill-update-ready');
+    await userEvent.setup().click(within(row).getByRole('button', { name: '更新' }));
+
+    expect(onUpdate).toHaveBeenCalledWith('update-ready');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('lets an installed skill be refreshed from the all tab', async () => {
+    const onUpdate = vi.fn();
+    renderHub({
+      skills: [createSkill('installed', 'installed', 'verified', ['update', 'use'])],
+      onUpdate
+    });
+
+    const row = screen.getByTestId('enterprise-skill-installed');
+    await userEvent.setup().click(within(row).getByRole('button', { name: '更新' }));
+
+    expect(onUpdate).toHaveBeenCalledWith('installed');
+    expect(screen.getByRole('button', { name: /可更新 0/ })).toBeInTheDocument();
   });
 
   it('loads detail on demand and restores trigger focus', async () => {

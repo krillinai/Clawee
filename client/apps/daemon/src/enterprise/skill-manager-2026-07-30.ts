@@ -144,7 +144,7 @@ export function computeEnterpriseSkillState(input: {
   const actions =
     integrity === 'local_changed'
       ? ['use'] as const
-      : status === 'update_available'
+      : status === 'update_available' || status === 'installed'
         ? ['update', 'use'] as const
         : ['use'] as const;
 

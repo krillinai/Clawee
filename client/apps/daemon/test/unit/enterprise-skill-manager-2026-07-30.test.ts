@@ -89,7 +89,7 @@ describe('enterprise skill manager', () => {
           enterpriseRecord: enterpriseRecord(),
           localContentSha256: 'b'.repeat(64)
         },
-        actions: ['use'],
+        actions: ['update', 'use'],
         integrity: 'verified'
       },
       {
@@ -263,6 +263,32 @@ describe('enterprise skill manager', () => {
     });
     expect(installSkill).not.toHaveBeenCalled();
     expect(records.upsertRecord).not.toHaveBeenCalled();
+  });
+
+  it('downloads and replaces an installed skill on explicit update even at the same version', async () => {
+    const client = createHttpClient();
+    const installSkill = vi.fn(async () => ({
+      skill: localSkill(),
+      operation: operation('overwrite')
+    }));
+    const manager = createManager({
+      client,
+      records: createEnterpriseRecords(enterpriseRecord()),
+      skillManager: createSkillManager(createTransaction({
+        getSkill: vi.fn(() => localSkill()),
+        installSkill
+      }))
+    });
+
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({
+      skill: { status: 'installed', actions: ['update', 'use'] },
+      operation: { operation: 'overwrite' }
+    });
+    expect(client.downloadSkillPackage).toHaveBeenCalledOnce();
+    expect(installSkill).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'code-review',
+      overwrite: true
+    }));
   });
 
   it.each([

@@ -2351,6 +2351,7 @@
 .enterprise-skill-actions.skill-market-card__action-row {
   width: 100%;
   min-height: 38px;
+  margin-top: auto;
   justify-content: flex-end;
   padding: 0 15px 11px;
 }
@@ -2366,6 +2367,15 @@
   min-height: 18px;
   margin-top: 4px;
   -webkit-line-clamp: 1;
+}
+
+.enterprise-skill-row:has(.skill-market-card__action-row) .enterprise-skill-replace {
+  top: 18px;
+  bottom: auto;
+}
+
+.enterprise-skill-row:has(.skill-market-card__action-row) .skill-market-card__identity-copy {
+  padding-right: 44px;
 }
 
 .enterprise-skill-action.skill-market-action-button {

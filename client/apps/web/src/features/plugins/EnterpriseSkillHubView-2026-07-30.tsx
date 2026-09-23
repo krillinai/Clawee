@@ -75,7 +75,7 @@ const mockEnterpriseSkills: EnterpriseSkillResponse[] = mockEnterpriseSkillInput
   creator: { name: author },
   version: '1.2.0', installedVersion: status === 'not_installed' ? undefined : '1.1.0',
   updatedAt: '2026-08-03T08:00:00.000Z', integrity: status === 'not_installed' ? 'not_applicable' : 'verified',
-  actions: status === 'not_installed' ? ['install'] : status === 'update_available' ? ['update', 'use'] : ['use']
+  actions: status === 'not_installed' ? ['install'] : status === 'update_available' || status === 'installed' ? ['update', 'use'] : ['use']
 }));
 
 const mockEnterpriseSkillUsage: Record<string, number> = {
@@ -435,7 +435,24 @@ function EnterpriseSkillRow(props: {
           </span>
         </span>
       </button>
-      {props.skill.actions.filter(action => action === 'install' || action === 'use').map(action => (
+      {props.skill.actions.includes('update') ? (
+        <div className="enterprise-skill-actions skill-market-card__action-row">
+          {props.skill.actions.map(action => (
+            <EnterpriseSkillActionButton
+              action={action}
+              compact={action === 'use'}
+              connected={props.connected}
+              key={action}
+              mutationLocked={props.mutationLocked}
+              operation={props.operation}
+              skill={props.skill}
+              onInstall={props.onInstall}
+              onUpdate={props.onUpdate}
+              onUse={props.onUse}
+            />
+          ))}
+        </div>
+      ) : props.skill.actions.filter(action => action === 'install' || action === 'use').map(action => (
         <EnterpriseSkillActionButton
           action={action}
           compact
