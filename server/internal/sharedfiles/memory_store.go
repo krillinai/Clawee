@@ -52,7 +52,13 @@ func (s *MemoryStore) CreateSpace(ctx context.Context, space Space) (SpaceSummar
 		}
 	}
 	s.spaces[space.SpaceID] = space
-	return SpaceSummary{Space: space}, nil
+	if space.CreatedBy != "" {
+		if s.grants[space.SpaceID] == nil {
+			s.grants[space.SpaceID] = map[string]memoryGrant{}
+		}
+		s.grants[space.SpaceID][space.CreatedBy] = memoryGrant{Read: true, Write: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}
+	}
+	return s.summaryLocked(space), nil
 }
 
 func (s *MemoryStore) UpdateSpace(ctx context.Context, space Space) (SpaceSummary, error) {

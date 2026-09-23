@@ -15,13 +15,27 @@ type PostgresStore struct{ pool *pgxpool.Pool }
 func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore { return &PostgresStore{pool: pool} }
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
-	_, err := s.pool.Exec(ctx, `INSERT INTO shared_spaces
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return SpaceSummary{}, err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `INSERT INTO shared_spaces
 (space_id,name,description,created_by,updated_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7)`, space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, space.CreatedAt, space.UpdatedAt)
 	if err != nil {
 		return SpaceSummary{}, mapPostgresError(err, ErrSpaceNameConflict)
 	}
-	return SpaceSummary{Space: space}, nil
+	for _, action := range []string{ActionRead, ActionWrite} {
+		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, newID("drg_"), space.CreatedBy, ResourceTypeSharedSpace, space.SpaceID, action, space.CreatedBy, space.CreatedAt); err != nil {
+			return SpaceSummary{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SpaceSummary{}, err
+	}
+	return SpaceSummary{Space: space, MemberCount: 1}, nil
 }
 
 func (s *PostgresStore) UpdateSpace(ctx context.Context, space Space) (SpaceSummary, error) {

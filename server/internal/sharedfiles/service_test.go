@@ -82,6 +82,33 @@ func TestUploadCreateReplaceConflictAndMemberIsolation(t *testing.T) {
 	}
 }
 
+func TestCreateSpaceGrantsCreatorReadWrite(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	store.SetAccount("creator", "创建者", "creator@example.com", "active")
+	store.SetAccount("other", "其他人", "other@example.com", "active")
+	service := NewService(store, nil, nil)
+	space, err := service.CreateSpace(ctx, "团队空间", "", "creator")
+	if err != nil || space.MemberCount != 1 {
+		t.Fatalf("CreateSpace() = %#v, %v", space, err)
+	}
+	for _, action := range []string{ActionRead, ActionWrite} {
+		if err := store.CheckSpaceAccess(ctx, "creator", space.SpaceID, action); err != nil {
+			t.Fatalf("creator %s access: %v", action, err)
+		}
+		if err := store.CheckSpaceAccess(ctx, "other", space.SpaceID, action); !errors.Is(err, ErrSharedSpaceNotFound) {
+			t.Fatalf("other %s access: %v", action, err)
+		}
+	}
+	members, err := service.ListMembers(ctx, space.SpaceID, "", 50, "")
+	if err != nil || len(members.Items) != 1 || members.Items[0].UserID != "creator" || members.Items[0].GrantStatus != "complete" {
+		t.Fatalf("members = %#v, %v", members, err)
+	}
+	if _, err := service.CreateSpace(ctx, "团队空间", "", "other"); !errors.Is(err, ErrSpaceNameConflict) {
+		t.Fatalf("duplicate CreateSpace() error = %v", err)
+	}
+}
+
 func TestUploadValidationDoesNotPublishInvalidContent(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
@@ -120,7 +147,7 @@ func TestAdminFileManagementDoesNotRequireSpaceMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewService(store, storage, nil)
-	space, err := service.CreateSpace(ctx, "后台管理空间", "", "admin")
+	space, err := service.CreateSpace(ctx, "后台管理空间", "", "owner")
 	if err != nil {
 		t.Fatal(err)
 	}

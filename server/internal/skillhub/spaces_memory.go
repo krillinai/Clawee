@@ -18,6 +18,12 @@ func (s *MemoryStore) CreateSpace(_ context.Context, space Space) (SpaceSummary,
 		}
 	}
 	s.spaces[space.SpaceID] = space
+	if space.CreatedBy != "" {
+		if s.grants[space.CreatedBy] == nil {
+			s.grants[space.CreatedBy] = map[string]map[string]bool{}
+		}
+		s.grants[space.CreatedBy][space.SpaceID] = map[string]bool{SpaceActionRead: true, SpaceActionWrite: true}
+	}
 	return s.spaceSummaryLocked(space), nil
 }
 
@@ -69,7 +75,7 @@ func (s *MemoryStore) ListAuthorizedSpaces(_ context.Context, userID string) ([]
 	items := []Space{}
 	for id, space := range s.spaces {
 		actions := s.grants[userID][id]
-		if !actions[SpaceActionRead] && !(id == DefaultSpaceID && len(s.grants) == 0) {
+		if !actions[SpaceActionRead] && !(id == DefaultSpaceID && !s.hasDefaultSpaceGrantsLocked()) {
 			continue
 		}
 		space.Actions = sortedSpaceActions(actions)
@@ -154,10 +160,19 @@ func (s *MemoryStore) RemoveSpaceMember(_ context.Context, spaceID, userID strin
 }
 
 func (s *MemoryStore) hasAccessLocked(userID, spaceID, action string) bool {
-	if action == SpaceActionRead && spaceID == DefaultSpaceID && len(s.grants) == 0 {
+	if action == SpaceActionRead && spaceID == DefaultSpaceID && !s.hasDefaultSpaceGrantsLocked() {
 		return true
 	}
 	return s.grants[userID][spaceID][action]
+}
+
+func (s *MemoryStore) hasDefaultSpaceGrantsLocked() bool {
+	for _, spaces := range s.grants {
+		if len(spaces[DefaultSpaceID]) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) spaceSummaryLocked(space Space) SpaceSummary {

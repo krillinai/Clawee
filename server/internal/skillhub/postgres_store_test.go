@@ -41,6 +41,41 @@ func TestPostgresStoreCreateVersionAndLoadAdminDetail(t *testing.T) {
 	}
 }
 
+func TestPostgresCreateSpaceGrantsCreatorAtomically(t *testing.T) {
+	now := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	space := Space{SpaceID: "skillspace_new", Name: "团队空间", CreatedBy: "creator", UpdatedBy: "creator", CreatedAt: now, UpdatedAt: now}
+	for _, failGrant := range []bool{false, true} {
+		mock := newPGXMock(t)
+		store := NewPostgresStore(mock)
+		mock.ExpectBegin()
+		mock.ExpectExec(`INSERT INTO skill_spaces`).WithArgs(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		mock.ExpectExec(`INSERT INTO data_resource_grants`).WithArgs(pgxmock.AnyArg(), "creator", space.SpaceID, SpaceActionRead, "creator", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		write := mock.ExpectExec(`INSERT INTO data_resource_grants`).WithArgs(pgxmock.AnyArg(), "creator", space.SpaceID, SpaceActionWrite, "creator", now)
+		if failGrant {
+			write.WillReturnError(errors.New("grant failed"))
+			mock.ExpectRollback()
+		} else {
+			write.WillReturnResult(pgxmock.NewResult("INSERT", 1))
+			mock.ExpectCommit()
+			mock.ExpectQuery(`SELECT sp.space_id`).WithArgs(space.SpaceID).WillReturnRows(pgxmock.NewRows([]string{
+				"space_id", "name", "description", "created_by", "updated_by", "created_at", "updated_at",
+				"member_count", "skill_count", "published_count", "approver_user_id", "approver_name", "approval_provider", "external_approval_template_id",
+			}).AddRow(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now, 1, 0, 0, "", "", "local", ""))
+		}
+		created, err := store.CreateSpace(context.Background(), space)
+		if failGrant {
+			if err == nil {
+				t.Fatal("CreateSpace() succeeded after grant failure")
+			}
+		} else if err != nil || created.MemberCount != 1 {
+			t.Fatalf("CreateSpace() = %#v, %v", created, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestPostgresStoreContributionFactIsAtomic(t *testing.T) {
 	for _, tc := range []struct {
 		name, resolution, origin, event, actor string

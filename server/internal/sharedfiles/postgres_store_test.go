@@ -19,7 +19,7 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 	pool := openSharedFilesTestPool(t)
 	ctx := context.Background()
 	store := NewPostgresStore(pool)
-	for _, userID := range []string{"user_a", "user_b"} {
+	for _, userID := range []string{"admin", "user_a", "user_b"} {
 		if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,name,status) VALUES ($1,$1||'@test.local',$1,'active')`, userID); err != nil {
 			t.Fatal(err)
 		}
@@ -32,6 +32,14 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 	space, err := service.CreateSpace(ctx, "Postgres 集成空间", "", "admin")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if space.MemberCount != 1 {
+		t.Fatalf("creator member count = %d", space.MemberCount)
+	}
+	for _, action := range []string{ActionRead, ActionWrite} {
+		if err := store.CheckSpaceAccess(ctx, "admin", space.SpaceID, action); err != nil {
+			t.Fatalf("creator %s access: %v", action, err)
+		}
 	}
 	for _, userID := range []string{"user_a", "user_b"} {
 		if _, err := service.AddMember(ctx, space.SpaceID, userID, "admin"); err != nil {
@@ -48,7 +56,7 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary, err := service.GetSpaceSummary(ctx, space.SpaceID)
-	if err != nil || summary.MemberCount != 2 || summary.FileCount != 1 || summary.SizeBytes != 7 {
+	if err != nil || summary.MemberCount != 3 || summary.FileCount != 1 || summary.SizeBytes != 7 {
 		t.Fatalf("summary = %#v, %v", summary, err)
 	}
 	adminCreated, err := service.UploadAdmin(ctx, "admin", space.SpaceID, "admin/notice.txt", "text/plain", 6, nil, strings.NewReader("notice"))
@@ -123,7 +131,7 @@ func TestPostgresAuthorizedSpacesIncludeCurrentAccountWritePermissions(t *testin
 	pool := openSharedFilesTestPool(t)
 	ctx := context.Background()
 	store := NewPostgresStore(pool)
-	if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,status) VALUES ('reader','reader@test.local','active'),('writer','writer@test.local','active')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,status) VALUES ('admin','admin@test.local','active'),('reader','reader@test.local','active'),('writer','writer@test.local','active')`); err != nil {
 		t.Fatal(err)
 	}
 	storage, err := NewFileSystemStorage(t.TempDir())

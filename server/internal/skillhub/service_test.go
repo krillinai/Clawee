@@ -787,6 +787,37 @@ func TestServiceMovesSkillsToSpaceAtomically(t *testing.T) {
 	}
 }
 
+func TestCreateSpaceGrantsCreatorReadWrite(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore()})
+	space, err := service.CreateSpace(ctx, "团队空间", "", "creator")
+	if err != nil || space.MemberCount != 1 {
+		t.Fatalf("CreateSpace() = %#v, %v", space, err)
+	}
+	for _, action := range []string{SpaceActionRead, SpaceActionWrite} {
+		if err := service.spaces.CheckSpaceAccess(ctx, "creator", space.SpaceID, action); err != nil {
+			t.Fatalf("creator %s access: %v", action, err)
+		}
+		if err := service.spaces.CheckSpaceAccess(ctx, "other", space.SpaceID, action); !errors.Is(err, ErrSpaceNotFound) {
+			t.Fatalf("other %s access: %v", action, err)
+		}
+	}
+	members, err := service.ListSpaceMembers(ctx, space.SpaceID)
+	if err != nil || len(members) != 1 || members[0].UserID != "creator" || members[0].GrantStatus != "complete" {
+		t.Fatalf("members = %#v, %v", members, err)
+	}
+	if _, err := service.CreateSpace(ctx, "团队空间", "", "other"); !errors.Is(err, ErrSpaceNameConflict) {
+		t.Fatalf("duplicate CreateSpace() error = %v", err)
+	}
+	if err := service.spaces.CheckSpaceAccess(ctx, "other", DefaultSpaceID, SpaceActionRead); err != nil {
+		t.Fatalf("default space access changed: %v", err)
+	}
+	authorized, err := service.ListAuthorizedSpaces(ctx, "other")
+	if err != nil || len(authorized) != 1 || authorized[0].SpaceID != DefaultSpaceID {
+		t.Fatalf("other authorized spaces = %#v, %v", authorized, err)
+	}
+}
+
 func TestMemoryStoreDistinguishesMissingAndForeignVersions(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)

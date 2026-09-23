@@ -17,10 +17,24 @@ COALESCE(sp.approver_user_id,''),COALESCE(a.name,''),sp.approval_provider,sp.ext
 FROM skill_spaces sp LEFT JOIN accounts a ON a.user_id=sp.approver_user_id`
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
-	_, err := s.pool.Exec(ctx, `INSERT INTO skill_spaces (space_id,name,description,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return SpaceSummary{}, err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `INSERT INTO skill_spaces (space_id,name,description,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, space.CreatedAt, space.UpdatedAt)
 	if err != nil {
 		return SpaceSummary{}, mapSpaceStoreError(err)
+	}
+	for _, action := range []string{SpaceActionRead, SpaceActionWrite} {
+		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at) VALUES ($1,$2,'skill_space',$3,$4,$5,$6,$6)`,
+			newID("drg"), space.CreatedBy, space.SpaceID, action, space.CreatedBy, space.CreatedAt); err != nil {
+			return SpaceSummary{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SpaceSummary{}, err
 	}
 	return s.GetSpace(ctx, space.SpaceID)
 }
