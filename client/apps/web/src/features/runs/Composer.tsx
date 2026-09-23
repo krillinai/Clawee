@@ -209,6 +209,8 @@ export function Composer(props: {
   const [selectedReasoning, setSelectedReasoning] = useState<ReasoningEffort | null>(
     props.reasoning
   );
+  const [modelsExpanded, setModelsExpanded] = useState(true);
+  const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const [openMenu, setOpenMenu] = useState<
     'project' | 'add' | 'permission' | 'connectors' | 'model' | null
   >(null);
@@ -1272,7 +1274,7 @@ export function Composer(props: {
           placeholder={
             props.disabled
               ? props.disabledReason ?? '当前对话不可用'
-              : props.workflowDraft ? '补充本节点的任务要求' : hasComposerContent ? '' : '输入 / 调用插件'
+              : props.workflowDraft?.firstNode ? '发起时填写的任务要求' : props.workflowDraft ? '补充本节点的任务要求' : hasComposerContent ? '' : '输入 / 调用插件'
           }
         />
         {slashMenuOpen ? (

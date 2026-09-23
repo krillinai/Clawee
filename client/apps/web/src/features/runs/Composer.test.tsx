@@ -330,6 +330,39 @@ describe('Composer', () => {
     expect(screen.queryByText('跟随 Codex 配置')).not.toBeInTheDocument();
   });
 
+  it('collapses model and reasoning sections independently with a long model list', async () => {
+    const user = userEvent.setup();
+    const onModelConfigChange = vi.fn();
+    const models = Array.from({ length: 12 }, (_, index): CodexModelResponse => ({
+      ...codexModels[0]!,
+      id: `model-${index + 1}`,
+      model: `model-${index + 1}`,
+      displayName: `模型 ${index + 1}`,
+      isDefault: index === 0
+    }));
+    render(<Composer {...defaultProps} models={models} onModelConfigChange={onModelConfigChange} />);
+
+    await user.click(screen.getByRole('button', { name: '选择模型 模型 1' }));
+    const modelSection = screen.getByRole('button', { name: '模型' });
+    const reasoningSection = screen.getByRole('button', { name: '推理强度' });
+    expect(modelSection).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(17);
+
+    await user.click(modelSection);
+    expect(modelSection).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menuitemradio', { name: /模型 12/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: /默认/ })).toBeInTheDocument();
+
+    await user.click(reasoningSection);
+    expect(reasoningSection).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0);
+
+    await user.click(modelSection);
+    await user.click(screen.getByRole('menuitemradio', { name: /模型 12/ }));
+    expect(onModelConfigChange).toHaveBeenCalledWith({ model: 'model-12', reasoning: null });
+    expect(screen.getByRole('button', { name: '选择模型 模型 12' })).toBeInTheDocument();
+  });
+
   it('replaces a removed persisted model with the current default model', async () => {
     const onModelConfigChange = vi.fn();
     render(

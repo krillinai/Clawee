@@ -4685,11 +4685,36 @@ html.is-pane-resizing * {
 }
 
 .composer-model-section-label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
+  text-align: left;
+}
+
+.composer-model-section-label:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.composer-model-options {
+  display: grid;
+  gap: 2px;
+  max-height: min(260px, 35dvh);
+  overflow-y: auto;
+}
+
+.composer-reasoning-options {
+  max-height: none;
+  overflow: visible;
 }
 
 .composer-model-status {
