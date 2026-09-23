@@ -56,6 +56,7 @@ export type PersistentAppServerExecutor = {
   readonly maxConcurrency: number;
   start(input: PersistentAppServerExecutionInput): PersistentAppServerExecution;
   isBusy(): boolean;
+  canStart(threadId: string): boolean;
   invalidate(reason: string): Promise<void>;
   close(input?: {
     interruptGraceMs?: number;
@@ -88,6 +89,7 @@ export function createPersistentAppServerExecutor(
   type Slot = {
     executor: PersistentAppServerExecutor;
     busy: boolean;
+    threadIds: Set<string>;
   };
   const slots: Slot[] = [];
   let closing = false;
@@ -96,28 +98,46 @@ export function createPersistentAppServerExecutor(
   function createSlot(): Slot {
     const slot = {
       executor: createPersistentAppServerSlotExecutor(input),
-      busy: false
+      busy: false,
+      threadIds: new Set<string>()
     };
     slots.push(slot);
     return slot;
+  }
+
+  function findOwner(threadId: string): Slot | undefined {
+    return slots.find(slot => slot.threadIds.has(threadId));
+  }
+
+  function selectSlot(threadId: string): Slot | undefined {
+    const owner = findOwner(threadId);
+    if (owner !== undefined) return owner.busy ? undefined : owner;
+    const available = slots
+      .filter(slot => !slot.busy)
+      .sort((left, right) => left.threadIds.size - right.threadIds.size)[0];
+    return available
+      ?? (slots.length < maxConcurrency ? createSlot() : undefined);
   }
 
   return {
     maxConcurrency,
     start(run) {
       if (closing) throw new Error('Persistent app-server executor is closing');
-      const slot = slots.find(candidate => !candidate.busy)
-        ?? (slots.length < maxConcurrency ? createSlot() : undefined);
+      const threadId = run.thread.id;
+      const slot = selectSlot(threadId);
       if (slot === undefined) {
         throw new Error('Persistent app-server executor is busy');
       }
 
       slot.busy = true;
+      const alreadyOwned = slot.threadIds.has(threadId);
+      slot.threadIds.add(threadId);
       let execution: PersistentAppServerExecution;
       try {
         execution = slot.executor.start(run);
       } catch (error) {
         slot.busy = false;
+        if (!alreadyOwned) slot.threadIds.delete(threadId);
         throw error;
       }
       return {
@@ -131,6 +151,12 @@ export function createPersistentAppServerExecutor(
     isBusy() {
       return closing
         || (slots.length >= maxConcurrency && slots.every(slot => slot.busy));
+    },
+    canStart(threadId) {
+      if (closing) return false;
+      const owner = findOwner(threadId);
+      if (owner !== undefined) return !owner.busy;
+      return slots.some(slot => !slot.busy) || slots.length < maxConcurrency;
     },
     async invalidate(reason) {
       if (closing) return;
@@ -405,6 +431,9 @@ function createPersistentAppServerSlotExecutor(
     start,
     isBusy() {
       return busy;
+    },
+    canStart() {
+      return !closing && !busy;
     },
     async invalidate(reason) {
       if (closing) return;

@@ -376,7 +376,11 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         const capacityBlocked =
           runningPersistentRunIds.size
           >= options.persistentAppServerExecutor!.maxConcurrency;
-        if (!threadBlocked && !capacityBlocked) return startExistingRun(queuedRun);
+        const executorBlocked =
+          !options.persistentAppServerExecutor!.canStart(thread.id);
+        if (!threadBlocked && !capacityBlocked && !executorBlocked) {
+          return startExistingRun(queuedRun);
+        }
 
         updateStatus(id, 'queued', 'queued');
         runs.setRunQueueState(id, 'queued');
@@ -2116,6 +2120,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       const nextIndex = persistentRunQueue.findIndex(run =>
         run.input.threadId !== undefined
         && !runningThreadRun.has(run.input.threadId)
+        && executor.canStart(run.input.threadId)
       );
       if (nextIndex === -1) return;
       const [next] = persistentRunQueue.splice(nextIndex, 1);

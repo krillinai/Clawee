@@ -314,6 +314,34 @@ describe('run manager', () => {
     await waitForRunStatus(manager, runA2.id, 'succeeded');
   });
 
+  it('queues a thread while its persistent app-server slot is unavailable', async () => {
+    const persistent = createControllablePersistentExecutor(2);
+    const { manager, threadManager } = createTestRunManager({
+      runtimeTransport: 'app-server',
+      persistentAppServerExecutor: persistent.executor
+    });
+    const threadA = createPersistedThread(threadManager);
+    const threadB = createPersistedThread(threadManager);
+    persistent.setThreadBlocked(threadB.id, true);
+
+    const runA = manager.startRun(threadRun(threadA, 'A'));
+    await expect.poll(() => persistent.starts.length).toBe(1);
+    const runB = manager.startRun(threadRun(threadB, 'B'));
+
+    expect(runA.status).toBe('running');
+    expect(runB).toMatchObject({ status: 'queued', queuePosition: 1 });
+    expect(persistent.starts).toHaveLength(1);
+
+    persistent.setThreadBlocked(threadB.id, false);
+    persistent.complete(runA.id);
+    await expect.poll(() => persistent.starts.length).toBe(2);
+    expect(persistent.starts[1]?.runId).toBe(runB.id);
+    persistent.complete(runB.id);
+
+    await waitForRunStatus(manager, runA.id, 'succeeded');
+    await waitForRunStatus(manager, runB.id, 'succeeded');
+  });
+
   it('queues the eleventh parallel thread with an explicit capacity message', async () => {
     const persistent = createControllablePersistentExecutor(10);
     const { manager, threadManager } = createTestRunManager({
@@ -2587,6 +2615,7 @@ function createControllablePersistentExecutor(maxConcurrency = 1): {
   executor: PersistentAppServerExecutor;
   starts: PersistentAppServerExecutionInput[];
   complete(runId: string): void;
+  setThreadBlocked(threadId: string, blocked: boolean): void;
 } {
   type Completion = {
     input: PersistentAppServerExecutionInput;
@@ -2595,6 +2624,7 @@ function createControllablePersistentExecutor(maxConcurrency = 1): {
   const starts: PersistentAppServerExecutionInput[] = [];
   const completions = new Map<string, Completion>();
   const activeRunIds = new Set<string>();
+  const blockedThreadIds = new Set<string>();
 
   const executor: PersistentAppServerExecutor = {
     maxConcurrency,
@@ -2670,6 +2700,9 @@ function createControllablePersistentExecutor(maxConcurrency = 1): {
     isBusy() {
       return activeRunIds.size >= maxConcurrency;
     },
+    canStart(threadId) {
+      return activeRunIds.size < maxConcurrency && !blockedThreadIds.has(threadId);
+    },
     async invalidate() {
       return undefined;
     },
@@ -2689,6 +2722,13 @@ function createControllablePersistentExecutor(maxConcurrency = 1): {
         throw new Error(`Run ${runId} is not active`);
       }
       completion.resolve('completed');
+    },
+    setThreadBlocked(threadId, blocked) {
+      if (blocked) {
+        blockedThreadIds.add(threadId);
+      } else {
+        blockedThreadIds.delete(threadId);
+      }
     }
   };
 }
@@ -2762,6 +2802,9 @@ function createMissingResumePersistentExecutor(): {
     },
     isBusy() {
       return false;
+    },
+    canStart() {
+      return true;
     },
     async invalidate() {},
     async close() {}

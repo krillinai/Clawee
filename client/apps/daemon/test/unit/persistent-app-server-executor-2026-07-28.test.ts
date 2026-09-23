@@ -387,6 +387,70 @@ describe('persistent app-server executor', () => {
     expect(injections[0]!.deactivate).toHaveBeenCalledWith('run-after-slot-release');
   });
 
+  it('keeps a resumed thread on the app-server slot that established it', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-persistent-app-server-affinity-'));
+    const executor = createPersistentAppServerExecutor({
+      codexBin: createFakeAppServer(tempDir),
+      codexHome: join(tempDir, 'codex-home'),
+      maxConcurrency: 2
+    });
+    executors.push(executor);
+
+    let resolveBlockerTurnStart!: () => void;
+    const blockerTurnStarted = new Promise<void>(resolve => {
+      resolveBlockerTurnStart = resolve;
+    });
+    const blocker = executor.start(runInput({
+      runId: 'run-blocker',
+      prompt: 'wait',
+      thread: thread({ id: 'thread-blocker' }),
+      onTurnStartWritten: resolveBlockerTurnStart
+    }));
+    const blockerStarted = await blocker.started;
+    await blockerTurnStarted;
+
+    const initial = executor.start(runInput({
+      runId: 'run-affinity-initial',
+      thread: thread({ id: 'thread-affinity' })
+    }));
+    const initialStarted = await initial.started;
+    await initial.result;
+    expect(initialStarted.pid).not.toBe(blockerStarted.pid);
+
+    let resolveOccupierTurnStart!: () => void;
+    const occupierTurnStarted = new Promise<void>(resolve => {
+      resolveOccupierTurnStart = resolve;
+    });
+    const slotOccupier = executor.start(runInput({
+      runId: 'run-slot-occupier',
+      prompt: 'wait',
+      thread: thread({ id: 'thread-slot-occupier' }),
+      onTurnStartWritten: resolveOccupierTurnStart
+    }));
+    expect((await slotOccupier.started).pid).toBe(initialStarted.pid);
+    await occupierTurnStarted;
+
+    blocker.cancel();
+    await blocker.result;
+    expect(executor.isBusy()).toBe(false);
+    expect(executor.canStart('thread-affinity')).toBe(false);
+    expect(() => executor.start(runInput({
+      runId: 'run-affinity-overlap',
+      codexThreadId: 'codex-thread-affinity',
+      thread: thread({ id: 'thread-affinity' })
+    }))).toThrow('busy');
+
+    slotOccupier.cancel();
+    await slotOccupier.result;
+    const resumed = executor.start(runInput({
+      runId: 'run-affinity-resumed',
+      codexThreadId: 'codex-thread-affinity',
+      thread: thread({ id: 'thread-affinity' })
+    }));
+    expect((await resumed.started).pid).toBe(initialStarted.pid);
+    await resumed.result;
+  });
+
   it('caps configured parallelism at ten slots', async () => {
     const executor = createPersistentAppServerExecutor({
       codexBin: 'unused',
