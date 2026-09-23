@@ -1585,134 +1585,158 @@ export function Composer(props: {
             {openMenu === 'model' ? (
               <div className="composer-popover composer-model-menu" role="menu" aria-label="模型">
                 <div className="composer-model-section" role="presentation">
-                  <div className="composer-model-section-label">模型</div>
-                  {props.modelsLoading === true && availableModels.length === 0 ? (
-                    <div className="composer-model-status" role="status">正在加载模型</div>
-                  ) : null}
-                  {props.modelsError !== undefined && availableModels.length === 0 ? (
-                    <div className="composer-model-status composer-model-status-error">
-                      {props.modelsError}
+                  <button
+                    className="composer-model-section-label"
+                    type="button"
+                    aria-expanded={modelsExpanded}
+                    onClick={() => setModelsExpanded(expanded => !expanded)}
+                  >
+                    模型
+                    {modelsExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                  </button>
+                  {modelsExpanded ? (
+                    <div className="composer-model-options">
+                      {props.modelsLoading === true && availableModels.length === 0 ? (
+                        <div className="composer-model-status" role="status">正在加载模型</div>
+                      ) : null}
+                      {props.modelsError !== undefined && availableModels.length === 0 ? (
+                        <div className="composer-model-status composer-model-status-error">
+                          {props.modelsError}
+                        </div>
+                      ) : null}
+                      {props.modelsNotice !== undefined && availableModels.length > 0 ? (
+                        <div className="composer-model-status" role="status">
+                          {props.modelsNotice}
+                        </div>
+                      ) : null}
+                      {availableModels.length === 0
+                        && props.modelsLoading !== true
+                        && props.modelsError === undefined ? (
+                        <div className="composer-model-status">暂无可用模型</div>
+                      ) : null}
+                      {selectedModel !== null && resolvedSelectedModel === undefined ? (
+                        <button
+                          className="composer-menu-item"
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked="true"
+                          disabled
+                        >
+                          <span className="composer-menu-icon" aria-hidden="true">
+                            <Check size={15} />
+                          </span>
+                          <span>
+                            <strong>{selectedModel} · 不可用</strong>
+                            <small>该模型不在当前可用目录中</small>
+                          </span>
+                        </button>
+                      ) : null}
+                      {availableModels.map(option => {
+                        const imageBlocked =
+                          attachmentDrafts.length > 0
+                          && !option.inputModalities.includes('image');
+                        return (
+                          <button
+                            key={option.id}
+                            className="composer-menu-item"
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={resolvedSelectedModel?.model === option.model}
+                            disabled={
+                              imageBlocked
+                              || props.modelChangeDisabled
+                              || modelUpdating
+                            }
+                            onClick={() => {
+                              const nextReasoning = isReasoningAvailable(
+                                option,
+                                selectedReasoning
+                              )
+                                ? selectedReasoning
+                                : null;
+                              void applyModelConfig({
+                                model: option.model,
+                                reasoning: nextReasoning
+                              }, false);
+                            }}
+                          >
+                            <span className="composer-menu-icon" aria-hidden="true">
+                              {resolvedSelectedModel?.model === option.model ? <Check size={15} /> : null}
+                            </span>
+                            <span>
+                              <strong>{option.displayName}</strong>
+                              <small>{modelOptionDescription(option, imageBlocked)}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
-                  {props.modelsNotice !== undefined && availableModels.length > 0 ? (
-                    <div className="composer-model-status" role="status">
-                      {props.modelsNotice}
-                    </div>
-                  ) : null}
-                  {availableModels.length === 0
-                    && props.modelsLoading !== true
-                    && props.modelsError === undefined ? (
-                    <div className="composer-model-status">暂无可用模型</div>
-                  ) : null}
-                  {selectedModel !== null && resolvedSelectedModel === undefined ? (
-                    <button
-                      className="composer-menu-item"
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked="true"
-                      disabled
-                    >
-                      <span className="composer-menu-icon" aria-hidden="true">
-                        <Check size={15} />
-                      </span>
-                      <span>
-                        <strong>{selectedModel} · 不可用</strong>
-                        <small>该模型不在当前可用目录中</small>
-                      </span>
-                    </button>
-                  ) : null}
-                  {availableModels.map(option => {
-                    const imageBlocked =
-                      attachmentDrafts.length > 0
-                      && !option.inputModalities.includes('image');
-                    return (
-                      <button
-                        key={option.id}
-                        className="composer-menu-item"
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={resolvedSelectedModel?.model === option.model}
-                        disabled={
-                          imageBlocked
-                          || props.modelChangeDisabled
-                          || modelUpdating
-                        }
-                        onClick={() => {
-                          const nextReasoning = isReasoningAvailable(
-                            option,
-                            selectedReasoning
-                          )
-                            ? selectedReasoning
-                            : null;
-                          void applyModelConfig({
-                            model: option.model,
-                            reasoning: nextReasoning
-                          }, false);
-                        }}
-                      >
-                        <span className="composer-menu-icon" aria-hidden="true">
-                          {resolvedSelectedModel?.model === option.model ? <Check size={15} /> : null}
-                        </span>
-                        <span>
-                          <strong>{option.displayName}</strong>
-                          <small>{modelOptionDescription(option, imageBlocked)}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
                 </div>
                 {selectedReasoningOptions.length > 0 ? (
                   <div className="composer-model-section" role="presentation">
-                    <div className="composer-model-section-label">推理强度</div>
                     <button
-                      className="composer-menu-item"
+                      className="composer-model-section-label"
                       type="button"
-                      role="menuitemradio"
-                      aria-checked={selectedReasoning === null || selectedReasoning === 'default'}
-                      disabled={props.modelChangeDisabled || modelUpdating}
-                      onClick={() => {
-                        void applyModelConfig({
-                          model: selectedModel,
-                          reasoning: null
-                        }, true);
-                      }}
+                      aria-expanded={reasoningExpanded}
+                      onClick={() => setReasoningExpanded(expanded => !expanded)}
                     >
-                      <span className="composer-menu-icon" aria-hidden="true">
-                        {selectedReasoning === null || selectedReasoning === 'default'
-                          ? <Check size={15} />
-                          : null}
-                      </span>
-                      <span>
-                        <strong>默认</strong>
-                        <small>跟随 Codex 配置</small>
-                      </span>
+                      推理强度
+                      {reasoningExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
                     </button>
-                    {selectedReasoningOptions.map(option => (
-                      <button
-                        key={option.reasoningEffort}
-                        className="composer-menu-item"
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={selectedReasoning === option.reasoningEffort}
-                        disabled={props.modelChangeDisabled || modelUpdating}
-                        onClick={() => {
-                          void applyModelConfig({
-                            model: selectedModel,
-                            reasoning: option.reasoningEffort
-                          }, true);
-                        }}
-                      >
-                        <span className="composer-menu-icon" aria-hidden="true">
-                          {selectedReasoning === option.reasoningEffort
-                            ? <Check size={15} />
-                            : null}
-                        </span>
-                        <span>
-                          <strong>{reasoningEffortLabel(option.reasoningEffort)}</strong>
-                          <small>{reasoningEffortDescription(option.reasoningEffort)}</small>
-                        </span>
-                      </button>
-                    ))}
+                    {reasoningExpanded ? (
+                      <div className="composer-model-options composer-reasoning-options">
+                        <button
+                          className="composer-menu-item"
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selectedReasoning === null || selectedReasoning === 'default'}
+                          disabled={props.modelChangeDisabled || modelUpdating}
+                          onClick={() => {
+                            void applyModelConfig({
+                              model: selectedModel,
+                              reasoning: null
+                            }, true);
+                          }}
+                        >
+                          <span className="composer-menu-icon" aria-hidden="true">
+                            {selectedReasoning === null || selectedReasoning === 'default'
+                              ? <Check size={15} />
+                              : null}
+                          </span>
+                          <span>
+                            <strong>默认</strong>
+                            <small>跟随 Codex 配置</small>
+                          </span>
+                        </button>
+                        {selectedReasoningOptions.map(option => (
+                          <button
+                            key={option.reasoningEffort}
+                            className="composer-menu-item"
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selectedReasoning === option.reasoningEffort}
+                            disabled={props.modelChangeDisabled || modelUpdating}
+                            onClick={() => {
+                              void applyModelConfig({
+                                model: selectedModel,
+                                reasoning: option.reasoningEffort
+                              }, true);
+                            }}
+                          >
+                            <span className="composer-menu-icon" aria-hidden="true">
+                              {selectedReasoning === option.reasoningEffort
+                                ? <Check size={15} />
+                                : null}
+                            </span>
+                            <span>
+                              <strong>{reasoningEffortLabel(option.reasoningEffort)}</strong>
+                              <small>{reasoningEffortDescription(option.reasoningEffort)}</small>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
