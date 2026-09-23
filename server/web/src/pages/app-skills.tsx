@@ -13,6 +13,10 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Textarea } from "@/components/ui/textarea";
 import {
   getPublishedSkill,
+  getApprovalSkill,
+  getApprovalSkillPackageURL,
+  getApprovalSkillVersionFile,
+  listApprovalSkillVersionFiles,
   getPublishedSkillPackageURL,
   getPublishedSkillVersionFile,
   listAuthorizedSkillSpaces,
@@ -21,6 +25,9 @@ import {
   listPublishedSkillVersionFiles,
   uploadAppSkillVersion,
   publishOwnAppSkillVersion,
+  submitSkillApproval,
+  approvalStatusText,
+  approvalInstanceURL,
   type OwnPendingVersion
 } from "@/lib/skillhub-api";
 
@@ -29,7 +36,14 @@ import { SkillDetailView, type SkillDetailData } from "./skill-detail";
 export function AppSkillsPage() {
   const [searchParams] = useSearchParams();
   const skillId = searchParams.get("skill_id") ?? "";
-  return skillId ? <PublishedSkillDetail skillId={skillId} /> : <PublishedSkillList />;
+  return skillId ? searchParams.get("approval") === "1" ? <ApprovalSkillDetail skillId={skillId} versionId={searchParams.get("version_id") ?? ""} /> : <PublishedSkillDetail skillId={skillId} /> : <PublishedSkillList />;
+}
+
+function ApprovalSkillDetail({ skillId, versionId }: { skillId: string; versionId: string }) {
+  const query = useQuery({ queryKey: ["app-skill-approval", skillId], queryFn: () => getApprovalSkill(skillId) });
+  if (query.isLoading) return <PageShell><LoadingState label="正在加载 Skill 详情" /></PageShell>;
+  if (query.isError || !query.data) return <PageShell><ErrorAlert error={query.error}>无法查看该技能空间的待审版本</ErrorAlert></PageShell>;
+  return <SkillDetailView backHref="/app/skills" backLabel="返回技能中心" breadcrumbLabel="技能中心" detail={query.data} initialVersionId={versionId} getPackageURL={getApprovalSkillPackageURL} loadFile={getApprovalSkillVersionFile} loadFiles={listApprovalSkillVersionFiles} queryScope="app-skill-approval" showSourceEvidence />;
 }
 
 function PublishedSkillList() {
@@ -82,6 +96,16 @@ function PublishedSkillList() {
     }
   });
 
+  const approvalMutation = useMutation({
+    mutationFn: (item: OwnPendingVersion) => submitSkillApproval(item.skillId, item.versionId, true),
+    onSuccess: () => {
+      setNotice("钉钉审批已提交");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["app-skills-own-pending"] });
+    }
+  });
+
   function resetUploadForm() {
     setUploadSpaceId("");
     setVersion("");
@@ -122,11 +146,12 @@ function PublishedSkillList() {
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
       <div className="mb-3 max-w-64"><FilterSelect ariaLabel="筛选技能空间" value={spaceId} onChange={setSpaceId}><option value="all">全部空间</option>{(spacesQuery.data ?? []).map((space) => <option key={space.spaceId} value={space.spaceId}>{space.name}</option>)}</FilterSelect></div>
       {pendingQuery.isError ? <ErrorAlert error={pendingQuery.error}>待发布版本加载失败：{errorMessage(pendingQuery.error)}</ErrorAlert> : null}
+      {approvalMutation.isError ? <ErrorAlert error={approvalMutation.error}>提交钉钉审批失败：{errorMessage(approvalMutation.error)}</ErrorAlert> : null}
       {pendingItems.length > 0 ? <section className="mb-6" aria-label="待发布版本">
         <h2 className="mb-3 text-base font-semibold">待发布版本</h2>
         <DataTableShell dense minWidth={600}>
-          <TableHeader><TableRow><TableHead>技能</TableHead><TableHead>空间</TableHead><TableHead>版本</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-          <TableBody>{pendingItems.map((item) => <TableRow key={item.versionId}><TableCell>{item.name}</TableCell><TableCell>{(spacesQuery.data ?? []).find((space) => space.spaceId === item.spaceId)?.name ?? item.spaceId}</TableCell><TableCell>v{item.version}</TableCell><TableCell className="text-right"><Button size="sm" variant="secondary" onClick={() => { publishMutation.reset(); setPublishTarget(item); }}>发布</Button></TableCell></TableRow>)}</TableBody>
+          <TableHeader><TableRow><TableHead>技能</TableHead><TableHead>空间</TableHead><TableHead>版本</TableHead><TableHead>审批状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+          <TableBody>{pendingItems.map((item) => <TableRow key={item.versionId}><TableCell>{item.name}</TableCell><TableCell>{(spacesQuery.data ?? []).find((space) => space.spaceId === item.spaceId)?.name ?? item.spaceId}</TableCell><TableCell>v{item.version}</TableCell><TableCell>{item.approvalProvider === "dingtalk" ? approvalStatusText(item.approvalInstance) : "无需审批"}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-2">{item.approvalProvider === "dingtalk" ? <>{item.approvalInstance?.providerInstanceId ? <Button asChild size="sm" variant="outline"><a href={approvalInstanceURL(item.approvalInstance.providerInstanceId)} target="_blank" rel="noreferrer">审批单</a></Button> : null}{!item.approvalInstance || ["failed", "terminated"].includes(item.approvalInstance.status) || item.approvalInstance.status === "finished" && item.approvalInstance.decision === "rejected" ? <Button size="sm" variant="secondary" disabled={approvalMutation.isPending} onClick={() => approvalMutation.mutate(item)}>提交钉钉审批</Button> : null}</> : <Button size="sm" variant="secondary" onClick={() => { publishMutation.reset(); setPublishTarget(item); }}>发布</Button>}</div></TableCell></TableRow>)}</TableBody>
         </DataTableShell>
       </section> : null}
       <DataTableShell dense minWidth={800}>

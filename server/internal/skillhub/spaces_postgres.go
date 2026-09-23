@@ -13,7 +13,7 @@ const spaceSummarySelect = `SELECT sp.space_id,sp.name,sp.description,sp.created
 (SELECT count(DISTINCT g.user_id) FROM data_resource_grants g WHERE g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.action='read'),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id AND s.current_version_id IS NOT NULL),
-COALESCE(sp.approver_user_id,''),COALESCE(a.name,'')
+COALESCE(sp.approver_user_id,''),COALESCE(a.name,''),sp.approval_provider,sp.external_approval_template_id
 FROM skill_spaces sp LEFT JOIN accounts a ON a.user_id=sp.approver_user_id`
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
@@ -64,7 +64,7 @@ func (s *PostgresStore) GetSpace(ctx context.Context, spaceID string) (SpaceSumm
 
 func (s *PostgresStore) ListAuthorizedSpaces(ctx context.Context, userID string) ([]Space, error) {
 	rows, err := s.pool.Query(ctx, `SELECT sp.space_id,sp.name,sp.description,sp.updated_at,
-	bool_or(g.action='read'),bool_or(g.action='write')
+	bool_or(g.action='read'),bool_or(g.action='write'),sp.approval_provider,sp.external_approval_template_id
 FROM skill_spaces sp JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.user_id=$1
 GROUP BY sp.space_id ORDER BY sp.updated_at DESC,sp.space_id`, userID)
 	if err != nil {
@@ -75,7 +75,7 @@ GROUP BY sp.space_id ORDER BY sp.updated_at DESC,sp.space_id`, userID)
 	for rows.Next() {
 		var item Space
 		var read, write bool
-		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &read, &write); err != nil {
+		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &read, &write, &item.ApprovalProvider, &item.ExternalApprovalTemplateID); err != nil {
 			return nil, err
 		}
 		if !read {
@@ -200,7 +200,7 @@ func (s *PostgresStore) RemoveSpaceMember(ctx context.Context, spaceID, userID s
 
 func scanSpaceSummary(row rowScanner, item *SpaceSummary) error {
 	if err := row.Scan(&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt,
-		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &item.ApproverUserID, &item.ApproverName); err != nil {
+		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &item.ApproverUserID, &item.ApproverName, &item.ApprovalProvider, &item.ExternalApprovalTemplateID); err != nil {
 		return err
 	}
 	item.CreatedAt, item.UpdatedAt = item.CreatedAt.UTC(), item.UpdatedAt.UTC()

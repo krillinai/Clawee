@@ -19,12 +19,12 @@ func (s *PostgresStore) SetSpaceApprover(ctx context.Context, spaceID, userID, o
 			return ErrMemberNotFound
 		}
 	}
-	tag, err := tx.Exec(ctx, `UPDATE skill_spaces SET approver_user_id=$2,updated_by=$3,updated_at=$4 WHERE space_id=$1`, spaceID, nullableText(userID), operator, now)
+	tag, err := tx.Exec(ctx, `UPDATE skill_spaces SET approver_user_id=$2,updated_by=$3,updated_at=$4 WHERE space_id=$1 AND approval_provider='local'`, spaceID, nullableText(userID), operator, now)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrSpaceNotFound
+		return ErrReviewForbidden
 	}
 	return tx.Commit(ctx)
 }
@@ -39,11 +39,11 @@ func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, r
 	if err := tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID).Scan(&spaceID); err != nil {
 		return Version{}, mapNotFound(err)
 	}
-	var approver string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,'') FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&approver); err != nil {
+	var approver, provider string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,''),approval_provider FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&approver, &provider); err != nil {
 		return Version{}, err
 	}
-	if approver == "" || approver != reviewer {
+	if provider != "local" || approver == "" || approver != reviewer {
 		return Version{}, ErrReviewForbidden
 	}
 	var active bool

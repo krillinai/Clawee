@@ -452,7 +452,10 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			SharedFileMigrationService: sharedFileStorageMigrationSvc,
 			PlatformBrandingService:    platformBrandingSvc,
 			DingTalkAuth: server.DingTalkAuthOptions{
-				Enabled: cfg.DingTalk.Enabled, ProviderKey: cfg.DingTalk.ProviderKey,
+				OAEnabled: cfg.DingTalk.OAEnabled, OAEventToken: cfg.DingTalk.OAEventToken,
+				OAEncodingAESKey: cfg.DingTalk.OAEncodingAESKey, OAClient: dingtalkClient,
+				PublicBaseURL: strings.TrimSuffix(cfg.DingTalk.RedirectURL, "/api/v1/auth/dingtalk/callback"),
+				Enabled:       cfg.DingTalk.Enabled, ProviderKey: cfg.DingTalk.ProviderKey,
 				RedirectURL: cfg.DingTalk.RedirectURL, AutoProvision: cfg.DingTalk.AutoProvision,
 				StateTTL: dingtalkStateTTL, Client: dingtalkClient,
 			},

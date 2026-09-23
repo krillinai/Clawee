@@ -22,21 +22,22 @@ const (
 )
 
 var (
-	ErrInvalidRequest       = errors.New("invalid skillhub request")
-	ErrPackageInvalid       = errors.New("invalid skill package")
-	ErrPackageTooLarge      = errors.New("skill package too large")
-	ErrNotFound             = errors.New("skillhub object not found")
-	ErrConflict             = errors.New("skillhub operation conflict")
-	ErrVersionChanged       = errors.New("skillhub current version changed")
-	ErrFileNotPreviewable   = errors.New("skill file is not previewable")
-	ErrStoredPackageInvalid = errors.New("stored skill package is invalid")
-	ErrSpaceNotFound        = errors.New("skill space not found")
-	ErrSpaceNameConflict    = errors.New("skill space name conflict")
-	ErrMemberNotFound       = errors.New("skill space member not found")
-	ErrMemberAlreadyExists  = errors.New("skill space member already exists")
-	ErrApprovalRequired     = errors.New("skill version approval required")
-	ErrReviewForbidden      = errors.New("skill space reviewer required")
-	ErrSelfPublishForbidden = errors.New("only the uploader can publish without approval")
+	ErrInvalidRequest           = errors.New("invalid skillhub request")
+	ErrPackageInvalid           = errors.New("invalid skill package")
+	ErrPackageTooLarge          = errors.New("skill package too large")
+	ErrNotFound                 = errors.New("skillhub object not found")
+	ErrConflict                 = errors.New("skillhub operation conflict")
+	ErrVersionChanged           = errors.New("skillhub current version changed")
+	ErrFileNotPreviewable       = errors.New("skill file is not previewable")
+	ErrStoredPackageInvalid     = errors.New("stored skill package is invalid")
+	ErrSpaceNotFound            = errors.New("skill space not found")
+	ErrSpaceNameConflict        = errors.New("skill space name conflict")
+	ErrMemberNotFound           = errors.New("skill space member not found")
+	ErrMemberAlreadyExists      = errors.New("skill space member already exists")
+	ErrApprovalRequired         = errors.New("skill version approval required")
+	ErrReviewForbidden          = errors.New("skill space reviewer required")
+	ErrSelfPublishForbidden     = errors.New("only the uploader can publish without approval")
+	ErrExternalApprovalConflict = errors.New("external approval request conflicts with existing request")
 )
 
 type Skill struct {
@@ -61,12 +62,29 @@ type SkillLatestVersion struct {
 }
 
 type OwnPendingVersion struct {
-	SkillID   string    `json:"skill_id"`
-	SpaceID   string    `json:"space_id"`
-	Name      string    `json:"name"`
-	VersionID string    `json:"version_id"`
-	Version   string    `json:"version"`
-	CreatedAt time.Time `json:"created_at"`
+	SkillID          string            `json:"skill_id"`
+	SpaceID          string            `json:"space_id"`
+	Name             string            `json:"name"`
+	VersionID        string            `json:"version_id"`
+	Version          string            `json:"version"`
+	CreatedAt        time.Time         `json:"created_at"`
+	ApprovalProvider string            `json:"approval_provider,omitempty"`
+	ApprovalInstance *ApprovalInstance `json:"approval_instance"`
+}
+
+type ApprovalInstance struct {
+	ID                      string    `json:"id"`
+	VersionID               string    `json:"-"`
+	SpaceID                 string    `json:"-"`
+	PackageSHA256           string    `json:"-"`
+	TemplateID              string    `json:"-"`
+	ProviderInstanceID      string    `json:"provider_instance_id"`
+	InitiatorUserID         string    `json:"-"`
+	InitiatorExternalUserID string    `json:"-"`
+	Status                  string    `json:"status"`
+	Decision                string    `json:"decision"`
+	CreatedAt               time.Time `json:"-"`
+	UpdatedAt               time.Time `json:"-"`
 }
 
 type Version struct {
@@ -88,6 +106,7 @@ type Version struct {
 	UploadedByAgentID string                 `json:"uploaded_by_agent_id,omitempty"`
 	UploadedByName    string                 `json:"-"`
 	CreatedAt         time.Time              `json:"created_at"`
+	ApprovalInstance  *ApprovalInstance      `json:"approval_instance"`
 }
 
 type AdminDetail struct {
@@ -166,16 +185,18 @@ type CreateVersionInput struct {
 }
 
 type Space struct {
-	ApproverUserID string    `json:"approver_user_id"`
-	ApproverName   string    `json:"approver_name"`
-	SpaceID        string    `json:"space_id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	CreatedBy      string    `json:"created_by,omitempty"`
-	UpdatedBy      string    `json:"updated_by,omitempty"`
-	CreatedAt      time.Time `json:"created_at,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Actions        []string  `json:"actions,omitempty"`
+	ApprovalProvider           string    `json:"approval_provider"`
+	ExternalApprovalTemplateID string    `json:"external_approval_template_id"`
+	ApproverUserID             string    `json:"approver_user_id"`
+	ApproverName               string    `json:"approver_name"`
+	SpaceID                    string    `json:"space_id"`
+	Name                       string    `json:"name"`
+	Description                string    `json:"description"`
+	CreatedBy                  string    `json:"created_by,omitempty"`
+	UpdatedBy                  string    `json:"updated_by,omitempty"`
+	CreatedAt                  time.Time `json:"created_at,omitempty"`
+	UpdatedAt                  time.Time `json:"updated_at"`
+	Actions                    []string  `json:"actions,omitempty"`
 }
 
 type SpaceSummary struct {

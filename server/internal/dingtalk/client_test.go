@@ -130,6 +130,32 @@ func TestResolveMemberUsesFourStepFlowAndCachesAppToken(t *testing.T) {
 	}
 }
 
+func TestGetApprovalIncludesBindingEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/app-token":
+			writeJSON(t, w, map[string]any{"accessToken": "app-token", "expireIn": 7200})
+		case "/approval":
+			writeJSON(t, w, map[string]any{"result": map[string]any{
+				"processInstanceId": "instance-1", "processCode": "PROC-1", "originatorUserId": "staff-1",
+				"status": "COMPLETED", "result": "agree",
+				"formComponentValues": []map[string]string{{"name": "包 SHA-256", "value": "sha-1"}},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClientWithEndpoints("app", "secret", server.Client(), Endpoints{
+		AppToken: server.URL + "/app-token", GetProcess: server.URL + "/approval",
+	}, time.Now)
+	detail, err := client.GetApproval(context.Background(), "instance-1")
+	if err != nil || detail.OriginatorUserID != "staff-1" || len(detail.FormComponentValues) != 1 || detail.FormComponentValues[0].Value != "sha-1" {
+		t.Fatalf("approval binding evidence: %#v, %v", detail, err)
+	}
+}
+
 func TestResolveMemberMapsEnterpriseRejection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

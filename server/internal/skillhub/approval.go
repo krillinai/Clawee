@@ -32,6 +32,9 @@ func (s *MemoryStore) SetSpaceApprover(_ context.Context, spaceID, userID, opera
 	if !ok {
 		return ErrSpaceNotFound
 	}
+	if space.ApprovalProvider == "dingtalk" {
+		return ErrReviewForbidden
+	}
 	space.ApproverUserID, space.ApproverName = userID, userID
 	space.UpdatedBy, space.UpdatedAt = operator, now
 	s.spaces[spaceID] = space
@@ -45,7 +48,7 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 	if !ok {
 		return Version{}, ErrNotFound
 	}
-	if s.spaces[skill.SpaceID].ApproverUserID != reviewer || reviewer == "" {
+	if s.spaces[skill.SpaceID].ApprovalProvider == "dingtalk" || s.spaces[skill.SpaceID].ApproverUserID != reviewer || reviewer == "" {
 		return Version{}, ErrReviewForbidden
 	}
 	for i, version := range s.versions[skillID] {

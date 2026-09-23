@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -46,6 +47,11 @@ import {
   publishOwnSkillVersion,
   setCurrentSkillVersion,
   reviewSkillVersion,
+  submitSkillApproval,
+  syncSkillApproval,
+  resolveSkillApproval,
+  approvalStatusText,
+  approvalInstanceURL,
   SkillHubAPIError,
   type SkillVersion,
   type SkillVersionFile,
@@ -72,6 +78,13 @@ export type SkillDetailData = {
 };
 
 type SkillDetailManagement = {
+  externalApproval?: boolean;
+  canSubmitApproval?: (version: SkillVersion) => boolean;
+  approvalPending?: boolean;
+  approvalError?: string;
+  onSubmitApproval?: (version: SkillVersion) => void;
+  onSyncApproval?: (version: SkillVersion) => void;
+  onBeginResolveApproval?: (version: SkillVersion) => void;
   canReview?: boolean;
   canSelfPublish?: (version: SkillVersion) => boolean;
   reviewPending?: boolean;
@@ -85,6 +98,7 @@ type SkillDetailManagement = {
 };
 
 type SkillDetailViewProps = {
+  initialVersionId?: string;
   backHref: string;
   backLabel: string;
   breadcrumbLabel: string;
@@ -110,6 +124,8 @@ export function SkillDetailPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [reviewTarget, setReviewTarget] = useState<{ version: SkillVersion; decision: "approved" | "rejected" } | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [providerInstanceId, setProviderInstanceId] = useState("");
+  const [resolveTarget, setResolveTarget] = useState<SkillVersion | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ["skill", skillId],
@@ -118,7 +134,21 @@ export function SkillDetailPage() {
   });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const space = spacesQuery.data?.find((item) => item.spaceId === detailQuery.data?.skill.spaceId);
-  const canSelfPublish = (version: SkillVersion) => Boolean(space && !space.approverUserId && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
+  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !space.approverUserId && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
+  const canSubmitApproval = (version: SkillVersion) => Boolean(space?.approvalProvider === "dingtalk" && !version.source && version.versionId !== detailQuery.data?.skill.currentVersionId && account?.userId === version.uploadedByUserId && (!version.approvalInstance || ["failed", "terminated"].includes(version.approvalInstance.status) || version.approvalInstance.status === "finished" && version.approvalInstance.decision === "rejected"));
+  const approvalMutation = useMutation({
+    mutationFn: (input: { version: SkillVersion; action: "submit" | "sync" | "not_created" | "bind_instance"; providerId?: string }) => {
+      if (input.action === "submit") return submitSkillApproval(skillId, input.version.versionId);
+      if (input.action === "sync") return syncSkillApproval(skillId, input.version.versionId);
+      return resolveSkillApproval(input.version.approvalInstance!.id, input.action, input.providerId);
+    },
+    onSuccess: () => {
+      setNotice("审批状态已更新"); setResolveTarget(null); setProviderInstanceId("");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["skill", skillId] });
+    }
+  });
 
   const publishMutation = useMutation({
     mutationFn: (target: PublishTarget) => {
@@ -174,11 +204,18 @@ export function SkillDetailPage() {
         loadFile={getSkillVersionFile}
         loadFiles={listSkillVersionFiles}
         management={{
+          externalApproval: space?.approvalProvider === "dingtalk",
+          canSubmitApproval,
+          approvalPending: approvalMutation.isPending,
+          approvalError: approvalMutation.isError ? errorMessage(approvalMutation.error) : undefined,
+          onSubmitApproval: (version) => approvalMutation.mutate({ version, action: "submit" }),
+          onSyncApproval: (version) => approvalMutation.mutate({ version, action: "sync" }),
+          onBeginResolveApproval: (version) => { approvalMutation.reset(); setProviderInstanceId(""); setResolveTarget(version); },
           canReview: detail.canReview,
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
           onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
-          canPublish: canPublish && Boolean(space?.approverUserId),
+          canPublish: canPublish && Boolean(space?.approverUserId || space?.approvalProvider === "dingtalk"),
           canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,
@@ -195,6 +232,14 @@ export function SkillDetailPage() {
         queryScope="admin-skill"
         showSourceEvidence
       />
+
+      <ModalShell open={Boolean(resolveTarget)} onClose={() => { if (!approvalMutation.isPending) setResolveTarget(null); }} title="核对钉钉审批申请" contextLabel={`版本 ${resolveTarget?.version ?? ""}`}>
+        <FieldGroup>
+          <Field><FieldLabel htmlFor="skill-approval-instance-id">已核实的审批实例 ID</FieldLabel><Input id="skill-approval-instance-id" value={providerInstanceId} onChange={(event) => setProviderInstanceId(event.target.value)} /></Field>
+          {approvalMutation.isError ? <ErrorAlert error={approvalMutation.error}>恢复失败：{errorMessage(approvalMutation.error)}</ErrorAlert> : null}
+          <Field orientation="horizontal" className="justify-end"><Button variant="outline" disabled={approvalMutation.isPending} onClick={() => setResolveTarget(null)}>取消</Button><Button variant="destructive" disabled={approvalMutation.isPending} onClick={() => resolveTarget && approvalMutation.mutate({ version: resolveTarget, action: "not_created" })}>确认未创建</Button><Button variant="primary" disabled={approvalMutation.isPending || !trimInput(providerInstanceId)} onClick={() => resolveTarget && approvalMutation.mutate({ version: resolveTarget, action: "bind_instance", providerId: trimInput(providerInstanceId) })}>绑定并同步</Button></Field>
+        </FieldGroup>
+      </ModalShell>
 
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "通过版本审批" : "驳回版本"} contextLabel={`版本 ${reviewTarget?.version.version ?? ""}`}>
         <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}><FieldGroup>
@@ -239,6 +284,7 @@ export function SkillDetailPage() {
 }
 
 export function SkillDetailView({
+  initialVersionId,
   backHref,
   backLabel,
   breadcrumbLabel,
@@ -261,7 +307,7 @@ export function SkillDetailView({
     [detail.versions]
   );
   const pendingReviewVersion = management?.canReview ? sortedVersions.find((item) => item.approvalStatus === "pending") : undefined;
-  const defaultVersionId = pendingReviewVersion?.versionId ?? detail.skill.currentVersionId ?? sortedVersions[0]?.versionId ?? null;
+  const defaultVersionId = pendingReviewVersion?.versionId ?? (sortedVersions.some((item) => item.versionId === initialVersionId) ? initialVersionId : null) ?? detail.skill.currentVersionId ?? sortedVersions[0]?.versionId ?? null;
   const viewedVersion = sortedVersions.find((item) => item.versionId === selectedVersionId)
     ?? sortedVersions.find((item) => item.versionId === defaultVersionId)
     ?? null;
@@ -364,7 +410,15 @@ export function SkillDetailView({
                         : "将当前查看版本设为用户侧可安装版本。"}
                     </p>
                   </div>
-                  <ApprovalBadge status={viewedVersion.approvalStatus} />
+                  {management.externalApproval && viewedVersion.source ? null : <ApprovalBadge status={viewedVersion.approvalStatus} />}
+                  {management.externalApproval && !viewedVersion.source ? <div className="grid gap-2 text-sm">
+                    <span>钉钉审批：{approvalStatusText(viewedVersion.approvalInstance)}</span>
+                    {viewedVersion.approvalInstance?.providerInstanceId ? <a className="text-primary hover:underline" href={approvalInstanceURL(viewedVersion.approvalInstance.providerInstanceId)} target="_blank" rel="noreferrer">查看审批单</a> : null}
+                    {management.approvalError ? <ErrorAlert>{management.approvalError}</ErrorAlert> : null}
+                    {management.canSubmitApproval?.(viewedVersion) ? <Button disabled={management.approvalPending} size="sm" variant="secondary" onClick={() => management.onSubmitApproval?.(viewedVersion)}>提交钉钉审批</Button> : null}
+                    {management.canPublish && viewedVersion.approvalInstance?.providerInstanceId && viewedVersion.approvalInstance.status === "running" ? <Button disabled={management.approvalPending} size="sm" variant="outline" onClick={() => management.onSyncApproval?.(viewedVersion)}>同步审批结果</Button> : null}
+                    {management.canPublish && ["submitting", "uncertain"].includes(viewedVersion.approvalInstance?.status ?? "") ? <Button disabled={management.approvalPending} size="sm" variant="outline" onClick={() => management.onBeginResolveApproval?.(viewedVersion)}>核对申请</Button> : null}
+                  </div> : null}
                   {viewedVersion.skillName && viewedVersion.skillName !== detail.skill.name ? <p className="break-all text-xs text-muted-foreground">待发布名称：{viewedVersion.skillName}</p> : null}
                   {viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
                   {viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
@@ -380,7 +434,7 @@ export function SkillDetailView({
                   {(management.canPublish || management.canSelfPublish?.(viewedVersion)) && viewedVersion.versionId !== detail.skill.currentVersionId ? (
                     <Button
                       aria-label={`设为当前查看版本 ${viewedVersion.version}`}
-                      disabled={management.publishPending || (viewedVersion.approvalStatus !== "approved" && !management.canSelfPublish?.(viewedVersion))}
+                      disabled={management.publishPending || (viewedVersion.approvalStatus !== "approved" && !management.canSelfPublish?.(viewedVersion) && !(management.externalApproval && viewedVersion.source))}
                       onClick={() => management.onPublish(viewedVersion)}
                       size="sm"
                       variant="secondary"
@@ -428,6 +482,7 @@ export function SkillDetailView({
 
                 <TabsContent className="mt-5" value="history">
                   <VersionHistory
+                    externalApproval={management?.externalApproval}
                     canPublish={management?.canPublish ?? false}
                     canSelfPublish={management?.canSelfPublish}
                     currentVersionId={detail.skill.currentVersionId}
@@ -598,6 +653,7 @@ function FilePreview({ content, error, file, loading }: { content?: string; erro
 }
 
 function VersionHistory({
+  externalApproval,
   canPublish,
   currentVersionId,
   latestVersionId,
@@ -609,6 +665,7 @@ function VersionHistory({
   versions,
   viewedVersionId
 }: {
+  externalApproval?: boolean;
   canPublish: boolean;
   canSelfPublish?: (version: SkillVersion) => boolean;
   currentVersionId: string | null;
@@ -643,7 +700,7 @@ function VersionHistory({
                   <span className="min-w-0 break-all font-mono text-xs">{item.version}</span>
                   {current ? <Badge variant="success">当前</Badge> : null}
                   {latest ? <Badge variant="secondary">最新上传</Badge> : null}
-                  {showSourceEvidence ? <ApprovalBadge status={item.approvalStatus} /> : null}
+                  {showSourceEvidence && !(externalApproval && item.source) ? <ApprovalBadge status={item.approvalStatus} /> : null}
                 </div>
               </TableCell>
               <TableCell className="max-w-72 text-muted-foreground"><span className="block truncate" title={item.changelog || undefined}>{item.changelog || "-"}</span></TableCell>
@@ -655,7 +712,7 @@ function VersionHistory({
                     {viewed ? "正在查看" : "查看"}
                   </Button>
                   {(canPublish || canSelfPublish?.(item)) && !current ? (
-                    <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending || (item.approvalStatus !== "approved" && !canSelfPublish?.(item))} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
+                    <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending || (item.approvalStatus !== "approved" && !canSelfPublish?.(item) && !(externalApproval && item.source))} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
                   ) : null}
                 </div>
               </TableCell>

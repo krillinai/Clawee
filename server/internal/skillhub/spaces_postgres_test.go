@@ -15,9 +15,9 @@ func TestPostgresStoreListsOnlyReadableSkillSpaces(t *testing.T) {
 	store := NewPostgresStore(mock)
 	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`SELECT sp.space_id,sp.name,sp.description,sp.updated_at`).WithArgs("user-1").
-		WillReturnRows(pgxmock.NewRows([]string{"space_id", "name", "description", "updated_at", "read", "write"}).
-			AddRow("skillspace-readable", "可读空间", "", now, true, true).
-			AddRow("skillspace-write-only", "异常空间", "", now, false, true))
+		WillReturnRows(pgxmock.NewRows([]string{"space_id", "name", "description", "updated_at", "read", "write", "provider", "template"}).
+			AddRow("skillspace-readable", "可读空间", "", now, true, true, "local", "").
+			AddRow("skillspace-write-only", "异常空间", "", now, false, true, "local", ""))
 
 	spaces, err := store.ListAuthorizedSpaces(context.Background(), "user-1")
 	if err != nil {

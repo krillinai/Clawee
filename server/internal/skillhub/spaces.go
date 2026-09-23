@@ -150,6 +150,34 @@ func (s *Service) GetPublishedForUser(ctx context.Context, userID, skillID strin
 	return s.GetPublished(ctx, skillID)
 }
 
+func (s *Service) GetApprovalDetailForUser(ctx context.Context, userID, skillID string) (AdminDetail, error) {
+	if s == nil || s.spaces == nil || s.spaces.CheckSkillAccess(ctx, userID, skillID, SpaceActionRead) != nil {
+		return AdminDetail{}, ErrNotFound
+	}
+	return s.GetAdmin(ctx, skillID)
+}
+
+func (s *Service) ListApprovalVersionFilesForUser(ctx context.Context, userID, skillID, versionID string) ([]PackageFile, error) {
+	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+		return nil, err
+	}
+	return s.ListVersionFiles(ctx, skillID, versionID)
+}
+
+func (s *Service) ReadApprovalVersionFileForUser(ctx context.Context, userID, skillID, versionID, path string) (PackageFileContent, error) {
+	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+		return PackageFileContent{}, err
+	}
+	return s.ReadVersionFile(ctx, skillID, versionID, path)
+}
+
+func (s *Service) OpenApprovalVersionPackageForUser(ctx context.Context, userID, skillID, versionID string) (PackageDownload, error) {
+	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+		return PackageDownload{}, err
+	}
+	return s.OpenVersionPackage(ctx, skillID, versionID)
+}
+
 func sortedSpaceActions(actions map[string]bool) []string {
 	result := []string{}
 	for action, allowed := range actions {

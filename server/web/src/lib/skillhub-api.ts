@@ -16,10 +16,14 @@ export type AdminSkill = {
   latestVersion?: { versionId: string; version: string; approvalStatus: string; uploadedByUserId: string };
 };
 
-export type OwnPendingVersion = { skillId: string; spaceId: string; name: string; versionId: string; version: string; createdAt: string };
+export type ApprovalInstance = { id: string; status: "submitting" | "running" | "finished" | "terminated" | "failed" | "uncertain"; decision: string; providerInstanceId: string };
+export const approvalStatusText = (instance: ApprovalInstance | null | undefined) => !instance ? "待提交" : ({ submitting: "提交中", running: "审批中", finished: instance.decision === "approved" ? "通过" : "驳回", terminated: "已终止", failed: "提交失败", uncertain: "异常待核对" })[instance.status];
+export const approvalInstanceURL = (id: string) => `https://oa.dingtalk.com/approval/#/processInstanceDetail?processInstanceId=${encodeURIComponent(id)}`;
+export type OwnPendingVersion = { skillId: string; spaceId: string; name: string; versionId: string; version: string; createdAt: string; approvalProvider?: string; approvalInstance?: ApprovalInstance | null };
 
 export type SkillVersion = {
   approvalStatus?: "pending" | "approved" | "rejected";
+  approvalInstance?: ApprovalInstance | null;
   skillName?: string;
   reviewedBy?: string;
   reviewedAt?: string | null;
@@ -173,6 +177,8 @@ export type PublishedSkill = {
 };
 
 export type SkillSpace = {
+  approvalProvider?: "local" | "dingtalk";
+  externalApprovalTemplateId?: string;
   approverUserId?: string;
   approverName?: string;
   spaceId: string;
@@ -226,9 +232,12 @@ type AdminSkillResponse = {
   latest_version?: { version_id: string; version: string; approval_status: string; uploaded_by_user_id: string };
 };
 
-type OwnPendingVersionResponse = { skill_id: string; space_id: string; name: string; version_id: string; version: string; created_at: string };
+type ApprovalInstanceResponse = { id: string; status: ApprovalInstance["status"]; decision: string; provider_instance_id: string };
+const mapApprovalInstance = (item: ApprovalInstanceResponse | null | undefined): ApprovalInstance | null => item ? ({ id: item.id, status: item.status, decision: item.decision, providerInstanceId: item.provider_instance_id }) : null;
+type OwnPendingVersionResponse = { skill_id: string; space_id: string; name: string; version_id: string; version: string; created_at: string; approval_provider?: string; approval_instance?: ApprovalInstanceResponse | null };
 
 type SkillVersionResponse = {
+  approval_instance?: ApprovalInstanceResponse | null;
   approval_status?: "pending" | "approved" | "rejected";
   skill_name?: string;
   reviewed_by?: string;
@@ -369,6 +378,8 @@ type PublishedSkillResponse = {
 };
 
 type SkillSpaceResponse = {
+  approval_provider?: "local" | "dingtalk";
+  external_approval_template_id?: string;
   approver_user_id?: string;
   approver_name?: string;
   space_id: string;
@@ -413,7 +424,7 @@ export async function listPublishedSkills() {
 
 export async function listOwnPendingSkillVersions(): Promise<OwnPendingVersion[]> {
   const response = await appApi.get<ListResponse<OwnPendingVersionResponse>>("/skills/own-pending-versions");
-  return response.items.map((item) => ({ skillId: item.skill_id, spaceId: item.space_id, name: item.name, versionId: item.version_id, version: item.version, createdAt: item.created_at }));
+  return response.items.map((item) => ({ skillId: item.skill_id, spaceId: item.space_id, name: item.name, versionId: item.version_id, version: item.version, createdAt: item.created_at, approvalProvider: item.approval_provider, approvalInstance: mapApprovalInstance(item.approval_instance) }));
 }
 
 export async function getPublishedSkill(skillId: string) {
@@ -440,6 +451,15 @@ export async function getSkill(skillId: string) {
   const response = await adminApi.get<AdminSkillDetailResponse>(`/skills/detail?skill_id=${encodeURIComponent(skillId)}`);
   return { ...(response.can_review === undefined ? {} : { canReview: response.can_review }), skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
 }
+
+export async function getApprovalSkill(skillId: string) {
+  const response = await appApi.get<AdminSkillDetailResponse>(`/skills/approval-detail?skill_id=${encodeURIComponent(skillId)}`);
+  return { skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
+}
+
+export const getApprovalSkillPackageURL = (skillId: string, versionId: string) => `/api/v1/app/skills/approval-version-package?skill_id=${encodeURIComponent(skillId)}&version_id=${encodeURIComponent(versionId)}`;
+export const listApprovalSkillVersionFiles = (skillId: string, versionId: string) => skillHubGet<ListResponse<SkillVersionFile>>(`/api/v1/app/skills/approval-version-files?skill_id=${encodeURIComponent(skillId)}&version_id=${encodeURIComponent(versionId)}`);
+export const getApprovalSkillVersionFile = (skillId: string, versionId: string, path: string) => skillHubGet<SkillVersionFileContent>(`/api/v1/app/skills/approval-version-file?skill_id=${encodeURIComponent(skillId)}&version_id=${encodeURIComponent(versionId)}&path=${encodeURIComponent(path)}`);
 
 type SkillVersionUploadInput = { skillId?: string; spaceId?: string; version: string; changelog: string; packageFile: File };
 
@@ -484,6 +504,22 @@ export async function listSkillSpaceApproverCandidates() {
 
 export function setSkillSpaceApprover(spaceId: string, userId: string) {
   return adminApi.put<void>("/skill-spaces/approver", { space_id: spaceId, user_id: userId });
+}
+
+export function setSkillSpaceApproval(spaceId: string, provider: "local" | "dingtalk", templateId: string) {
+  return adminApi.put<void>("/skill-spaces/approval", { space_id: spaceId, approval_provider: provider, external_approval_template_id: templateId });
+}
+
+export function submitSkillApproval(skillId: string, versionId: string, app = false) {
+  return (app ? appApi : adminApi).post<ApprovalInstanceResponse>("/skills/versions/submit-approval", { skill_id: skillId, version_id: versionId });
+}
+
+export function syncSkillApproval(skillId: string, versionId: string) {
+  return adminApi.post("/skills/versions/sync-approval", { skill_id: skillId, version_id: versionId });
+}
+
+export function resolveSkillApproval(applicationId: string, resolution: "not_created" | "bind_instance", providerInstanceId = "") {
+  return adminApi.post("/skills/versions/resolve-approval", { application_id: applicationId, resolution, provider_instance_id: providerInstanceId });
 }
 
 export async function reviewSkillVersion(skillId: string, versionId: string, decision: "approved" | "rejected", comment: string) {
@@ -702,6 +738,7 @@ function mapSkill(item: AdminSkillResponse): AdminSkill {
 
 function mapVersion(item: SkillVersionResponse): SkillVersion {
   return {
+    approvalInstance: mapApprovalInstance(item.approval_instance),
     ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment, uploadedByUserId: item.uploaded_by_user_id }),
     versionId: item.version_id,
     skillId: item.skill_id,
@@ -836,6 +873,8 @@ function mapPublishedSkill(item: PublishedSkillResponse): PublishedSkill {
 
 function mapSkillSpace(item: SkillSpaceResponse): SkillSpace {
   return {
+    approvalProvider: item.approval_provider ?? "local",
+    externalApprovalTemplateId: item.external_approval_template_id ?? "",
     ...(item.approver_user_id === undefined ? {} : { approverUserId: item.approver_user_id, approverName: item.approver_name }),
     spaceId: item.space_id,
     name: item.name,

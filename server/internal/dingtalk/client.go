@@ -20,6 +20,8 @@ const maxResponseBytes = 1 << 20
 const maxAvatarBytes = 2 << 20
 
 type Endpoints struct {
+	CreateProcess string
+	GetProcess    string
 	UserToken     string
 	CurrentUser   string
 	AppToken      string
@@ -29,6 +31,8 @@ type Endpoints struct {
 
 func ProductionEndpoints() Endpoints {
 	return Endpoints{
+		CreateProcess: "https://api.dingtalk.com/v1.0/workflow/processInstances",
+		GetProcess:    "https://api.dingtalk.com/v1.0/workflow/processInstances",
 		UserToken:     "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
 		CurrentUser:   "https://api.dingtalk.com/v1.0/contact/users/me",
 		AppToken:      "https://api.dingtalk.com/v1.0/oauth2/accessToken",

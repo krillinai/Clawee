@@ -285,6 +285,8 @@ func TestPostgresStoreMovesSkillsToSpaceAtomically(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"space_id"}).AddRow("skillspace-target"))
 	mock.ExpectQuery(`SELECT skill_id FROM skills`).WithArgs(skillIDs).
 		WillReturnRows(pgxmock.NewRows([]string{"skill_id"}).AddRow("skill-1").AddRow("skill-2"))
+	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM skill_version_approval_instances`).WithArgs(skillIDs, "skillspace-target").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(`UPDATE skill_version_approval_instances SET status='invalidated'`).WithArgs(skillIDs, "skillspace-target", now).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
 	mock.ExpectExec(`UPDATE skill_versions SET approval_status`).WithArgs(skillIDs, "skillspace-target").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(`UPDATE skills SET space_id`).WithArgs(skillIDs, "skillspace-target", now).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
@@ -394,6 +396,9 @@ func TestPostgresStoreAdminDetailNormalizesVersionTimestampsToUTC(t *testing.T) 
 		WillReturnRows(versionSourceRows().
 			AddRow("version-1", "skill-1", "1.0", "description", "changes", "version-1.zip", "sha", now, "source-1", "acme", "skills", "skills/code-review", strings.Repeat("1", 40), strings.Repeat("a", 64), "usr-1", "agent-1", "code-review", "pending", "", "", nil, "").
 			AddRow("version-manual", "skill-1", "0.9", "manual", "", "version-manual.zip", "sha-manual", now.Add(-time.Hour), nil, nil, nil, nil, nil, nil, nil, nil, "code-review", "approved", DefaultSpaceID, "reviewer", now, "通过"))
+	for _, id := range []string{"version-1", "version-manual"} {
+		mock.ExpectQuery(`SELECT id,version_id,space_id`).WithArgs(id).WillReturnError(pgx.ErrNoRows)
+	}
 
 	detail, err := store.GetAdmin(context.Background(), "skill-1")
 	if err != nil || len(detail.Versions) != 2 {
@@ -415,7 +420,7 @@ func TestPostgresStoreListsOnlyOwnWritablePendingVersions(t *testing.T) {
 	store := NewPostgresStore(mock)
 	now := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`FROM skill_versions v JOIN skills s`).WithArgs("writer-id").
-		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "space_id", "name", "version_id", "version", "created_at"}).AddRow("skill-1", DefaultSpaceID, "code-review", "version-1", "1.0", now))
+		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "space_id", "name", "version_id", "version", "created_at", "approval_provider", "id", "status", "decision", "provider_instance_id"}).AddRow("skill-1", DefaultSpaceID, "code-review", "version-1", "1.0", now, "local", nil, nil, nil, nil))
 	items, err := store.ListOwnPendingVersions(context.Background(), "writer-id")
 	if err != nil || len(items) != 1 || items[0].VersionID != "version-1" {
 		t.Fatalf("own pending versions = %#v, %v", items, err)
@@ -432,9 +437,9 @@ func TestPostgresStoreSetsAndClearsCurrentVersion(t *testing.T) {
 		WillReturnRows(skillRows().AddRow("skill-1", DefaultSpaceID, "code-review", nil, "admin", now, now))
 	mock.ExpectQuery(`SELECT version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at FROM skill_versions`).
 		WithArgs("version-1").WillReturnRows(versionRows().AddRow("version-1", "skill-1", "1.0", "description", "changes", "version-1.zip", "sha", now))
-	mock.ExpectQuery(`SELECT COALESCE\(approver_user_id`).WithArgs(DefaultSpaceID).WillReturnRows(pgxmock.NewRows([]string{"approver"}).AddRow("reviewer"))
+	mock.ExpectQuery(`SELECT COALESCE\(approver_user_id`).WithArgs(DefaultSpaceID).WillReturnRows(pgxmock.NewRows([]string{"approver", "provider", "template"}).AddRow("reviewer", "local", ""))
 	mock.ExpectQuery(`SELECT status='active' FROM accounts`).WithArgs("reviewer").WillReturnRows(pgxmock.NewRows([]string{"active"}).AddRow(true))
-	mock.ExpectQuery(`SELECT skill_name,approval_status`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"skill_name", "approval_status", "approved_space_id"}).AddRow("code-review", "approved", DefaultSpaceID))
+	mock.ExpectQuery(`SELECT skill_name,approval_status`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"skill_name", "approval_status", "approved_space_id", "source_id"}).AddRow("code-review", "approved", DefaultSpaceID, nil))
 	mock.ExpectExec(`UPDATE skills SET current_version_id`).WithArgs("skill-1", "version-1", now).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectCommit()
@@ -478,8 +483,8 @@ func TestPostgresStorePublishesOwnVersionWithoutApprover(t *testing.T) {
 		WillReturnRows(skillRows().AddRow("skill-1", DefaultSpaceID, "code-review", nil, "writer", now, now))
 	mock.ExpectQuery(`SELECT version_id,skill_id,version,description,changelog,package_path,package_sha256,created_at FROM skill_versions`).
 		WithArgs("version-1").WillReturnRows(versionRows().AddRow("version-1", "skill-1", "1.0", "description", "changes", "version-1.zip", "sha", now))
-	mock.ExpectQuery(`SELECT COALESCE\(approver_user_id`).WithArgs(DefaultSpaceID).WillReturnRows(pgxmock.NewRows([]string{"approver"}).AddRow(""))
-	mock.ExpectQuery(`SELECT skill_name,approval_status`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"skill_name", "approval_status", "approved_space_id"}).AddRow("code-review", "pending", ""))
+	mock.ExpectQuery(`SELECT COALESCE\(approver_user_id`).WithArgs(DefaultSpaceID).WillReturnRows(pgxmock.NewRows([]string{"approver", "provider", "template"}).AddRow("", "local", ""))
+	mock.ExpectQuery(`SELECT skill_name,approval_status`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"skill_name", "approval_status", "approved_space_id", "source_id"}).AddRow("code-review", "pending", "", nil))
 	mock.ExpectQuery(`SELECT COALESCE\(uploaded_by_user_id`).WithArgs("version-1").WillReturnRows(pgxmock.NewRows([]string{"uploader"}).AddRow("writer-id"))
 	mock.ExpectExec(`UPDATE skill_versions SET approval_status='approved'`).WithArgs("version-1", DefaultSpaceID, "writer-id", now).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(`UPDATE skills SET current_version_id`).WithArgs("skill-1", "version-1", now).WillReturnResult(pgxmock.NewResult("UPDATE", 1))

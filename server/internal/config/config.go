@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -92,14 +93,17 @@ func (cfg ModelAccessConfig) Validate() error {
 }
 
 type DingTalkConfig struct {
-	Enabled        bool   `mapstructure:"enabled"`
-	ClientID       string `mapstructure:"client_id"`
-	ClientSecret   string `mapstructure:"client_secret"`
-	RedirectURL    string `mapstructure:"redirect_url"`
-	ProviderKey    string `mapstructure:"provider_key"`
-	AutoProvision  bool   `mapstructure:"auto_provision"`
-	StateTTL       string `mapstructure:"state_ttl"`
-	RequestTimeout string `mapstructure:"request_timeout"`
+	OAEnabled        bool   `mapstructure:"oa_enabled"`
+	OAEventToken     string `mapstructure:"oa_event_token"`
+	OAEncodingAESKey string `mapstructure:"oa_encoding_aes_key"`
+	Enabled          bool   `mapstructure:"enabled"`
+	ClientID         string `mapstructure:"client_id"`
+	ClientSecret     string `mapstructure:"client_secret"`
+	RedirectURL      string `mapstructure:"redirect_url"`
+	ProviderKey      string `mapstructure:"provider_key"`
+	AutoProvision    bool   `mapstructure:"auto_provision"`
+	StateTTL         string `mapstructure:"state_ttl"`
+	RequestTimeout   string `mapstructure:"request_timeout"`
 }
 
 func (cfg DingTalkConfig) Validate() (time.Duration, time.Duration, error) {
@@ -110,6 +114,15 @@ func (cfg DingTalkConfig) Validate() (time.Duration, time.Duration, error) {
 	timeout, err := time.ParseDuration(strings.TrimSpace(cfg.RequestTimeout))
 	if err != nil || timeout < time.Second || timeout > 30*time.Second {
 		return 0, 0, errors.New("dingtalk.request_timeout must be between 1s and 30s")
+	}
+	if cfg.OAEnabled && (!cfg.Enabled || strings.TrimSpace(cfg.OAEventToken) == "" || len(cfg.OAEncodingAESKey) != 43 || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "") {
+		return 0, 0, errors.New("dingtalk OA requires login app credentials, oa_event_token and a 43-character oa_encoding_aes_key")
+	}
+	if cfg.OAEnabled {
+		key, decodeErr := base64.StdEncoding.DecodeString(cfg.OAEncodingAESKey + "=")
+		if decodeErr != nil || len(key) != 32 {
+			return 0, 0, errors.New("dingtalk.oa_encoding_aes_key must be a valid 32-byte base64 key")
+		}
 	}
 	if !cfg.Enabled {
 		return stateTTL, timeout, nil
@@ -451,6 +464,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("claw_admin.deployment_credential", "")
 	v.SetDefault("claw_admin.timeout", "10s")
 	v.SetDefault("dingtalk.enabled", false)
+	v.SetDefault("dingtalk.oa_enabled", false)
+	v.SetDefault("dingtalk.oa_event_token", "")
+	v.SetDefault("dingtalk.oa_encoding_aes_key", "")
 	v.SetDefault("dingtalk.client_id", "")
 	v.SetDefault("dingtalk.client_secret", "")
 	v.SetDefault("dingtalk.redirect_url", "")
@@ -507,6 +523,7 @@ func bindEnv(v *viper.Viper) {
 		"claw_admin.deployment_credential",
 		"claw_admin.timeout",
 		"dingtalk.enabled",
+		"dingtalk.oa_enabled", "dingtalk.oa_event_token", "dingtalk.oa_encoding_aes_key",
 		"dingtalk.client_id",
 		"dingtalk.client_secret",
 		"dingtalk.redirect_url",

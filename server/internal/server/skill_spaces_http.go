@@ -50,6 +50,7 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.PATCH("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
 	admin.GET("/skill-spaces/approver-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverCandidates(opts.AccountService, opts.RBACService))
 	admin.PUT("/skill-spaces/approver", skillOperationLog(opts.Logger, "skill_space_approver_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApprover(opts.SkillHubService, opts.AccountService, opts.RBACService))
+	admin.PUT("/skill-spaces/approval", skillOperationLog(opts.Logger, "skill_space_approval_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproval(opts))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
 	admin.GET("/skill-spaces/member-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSkillSpaceCandidates(opts.SkillHubService, opts.AccountService))
 	admin.POST("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))

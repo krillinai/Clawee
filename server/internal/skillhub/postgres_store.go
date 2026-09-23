@@ -145,11 +145,13 @@ func (s *PostgresStore) ListAdmin(ctx context.Context) ([]Skill, error) {
 }
 
 func (s *PostgresStore) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
-	rows, err := s.pool.Query(ctx, `SELECT s.skill_id,s.space_id,s.name,v.version_id,v.version,v.created_at
+	rows, err := s.pool.Query(ctx, `SELECT s.skill_id,s.space_id,s.name,v.version_id,v.version,v.created_at,sp.approval_provider,
+ai.id,ai.status,COALESCE(ai.decision,''),COALESCE(ai.provider_instance_id,'')
 FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id
 JOIN skill_spaces sp ON sp.space_id=s.space_id
 JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=s.space_id AND g.user_id=$1 AND g.action='write'
-WHERE v.uploaded_by_user_id=$1 AND v.approval_status='pending' AND sp.approver_user_id IS NULL
+LEFT JOIN LATERAL (SELECT id,status,decision,provider_instance_id FROM skill_version_approval_instances WHERE version_id=v.version_id AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1) ai ON TRUE
+WHERE v.uploaded_by_user_id=$1 AND ((sp.approval_provider='dingtalk' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id) OR (sp.approval_provider='local' AND v.approval_status='pending' AND sp.approver_user_id IS NULL))
 ORDER BY v.created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -158,8 +160,12 @@ ORDER BY v.created_at DESC`, userID)
 	items := []OwnPendingVersion{}
 	for rows.Next() {
 		var item OwnPendingVersion
-		if err := rows.Scan(&item.SkillID, &item.SpaceID, &item.Name, &item.VersionID, &item.Version, &item.CreatedAt); err != nil {
+		var id, status, decision, providerID pgtype.Text
+		if err := rows.Scan(&item.SkillID, &item.SpaceID, &item.Name, &item.VersionID, &item.Version, &item.CreatedAt, &item.ApprovalProvider, &id, &status, &decision, &providerID); err != nil {
 			return nil, err
+		}
+		if id.Valid {
+			item.ApprovalInstance = &ApprovalInstance{ID: id.String, Status: status.String, Decision: decision.String, ProviderInstanceID: providerID.String}
 		}
 		item.CreatedAt = item.CreatedAt.UTC()
 		items = append(items, item)
@@ -234,6 +240,13 @@ WHERE v.skill_id=$1 ORDER BY v.created_at DESC`, skillID)
 	}
 	if err := rows.Err(); err != nil {
 		return AdminDetail{}, err
+	}
+	rows.Close()
+	for i := range versions {
+		versions[i].ApprovalInstance, err = s.latestApproval(ctx, versions[i].VersionID)
+		if err != nil {
+			return AdminDetail{}, err
+		}
 	}
 	return AdminDetail{Skill: skill, Versions: versions}, nil
 }
@@ -367,14 +380,17 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 	if version.SkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
-	var approver string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,'') FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&approver); err != nil {
+	var approver, provider, template string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,''),approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&approver, &provider, &template); err != nil {
 		return Skill{}, Version{}, err
 	}
-	if approver == "" && userID == "" {
+	if provider == "dingtalk" && userID != "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
-	if approver != "" {
+	if provider == "local" && approver == "" && userID == "" {
+		return Skill{}, Version{}, ErrApprovalRequired
+	}
+	if provider == "local" && approver != "" {
 		if userID != "" {
 			return Skill{}, Version{}, ErrApprovalRequired
 		}
@@ -386,10 +402,26 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 			return Skill{}, Version{}, ErrApprovalRequired
 		}
 	}
-	if err := tx.QueryRow(ctx, `SELECT skill_name,approval_status,COALESCE(approved_space_id,'') FROM skill_versions WHERE version_id=$1 FOR UPDATE`, versionID).Scan(&version.SkillName, &version.ApprovalStatus, &version.ApprovedSpaceID); err != nil {
+	var sourceID pgtype.Text
+	if err := tx.QueryRow(ctx, `SELECT skill_name,approval_status,COALESCE(approved_space_id,''),source_id FROM skill_versions WHERE version_id=$1 FOR UPDATE`, versionID).Scan(&version.SkillName, &version.ApprovalStatus, &version.ApprovedSpaceID, &sourceID); err != nil {
 		return Skill{}, Version{}, err
 	}
-	if approver == "" && userID != "" {
+	if provider == "dingtalk" {
+		if sourceID.Valid {
+			if _, err := tx.Exec(ctx, `UPDATE skill_versions SET approval_status='approved',approved_space_id=$2,reviewed_at=$3 WHERE version_id=$1`, versionID, skill.SpaceID, now); err != nil {
+				return Skill{}, Version{}, err
+			}
+			version.ApprovalStatus, version.ApprovedSpaceID, version.ReviewedAt = "approved", skill.SpaceID, &now
+		} else {
+			var valid bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM skill_version_approval_instances WHERE version_id=$1 AND space_id=$2 AND template_id=$3 AND package_sha256=$4 AND status='finished' AND decision='approved')`, versionID, skill.SpaceID, template, version.PackageSHA256).Scan(&valid); err != nil {
+				return Skill{}, Version{}, err
+			}
+			if !valid || version.ApprovalStatus != "approved" || version.ApprovedSpaceID != skill.SpaceID {
+				return Skill{}, Version{}, ErrApprovalRequired
+			}
+		}
+	} else if approver == "" && userID != "" {
 		var uploader string
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(uploaded_by_user_id,'') FROM skill_versions WHERE version_id=$1`, versionID).Scan(&uploader); err != nil {
 			return Skill{}, Version{}, err
@@ -458,6 +490,16 @@ func (s *PostgresStore) MoveSkillsToSpace(ctx context.Context, skillIDs []string
 	}
 	if found != int64(len(skillIDs)) {
 		return SkillSpaceMoveResult{}, ErrNotFound
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM skill_version_approval_instances ai JOIN skill_versions v ON v.version_id=ai.version_id JOIN skills s ON s.skill_id=v.skill_id WHERE s.skill_id=ANY($1) AND s.space_id<>$2 AND ai.status IN ('submitting','running','uncertain'))`, skillIDs, targetSpaceID).Scan(&active); err != nil {
+		return SkillSpaceMoveResult{}, err
+	}
+	if active {
+		return SkillSpaceMoveResult{}, ErrExternalApprovalConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE skill_version_approval_instances SET status='invalidated',updated_at=$3 WHERE version_id IN (SELECT v.version_id FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id WHERE s.skill_id=ANY($1) AND s.space_id<>$2) AND status<>'invalidated'`, skillIDs, targetSpaceID, now); err != nil {
+		return SkillSpaceMoveResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE skill_versions SET approval_status='pending',approved_space_id=NULL,reviewed_by=NULL,reviewed_at=NULL,review_comment='' WHERE skill_id IN (SELECT skill_id FROM skills WHERE skill_id=ANY($1) AND space_id<>$2)`, skillIDs, targetSpaceID); err != nil {
 		return SkillSpaceMoveResult{}, err

@@ -22,6 +22,16 @@ type Store interface {
 	DeleteUnpublished(context.Context, string) ([]Version, error)
 }
 
+type ExternalApprovalStore interface {
+	SetSpaceApproval(context.Context, string, string, string, string, time.Time) error
+	BeginApproval(context.Context, string, string, string, string, time.Time) (ApprovalInstance, Version, Skill, error)
+	FinishSubmission(context.Context, string, string, string, time.Time) (ApprovalInstance, error)
+	GetApproval(context.Context, string, string) (ApprovalInstance, error)
+	GetApprovalByID(context.Context, string) (ApprovalInstance, error)
+	ResolveApproval(context.Context, string, string, string, time.Time) (ApprovalInstance, error)
+	ApplyApprovalResult(context.Context, string, string, string, string, time.Time) error
+}
+
 type SpaceStore interface {
 	CreateSpace(context.Context, Space) (SpaceSummary, error)
 	UpdateSpace(context.Context, Space) (SpaceSummary, error)
@@ -49,20 +59,21 @@ type CreateVersionOptions struct {
 }
 
 type MemoryStore struct {
-	mu       sync.Mutex
-	skills   map[string]Skill
-	byName   map[string]string
-	versions map[string][]Version
-	spaces   map[string]Space
-	grants   map[string]map[string]map[string]bool
+	mu        sync.Mutex
+	skills    map[string]Skill
+	byName    map[string]string
+	versions  map[string][]Version
+	spaces    map[string]Space
+	grants    map[string]map[string]map[string]bool
+	approvals map[string][]ApprovalInstance
 }
 
 func NewMemoryStore() *MemoryStore {
 	now := time.Now().UTC()
 	return &MemoryStore{
 		skills: map[string]Skill{}, byName: map[string]string{}, versions: map[string][]Version{},
-		spaces: map[string]Space{DefaultSpaceID: {SpaceID: DefaultSpaceID, Name: "默认技能空间", CreatedBy: "system", UpdatedBy: "system", CreatedAt: now, UpdatedAt: now}},
-		grants: map[string]map[string]map[string]bool{},
+		spaces: map[string]Space{DefaultSpaceID: {SpaceID: DefaultSpaceID, Name: "默认技能空间", ApprovalProvider: "local", CreatedBy: "system", UpdatedBy: "system", CreatedAt: now, UpdatedAt: now}},
+		grants: map[string]map[string]map[string]bool{}, approvals: map[string][]ApprovalInstance{},
 	}
 }
 
@@ -154,12 +165,16 @@ func (s *MemoryStore) ListOwnPendingVersions(_ context.Context, userID string) (
 	items := []OwnPendingVersion{}
 	for _, skill := range s.skills {
 		space := s.spaces[skill.SpaceID]
-		if space.ApproverUserID != "" || !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionWrite) {
+		if (space.ApprovalProvider != "dingtalk" && space.ApproverUserID != "") || !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionWrite) {
 			continue
 		}
 		for _, version := range s.versions[skill.SkillID] {
-			if version.UploadedByUserID == userID && version.ApprovalStatus == "pending" {
-				items = append(items, OwnPendingVersion{SkillID: skill.SkillID, SpaceID: skill.SpaceID, Name: skill.Name, VersionID: version.VersionID, Version: version.Version, CreatedAt: version.CreatedAt})
+			if version.UploadedByUserID == userID && (space.ApprovalProvider == "dingtalk" && version.Source == nil && (skill.CurrentVersionID == nil || *skill.CurrentVersionID != version.VersionID) || space.ApprovalProvider != "dingtalk" && version.ApprovalStatus == "pending") {
+				item := OwnPendingVersion{SkillID: skill.SkillID, SpaceID: skill.SpaceID, Name: skill.Name, VersionID: version.VersionID, Version: version.Version, CreatedAt: version.CreatedAt, ApprovalProvider: space.ApprovalProvider}
+				if space.ApprovalProvider == "dingtalk" {
+					item.ApprovalInstance = s.latestApprovalLocked(version.VersionID)
+				}
+				items = append(items, item)
 			}
 		}
 	}
@@ -192,6 +207,9 @@ func (s *MemoryStore) GetAdmin(_ context.Context, id string) (AdminDetail, error
 		return AdminDetail{}, ErrNotFound
 	}
 	versions := append([]Version(nil), s.versions[id]...)
+	for i := range versions {
+		versions[i].ApprovalInstance = s.latestApprovalLocked(versions[i].VersionID)
+	}
 	return AdminDetail{Skill: s.adminSkill(skill), Versions: versions}, nil
 }
 
@@ -297,7 +315,17 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 	if targetSkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
-	if s.spaces[skill.SpaceID].ApproverUserID == "" && userID != "" {
+	space := s.spaces[skill.SpaceID]
+	if space.ApprovalProvider == "dingtalk" {
+		if userID != "" {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+		if target.Source != nil {
+			target.ApprovalStatus, target.ApprovedSpaceID, target.ReviewedAt = "approved", skill.SpaceID, &now
+		} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || !s.hasValidApprovalLocked(target, space) {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+	} else if space.ApproverUserID == "" && userID != "" {
 		if target.UploadedByUserID != userID {
 			return Skill{}, Version{}, ErrSelfPublishForbidden
 		}
@@ -307,7 +335,7 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 		target.ApprovalStatus, target.ApprovedSpaceID, target.ReviewedBy, target.ReviewedAt = "approved", skill.SpaceID, userID, &now
 	} else if userID != "" {
 		return Skill{}, Version{}, ErrApprovalRequired
-	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || s.spaces[skill.SpaceID].ApproverUserID == "" {
+	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || space.ApproverUserID == "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
 	if target.SkillName != "" && target.SkillName != skill.Name {
@@ -318,7 +346,7 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 		skill.Name = target.SkillName
 		s.byName[skill.Name] = skillID
 	}
-	if userID != "" {
+	if userID != "" || space.ApprovalProvider == "dingtalk" && target.Source != nil {
 		for i := range s.versions[skillID] {
 			if s.versions[skillID][i].VersionID == versionID {
 				s.versions[skillID][i] = target
@@ -346,6 +374,15 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 		if _, exists := s.skills[skillID]; !exists {
 			return SkillSpaceMoveResult{}, ErrNotFound
 		}
+		if s.skills[skillID].SpaceID != targetSpaceID {
+			for _, version := range s.versions[skillID] {
+				for _, item := range s.approvals[version.VersionID] {
+					if approvalActive(item.Status) {
+						return SkillSpaceMoveResult{}, ErrExternalApprovalConflict
+					}
+				}
+			}
+		}
 	}
 	for _, skillID := range skillIDs {
 		skill := s.skills[skillID]
@@ -354,6 +391,9 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 			continue
 		}
 		skill.SpaceID = targetSpaceID
+		for _, version := range s.versions[skillID] {
+			s.invalidateApprovalsLocked(version.VersionID, now)
+		}
 		skill.CurrentVersionID = nil
 		for i := range s.versions[skillID] {
 			s.versions[skillID][i].ApprovalStatus = "pending"

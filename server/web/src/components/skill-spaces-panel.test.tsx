@@ -10,7 +10,8 @@ import {
   removeSkillSpaceMember,
   updateSkillSpaceMember,
   listSkillSpaceApproverCandidates,
-  setSkillSpaceApprover
+  setSkillSpaceApprover,
+  setSkillSpaceApproval
 } from "@/lib/skillhub-api";
 
 import { SkillSpacesPanel } from "./skill-spaces-panel";
@@ -26,7 +27,8 @@ vi.mock("@/lib/skillhub-api", async () => {
     removeSkillSpaceMember: vi.fn(),
     updateSkillSpaceMember: vi.fn(),
     listSkillSpaceApproverCandidates: vi.fn(),
-    setSkillSpaceApprover: vi.fn()
+    setSkillSpaceApprover: vi.fn(),
+    setSkillSpaceApproval: vi.fn()
   };
 });
 
@@ -59,15 +61,28 @@ describe("SkillSpacesPanel", () => {
     renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
     fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
     const dialog = screen.getByRole("dialog", { name: "空间设置" });
-    expect(within(dialog).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("combobox", { name: "空间技能审批人" })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "开启审批" }));
     expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
-    const select = within(dialog).getByRole("combobox");
+    const select = within(dialog).getByRole("combobox", { name: "空间技能审批人" });
     await waitFor(() => expect(select).toBeEnabled());
     fireEvent.click(select);
     fireEvent.click(await screen.findByRole("option", { name: /李四/ }));
     fireEvent.submit(dialog.querySelector("form")!);
     await waitFor(() => expect(setSkillSpaceApprover).toHaveBeenCalledWith("skillspace_dev", "usr_2"));
+  });
+
+  it("requires a template when switching to DingTalk OA", async () => {
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const dialog = screen.getByRole("dialog", { name: "空间设置" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "审批方式" }));
+    fireEvent.click(await screen.findByRole("option", { name: "钉钉 OA" }));
+    expect(within(dialog).queryByRole("checkbox", { name: "开启审批" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /钉钉审批模板 ID/ }), { target: { value: "PROC-1" } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "dingtalk", "PROC-1"));
   });
 
   it("turns approval off without requiring a reviewer", async () => {

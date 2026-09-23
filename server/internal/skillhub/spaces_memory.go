@@ -9,6 +9,9 @@ import (
 func (s *MemoryStore) CreateSpace(_ context.Context, space Space) (SpaceSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if space.ApprovalProvider == "" {
+		space.ApprovalProvider = "local"
+	}
 	for _, item := range s.spaces {
 		if strings.EqualFold(item.Name, space.Name) {
 			return SpaceSummary{}, ErrSpaceNameConflict

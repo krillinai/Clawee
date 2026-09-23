@@ -80,6 +80,9 @@ sub2api:
   organization_user_id: 0
 
 dingtalk:
+  oa_enabled: false
+  oa_event_token: ""
+  oa_encoding_aes_key: ""
   enabled: false
   client_id: ""
   client_secret: ""

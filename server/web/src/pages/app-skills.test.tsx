@@ -11,7 +11,8 @@ import {
   listPublishedSkills,
   listPublishedSkillVersionFiles,
   uploadAppSkillVersion,
-  publishOwnAppSkillVersion
+  publishOwnAppSkillVersion,
+  submitSkillApproval
 } from "@/lib/skillhub-api";
 
 import { AppSkillsPage } from "./app-skills";
@@ -27,7 +28,8 @@ vi.mock("@/lib/skillhub-api", async () => {
     listPublishedSkills: vi.fn(),
     listPublishedSkillVersionFiles: vi.fn(),
     uploadAppSkillVersion: vi.fn(),
-    publishOwnAppSkillVersion: vi.fn()
+    publishOwnAppSkillVersion: vi.fn(),
+    submitSkillApproval: vi.fn()
   };
 });
 
@@ -166,6 +168,17 @@ describe("AppSkillsPage published detail", () => {
     fireEvent.click(await within(await screen.findByRole("region", { name: "待发布版本" })).findByRole("button", { name: "发布" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "发布 Skill" })).getByRole("button", { name: "确认发布" }));
     await waitFor(() => expect(publishOwnAppSkillVersionMock).toHaveBeenCalledWith("skill-2", "version-1"));
+  });
+
+  it("shows DingTalk approval state without offering self-publish", async () => {
+    listOwnPendingSkillVersionsMock.mockResolvedValue([{ skillId: "skill-2", spaceId: "space-write", name: "release-helper", versionId: "version-1", version: "1.0.0", createdAt: "2026-08-24T10:00:00Z", approvalProvider: "dingtalk", approvalInstance: null }]);
+    vi.mocked(submitSkillApproval).mockResolvedValue({ id: "application-1", status: "running", decision: "", provider_instance_id: "instance-1" });
+    renderPage("/app/skills");
+    const region = await screen.findByRole("region", { name: "待发布版本" });
+    expect(within(region).queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
+    expect(within(region).getByText("待提交")).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole("button", { name: "提交钉钉审批" }));
+    await waitFor(() => expect(submitSkillApproval).toHaveBeenCalledWith("skill-2", "version-1", true));
   });
 
   it("disables uploading when the user has no writable space", async () => {

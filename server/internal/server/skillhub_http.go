@@ -63,6 +63,11 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 	app.GET("/skills/package", skillOperationLog(opts.Logger, skillActionDownload), download)
 	app.POST("/skills/versions", skillOperationLog(opts.Logger, skillActionUpload), requireSkillUploadCaller(), handleSkillUpload(opts.SkillHubService, true))
 	app.GET("/skills/own-pending-versions", handleSkillOwnPendingVersions(opts.SkillHubService))
+	app.GET("/skills/approval-detail", handleAppSkillApprovalDetail(opts.SkillHubService))
+	app.GET("/skills/approval-version-files", handleAppSkillApprovalFiles(opts.SkillHubService))
+	app.GET("/skills/approval-version-file", handleAppSkillApprovalFile(opts.SkillHubService))
+	app.GET("/skills/approval-version-package", handleAppSkillApprovalPackage(opts.SkillHubService))
+	app.POST("/skills/versions/submit-approval", skillOperationLog(opts.Logger, "skill_approval_submit"), handleSubmitSkillApproval(opts, true))
 	app.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), handleSkillPublishOwn(opts.SkillHubService, true))
 	app.GET("/skill-spaces", handleAppSkillSpaces(opts.SkillHubService))
 
@@ -81,6 +86,9 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/skills/version-file", read, handleAdminSkillVersionFile(opts.SkillHubService))
 	admin.GET("/skills/version-package", skillOperationLog(opts.Logger, skillActionDownload), read, handleAdminSkillVersionPackage(opts.SkillHubService))
 	admin.POST("/skills/versions", skillOperationLog(opts.Logger, skillActionUpload), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSkillUpload(opts.SkillHubService, false))
+	admin.POST("/skills/versions/submit-approval", skillOperationLog(opts.Logger, "skill_approval_submit"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSubmitSkillApproval(opts, false))
+	admin.POST("/skills/versions/sync-approval", skillOperationLog(opts.Logger, "skill_approval_sync"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSyncSkillApproval(opts))
+	admin.POST("/skills/versions/resolve-approval", skillOperationLog(opts.Logger, "skill_approval_resolve"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleResolveSkillApproval(opts))
 	admin.DELETE("/skills", skillOperationLog(opts.Logger, "skill_delete"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillDelete), handleSkillDelete(opts.SkillHubService))
 	admin.PATCH("/skills/space", skillBatchMoveOperationLog(opts.Logger), skillRequirePermission(opts.RBACService, rbac.PermissionSkillMove), handleSkillMoveSpace(opts.SkillHubService))
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
@@ -498,7 +506,7 @@ func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		account, _ := currentAccount(c)
-		item.CanReview = space.ApproverUserID != "" && space.ApproverUserID == account.UserID
+		item.CanReview = space.ApprovalProvider != "dingtalk" && space.ApproverUserID != "" && space.ApproverUserID == account.UserID
 		c.JSON(http.StatusOK, item)
 	}
 }
@@ -951,6 +959,8 @@ func decodeSkillJSON(c *gin.Context, target any) error {
 func skillError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "技能中心操作失败"
 	switch {
+	case errors.Is(err, skillhub.ErrExternalApprovalConflict):
+		status, code, message = http.StatusConflict, "skill_external_approval_conflict", "审批申请正在进行或状态不允许此操作"
 	case errors.Is(err, skillhub.ErrApprovalRequired):
 		status, code, message = http.StatusConflict, "skill_approval_required", "该版本尚未通过所属技能空间审批人的审批"
 	case errors.Is(err, skillhub.ErrReviewForbidden):

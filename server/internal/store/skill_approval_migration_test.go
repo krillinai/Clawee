@@ -41,6 +41,9 @@ func TestSkillApprovalMigrationAndLifecycleOnPostgres(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 56); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := provider.UpTo(ctx, 62); err != nil {
+		t.Fatal(err)
+	}
 	store := skillhub.NewPostgresStore(pool)
 	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
 	detail, err := service.GetAdmin(ctx, "legacy")

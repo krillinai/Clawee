@@ -119,13 +119,23 @@ type DingTalkAvatarFetcher interface {
 	FetchAvatar(context.Context, string) ([]byte, string, error)
 }
 
+type DingTalkApprovalClient interface {
+	CreateApproval(context.Context, string, string, []dingtalk.ApprovalField) (string, error)
+	GetApproval(context.Context, string) (dingtalk.ApprovalDetail, error)
+}
+
 type DingTalkAuthOptions struct {
-	Enabled       bool
-	ProviderKey   string
-	RedirectURL   string
-	AutoProvision bool
-	StateTTL      time.Duration
-	Client        DingTalkClient
+	OAEnabled        bool
+	OAEventToken     string
+	OAEncodingAESKey string
+	OAClient         DingTalkApprovalClient
+	PublicBaseURL    string
+	Enabled          bool
+	ProviderKey      string
+	RedirectURL      string
+	AutoProvision    bool
+	StateTTL         time.Duration
+	Client           DingTalkClient
 }
 
 type AgentCollectorLookup interface {
@@ -209,6 +219,7 @@ func NewRouter(opts Options) http.Handler {
 	mountDingTalkBrowserRoutes(api, opts, authCookieConfig{
 		FrontendName: cookieName, AdminName: adminCookieName, Secure: opts.SessionCookieSecure,
 	})
+	mountSkillApprovalCallback(api, opts)
 	mountBilibiliCallbackRoute(api, opts)
 
 	mountAuthRoutes(authAPI, opts, authCookieConfig{
