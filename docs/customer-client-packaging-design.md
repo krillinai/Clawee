@@ -25,7 +25,7 @@
 
 ## 3. 私有仓库与代码同步
 
-使用现有 `/Users/mima000/codespace/krillinai/clawee-agent`，新增长期分支 `customer-packaging`，所有客户共用此分支。
+使用现有 `clawee-agent` 仓库，新增长期分支 `customer-packaging`，所有客户共用此分支。
 
 该仓库现在是旧的客户端独立目录结构，公共仓库已经采用 `client/` 和 `server/` 的整合结构。初始化时，在现有仓库中获取公共仓库指定提交，以该提交为起点创建新分支；旧分支和历史保留。不要把新代码逐目录覆盖到旧客户端结构，也不要合并两套发布 workflow。
 
