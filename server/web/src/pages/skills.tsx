@@ -112,7 +112,7 @@ export function SkillsPage() {
   const sourcesQuery = useQuery({ queryKey: skillSourcesKey, queryFn: listGitHubSources, enabled: skillSourceEnabled && activeTab === "sources" });
   const skills = skillsQuery.data ?? [];
   const selectedSpace = (spacesQuery.data ?? []).find((space) => space.spaceId === spaceId);
-  const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approverUserId));
+  const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approvers.length));
   const spaceSkills = skills.filter((item) => item.spaceId === spaceId);
   const filtered = useMemo(() => {
     const normalized = trimInput(query).toLowerCase();
@@ -454,7 +454,7 @@ export function SkillsPage() {
                   <FolderInput data-icon="inline-start" aria-hidden="true" />
                   调整空间（{selectedSkills.length}）
                 </Button> : null}
-                {canPublish && selectedSpace?.approverUserId ? <Button onClick={openBatchPublish} variant="outline">
+                {canPublish && selectedSpace?.approvers.length ? <Button onClick={openBatchPublish} variant="outline">
                   <PackageCheck data-icon="inline-start" aria-hidden="true" />
                   批量发布（{selectedSkills.length}）
                 </Button> : null}
@@ -547,7 +547,7 @@ export function SkillsPage() {
                         />
                       </TableCell>
                     ) : null}
-                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell className="font-medium">{item.name}{item.latestVersion?.localApproval ? <div className="text-xs font-normal text-muted-foreground">已通过 {item.latestVersion.localApproval.approved}/{item.latestVersion.localApproval.total}</div> : null}</TableCell>
                     <TableCell><Badge variant="outline">{item.spaceName}</Badge></TableCell>
                     <TableCell className="max-w-80 text-muted-foreground"><span className="block truncate" title={item.description}>{item.description}</span></TableCell>
                     <TableCell><PublicationBadge published={item.currentVersionId !== null} /></TableCell>
@@ -559,8 +559,8 @@ export function SkillsPage() {
                         const latest = item.latestVersion;
                         const pending = latest?.approvalStatus === "pending";
                         return <>
-                          {pending && selectedSpace?.approverUserId === account?.userId ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
-                          {pending && !selectedSpace?.approverUserId && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
+                          {pending && latest.localApproval?.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
+                          {pending && !selectedSpace?.approvers.length && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
                         </>;
                       })()}
                       {canUpload ? <Button aria-label={`替换上传 ${item.name}`} title="替换上传" size="icon" variant="ghost" onClick={() => openUpload(item)}><Upload /></Button> : null}

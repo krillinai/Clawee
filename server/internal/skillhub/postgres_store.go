@@ -34,6 +34,17 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		return Skill{}, Version{}, err
 	}
 	defer tx.Rollback(ctx)
+	// Serialize uploads against changes to the space's approver list.
+	var lockedSpace string
+	spaceID := proposed.SpaceID
+	if options.Resolution == VersionResolutionTarget {
+		if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1`, options.TargetSkillID).Scan(&spaceID); err != nil {
+			return Skill{}, Version{}, mapNotFound(err)
+		}
+	}
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&lockedSpace); err != nil {
+		return Skill{}, Version{}, mapSpaceNotFound(err)
+	}
 
 	skill := Skill{}
 	newSkill := false
@@ -89,6 +100,9 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 	default:
 		return Skill{}, Version{}, ErrInvalidRequest
 	}
+	if skill.SpaceID != lockedSpace {
+		return Skill{}, Version{}, ErrConflict
+	}
 
 	version.SkillID = skill.SkillID
 	version.SkillName, version.ApprovalStatus = proposed.Name, "pending"
@@ -104,6 +118,9 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName, version.SkillName)
 	if err != nil {
 		return Skill{}, Version{}, mapStoreError(err)
+	}
+	if err = createLocalRequest(ctx, tx, version.VersionID, skill.SpaceID, version.PackageSHA256, version.CreatedAt); err != nil {
+		return Skill{}, Version{}, err
 	}
 	eventType, actorKind := "skill.version_uploaded", "user"
 	var actorUserID any = version.UploadedByUserID
@@ -141,7 +158,20 @@ func (s *PostgresStore) ListAdmin(ctx context.Context) ([]Skill, error) {
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	progress, err := s.listLocalProgress(ctx, items)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].LatestVersion != nil {
+			items[i].LatestVersion.LocalApproval = progress[items[i].LatestVersion.VersionID]
+		}
+	}
+	return items, nil
 }
 
 func (s *PostgresStore) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
@@ -151,7 +181,7 @@ FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id
 JOIN skill_spaces sp ON sp.space_id=s.space_id
 JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=s.space_id AND g.user_id=$1 AND g.action='write'
 LEFT JOIN LATERAL (SELECT id,status,decision,provider_instance_id FROM skill_version_approval_instances WHERE version_id=v.version_id AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1) ai ON TRUE
-WHERE v.uploaded_by_user_id=$1 AND ((sp.approval_provider='dingtalk' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id) OR (sp.approval_provider='local' AND v.approval_status='pending' AND sp.approver_user_id IS NULL))
+WHERE v.uploaded_by_user_id=$1 AND ((sp.approval_provider='dingtalk' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id) OR (sp.approval_provider='local' AND v.approval_status='pending' AND NOT EXISTS(SELECT 1 FROM approval_config_approvers ac WHERE ac.scope_type='skill_space' AND ac.scope_id=sp.space_id)))
 ORDER BY v.created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -187,6 +217,9 @@ func (s *PostgresStore) DeleteUnpublished(ctx context.Context, id string) ([]Ver
 		return nil, ErrConflict
 	}
 	if _, err := tx.Exec(ctx, `UPDATE skill_source_items SET skill_id=NULL,last_version_id=NULL WHERE skill_id=$1`, id); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM approval_requests WHERE business_type='skill_version' AND business_id IN (SELECT version_id FROM skill_versions WHERE skill_id=$1)`, id); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `DELETE FROM skill_versions WHERE skill_id=$1 RETURNING package_path`, id)
@@ -244,6 +277,10 @@ WHERE v.skill_id=$1 ORDER BY v.created_at DESC`, skillID)
 	rows.Close()
 	for i := range versions {
 		versions[i].ApprovalInstance, err = s.latestApproval(ctx, versions[i].VersionID)
+		if err != nil {
+			return AdminDetail{}, err
+		}
+		versions[i].LocalApproval, err = s.localProgress(ctx, versions[i].VersionID, skill.SpaceID, versions[i].PackageSHA256)
 		if err != nil {
 			return AdminDetail{}, err
 		}
@@ -366,6 +403,14 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 		return Skill{}, Version{}, err
 	}
 	defer tx.Rollback(ctx)
+	var spaceID string
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1`, skillID).Scan(&spaceID); err != nil {
+		return Skill{}, Version{}, mapNotFound(err)
+	}
+	var provider, template string
+	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&provider, &template); err != nil {
+		return Skill{}, Version{}, err
+	}
 	var skill Skill
 	if err := scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID), &skill); err != nil {
 		return Skill{}, Version{}, mapNotFound(err)
@@ -380,25 +425,21 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 	if version.SkillID != skillID {
 		return Skill{}, Version{}, ErrConflict
 	}
-	var approver, provider, template string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(approver_user_id,''),approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&approver, &provider, &template); err != nil {
+	if skill.SpaceID != spaceID {
+		return Skill{}, Version{}, ErrConflict
+	}
+	var hasApprovers bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
 		return Skill{}, Version{}, err
 	}
 	if provider == "dingtalk" && userID != "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
-	if provider == "local" && approver == "" && userID == "" {
+	if provider == "local" && !hasApprovers && userID == "" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
-	if provider == "local" && approver != "" {
+	if provider == "local" && hasApprovers {
 		if userID != "" {
-			return Skill{}, Version{}, ErrApprovalRequired
-		}
-		var approverActive bool
-		if err := tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, approver).Scan(&approverActive); err != nil {
-			return Skill{}, Version{}, err
-		}
-		if !approverActive {
 			return Skill{}, Version{}, ErrApprovalRequired
 		}
 	}
@@ -421,7 +462,7 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 				return Skill{}, Version{}, ErrApprovalRequired
 			}
 		}
-	} else if approver == "" && userID != "" {
+	} else if !hasApprovers && userID != "" {
 		var uploader string
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(uploaded_by_user_id,'') FROM skill_versions WHERE version_id=$1`, versionID).Scan(&uploader); err != nil {
 			return Skill{}, Version{}, err
@@ -439,6 +480,15 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 	} else if version.ApprovalStatus != "approved" || version.ApprovedSpaceID != skill.SpaceID {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
+	if provider == "local" && hasApprovers {
+		var valid bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='approved')`, versionID, skill.SpaceID, version.PackageSHA256).Scan(&valid); err != nil {
+			return Skill{}, Version{}, err
+		}
+		if !valid {
+			return Skill{}, Version{}, ErrApprovalRequired
+		}
+	}
 	if version.SkillName != "" && version.SkillName != skill.Name {
 		if _, err := tx.Exec(ctx, `UPDATE skills SET name=$2 WHERE skill_id=$1`, skillID, version.SkillName); err != nil {
 			return Skill{}, Version{}, mapStoreError(err)
@@ -446,8 +496,18 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 		skill.Name = version.SkillName
 	}
 	if skill.CurrentVersionID == nil || *skill.CurrentVersionID != versionID {
+		previous := skill.CurrentVersionID
 		if _, err := tx.Exec(ctx, `UPDATE skills SET current_version_id=$2,updated_at=$3 WHERE skill_id=$1`, skillID, versionID, now); err != nil {
 			return Skill{}, Version{}, mapStoreError(err)
+		}
+		if provider == "local" && hasApprovers && previous != nil {
+			var digest string
+			if err := tx.QueryRow(ctx, `SELECT package_sha256 FROM skill_versions WHERE version_id=$1 FOR UPDATE`, *previous).Scan(&digest); err != nil {
+				return Skill{}, Version{}, err
+			}
+			if err := resetStaleLocalRequest(ctx, tx, *previous, spaceID, digest, now); err != nil {
+				return Skill{}, Version{}, err
+			}
 		}
 		value := versionID
 		skill.CurrentVersionID = &value
@@ -501,12 +561,42 @@ func (s *PostgresStore) MoveSkillsToSpace(ctx context.Context, skillIDs []string
 	if _, err := tx.Exec(ctx, `UPDATE skill_version_approval_instances SET status='invalidated',updated_at=$3 WHERE version_id IN (SELECT v.version_id FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id WHERE s.skill_id=ANY($1) AND s.space_id<>$2) AND status<>'invalidated'`, skillIDs, targetSpaceID, now); err != nil {
 		return SkillSpaceMoveResult{}, err
 	}
+	var movedIDs []string
+	rows, err = tx.Query(ctx, `SELECT v.version_id FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id WHERE s.skill_id=ANY($1) AND s.space_id<>$2`, skillIDs, targetSpaceID)
+	if err != nil {
+		return SkillSpaceMoveResult{}, err
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return SkillSpaceMoveResult{}, err
+		}
+		movedIDs = append(movedIDs, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return SkillSpaceMoveResult{}, err
+	}
+	if err = invalidateLocalRequests(ctx, tx, movedIDs, now); err != nil {
+		return SkillSpaceMoveResult{}, err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE skill_versions SET approval_status='pending',approved_space_id=NULL,reviewed_by=NULL,reviewed_at=NULL,review_comment='' WHERE skill_id IN (SELECT skill_id FROM skills WHERE skill_id=ANY($1) AND space_id<>$2)`, skillIDs, targetSpaceID); err != nil {
 		return SkillSpaceMoveResult{}, err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE skills SET space_id=$2,current_version_id=NULL,updated_at=$3 WHERE skill_id=ANY($1) AND space_id<>$2`, skillIDs, targetSpaceID, now)
 	if err != nil {
 		return SkillSpaceMoveResult{}, mapStoreError(err)
+	}
+	for _, id := range movedIDs {
+		var digest string
+		if err = tx.QueryRow(ctx, `SELECT package_sha256 FROM skill_versions WHERE version_id=$1`, id).Scan(&digest); err != nil {
+			return SkillSpaceMoveResult{}, err
+		}
+		if err = createLocalRequest(ctx, tx, id, targetSpaceID, digest, now); err != nil {
+			return SkillSpaceMoveResult{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return SkillSpaceMoveResult{}, err
@@ -521,9 +611,20 @@ func (s *PostgresStore) ClearCurrentVersion(ctx context.Context, skillID string,
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	var current pgtype.Text
-	if err := tx.QueryRow(ctx, `SELECT current_version_id FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID).Scan(&current); err != nil {
+	var spaceID, provider string
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1`, skillID).Scan(&spaceID); err != nil {
 		return nil, mapNotFound(err)
+	}
+	if err = tx.QueryRow(ctx, `SELECT approval_provider FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&provider); err != nil {
+		return nil, err
+	}
+	var current pgtype.Text
+	var actualSpace string
+	if err := tx.QueryRow(ctx, `SELECT current_version_id,space_id FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID).Scan(&current, &actualSpace); err != nil {
+		return nil, mapNotFound(err)
+	}
+	if actualSpace != spaceID {
+		return nil, ErrConflict
 	}
 	var cleared *Version
 	if current.Valid {
@@ -533,6 +634,17 @@ func (s *PostgresStore) ClearCurrentVersion(ctx context.Context, skillID string,
 		}
 		if _, err := tx.Exec(ctx, `UPDATE skills SET current_version_id=NULL,updated_at=$2 WHERE skill_id=$1`, skillID, now); err != nil {
 			return nil, err
+		}
+		if provider == "local" {
+			var hasApprovers bool
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
+				return nil, err
+			}
+			if hasApprovers {
+				if err = resetStaleLocalRequest(ctx, tx, version.VersionID, spaceID, version.PackageSHA256, now); err != nil {
+					return nil, err
+				}
+			}
 		}
 		cleared = &version
 	}
@@ -544,12 +656,12 @@ func (s *PostgresStore) ClearCurrentVersion(ctx context.Context, skillID string,
 
 const adminSkillSelect = `
 SELECT s.skill_id,s.space_id,sp.name,s.name,COALESCE(cv.description,lv.description,''),s.current_version_id,s.created_by,s.created_at,s.updated_at,
-COALESCE(lv.version_id,''),COALESCE(lv.version,''),COALESCE(lv.approval_status,''),COALESCE(lv.uploaded_by_user_id,'')
+COALESCE(lv.version_id,''),COALESCE(lv.version,''),COALESCE(lv.approval_status,''),COALESCE(lv.uploaded_by_user_id,''),COALESCE(lv.package_sha256,'')
 FROM skills s
 JOIN skill_spaces sp ON sp.space_id=s.space_id
 LEFT JOIN skill_versions cv ON cv.skill_id=s.skill_id AND cv.version_id=s.current_version_id
 LEFT JOIN LATERAL (
-  SELECT version_id,version,description,approval_status,uploaded_by_user_id FROM skill_versions WHERE skill_id=s.skill_id ORDER BY created_at DESC LIMIT 1
+  SELECT version_id,version,description,approval_status,uploaded_by_user_id,package_sha256 FROM skill_versions WHERE skill_id=s.skill_id ORDER BY created_at DESC LIMIT 1
 ) lv ON TRUE`
 
 const publishedSelect = `
@@ -577,7 +689,7 @@ func scanSkill(row rowScanner, skill *Skill) error {
 func scanAdminSkill(row rowScanner, skill *Skill) error {
 	var current pgtype.Text
 	var latest SkillLatestVersion
-	if err := row.Scan(&skill.SkillID, &skill.SpaceID, &skill.SpaceName, &skill.Name, &skill.Description, &current, &skill.CreatedBy, &skill.CreatedAt, &skill.UpdatedAt, &latest.VersionID, &latest.Version, &latest.ApprovalStatus, &latest.UploadedByUserID); err != nil {
+	if err := row.Scan(&skill.SkillID, &skill.SpaceID, &skill.SpaceName, &skill.Name, &skill.Description, &current, &skill.CreatedBy, &skill.CreatedAt, &skill.UpdatedAt, &latest.VersionID, &latest.Version, &latest.ApprovalStatus, &latest.UploadedByUserID, &latest.PackageSHA256); err != nil {
 		return err
 	}
 	if latest.VersionID != "" {

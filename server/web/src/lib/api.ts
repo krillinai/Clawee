@@ -130,7 +130,7 @@ async function responseAPIError(response: Response, fallback: string) {
   try {
     const body = await response.json();
     if (body && typeof body.error === "string" && body.error.trim()) {
-      return new APIError(body.error, response.status, "request_failed");
+      return new APIError(body.error, response.status, typeof body.code === "string" ? body.code : "request_failed", typeof body.affected_versions === "number" ? [{ affected_versions: body.affected_versions }] : []);
     }
     if (body?.error && typeof body.error.message === "string" && body.error.message.trim()) {
       const details = Array.isArray(body.error.details)

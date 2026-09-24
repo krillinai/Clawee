@@ -2,6 +2,7 @@ package skillhub
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -13,8 +14,8 @@ const spaceSummarySelect = `SELECT sp.space_id,sp.name,sp.description,sp.created
 (SELECT count(DISTINCT g.user_id) FROM data_resource_grants g WHERE g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.action='read'),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id AND s.current_version_id IS NOT NULL),
-COALESCE(sp.approver_user_id,''),COALESCE(a.name,''),sp.approval_provider,sp.external_approval_template_id
-FROM skill_spaces sp LEFT JOIN accounts a ON a.user_id=sp.approver_user_id`
+COALESCE((SELECT json_agg(json_build_object('user_id',c.user_id,'name',COALESCE(a.name,'')) ORDER BY a.name,c.user_id) FROM approval_config_approvers c JOIN accounts a ON a.user_id=c.user_id WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id),'[]'::json),sp.approval_provider,sp.external_approval_template_id
+FROM skill_spaces sp`
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -213,8 +214,12 @@ func (s *PostgresStore) RemoveSpaceMember(ctx context.Context, spaceID, userID s
 }
 
 func scanSpaceSummary(row rowScanner, item *SpaceSummary) error {
+	var approvers []byte
 	if err := row.Scan(&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt,
-		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &item.ApproverUserID, &item.ApproverName, &item.ApprovalProvider, &item.ExternalApprovalTemplateID); err != nil {
+		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &approvers, &item.ApprovalProvider, &item.ExternalApprovalTemplateID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(approvers, &item.Approvers); err != nil {
 		return err
 	}
 	item.CreatedAt, item.UpdatedAt = item.CreatedAt.UTC(), item.UpdatedAt.UTC()

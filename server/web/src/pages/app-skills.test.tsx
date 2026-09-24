@@ -214,6 +214,7 @@ function skillSpace(spaceId: string, name: string, actions: Array<"read" | "writ
   return {
     spaceId,
     name,
+    approvers: [],
     description: "",
     actions,
     memberCount: 1,

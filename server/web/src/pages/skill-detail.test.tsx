@@ -62,7 +62,7 @@ const detail: AdminSkillDetail = {
 
 describe("SkillDetailPage", () => {
   it("allows the uploader to publish a pending version when approval is off", async () => {
-    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 0, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", description: "", approvers: [], actions: [], memberCount: 0, skillCount: 1, publishedCount: 0, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });
     vi.mocked(publishOwnSkillVersion).mockResolvedValue({ skill: detail.skill, version: version({}) });
     renderPage(true);
@@ -73,7 +73,7 @@ describe("SkillDetailPage", () => {
   });
 
   it("keeps the reviewed update selected after approval so it can be published", async () => {
-    const pending = { ...detail, canReview: true, versions: detail.versions.map((item) => item.versionId === "version-3" ? { ...item, approvalStatus: "pending" as const } : item) };
+    const pending = { ...detail, canReview: true, versions: detail.versions.map((item) => item.versionId === "version-3" ? { ...item, approvalStatus: "pending" as const, localApproval: reviewerProgress() } : item) };
     getSkillMock.mockResolvedValueOnce(pending).mockResolvedValue({ ...detail, canReview: true });
     vi.mocked(reviewSkillVersion).mockResolvedValue(detail.versions[2]);
     renderPage();
@@ -85,7 +85,7 @@ describe("SkillDetailPage", () => {
   });
 
   it.each(["approved", "rejected"] as const)("allows the space reviewer to submit an %s decision", async (decision) => {
-    getSkillMock.mockResolvedValue({ ...detail, canReview: true, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ versionId: "pending-version", approvalStatus: "pending" })] });
+    getSkillMock.mockResolvedValue({ ...detail, canReview: true, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ versionId: "pending-version", approvalStatus: "pending", localApproval: reviewerProgress() })] });
     vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: decision }));
     renderPage();
     const approve = await screen.findByRole("button", { name: "审批通过" });
@@ -107,7 +107,7 @@ describe("SkillDetailPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", approverUserId: "reviewer", approverName: "审批人", description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 1, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", approvers: [{ userId: "reviewer", name: "审批人" }], description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 1, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue(detail);
     listSkillVersionFilesMock.mockImplementation(async (_skillId, versionId) => ({
       items: versionId === "version-3"
@@ -312,11 +312,15 @@ function renderPage(asUploader = false) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/admin/skills/detail?skill_id=skill-1"]}>
         <Routes>
-          <Route path="/admin/skills/detail" element={asUploader ? <AdminPermissionsProvider account={{ userId: "writer-id", email: "writer@example.com", name: "Writer", status: "active", adminPermissions: [permissions.skillRead] }}><SkillDetailPage /></AdminPermissionsProvider> : <SkillDetailPage />} />
+          <Route path="/admin/skills/detail" element={<AdminPermissionsProvider account={{ userId: asUploader ? "writer-id" : "reviewer", email: "reviewer@example.com", name: "审批人", status: "active", adminPermissions: asUploader ? [permissions.skillRead] : [permissions.skillRead, permissions.skillPublish, permissions.skillUnpublish] }}><SkillDetailPage /></AdminPermissionsProvider>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+function reviewerProgress(): NonNullable<SkillVersion["localApproval"]> {
+  return { status: "pending", total: 1, approved: 0, approvers: [{ userId: "reviewer", name: "审批人", status: "pending", comment: "", decidedAt: null }] };
 }
 
 function version(overrides: Partial<SkillVersion>): SkillVersion {

@@ -4,8 +4,203 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
+
+func TestLocalMultiApprovalSnapshotAndPublishGate(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	makeVersion := func(number string) MutationResult {
+		t.Helper()
+		result, err := service.UploadVersion(ctx, UploadVersionInput{Version: number, CreatedBy: "writer", UploadedByUserID: "writer", Origin: "admin_upload", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("multi-review")}}))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	first := makeVersion("1")
+	count, err := service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "bob"}, false, "admin")
+	if err != nil || count != 1 {
+		t.Fatalf("confirmation = %d, %v", count, err)
+	}
+	if detail, err := service.GetAdmin(ctx, first.Skill.SkillID); err != nil || detail.Versions[0].LocalApproval != nil {
+		t.Fatalf("preflight changed approval: %#v %v", detail, err)
+	}
+	if _, err = service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "bob"}, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "alice"}, true, "admin"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("duplicate approvers: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("partial approval published: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate vote: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "mallory", true, ""); !errors.Is(err, ErrReviewForbidden) {
+		t.Fatalf("outsider vote: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, "同意"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
+		t.Fatal(err)
+	}
+
+	second := makeVersion("2")
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for _, id := range []string{"alice", "bob"} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			_, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, id, true, "")
+			results <- err
+		}(id)
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	detail, err := service.GetAdmin(ctx, first.Skill.SkillID)
+	if err != nil || detail.Versions[0].LocalApproval.Approved != 2 {
+		t.Fatalf("concurrent votes: %#v %v", detail, err)
+	}
+	count, err = service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "carol"}, false, "admin")
+	if err != nil || count != 1 {
+		t.Fatalf("reset confirmation: %d %v", count, err)
+	}
+	if _, err = service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "carol"}, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("stale approval published: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); !errors.Is(err, ErrReviewForbidden) {
+		t.Fatalf("old reviewer voted: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "carol", false, "修订"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("rejected version changed: %v", err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("rejected version published: %v", err)
+	}
+}
+
+func TestPublishedVersionNeedsNewApprovalAfterApproversChangeAndUnpublish(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(Config{Store: store, PackageRoot: t.TempDir()})
+	result, err := service.UploadVersion(ctx, UploadVersionInput{Version: "1", CreatedBy: "writer", UploadedByUserID: "writer", Origin: "admin_upload", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("republish-review")}}))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetSpaceApprovers(ctx, result.Skill.SpaceID, "local", "", []string{"alice"}, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetSpaceApprovers(ctx, result.Skill.SpaceID, "local", "", []string{"bob"}, false, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.GetPublished(ctx, result.Skill.SkillID); err != nil {
+		t.Fatalf("configuration took published version offline: %v", err)
+	}
+	detail, err := service.GetAdmin(ctx, result.Skill.SkillID)
+	if err != nil || detail.Versions[0].LocalApproval == nil || detail.Versions[0].LocalApproval.Status != "approved" || detail.Versions[0].LocalApproval.Approvers[0].UserID != "alice" {
+		t.Fatalf("published approval history was lost: %#v %v", detail, err)
+	}
+	if _, err = service.ClearCurrentVersion(ctx, result.Skill.SkillID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("old approval reused: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrReviewForbidden) {
+		t.Fatalf("old reviewer reused: %v", err)
+	}
+	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "bob", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ClearCurrentVersion(ctx, result.Skill.SkillID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); err != nil {
+		t.Fatalf("unchanged approvers required another review: %v", err)
+	}
+	for _, config := range []struct {
+		provider, template string
+		approvers          []string
+	}{
+		{provider: "local"},
+		{provider: "dingtalk", template: "PROC"},
+	} {
+		if _, err = service.SetSpaceApprovers(ctx, result.Skill.SpaceID, config.provider, config.template, config.approvers, true, "admin"); err != nil {
+			t.Fatal(err)
+		}
+		detail, err = service.GetAdmin(ctx, result.Skill.SkillID)
+		if err != nil || detail.Versions[0].LocalApproval != nil || store.localApprovals[result.Version.VersionID][len(store.localApprovals[result.Version.VersionID])-1].Status != "approved" {
+			t.Fatalf("published approval history after %s: %#v %v", config.provider, detail, err)
+		}
+	}
+}
+
+func TestReplacingCurrentVersionResetsStalePublishedApproval(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	upload := func(version string) MutationResult {
+		t.Helper()
+		result, err := service.UploadVersion(ctx, UploadVersionInput{Version: version, CreatedBy: "writer", UploadedByUserID: "writer", Origin: "admin_upload", Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("replace-current")}}))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	first := upload("1")
+	if _, err := service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice"}, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	second := upload("2")
+	if _, err := service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"bob"}, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("superseded version reused old approval: %v", err)
+	}
+	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
+		t.Fatalf("superseded version was not resubmitted: %v", err)
+	}
+}
 
 func uploadApprovedVersion(service *Service, ctx context.Context, input UploadVersionInput) (MutationResult, error) {
 	input.Origin = "admin_upload"
@@ -140,6 +335,10 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("rejected publish: %v", err)
 	}
+	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("rejected version changed: %v", err)
+	}
+	first = upload("approval-test", "1.1", first.Skill.SkillID, true)
 	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); err != nil {
 		t.Fatal(err)
 	}

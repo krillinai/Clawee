@@ -578,7 +578,17 @@ func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		account, _ := currentAccount(c)
-		item.CanReview = space.ApprovalProvider != "dingtalk" && space.ApproverUserID != "" && space.ApproverUserID == account.UserID
+		if space.ApprovalProvider == "local" {
+			for _, version := range item.Versions {
+				if version.LocalApproval != nil && version.LocalApproval.Status == "pending" {
+					for _, reviewer := range version.LocalApproval.Approvers {
+						if reviewer.UserID == account.UserID && reviewer.Status == "pending" {
+							item.CanReview = true
+						}
+					}
+				}
+			}
+		}
 		c.JSON(http.StatusOK, item)
 	}
 }
@@ -887,6 +897,11 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 		if !checkAdminSkillRead(c, service, request.SkillID) {
 			return
 		}
+		detail, err := service.GetAdmin(c.Request.Context(), request.SkillID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
 		c.Set(skillReviewDecisionKey, request.Decision)
 		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
 		if err != nil {
@@ -894,7 +909,7 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		c.Set(skillSHAKey, version.PackageSHA256)
-		c.Set(skillSpaceIDKey, version.ApprovedSpaceID)
+		c.Set(skillSpaceIDKey, detail.Skill.SpaceID)
 		c.JSON(http.StatusOK, version)
 	}
 }

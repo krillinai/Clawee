@@ -107,41 +107,8 @@ func (s *MemoryStore) hasValidApprovalLocked(version Version, space Space) bool 
 }
 
 func (s *MemoryStore) SetSpaceApproval(_ context.Context, spaceID, provider, template, operator string, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	space, ok := s.spaces[spaceID]
-	if !ok {
-		return ErrSpaceNotFound
-	}
-	if space.ApprovalProvider == provider && space.ExternalApprovalTemplateID == template {
-		return nil
-	}
-	for _, skill := range s.skills {
-		if skill.SpaceID == spaceID {
-			for _, version := range s.versions[skill.SkillID] {
-				for _, item := range s.approvals[version.VersionID] {
-					if approvalActive(item.Status) {
-						return ErrExternalApprovalConflict
-					}
-				}
-			}
-		}
-	}
-	for _, skill := range s.skills {
-		if skill.SpaceID != spaceID {
-			continue
-		}
-		for i := range s.versions[skill.SkillID] {
-			version := &s.versions[skill.SkillID][i]
-			s.invalidateApprovalsLocked(version.VersionID, now)
-			if skill.CurrentVersionID == nil || *skill.CurrentVersionID != version.VersionID {
-				version.ApprovalStatus, version.ApprovedSpaceID, version.ReviewedBy, version.ReviewedAt, version.ReviewComment = "pending", "", "", nil, ""
-			}
-		}
-	}
-	space.ApprovalProvider, space.ExternalApprovalTemplateID, space.UpdatedBy, space.UpdatedAt = provider, template, operator, now
-	s.spaces[spaceID] = space
-	return nil
+	_, err := s.SetSpaceApprovers(context.Background(), spaceID, provider, template, nil, true, operator, now)
+	return err
 }
 
 func (s *MemoryStore) BeginApproval(_ context.Context, skillID, versionID, userID, externalUserID string, now time.Time) (ApprovalInstance, Version, Skill, error) {

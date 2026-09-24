@@ -176,6 +176,9 @@ func (s *MemoryStore) hasDefaultSpaceGrantsLocked() bool {
 }
 
 func (s *MemoryStore) spaceSummaryLocked(space Space) SpaceSummary {
+	if space.Approvers == nil {
+		space.Approvers = []Approver{}
+	}
 	var summary SpaceSummary
 	summary.Space = space
 	for _, spaces := range s.grants {

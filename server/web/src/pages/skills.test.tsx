@@ -75,12 +75,12 @@ const sourceSummary: GitHubSourceSummary = {
   discoveredCount: 7
 };
 const defaultSpace: SkillSpace = {
-  spaceId: "skillspace_default", name: "默认技能空间", description: "", approverUserId: "usr_reviewer", actions: [],
+  spaceId: "skillspace_default", name: "默认技能空间", description: "", approvers: [{ userId: "usr_reviewer", name: "审批人" }], actions: [],
   memberCount: 0, skillCount: 2, publishedCount: 1, createdBy: "system", updatedBy: "system",
   createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z"
 };
 const productSpace: SkillSpace = {
-  spaceId: "skillspace_product", name: "产品技能空间", description: "", actions: [],
+  spaceId: "skillspace_product", name: "产品技能空间", description: "", approvers: [], actions: [],
   memberCount: 0, skillCount: 0, publishedCount: 0, createdBy: "usr_admin", updatedBy: "usr_admin",
   createdAt: "2026-08-24T08:00:00Z", updatedAt: "2026-08-24T08:00:00Z"
 };
@@ -100,8 +100,8 @@ describe("SkillsPage", () => {
   });
 
   it("offers quick approval only to the space reviewer", async () => {
-    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "usr_reader" }, productSpace]);
-    listSkillsMock.mockResolvedValue([published, { ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin" } }]);
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approvers: [{ userId: "usr_reader", name: "审批人" }] }, productSpace]);
+    listSkillsMock.mockResolvedValue([published, { ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending", comment: "", decidedAt: null }] } } }]);
     vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: "approved" }));
     renderPage([permissions.skillRead]);
     fireEvent.click(await screen.findByRole("button", { name: "审批通过 release-notes" }));
@@ -111,7 +111,7 @@ describe("SkillsPage", () => {
   });
 
   it("lets the uploader publish when the space has no reviewer", async () => {
-    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "" }, productSpace]);
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approvers: [] }, productSpace]);
     listSkillsMock.mockResolvedValue([{ ...published, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_reader" } }, unpublished]);
     vi.mocked(publishOwnSkillVersion).mockResolvedValue({ skill: published, version: version({}) });
     renderPage([permissions.skillRead]);
@@ -121,7 +121,7 @@ describe("SkillsPage", () => {
   });
 
   it("hides selection when approval is off and moving is unavailable", async () => {
-    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approverUserId: "" }, productSpace]);
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approvers: [] }, productSpace]);
     renderPage([permissions.skillRead, permissions.skillPublish]);
     await screen.findByText("code-review");
     expect(screen.queryByRole("checkbox", { name: "选择当前可见的 Skill" })).not.toBeInTheDocument();

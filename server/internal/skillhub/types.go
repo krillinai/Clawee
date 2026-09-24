@@ -55,10 +55,12 @@ type Skill struct {
 }
 
 type SkillLatestVersion struct {
-	VersionID        string `json:"version_id"`
-	Version          string `json:"version"`
-	ApprovalStatus   string `json:"approval_status"`
-	UploadedByUserID string `json:"uploaded_by_user_id"`
+	LocalApproval    *LocalApproval `json:"local_approval,omitempty"`
+	PackageSHA256    string         `json:"-"`
+	VersionID        string         `json:"version_id"`
+	Version          string         `json:"version"`
+	ApprovalStatus   string         `json:"approval_status"`
+	UploadedByUserID string         `json:"uploaded_by_user_id"`
 }
 
 type OwnPendingVersion struct {
@@ -88,6 +90,7 @@ type ApprovalInstance struct {
 }
 
 type Version struct {
+	LocalApproval     *LocalApproval         `json:"local_approval,omitempty"`
 	SkillName         string                 `json:"skill_name"`
 	ApprovalStatus    string                 `json:"approval_status"`
 	ApprovedSpaceID   string                 `json:"-"`
@@ -107,6 +110,25 @@ type Version struct {
 	UploadedByName    string                 `json:"-"`
 	CreatedAt         time.Time              `json:"created_at"`
 	ApprovalInstance  *ApprovalInstance      `json:"approval_instance"`
+}
+
+type Approver struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+}
+
+type ApprovalDecision struct {
+	Approver
+	Status    string     `json:"status"`
+	Comment   string     `json:"comment"`
+	DecidedAt *time.Time `json:"decided_at"`
+}
+
+type LocalApproval struct {
+	Status    string             `json:"status"`
+	Total     int                `json:"total"`
+	Approved  int                `json:"approved"`
+	Approvers []ApprovalDecision `json:"approvers"`
 }
 
 type AdminDetail struct {
@@ -185,18 +207,17 @@ type CreateVersionInput struct {
 }
 
 type Space struct {
-	ApprovalProvider           string    `json:"approval_provider"`
-	ExternalApprovalTemplateID string    `json:"external_approval_template_id"`
-	ApproverUserID             string    `json:"approver_user_id"`
-	ApproverName               string    `json:"approver_name"`
-	SpaceID                    string    `json:"space_id"`
-	Name                       string    `json:"name"`
-	Description                string    `json:"description"`
-	CreatedBy                  string    `json:"created_by,omitempty"`
-	UpdatedBy                  string    `json:"updated_by,omitempty"`
-	CreatedAt                  time.Time `json:"created_at,omitempty"`
-	UpdatedAt                  time.Time `json:"updated_at"`
-	Actions                    []string  `json:"actions,omitempty"`
+	Approvers                  []Approver `json:"approvers"`
+	ApprovalProvider           string     `json:"approval_provider"`
+	ExternalApprovalTemplateID string     `json:"external_approval_template_id"`
+	SpaceID                    string     `json:"space_id"`
+	Name                       string     `json:"name"`
+	Description                string     `json:"description"`
+	CreatedBy                  string     `json:"created_by,omitempty"`
+	UpdatedBy                  string     `json:"updated_by,omitempty"`
+	CreatedAt                  time.Time  `json:"created_at,omitempty"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
+	Actions                    []string   `json:"actions,omitempty"`
 }
 
 type SpaceSummary struct {

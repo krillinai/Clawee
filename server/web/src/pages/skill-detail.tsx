@@ -85,7 +85,7 @@ type SkillDetailManagement = {
   onSubmitApproval?: (version: SkillVersion) => void;
   onSyncApproval?: (version: SkillVersion) => void;
   onBeginResolveApproval?: (version: SkillVersion) => void;
-  canReview?: boolean;
+  canReviewVersion?: (version: SkillVersion) => boolean;
   canSelfPublish?: (version: SkillVersion) => boolean;
   reviewPending?: boolean;
   onReview?: (version: SkillVersion, decision: "approved" | "rejected") => void;
@@ -134,7 +134,7 @@ export function SkillDetailPage() {
   });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const space = spacesQuery.data?.find((item) => item.spaceId === detailQuery.data?.skill.spaceId);
-  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !space.approverUserId && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
+  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !space.approvers.length && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
   const canSubmitApproval = (version: SkillVersion) => Boolean(space?.approvalProvider === "dingtalk" && !version.source && version.versionId !== detailQuery.data?.skill.currentVersionId && account?.userId === version.uploadedByUserId && (!version.approvalInstance || ["failed", "terminated"].includes(version.approvalInstance.status) || version.approvalInstance.status === "finished" && version.approvalInstance.decision === "rejected"));
   const approvalMutation = useMutation({
     mutationFn: (input: { version: SkillVersion; action: "submit" | "sync" | "not_created" | "bind_instance"; providerId?: string }) => {
@@ -211,11 +211,11 @@ export function SkillDetailPage() {
           onSubmitApproval: (version) => approvalMutation.mutate({ version, action: "submit" }),
           onSyncApproval: (version) => approvalMutation.mutate({ version, action: "sync" }),
           onBeginResolveApproval: (version) => { approvalMutation.reset(); setProviderInstanceId(""); setResolveTarget(version); },
-          canReview: detail.canReview,
+          canReviewVersion: (version) => version.localApproval?.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending"),
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
           onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
-          canPublish: canPublish && Boolean(space?.approverUserId || space?.approvalProvider === "dingtalk"),
+          canPublish: canPublish && Boolean(space?.approvers.length || space?.approvalProvider === "dingtalk"),
           canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,
@@ -306,7 +306,7 @@ export function SkillDetailView({
     () => [...detail.versions].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)),
     [detail.versions]
   );
-  const pendingReviewVersion = management?.canReview ? sortedVersions.find((item) => item.approvalStatus === "pending") : undefined;
+  const pendingReviewVersion = sortedVersions.find((item) => management?.canReviewVersion?.(item));
   const defaultVersionId = pendingReviewVersion?.versionId ?? (sortedVersions.some((item) => item.versionId === initialVersionId) ? initialVersionId : null) ?? detail.skill.currentVersionId ?? sortedVersions[0]?.versionId ?? null;
   const viewedVersion = sortedVersions.find((item) => item.versionId === selectedVersionId)
     ?? sortedVersions.find((item) => item.versionId === defaultVersionId)
@@ -420,9 +420,10 @@ export function SkillDetailView({
                     {management.canPublish && ["submitting", "uncertain"].includes(viewedVersion.approvalInstance?.status ?? "") ? <Button disabled={management.approvalPending} size="sm" variant="outline" onClick={() => management.onBeginResolveApproval?.(viewedVersion)}>核对申请</Button> : null}
                   </div> : null}
                   {viewedVersion.skillName && viewedVersion.skillName !== detail.skill.name ? <p className="break-all text-xs text-muted-foreground">待发布名称：{viewedVersion.skillName}</p> : null}
-                  {viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
-                  {viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
-                  {management.canReview && viewedVersion.approvalStatus !== "approved" ? <div className="flex flex-wrap gap-2">
+                  {viewedVersion.localApproval ? <div className="grid gap-1 text-sm"><span>已通过 {viewedVersion.localApproval.approved}/{viewedVersion.localApproval.total}</span>{viewedVersion.localApproval.approvers.map((person) => <span key={person.userId}>{person.name || person.userId} · {person.status === "approved" ? "通过" : person.status === "rejected" ? "驳回" : "待审"}{person.decidedAt ? ` · ${formatDateTime(person.decidedAt)}` : ""}{person.comment ? ` · ${person.comment}` : ""}</span>)}</div> : null}
+                  {!viewedVersion.localApproval && viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
+                  {!viewedVersion.localApproval && viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
+                  {management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "approved"); }} size="sm" variant="primary"><Check data-icon="inline-start" aria-hidden="true" />审批通过</Button>
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "rejected"); }} size="sm" variant="destructive"><X data-icon="inline-start" aria-hidden="true" />驳回</Button>
                   </div> : null}
@@ -700,7 +701,7 @@ function VersionHistory({
                   <span className="min-w-0 break-all font-mono text-xs">{item.version}</span>
                   {current ? <Badge variant="success">当前</Badge> : null}
                   {latest ? <Badge variant="secondary">最新上传</Badge> : null}
-                  {showSourceEvidence && !(externalApproval && item.source) ? <ApprovalBadge status={item.approvalStatus} /> : null}
+                  {showSourceEvidence && !(externalApproval && item.source) ? <><ApprovalBadge status={item.approvalStatus} />{item.localApproval ? <span className="text-xs text-muted-foreground">已通过 {item.localApproval.approved}/{item.localApproval.total}</span> : null}</> : null}
                 </div>
               </TableCell>
               <TableCell className="max-w-72 text-muted-foreground"><span className="block truncate" title={item.changelog || undefined}>{item.changelog || "-"}</span></TableCell>

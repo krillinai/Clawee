@@ -38,35 +38,8 @@ func (s *PostgresStore) latestApproval(ctx context.Context, versionID string) (*
 }
 
 func (s *PostgresStore) SetSpaceApproval(ctx context.Context, spaceID, provider, template, operator string, now time.Time) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	var previousProvider, previousTemplate string
-	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR UPDATE`, spaceID).Scan(&previousProvider, &previousTemplate); err != nil {
-		return mapSpaceNotFound(err)
-	}
-	if previousProvider == provider && previousTemplate == template {
-		return nil
-	}
-	var active bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM skill_version_approval_instances ai JOIN skill_versions v ON v.version_id=ai.version_id JOIN skills s ON s.skill_id=v.skill_id WHERE s.space_id=$1 AND ai.status IN ('submitting','running','uncertain'))`, spaceID).Scan(&active); err != nil {
-		return err
-	}
-	if active {
-		return ErrExternalApprovalConflict
-	}
-	if _, err = tx.Exec(ctx, `UPDATE skill_version_approval_instances SET status='invalidated',updated_at=$2 WHERE space_id=$1 AND status<>'invalidated'`, spaceID, now); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE skill_versions v SET approval_status='pending',approved_space_id=NULL,reviewed_by=NULL,reviewed_at=NULL,review_comment='' FROM skills s WHERE s.skill_id=v.skill_id AND s.space_id=$1 AND s.current_version_id IS DISTINCT FROM v.version_id`, spaceID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE skill_spaces SET approval_provider=$2,external_approval_template_id=$3,updated_by=$4,updated_at=$5 WHERE space_id=$1`, spaceID, provider, template, operator, now); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err := s.SetSpaceApprovers(ctx, spaceID, provider, template, nil, true, operator, now)
+	return err
 }
 
 func (s *PostgresStore) BeginApproval(ctx context.Context, skillID, versionID, userID, externalUserID string, now time.Time) (ApprovalInstance, Version, Skill, error) {
@@ -75,13 +48,20 @@ func (s *PostgresStore) BeginApproval(ctx context.Context, skillID, versionID, u
 		return ApprovalInstance{}, Version{}, Skill{}, err
 	}
 	defer tx.Rollback(ctx)
+	var spaceID string
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1`, skillID).Scan(&spaceID); err != nil {
+		return ApprovalInstance{}, Version{}, Skill{}, mapNotFound(err)
+	}
+	var provider, template string
+	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&provider, &template); err != nil {
+		return ApprovalInstance{}, Version{}, Skill{}, err
+	}
 	var skill Skill
 	if err = scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID), &skill); err != nil {
 		return ApprovalInstance{}, Version{}, Skill{}, mapNotFound(err)
 	}
-	var provider, template string
-	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, skill.SpaceID).Scan(&provider, &template); err != nil {
-		return ApprovalInstance{}, Version{}, Skill{}, err
+	if skill.SpaceID != spaceID {
+		return ApprovalInstance{}, Version{}, Skill{}, ErrConflict
 	}
 	if provider != "dingtalk" {
 		return ApprovalInstance{}, Version{}, Skill{}, ErrInvalidRequest
@@ -160,8 +140,19 @@ func (s *PostgresStore) ApplyApprovalResult(ctx context.Context, providerID, tem
 		return err
 	}
 	var spaceID string
-	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID).Scan(&spaceID); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1`, skillID).Scan(&spaceID); err != nil {
 		return err
+	}
+	var provider, currentTemplate, sha string
+	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&provider, &currentTemplate); err != nil {
+		return err
+	}
+	var actualSpace string
+	if err = tx.QueryRow(ctx, `SELECT space_id FROM skills WHERE skill_id=$1 FOR UPDATE`, skillID).Scan(&actualSpace); err != nil {
+		return err
+	}
+	if actualSpace != spaceID {
+		return ErrConflict
 	}
 	item, err := scanApproval(tx.QueryRow(ctx, `SELECT `+approvalColumns+` FROM skill_version_approval_instances WHERE provider_instance_id=$1 FOR UPDATE`, providerID))
 	if err != nil {
@@ -169,10 +160,6 @@ func (s *PostgresStore) ApplyApprovalResult(ctx context.Context, providerID, tem
 	}
 	if item.Status != "running" || item.TemplateID != template || item.SpaceID != spaceID {
 		return nil
-	}
-	var provider, currentTemplate, sha string
-	if err = tx.QueryRow(ctx, `SELECT approval_provider,external_approval_template_id FROM skill_spaces WHERE space_id=$1 FOR SHARE`, spaceID).Scan(&provider, &currentTemplate); err != nil {
-		return err
 	}
 	if err = tx.QueryRow(ctx, `SELECT package_sha256 FROM skill_versions WHERE version_id=$1 FOR UPDATE`, item.VersionID).Scan(&sha); err != nil {
 		return err

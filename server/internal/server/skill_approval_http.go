@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/dingtalk"
+	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
 )
 
@@ -57,9 +58,11 @@ func mountSkillApprovalCallback(api *gin.RouterGroup, opts Options) {
 func handleSkillSpaceApproval(opts Options) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			SpaceID  string `json:"space_id"`
-			Provider string `json:"approval_provider"`
-			Template string `json:"external_approval_template_id"`
+			SpaceID         string   `json:"space_id"`
+			Provider        string   `json:"approval_provider"`
+			Template        string   `json:"external_approval_template_id"`
+			ApproverUserIDs []string `json:"approver_user_ids"`
+			Confirmed       bool     `json:"confirm_reset"`
 		}
 		if decodeSkillJSON(c, &req) != nil {
 			skillError(c, skillhub.ErrInvalidRequest)
@@ -74,8 +77,33 @@ func handleSkillSpaceApproval(opts Options) gin.HandlerFunc {
 		}
 		account, _ := currentAccount(c)
 		c.Set(skillSpaceIDKey, req.SpaceID)
-		if err := opts.SkillHubService.SetSpaceApproval(c.Request.Context(), req.SpaceID, req.Provider, req.Template, account.UserID); err != nil {
+		for _, id := range req.ApproverUserIDs {
+			target, err := opts.AccountService.Account(c.Request.Context(), id)
+			if err != nil || target.Status != accounts.StatusActive {
+				skillError(c, skillhub.ErrMemberNotFound)
+				return
+			}
+			allowed, err := opts.RBACService.HasPermission(c.Request.Context(), id, rbac.PermissionSkillRead)
+			if err != nil {
+				skillError(c, err)
+				return
+			}
+			if !allowed {
+				skillError(c, skillhub.ErrInvalidRequest)
+				return
+			}
+			if err := opts.SkillHubService.CheckSpaceRead(c.Request.Context(), id, req.SpaceID); err != nil {
+				skillError(c, skillhub.ErrMemberNotFound)
+				return
+			}
+		}
+		count, err := opts.SkillHubService.SetSpaceApprovers(c.Request.Context(), req.SpaceID, req.Provider, req.Template, req.ApproverUserIDs, req.Confirmed, account.UserID)
+		if err != nil {
 			skillError(c, err)
+			return
+		}
+		if count > 0 && !req.Confirmed {
+			c.JSON(http.StatusConflict, gin.H{"error": gin.H{"code": "approval_reset_required", "message": "修改审批配置需重新审批未发布版本", "details": []gin.H{{"affected_versions": count}}}})
 			return
 		}
 		c.Status(http.StatusNoContent)
