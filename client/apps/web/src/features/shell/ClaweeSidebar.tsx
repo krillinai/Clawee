@@ -37,7 +37,6 @@ import {
   type LucideIcon
 } from 'lucide-react';
 import type { ActiveView } from '../../app/app-state.js';
-import { CLAWEE_APP_VERSION } from '../../app-version.js';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import type { ColorMode } from '../../styles/color-mode.js';
 import type {
@@ -383,34 +382,16 @@ export function ClaweeSidebar(props: {
                   alt="KrillinAI"
                 />
               </span>
-              <span className="sidebar-brand-product">
-                <span className="sidebar-logo-word">Clawee</span>
-                <span className="sidebar-brand-version">
-                  v{CLAWEE_APP_VERSION}
-                </span>
-              </span>
             </div>
-            <div className="sidebar-brand-actions">
-              <button
-                className="sidebar-collapse-button sidebar-search-button"
-                type="button"
-                aria-label="搜索"
-                title="搜索"
-                aria-current={props.activeView === 'search' ? 'page' : undefined}
-                onClick={() => props.onOpenView('search')}
-              >
-                <Search size={18} strokeWidth={1.85} aria-hidden="true" />
-              </button>
-              <button
-                className="sidebar-collapse-button"
-                type="button"
-                aria-label="收起侧栏"
-                title="收起侧栏"
-                onClick={props.onToggleCollapsed}
-              >
-                <PanelLeftClose size={18} strokeWidth={1.85} aria-hidden="true" />
-              </button>
-            </div>
+            <button
+              className="sidebar-collapse-button sidebar-brand-collapse-button"
+              type="button"
+              aria-label="收起侧栏"
+              title="收起侧栏"
+              onClick={props.onToggleCollapsed}
+            >
+              <PanelLeftClose size={18} strokeWidth={1.85} aria-hidden="true" />
+            </button>
           </>
         )}
       </div>
@@ -439,76 +420,84 @@ export function ClaweeSidebar(props: {
           <section className="sidebar-section" aria-labelledby="clawee-projects-heading">
             <div className="sidebar-section-heading">
               <h2 id="clawee-projects-heading">项目</h2>
-              {props.onAddProject || props.onAddProjectDirectory || props.onManageProjects ? (
-                <div className="sidebar-section-actions">
-                  {props.onAddProject || props.onAddProjectDirectory ? (
-                    <div className="sidebar-project-menu-shell" ref={projectAddMenuRef}>
-                      <button
-                        type="button"
-                        className="sidebar-section-action"
-                        aria-label={hasMultipleProjectAddActions ? '添加项目' : '创建项目'}
-                        title={hasMultipleProjectAddActions ? '添加项目' : '创建项目'}
-                        aria-haspopup={hasMultipleProjectAddActions ? 'menu' : undefined}
-                        aria-expanded={hasMultipleProjectAddActions ? projectAddMenuOpen : undefined}
-                        onClick={() => {
-                          if (!hasMultipleProjectAddActions) {
-                            if (props.onAddProject !== undefined) {
-                              props.onAddProject();
-                            } else {
-                              void props.onAddProjectDirectory?.();
-                            }
-                            return;
-                          }
-                          setProjectAddMenuOpen(current => !current);
-                        }}
-                      >
-                        <FolderPlus size={16} strokeWidth={1.9} aria-hidden="true" />
-                      </button>
-                      {projectAddMenuOpen ? (
-                        <div
-                          className="sidebar-project-menu sidebar-project-add-menu"
-                          role="menu"
-                          aria-label="添加项目"
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setProjectAddMenuOpen(false);
-                              props.onAddProject?.();
-                            }}
-                          >
-                            <FolderPlus size={15} strokeWidth={1.9} aria-hidden="true" />
-                            <span>新建项目</span>
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setProjectAddMenuOpen(false);
-                              void props.onAddProjectDirectory?.();
-                            }}
-                          >
-                            <FolderOpen size={15} strokeWidth={1.9} aria-hidden="true" />
-                            <span>使用现有文件夹</span>
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {props.onManageProjects ? (
+              <div className="sidebar-section-actions">
+                {props.onAddProject || props.onAddProjectDirectory ? (
+                  <div className="sidebar-project-menu-shell" ref={projectAddMenuRef}>
                     <button
                       type="button"
                       className="sidebar-section-action"
-                      aria-label="管理项目"
-                      title="管理项目"
-                      onClick={props.onManageProjects}
+                      aria-label={hasMultipleProjectAddActions ? '添加项目' : '创建项目'}
+                      title={hasMultipleProjectAddActions ? '添加项目' : '创建项目'}
+                      aria-haspopup={hasMultipleProjectAddActions ? 'menu' : undefined}
+                      aria-expanded={hasMultipleProjectAddActions ? projectAddMenuOpen : undefined}
+                      onClick={() => {
+                        if (!hasMultipleProjectAddActions) {
+                          if (props.onAddProject !== undefined) {
+                            props.onAddProject();
+                          } else {
+                            void props.onAddProjectDirectory?.();
+                          }
+                          return;
+                        }
+                        setProjectAddMenuOpen(current => !current);
+                      }}
                     >
-                      <Settings2 size={16} strokeWidth={1.9} aria-hidden="true" />
+                      <FolderPlus size={16} strokeWidth={1.9} aria-hidden="true" />
                     </button>
-                  ) : null}
-                </div>
-              ) : null}
+                    {projectAddMenuOpen ? (
+                      <div
+                        className="sidebar-project-menu sidebar-project-add-menu"
+                        role="menu"
+                        aria-label="添加项目"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setProjectAddMenuOpen(false);
+                            props.onAddProject?.();
+                          }}
+                        >
+                          <FolderPlus size={15} strokeWidth={1.9} aria-hidden="true" />
+                          <span>新建项目</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setProjectAddMenuOpen(false);
+                            void props.onAddProjectDirectory?.();
+                          }}
+                        >
+                          <FolderOpen size={15} strokeWidth={1.9} aria-hidden="true" />
+                          <span>使用现有文件夹</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {props.onManageProjects ? (
+                  <button
+                    type="button"
+                    className="sidebar-section-action"
+                    aria-label="管理项目"
+                    title="管理项目"
+                    onClick={props.onManageProjects}
+                  >
+                    <Settings2 size={16} strokeWidth={1.9} aria-hidden="true" />
+                  </button>
+                ) : null}
+                <button
+                  className="sidebar-section-action sidebar-search-button"
+                  type="button"
+                  aria-label="搜索"
+                  title="搜索"
+                  aria-current={props.activeView === 'search' ? 'page' : undefined}
+                  onClick={() => props.onOpenView('search')}
+                >
+                  <Search size={16} strokeWidth={1.9} aria-hidden="true" />
+                </button>
+              </div>
             </div>
             <div className="sidebar-project-tree" aria-label="项目">
               {props.projects.map((project) => {

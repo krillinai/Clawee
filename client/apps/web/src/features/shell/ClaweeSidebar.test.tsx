@@ -2,7 +2,6 @@ import type { ComponentProps } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { CLAWEE_APP_VERSION } from '../../app-version.js';
 import { ClaweeSidebar } from './ClaweeSidebar.js';
 
 const projects = [
@@ -105,6 +104,8 @@ describe('ClaweeSidebar', () => {
     const expandedLogo = screen.getByRole('img', { name: 'KrillinAI' });
     expect(expandedLogo).toHaveAttribute('src', 'blob:expanded');
     expect(expandedLogo.parentElement).toHaveClass('sidebar-brand-lockup-logo');
+    expect(expandedLogo.closest('.sidebar-logo-lockup')?.nextElementSibling)
+      .toBe(screen.getByRole('button', { name: '收起侧栏' }));
 
     rerender(
       <ClaweeSidebar
@@ -136,10 +137,7 @@ describe('ClaweeSidebar', () => {
       'src',
       '/krillinai-wordmark-white.png'
     );
-    expect(screen.getByText('Clawee')).toHaveClass('sidebar-logo-word');
-    expect(screen.getByText(`v${CLAWEE_APP_VERSION}`)).toHaveClass(
-      'sidebar-brand-version'
-    );
+    expect(screen.queryByText('Clawee')).not.toBeInTheDocument();
     expect(screen.queryByText('Coca-Cola')).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Clawee' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收起侧栏' })).toBeInTheDocument();
@@ -152,7 +150,8 @@ describe('ClaweeSidebar', () => {
     expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '工作流' }));
     expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: 'Agent动态' }));
     const searchButton = screen.getByRole('button', { name: '搜索' });
-    expect(searchButton.nextElementSibling).toBe(screen.getByRole('button', { name: '收起侧栏' }));
+    expect(searchButton.parentElement).toHaveClass('sidebar-section-actions');
+    expect(searchButton.previousElementSibling).toBeNull();
     expect(primaryActions).not.toContainElement(searchButton);
     expect(screen.getByRole('button', { name: '定时任务' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '任务' })).not.toBeInTheDocument();
@@ -403,7 +402,6 @@ describe('ClaweeSidebar', () => {
 
     expect(screen.getByRole('img', { name: 'KrillinAI' }))
       .toHaveAttribute('src', '/krillinai-wordmark-black.png');
-    expect(screen.getByText('Clawee')).toHaveClass('sidebar-logo-word');
     expect(screen.queryByRole('img', { name: 'Clawee' })).not.toBeInTheDocument();
   });
 
@@ -925,7 +923,7 @@ describe('ClaweeSidebar', () => {
     expect(onNewConversation).toHaveBeenCalledTimes(1);
   });
 
-  it('opens search from the header action', async () => {
+  it('opens search from the project heading', async () => {
     const user = userEvent.setup();
     const onOpenView = vi.fn();
 
@@ -936,7 +934,14 @@ describe('ClaweeSidebar', () => {
     expect(onOpenView).toHaveBeenCalledWith('search');
   });
 
-  it('marks the header search action as selected', () => {
+  it('places search after the project actions when they are available', () => {
+    renderSidebar({ onAddProject: vi.fn(), onManageProjects: vi.fn() });
+
+    expect(screen.getByRole('button', { name: '搜索' }).previousElementSibling)
+      .toBe(screen.getByRole('button', { name: '管理项目' }));
+  });
+
+  it('marks the project heading search action as selected', () => {
     renderSidebar({ activeView: 'search' });
 
     expect(screen.getByRole('button', { name: '搜索' })).toHaveAttribute('aria-current', 'page');

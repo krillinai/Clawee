@@ -518,21 +518,21 @@ describe('app CSS visual contracts', () => {
     ).toContain('border: 0;');
   });
 
-  it('uses a compact wordmark image in the expanded sidebar and centers the collapsed logo button', () => {
+  it('keeps the expanded wordmark and collapse control in one row', () => {
+    const brand = cssBlock('.sidebar-brand');
     const brandButton = cssBlock('.sidebar-brand-button');
     const logoLockup = cssBlock('.sidebar-logo-lockup');
     const wordmark = cssBlock('.sidebar-brand-lockup-logo');
     const logoMark = cssBlock('.sidebar-logo-mark');
-    const productName = cssBlock('.sidebar-logo-word');
-    const productVersion = cssBlock('.sidebar-brand-version');
+    const collapseButton = cssBlock('.sidebar-collapse-button.sidebar-brand-collapse-button');
 
     expect(brandButton).toContain('padding: 0;');
-    expect(logoLockup).toContain('justify-content: flex-start;');
-    expect(logoLockup).toContain('padding-top: 10px;');
-    expect(wordmark).toContain('width: 72px;');
-    expect(wordmark).toContain('height: 17px;');
-    expect(productName).toContain('font-size: 12px;');
-    expect(productVersion).toContain('font-size: 12px;');
+    expect(brand).toContain('align-items: center;');
+    expect(logoLockup).toContain('flex: 1 1 auto;');
+    expect(logoLockup).toContain('height: 34px;');
+    expect(wordmark).toContain('width: 100%;');
+    expect(wordmark).toContain('height: 100%;');
+    expect(collapseButton).toContain('width: 28px;');
     expect(appCss).not.toContain('.sidebar-logo-full');
     expect(appCss).toMatch(
       /\n\.sidebar-collapse-button\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/
@@ -549,10 +549,11 @@ describe('app CSS visual contracts', () => {
     const projectRowShell = cssBlock('.sidebar-project-row-shell');
     const projectActions = cssBlock('.sidebar-project-actions');
 
-    expect(sectionHeading).toContain('grid-template-columns: minmax(0, 1fr) 58px;');
+    expect(sectionHeading).toContain('grid-template-columns: minmax(0, 1fr) 88px;');
     expect(sectionHeading).toContain('padding-right: 0;');
-    expect(sectionActions).toContain('width: 58px;');
-    expect(sectionActions).toContain('grid-template-columns: repeat(2, 28px);');
+    expect(sectionActions).toContain('width: 88px;');
+    expect(sectionActions).toContain('grid-template-columns: repeat(3, 28px);');
+    expect(cssBlock('.sidebar-section-actions .sidebar-search-button')).toContain('grid-column: 3;');
     expect(projectRowShell).toContain('grid-template-columns: minmax(0, 1fr) 58px;');
     expect(appCss).not.toContain('.sidebar-project-toggle');
     expect(projectActions).toContain('width: 58px;');

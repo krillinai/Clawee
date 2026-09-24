@@ -5280,29 +5280,20 @@ html.is-pane-resizing * {
   min-width: 0;
   min-height: 42px;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  gap: 4px;
   padding: 0 8px 0 6px;
 }
 
 .sidebar-logo-lockup {
   flex: 1 1 auto;
   min-width: 0;
-  height: 42px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 2px;
-  padding-top: 10px;
+  height: 34px;
 }
 
-.sidebar-brand-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.sidebar-collapse-button.sidebar-brand-collapse-button {
+  width: 28px;
+  height: 34px;
 }
 
 .sidebar-logo-image {
@@ -5312,9 +5303,8 @@ html.is-pane-resizing * {
 
 .sidebar-brand-lockup-logo {
   display: block;
-  width: 72px;
-  max-width: 100%;
-  height: 17px;
+  width: 100%;
+  height: 100%;
 }
 
 .sidebar-brand-lockup-logo .sidebar-logo-image {
@@ -5322,26 +5312,6 @@ html.is-pane-resizing * {
   height: 100%;
   object-fit: contain;
   object-position: left center;
-}
-
-.sidebar-brand-product {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  line-height: 12px;
-  white-space: nowrap;
-}
-
-.sidebar-logo-word {
-  color: color-mix(in srgb, var(--text) 55%, transparent);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.sidebar-brand-version {
-  color: color-mix(in srgb, var(--text) 32%, transparent);
-  font-size: 12px;
-  font-weight: 400;
 }
 
 .sidebar-logo-mark {
@@ -5586,18 +5556,22 @@ html.is-pane-resizing * {
 .sidebar-section-heading {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px;
+  grid-template-columns: minmax(0, 1fr) 88px;
   align-items: center;
   gap: 2px;
   padding-right: 0;
 }
 
 .sidebar-section-actions {
-  width: 58px;
+  width: 88px;
   display: grid;
-  grid-template-columns: repeat(2, 28px);
+  grid-template-columns: repeat(3, 28px);
   align-items: center;
   gap: 2px;
+}
+
+.sidebar-section-actions .sidebar-search-button {
+  grid-column: 3;
 }
 
 .sidebar-section-action,
@@ -6173,6 +6147,7 @@ html.is-pane-resizing * {
 }
 
 .clawee-sidebar[data-collapsed="true"] .sidebar-brand {
+  align-items: center;
   justify-content: center;
   padding: 0;
 }
