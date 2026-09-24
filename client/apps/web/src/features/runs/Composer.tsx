@@ -233,6 +233,8 @@ export function Composer(props: {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const slashMenuRootRef = useRef<HTMLDivElement | null>(null);
   const slashMenuRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuRootRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const connectorUpdatingIdRef = useRef<string>();
   const projectSearchRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -607,12 +609,15 @@ export function Composer(props: {
   }, [filteredSlashCommands.length, slashTrigger?.activeIndex]);
 
   useLayoutEffect(() => {
-    if (!slashMenuOpen) return;
+    if (!slashMenuOpen && openMenu !== 'model') return;
 
-    const menu = slashMenuRef.current;
-    const root = slashMenuRootRef.current;
+    const menu = slashMenuOpen ? slashMenuRef.current : modelMenuRef.current;
+    const root = slashMenuOpen ? slashMenuRootRef.current : modelMenuRootRef.current;
     if (menu === null || root === null) return;
 
+    const heightProperty = slashMenuOpen
+      ? '--composer-slash-menu-available-height'
+      : '--composer-model-menu-available-height';
     const clippingAncestors = findClippingAncestors(root);
     const updateAvailableHeight = () => {
       const boundaryTop = clippingAncestors.reduce(
@@ -628,10 +633,7 @@ export function Composer(props: {
           - COMPOSER_POPOVER_VIEWPORT_MARGIN
         )
       );
-      menu.style.setProperty(
-        '--composer-slash-menu-available-height',
-        `${availableHeight}px`
-      );
+      menu.style.setProperty(heightProperty, `${availableHeight}px`);
     };
 
     updateAvailableHeight();
@@ -651,9 +653,9 @@ export function Composer(props: {
       visualViewport?.removeEventListener('resize', updateAvailableHeight);
       visualViewport?.removeEventListener('scroll', updateAvailableHeight);
       resizeObserver?.disconnect();
-      menu.style.removeProperty('--composer-slash-menu-available-height');
+      menu.style.removeProperty(heightProperty);
     };
-  }, [slashMenuOpen]);
+  }, [slashMenuOpen, openMenu]);
 
   const updatePrompt = (value: string, caret: number) => {
     promptRevisionRef.current += 1;
@@ -1567,7 +1569,7 @@ export function Composer(props: {
         </div>
 
         <div className="composer-right-actions">
-          <div className="composer-control-wrap" data-composer-menu-root="model">
+          <div className="composer-control-wrap" data-composer-menu-root="model" ref={modelMenuRootRef}>
             <button
               className="composer-model-button"
               type="button"
@@ -1583,7 +1585,7 @@ export function Composer(props: {
               <ChevronDown aria-hidden="true" size={13} />
             </button>
             {openMenu === 'model' ? (
-              <div className="composer-popover composer-model-menu" role="menu" aria-label="模型">
+              <div className="composer-popover composer-model-menu" role="menu" aria-label="模型" ref={modelMenuRef}>
                 <div className="composer-model-section" role="presentation">
                   <button
                     className="composer-model-section-label"

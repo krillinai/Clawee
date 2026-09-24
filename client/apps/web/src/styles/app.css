@@ -4695,7 +4695,7 @@ html.is-pane-resizing * {
 
 .composer-model-menu {
   width: min(320px, calc(100vw - 24px));
-  max-height: min(520px, 70dvh);
+  max-height: min(520px, 70dvh, var(--composer-model-menu-available-height, 520px));
   overflow-y: auto;
 }
 

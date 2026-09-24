@@ -1815,6 +1815,40 @@ describe('Composer', () => {
     getBoundingClientRect.mockRestore();
   });
 
+  it('keeps the model menu within the visible space above the composer', async () => {
+    const user = userEvent.setup();
+    let modelTop = 430;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function getRect(this: HTMLElement) {
+        const top = this.dataset.modelMenuBoundary === 'true'
+          ? 48
+          : this.dataset.composerMenuRoot === 'model'
+            ? modelTop
+            : 0;
+        return {
+          x: 0, y: top, width: 800, height: 100,
+          top, right: 800, bottom: top + 100, left: 0,
+          toJSON: () => ({})
+        };
+      });
+
+    render(
+      <div data-model-menu-boundary="true" style={{ overflow: 'hidden' }}>
+        <Composer {...defaultProps} models={codexModels} />
+      </div>
+    );
+
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.6 Sol' }));
+    const menu = screen.getByRole('menu', { name: '模型' });
+    expect(menu.style.getPropertyValue('--composer-model-menu-available-height'))
+      .toBe('362px');
+
+    modelTop = 300;
+    fireEvent(window, new Event('resize'));
+    expect(menu.style.getPropertyValue('--composer-model-menu-available-height'))
+      .toBe('232px');
+  });
+
   it('renders queued messages above the input and forwards Steer and delete actions', async () => {
     const user = userEvent.setup();
     const onSteerQueuedRun = vi.fn();
