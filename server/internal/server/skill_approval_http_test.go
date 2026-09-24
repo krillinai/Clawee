@@ -131,6 +131,10 @@ func TestSkillSelfPublishHTTPChecksUploader(t *testing.T) {
 	if _, err := service.SetSpaceMember(ctx, created.Skill.SpaceID, readerID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, "admin", false); err != nil {
 		t.Fatal(err)
 	}
+	uploaderID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", uploader, http.StatusOK), "data", "account", "user_id")
+	if _, err := service.SetSpaceMember(ctx, created.Skill.SpaceID, uploaderID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, "admin", false); err != nil {
+		t.Fatal(err)
+	}
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, endpoint, payload, reader), http.StatusForbidden, "skill_self_publish_forbidden")
 	doJSON(t, router, http.MethodPost, endpoint, payload, uploader, http.StatusOK)
 }

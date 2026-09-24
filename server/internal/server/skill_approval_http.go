@@ -65,6 +65,9 @@ func handleSkillSpaceApproval(opts Options) gin.HandlerFunc {
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
+		if !checkAdminSpaceRead(c, opts.SkillHubService, req.SpaceID) {
+			return
+		}
 		if req.Provider == "dingtalk" && (!opts.DingTalkAuth.OAEnabled || opts.DingTalkAuth.OAClient == nil) {
 			c.JSON(http.StatusConflict, gin.H{"code": "oa_not_configured", "error": "钉钉 OA 尚未配置完整"})
 			return
@@ -137,6 +140,9 @@ func handleSubmitSkillApproval(opts Options, app bool) gin.HandlerFunc {
 		var req setCurrentVersionRequest
 		if decodeSkillJSON(c, &req) != nil || !opts.DingTalkAuth.OAEnabled || opts.DingTalkAuth.OAClient == nil {
 			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		if !app && !checkAdminSkillRead(c, opts.SkillHubService, req.SkillID) {
 			return
 		}
 		account, _ := currentAccount(c)
@@ -212,6 +218,9 @@ func handleSyncSkillApproval(opts Options) gin.HandlerFunc {
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
+		if !checkAdminSkillRead(c, opts.SkillHubService, req.SkillID) {
+			return
+		}
 		c.Set(skillIDKey, req.SkillID)
 		c.Set(skillVersionKey, req.VersionID)
 		item, err := opts.SkillHubService.GetApproval(c.Request.Context(), req.SkillID, req.VersionID)
@@ -237,13 +246,16 @@ func handleResolveSkillApproval(opts Options) gin.HandlerFunc {
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
+		current, err := opts.SkillHubService.GetApprovalByID(c.Request.Context(), req.ID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		if !checkAdminSpaceRead(c, opts.SkillHubService, current.SpaceID) {
+			return
+		}
 		var detail dingtalk.ApprovalDetail
 		if req.Resolution == "bind_instance" {
-			current, err := opts.SkillHubService.GetApprovalByID(c.Request.Context(), req.ID)
-			if err != nil {
-				skillError(c, err)
-				return
-			}
 			if current.Status != "submitting" && current.Status != "uncertain" {
 				skillError(c, skillhub.ErrExternalApprovalConflict)
 				return

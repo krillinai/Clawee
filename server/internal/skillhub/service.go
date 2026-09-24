@@ -250,6 +250,28 @@ func (s *Service) ListAdmin(ctx context.Context) ([]Skill, error) {
 	return s.store.ListAdmin(ctx)
 }
 
+func (s *Service) ListAdminForUser(ctx context.Context, userID string) ([]Skill, error) {
+	spaces, err := s.ListAuthorizedSpaces(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.ListAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool, len(spaces))
+	for _, space := range spaces {
+		visible[space.SpaceID] = true
+	}
+	result := make([]Skill, 0, len(items))
+	for _, item := range items {
+		if visible[item.SpaceID] {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
 func (s *Service) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, ErrInvalidRequest

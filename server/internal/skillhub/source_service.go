@@ -86,6 +86,17 @@ func (s *GitHubSourceService) Get(ctx context.Context, sourceID string) (GitHubS
 	return publicSource(source), nil
 }
 
+func (s *GitHubSourceService) GetItem(ctx context.Context, itemID string) (SourceItem, error) {
+	if !s.ready() || strings.TrimSpace(itemID) == "" {
+		return SourceItem{}, ErrInvalidRequest
+	}
+	item, err := s.store.GetSourceItem(ctx, strings.TrimSpace(itemID))
+	if err != nil {
+		return SourceItem{}, safeSourceStoreError(err)
+	}
+	return item, nil
+}
+
 func (s *GitHubSourceService) GetToken(ctx context.Context, sourceID string) (string, error) {
 	source, err := s.sourceForMutation(ctx, sourceID)
 	if err != nil {

@@ -97,6 +97,9 @@ func handleSkillSpaceApprover(service *skillhub.Service, accountService *account
 		request.UserID = strings.TrimSpace(request.UserID)
 		c.Set(skillSpaceIDKey, request.SpaceID)
 		c.Set(skillApproverKey, request.UserID)
+		if !checkAdminSpaceRead(c, service, request.SpaceID) {
+			return
+		}
 		if request.UserID != "" {
 			target, err := accountService.Account(c.Request.Context(), request.UserID)
 			if err != nil || target.Status != accounts.StatusActive {
@@ -143,7 +146,8 @@ func handleAppSkillSpaces(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillSpaces(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		items, err := service.ListSpaces(c.Request.Context())
+		account, _ := currentAccount(c)
+		items, err := service.ListSpacesForUser(c.Request.Context(), account.UserID)
 		if err != nil {
 			skillError(c, err)
 			return
@@ -154,6 +158,9 @@ func handleAdminSkillSpaces(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillSpace(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSpaceRead(c, service, c.Query("space_id")) {
+			return
+		}
 		item, err := service.GetSpace(c.Request.Context(), c.Query("space_id"))
 		if err != nil {
 			skillError(c, err)
@@ -187,6 +194,9 @@ func handleAdminUpdateSkillSpace(service *skillhub.Service) gin.HandlerFunc {
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
+		if !checkAdminSpaceRead(c, service, request.SpaceID) {
+			return
+		}
 		account, _ := currentAccount(c)
 		item, err := service.UpdateSpace(c.Request.Context(), request.SpaceID, request.Name, request.Description, account.UserID)
 		if err != nil {
@@ -199,6 +209,9 @@ func handleAdminUpdateSkillSpace(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillSpaceMembers(service *skillhub.Service, accountService *accounts.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSpaceRead(c, service, c.Query("space_id")) {
+			return
+		}
 		grants, err := service.ListSpaceMembers(c.Request.Context(), c.Query("space_id"))
 		if err != nil {
 			skillError(c, err)
@@ -228,6 +241,9 @@ func handleAdminSkillSpaceMembers(service *skillhub.Service, accountService *acc
 
 func handleAdminSkillSpaceCandidates(service *skillhub.Service, accountService *accounts.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSpaceRead(c, service, c.Query("space_id")) {
+			return
+		}
 		members, err := service.ListSpaceMembers(c.Request.Context(), c.Query("space_id"))
 		if err != nil {
 			skillError(c, err)
@@ -258,11 +274,23 @@ func handleAdminSkillSpaceCandidates(service *skillhub.Service, accountService *
 	}
 }
 
+func checkAdminSpaceRead(c *gin.Context, service *skillhub.Service, spaceID string) bool {
+	account, _ := currentAccount(c)
+	if err := service.CheckSpaceRead(c.Request.Context(), account.UserID, spaceID); err != nil {
+		skillError(c, err)
+		return false
+	}
+	return true
+}
+
 func handleAdminSetSkillSpaceMember(service *skillhub.Service, accountService *accounts.Service, replace bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request skillSpaceMemberRequest
 		if decodeSkillJSON(c, &request) != nil {
 			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		if !checkAdminSpaceRead(c, service, request.SpaceID) {
 			return
 		}
 		if len(request.Actions) == 0 {
@@ -292,6 +320,9 @@ func handleAdminRemoveSkillSpaceMember(service *skillhub.Service) gin.HandlerFun
 		var request skillSpaceMemberRequest
 		if decodeSkillJSON(c, &request) != nil {
 			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		if !checkAdminSpaceRead(c, service, request.SpaceID) {
 			return
 		}
 		if err := service.RemoveSpaceMember(c.Request.Context(), request.SpaceID, request.UserID); err != nil {

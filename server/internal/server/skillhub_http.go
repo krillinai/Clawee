@@ -98,19 +98,19 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	if opts.SkillSourceService == nil {
 		return
 	}
-	admin.GET("/skill-sources", read, handleSkillSourceList(opts.SkillSourceService))
-	admin.POST("/skill-sources", skillSourceOperationLog(opts.Logger, skillSourceActionCreate), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceCreate), handleSkillSourceCreate(opts.SkillSourceService))
-	admin.GET("/skill-sources/detail", read, handleSkillSourceDetail(opts.SkillSourceService))
-	admin.GET("/skill-sources/token", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceTokenReveal), handleSkillSourceToken(opts.SkillSourceService))
-	admin.PUT("/skill-sources", skillSourceOperationLog(opts.Logger, skillSourceActionUpdate), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceUpdate), handleSkillSourceUpdate(opts.SkillSourceService))
-	admin.POST("/skill-sources/sync", skillSourceOperationLog(opts.Logger, skillSourceActionSync), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceSync), handleSkillSourceSync(opts.SkillSourceService))
-	admin.POST("/skill-sources/scan-local", skillSourceOperationLog(opts.Logger, skillSourceActionLocalScan), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceScan), handleSkillSourceLocalScan(opts.SkillSourceService))
-	admin.POST("/skill-sources/disable", skillSourceOperationLog(opts.Logger, skillSourceActionDisable), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceDisable), handleSkillSourceStatus(opts.SkillSourceService, false))
-	admin.POST("/skill-sources/enable", skillSourceOperationLog(opts.Logger, skillSourceActionEnable), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceEnable), handleSkillSourceStatus(opts.SkillSourceService, true))
-	admin.POST("/skill-sources/token/remove", skillSourceOperationLog(opts.Logger, skillSourceActionRemoveToken), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceTokenRemove), handleSkillSourceRemoveToken(opts.SkillSourceService))
-	admin.POST("/skill-sources/items/bind", skillSourceOperationLog(opts.Logger, skillSourceActionBind), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceBind), handleSkillSourceBind(opts.SkillSourceService))
-	admin.POST("/skill-sources/items/unbind", skillSourceOperationLog(opts.Logger, skillSourceActionUnbind), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceUnbind), handleSkillSourceUnbind(opts.SkillSourceService))
-	admin.GET("/skill-sources/sync-runs", read, handleSkillSourceSyncRuns(opts.SkillSourceService))
+	admin.GET("/skill-sources", read, handleSkillSourceList(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources", skillSourceOperationLog(opts.Logger, skillSourceActionCreate), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceCreate), handleSkillSourceCreate(opts.SkillSourceService, opts.SkillHubService))
+	admin.GET("/skill-sources/detail", read, handleSkillSourceDetail(opts.SkillSourceService, opts.SkillHubService))
+	admin.GET("/skill-sources/token", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceTokenReveal), handleSkillSourceToken(opts.SkillSourceService, opts.SkillHubService))
+	admin.PUT("/skill-sources", skillSourceOperationLog(opts.Logger, skillSourceActionUpdate), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceUpdate), handleSkillSourceUpdate(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources/sync", skillSourceOperationLog(opts.Logger, skillSourceActionSync), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceSync), handleSkillSourceSync(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources/scan-local", skillSourceOperationLog(opts.Logger, skillSourceActionLocalScan), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceScan), handleSkillSourceLocalScan(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources/disable", skillSourceOperationLog(opts.Logger, skillSourceActionDisable), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceDisable), handleSkillSourceStatus(opts.SkillSourceService, opts.SkillHubService, false))
+	admin.POST("/skill-sources/enable", skillSourceOperationLog(opts.Logger, skillSourceActionEnable), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceEnable), handleSkillSourceStatus(opts.SkillSourceService, opts.SkillHubService, true))
+	admin.POST("/skill-sources/token/remove", skillSourceOperationLog(opts.Logger, skillSourceActionRemoveToken), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceTokenRemove), handleSkillSourceRemoveToken(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources/items/bind", skillSourceOperationLog(opts.Logger, skillSourceActionBind), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceBind), handleSkillSourceBind(opts.SkillSourceService, opts.SkillHubService))
+	admin.POST("/skill-sources/items/unbind", skillSourceOperationLog(opts.Logger, skillSourceActionUnbind), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSourceUnbind), handleSkillSourceUnbind(opts.SkillSourceService, opts.SkillHubService))
+	admin.GET("/skill-sources/sync-runs", read, handleSkillSourceSyncRuns(opts.SkillSourceService, opts.SkillHubService))
 }
 
 type skillSourceCreateRequest struct {
@@ -138,22 +138,45 @@ type skillSourceUpdateRequest struct {
 	Schedule        string   `json:"schedule"`
 }
 
-func handleSkillSourceList(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceList(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		items, err := service.List(c.Request.Context())
 		if err != nil {
 			skillError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, itemsResponse(items))
+		account, _ := currentAccount(c)
+		spaces, err := skillService.ListAuthorizedSpaces(c.Request.Context(), account.UserID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		visible := make(map[string]bool, len(spaces))
+		for _, space := range spaces {
+			visible[space.SpaceID] = true
+		}
+		result := make([]skillhub.GitHubSourceSummary, 0, len(items))
+		for _, item := range items {
+			if visible[item.Source.SpaceID] {
+				result = append(result, item)
+			}
+		}
+		c.JSON(http.StatusOK, itemsResponse(result))
 	}
 }
 
-func handleSkillSourceCreate(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceCreate(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request skillSourceCreateRequest
 		if decodeSkillJSON(c, &request) != nil {
 			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		spaceID := request.SpaceID
+		if spaceID == "" {
+			spaceID = skillhub.DefaultSpaceID
+		}
+		if !checkAdminSpaceRead(c, skillService, spaceID) {
 			return
 		}
 		account, ok := currentAccount(c)
@@ -176,15 +199,14 @@ func handleSkillSourceCreate(service *skillhub.GitHubSourceService) gin.HandlerF
 	}
 }
 
-func handleSkillSourceDetail(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceDetail(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := skillSourceQueryID(c)
 		if !ok {
 			return
 		}
-		source, err := service.Get(c.Request.Context(), id)
-		if err != nil {
-			skillError(c, err)
+		source, ok := authorizedAdminSource(c, service, skillService, id)
+		if !ok {
 			return
 		}
 		items, err := service.ListItems(c.Request.Context(), id)
@@ -198,10 +220,13 @@ func handleSkillSourceDetail(service *skillhub.GitHubSourceService) gin.HandlerF
 	}
 }
 
-func handleSkillSourceToken(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceToken(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := skillSourceQueryID(c)
 		if !ok {
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, id); !ok {
 			return
 		}
 		token, err := service.GetToken(c.Request.Context(), id)
@@ -213,7 +238,7 @@ func handleSkillSourceToken(service *skillhub.GitHubSourceService) gin.HandlerFu
 	}
 }
 
-func handleSkillSourceUpdate(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceUpdate(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request skillSourceUpdateRequest
 		if decodeSkillJSON(c, &request) != nil {
@@ -221,6 +246,9 @@ func handleSkillSourceUpdate(service *skillhub.GitHubSourceService) gin.HandlerF
 			return
 		}
 		c.Set(skillSourceIDKey, strings.TrimSpace(request.SourceID))
+		if _, ok := authorizedAdminSource(c, service, skillService, request.SourceID); !ok {
+			return
+		}
 		token := request.Token
 		if token != nil && *token == "" {
 			token = nil
@@ -239,18 +267,21 @@ func handleSkillSourceUpdate(service *skillhub.GitHubSourceService) gin.HandlerF
 	}
 }
 
-func handleSkillSourceSync(service *skillhub.GitHubSourceService) gin.HandlerFunc {
-	return handleSkillSourceQueue(service, false)
+func handleSkillSourceSync(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
+	return handleSkillSourceQueue(service, skillService, false)
 }
 
-func handleSkillSourceLocalScan(service *skillhub.GitHubSourceService) gin.HandlerFunc {
-	return handleSkillSourceQueue(service, true)
+func handleSkillSourceLocalScan(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
+	return handleSkillSourceQueue(service, skillService, true)
 }
 
-func handleSkillSourceQueue(service *skillhub.GitHubSourceService, local bool) gin.HandlerFunc {
+func handleSkillSourceQueue(service *skillhub.GitHubSourceService, skillService *skillhub.Service, local bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := decodeSkillSourceID(c)
 		if !ok {
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, id); !ok {
 			return
 		}
 		account, ok := currentAccount(c)
@@ -274,10 +305,13 @@ func handleSkillSourceQueue(service *skillhub.GitHubSourceService, local bool) g
 	}
 }
 
-func handleSkillSourceStatus(service *skillhub.GitHubSourceService, enable bool) gin.HandlerFunc {
+func handleSkillSourceStatus(service *skillhub.GitHubSourceService, skillService *skillhub.Service, enable bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := decodeSkillSourceID(c)
 		if !ok {
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, id); !ok {
 			return
 		}
 		var source skillhub.GitHubSource
@@ -296,10 +330,13 @@ func handleSkillSourceStatus(service *skillhub.GitHubSourceService, enable bool)
 	}
 }
 
-func handleSkillSourceRemoveToken(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceRemoveToken(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := decodeSkillSourceID(c)
 		if !ok {
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, id); !ok {
 			return
 		}
 		source, err := service.RemoveToken(c.Request.Context(), id)
@@ -312,7 +349,7 @@ func handleSkillSourceRemoveToken(service *skillhub.GitHubSourceService) gin.Han
 	}
 }
 
-func handleSkillSourceBind(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceBind(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
 			SourceItemID string `json:"source_item_id"`
@@ -322,7 +359,15 @@ func handleSkillSourceBind(service *skillhub.GitHubSourceService) gin.HandlerFun
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
-		item, err := service.BindItem(c.Request.Context(), request.SourceItemID, request.SkillID)
+		item, err := service.GetItem(c.Request.Context(), request.SourceItemID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, item.SourceID); !ok || !checkAdminSkillRead(c, skillService, request.SkillID) {
+			return
+		}
+		item, err = service.BindItem(c.Request.Context(), request.SourceItemID, request.SkillID)
 		if err != nil {
 			skillError(c, err)
 			return
@@ -332,7 +377,7 @@ func handleSkillSourceBind(service *skillhub.GitHubSourceService) gin.HandlerFun
 	}
 }
 
-func handleSkillSourceUnbind(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceUnbind(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
 			SourceItemID string `json:"source_item_id"`
@@ -341,7 +386,15 @@ func handleSkillSourceUnbind(service *skillhub.GitHubSourceService) gin.HandlerF
 			skillError(c, skillhub.ErrInvalidRequest)
 			return
 		}
-		item, err := service.UnbindItem(c.Request.Context(), request.SourceItemID)
+		item, err := service.GetItem(c.Request.Context(), request.SourceItemID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, item.SourceID); !ok {
+			return
+		}
+		item, err = service.UnbindItem(c.Request.Context(), request.SourceItemID)
 		if err != nil {
 			skillError(c, err)
 			return
@@ -351,10 +404,13 @@ func handleSkillSourceUnbind(service *skillhub.GitHubSourceService) gin.HandlerF
 	}
 }
 
-func handleSkillSourceSyncRuns(service *skillhub.GitHubSourceService) gin.HandlerFunc {
+func handleSkillSourceSyncRuns(service *skillhub.GitHubSourceService, skillService *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := skillSourceQueryID(c)
 		if !ok {
+			return
+		}
+		if _, ok := authorizedAdminSource(c, service, skillService, id); !ok {
 			return
 		}
 		items, err := service.ListSyncRuns(c.Request.Context(), id, 20)
@@ -364,6 +420,18 @@ func handleSkillSourceSyncRuns(service *skillhub.GitHubSourceService) gin.Handle
 		}
 		c.JSON(http.StatusOK, itemsResponse(items))
 	}
+}
+
+func authorizedAdminSource(c *gin.Context, sourceService *skillhub.GitHubSourceService, skillService *skillhub.Service, id string) (skillhub.GitHubSource, bool) {
+	source, err := sourceService.Get(c.Request.Context(), id)
+	if err != nil {
+		skillError(c, err)
+		return skillhub.GitHubSource{}, false
+	}
+	if !checkAdminSpaceRead(c, skillService, source.SpaceID) {
+		return skillhub.GitHubSource{}, false
+	}
+	return source, true
 }
 
 func decodeSkillSourceID(c *gin.Context) (string, bool) {
@@ -484,7 +552,8 @@ func handlePublishedSkillVersionFile(service *skillhub.Service) gin.HandlerFunc 
 
 func handleAdminSkillList(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		items, err := service.ListAdmin(c.Request.Context())
+		account, _ := currentAccount(c)
+		items, err := service.ListAdminForUser(c.Request.Context(), account.UserID)
 		if err != nil {
 			skillError(c, err)
 			return
@@ -495,6 +564,9 @@ func handleAdminSkillList(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSkillRead(c, service, skillID(c)) {
+			return
+		}
 		item, err := service.GetAdmin(c.Request.Context(), skillID(c))
 		if err != nil {
 			skillError(c, err)
@@ -513,6 +585,9 @@ func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillVersionFiles(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSkillRead(c, service, skillID(c)) {
+			return
+		}
 		items, err := service.ListVersionFiles(c.Request.Context(), skillID(c), skillVersionID(c))
 		if err != nil {
 			skillError(c, err)
@@ -524,6 +599,9 @@ func handleAdminSkillVersionFiles(service *skillhub.Service) gin.HandlerFunc {
 
 func handleAdminSkillVersionFile(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !checkAdminSkillRead(c, service, skillID(c)) {
+			return
+		}
 		item, err := service.ReadVersionFile(c.Request.Context(), skillID(c), skillVersionID(c), c.Query("path"))
 		if err != nil {
 			skillError(c, err)
@@ -536,6 +614,9 @@ func handleAdminSkillVersionFile(service *skillhub.Service) gin.HandlerFunc {
 func handleAdminSkillVersionPackage(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := skillID(c)
+		if !checkAdminSkillRead(c, service, id) {
+			return
+		}
 		versionID := skillVersionID(c)
 		c.Set(skillIDKey, id)
 		c.Set(skillVersionKey, versionID)
@@ -554,6 +635,15 @@ func handleAdminSkillVersionPackage(service *skillhub.Service) gin.HandlerFunc {
 			c.Set(skillResultKey, "failure")
 		}
 	}
+}
+
+func checkAdminSkillRead(c *gin.Context, service *skillhub.Service, id string) bool {
+	account, _ := currentAccount(c)
+	if err := service.CheckSkillRead(c.Request.Context(), account.UserID, id); err != nil {
+		skillError(c, err)
+		return false
+	}
+	return true
 }
 
 func handleSkillUpload(service *skillhub.Service, client bool) gin.HandlerFunc {
@@ -608,6 +698,16 @@ func handleSkillUpload(service *skillhub.Service, client bool) gin.HandlerFunc {
 			principal, _ := currentPrincipal(c)
 			result, err = service.UploadVersionForUser(c.Request.Context(), account.UserID, principal.AgentID, input)
 		} else {
+			spaceID := input.SpaceID
+			if spaceID == "" {
+				spaceID = skillhub.DefaultSpaceID
+			}
+			if !checkAdminSpaceRead(c, service, spaceID) {
+				return
+			}
+			if input.TargetSkillID != "" && !checkAdminSkillRead(c, service, input.TargetSkillID) {
+				return
+			}
 			result, err = service.UploadVersion(c.Request.Context(), input)
 		}
 		if err != nil {
@@ -641,6 +741,9 @@ func validSkillUploadForm(values map[string][]string, files map[string][]*multip
 func handleSkillDelete(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := skillID(c)
+		if !checkAdminSkillRead(c, service, id) {
+			return
+		}
 		c.Set(skillIDKey, id)
 		if err := service.DeleteUnpublished(c.Request.Context(), id); err != nil {
 			skillError(c, err)
@@ -692,6 +795,14 @@ func handleSkillMoveSpace(service *skillhub.Service) gin.HandlerFunc {
 		}
 		c.Set(skillIDsKey, append([]string(nil), request.SkillIDs...))
 		c.Set(skillSpaceIDKey, strings.TrimSpace(request.TargetSpaceID))
+		if !checkAdminSpaceRead(c, service, request.TargetSpaceID) {
+			return
+		}
+		for _, id := range request.SkillIDs {
+			if !checkAdminSkillRead(c, service, id) {
+				return
+			}
+		}
 		result, err := service.MoveSkillsToSpace(c.Request.Context(), request.SkillIDs, request.TargetSpaceID)
 		if err != nil {
 			skillError(c, err)
@@ -715,6 +826,9 @@ func handleSkillSetCurrent(service *skillhub.Service) gin.HandlerFunc {
 		}
 		c.Set(skillIDKey, id)
 		c.Set(skillVersionKey, request.VersionID)
+		if !checkAdminSkillRead(c, service, id) {
+			return
+		}
 		result, err := service.SetCurrentVersion(c.Request.Context(), id, request.VersionID)
 		if err != nil {
 			skillError(c, err)
@@ -735,6 +849,9 @@ func handleSkillPublishOwn(service *skillhub.Service, requireSpaceWrite bool) gi
 		account, _ := currentAccount(c)
 		c.Set(skillIDKey, request.SkillID)
 		c.Set(skillVersionKey, request.VersionID)
+		if !requireSpaceWrite && !checkAdminSkillRead(c, service, request.SkillID) {
+			return
+		}
 		var result skillhub.MutationResult
 		var err error
 		if requireSpaceWrite {
@@ -767,6 +884,9 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 		account, _ := currentAccount(c)
 		c.Set(skillIDKey, request.SkillID)
 		c.Set(skillVersionKey, request.VersionID)
+		if !checkAdminSkillRead(c, service, request.SkillID) {
+			return
+		}
 		c.Set(skillReviewDecisionKey, request.Decision)
 		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
 		if err != nil {
@@ -794,6 +914,9 @@ func handleSkillClearCurrent(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		c.Set(skillIDKey, id)
+		if !checkAdminSkillRead(c, service, id) {
+			return
+		}
 		cleared, err := service.ClearCurrentVersion(c.Request.Context(), id)
 		if err != nil {
 			skillError(c, err)

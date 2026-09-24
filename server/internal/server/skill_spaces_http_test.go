@@ -38,6 +38,12 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	adminID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", adminCookies, http.StatusOK), "data", "account", "user_id")
+	for _, spaceID := range []string{primary.SpaceID, secondary.SpaceID} {
+		if _, err := service.SetSpaceMember(ctx, spaceID, adminID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, adminID, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	seeded, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{
 		SpaceID: primary.SpaceID, Version: "1.0.0", Package: bytes.NewReader(skillPackageNamed(t, "space-demo")), CreatedBy: "技能管理员",
 	})
@@ -247,6 +253,94 @@ func TestSkillSpaceAdminMemberLifecycleAndStrictJSON(t *testing.T) {
 	assertSkillError(t, recorder, http.StatusNotFound, "skill_space_not_found")
 }
 
+func TestAdminSkillSpaceVisibilityRequiresMembership(t *testing.T) {
+	ctx := context.Background()
+	accountService := newTestAccountService(accounts.NewMemoryStore())
+	store := skillhub.NewMemoryStore()
+	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
+	sourceService := skillhub.NewGitHubSourceService(skillhub.GitHubSourceServiceConfig{
+		Store: skillhub.NewMemorySourceStore(store), TokenCipher: sourceHTTPTestCipher{},
+	})
+	router := newTestRouter(t, server.Options{
+		AccountService: accountService, ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), SkillHubService: service, SkillSourceService: sourceService,
+	})
+	adminCookies := register(t, router, `{"email":"visibility-admin@example.com","name":"后台管理员","password":"passw0rd!"}`)
+	accountsList, err := accountService.ListAccounts(ctx)
+	if err != nil || len(accountsList) != 1 {
+		t.Fatalf("admin account: %v, %#v", err, accountsList)
+	}
+	adminID := accountsList[0].UserID
+	owner, err := accountService.Register(ctx, accounts.RegisterRequest{Email: "visibility-owner@example.com", Name: "空间所有者", Password: "passw0rd!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, err := service.CreateSpace(ctx, "私有技能空间", "仅成员可见", owner.Account.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{
+		SpaceID: space.SpaceID, Version: "1.0.0", Package: bytes.NewReader(skillPackageNamed(t, "private-skill")), CreatedBy: "空间所有者",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := sourceService.Create(ctx, skillhub.CreateGitHubSourceInput{
+		SpaceID: space.SpaceID, RepositoryOwner: "private", RepositoryName: "skills", Branch: "main", ScanRoot: ".", Schedule: "manual", CreatedBy: "空间所有者",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listPaths := []string{"/api/v1/admin/skill-spaces", "/api/v1/admin/skills", "/api/v1/admin/skill-sources"}
+	detailPaths := []string{
+		"/api/v1/admin/skill-spaces/detail?space_id=" + space.SpaceID,
+		"/api/v1/admin/skill-spaces/account-grants?space_id=" + space.SpaceID,
+		"/api/v1/admin/skill-spaces/member-candidates?space_id=" + space.SpaceID,
+		"/api/v1/admin/skills/detail?skill_id=" + skill.Skill.SkillID,
+		"/api/v1/admin/skills/version-files?skill_id=" + skill.Skill.SkillID + "&version_id=" + skill.Version.VersionID,
+		"/api/v1/admin/skills/version-file?skill_id=" + skill.Skill.SkillID + "&version_id=" + skill.Version.VersionID + "&path=SKILL.md",
+		"/api/v1/admin/skills/version-package?skill_id=" + skill.Skill.SkillID + "&version_id=" + skill.Version.VersionID,
+		"/api/v1/admin/skill-sources/detail?source_id=" + source.SourceID,
+		"/api/v1/admin/skill-sources/token?source_id=" + source.SourceID,
+		"/api/v1/admin/skill-sources/sync-runs?source_id=" + source.SourceID,
+	}
+	check := func(visible bool) {
+		t.Helper()
+		for _, path := range listPaths {
+			response := sourceJSONRequest(t, router, http.MethodGet, path, "", adminCookies)
+			if response.Code != http.StatusOK || strings.Contains(response.Body.String(), space.SpaceID) != visible {
+				t.Fatalf("list %s visible=%t status=%d body=%s", path, visible, response.Code, response.Body.String())
+			}
+		}
+		for _, path := range detailPaths {
+			response := sourceJSONRequest(t, router, http.MethodGet, path, "", adminCookies)
+			if visible {
+				if response.Code != http.StatusOK {
+					t.Fatalf("member GET %s status=%d body=%s", path, response.Code, response.Body.String())
+				}
+			} else if response.Code != http.StatusNotFound {
+				t.Fatalf("nonmember GET %s status=%d body=%s", path, response.Code, response.Body.String())
+			}
+		}
+	}
+	check(false)
+	for _, attempt := range []struct{ method, path, body, code string }{
+		{http.MethodPut, "/api/v1/admin/skill-spaces", `{"space_id":"` + space.SpaceID + `","name":"私有技能空间","description":""}`, "skill_space_not_found"},
+		{http.MethodPost, "/api/v1/admin/skill-spaces/account-grants", `{"space_id":"` + space.SpaceID + `","user_id":"` + adminID + `","actions":["read"]}`, "skill_space_not_found"},
+		{http.MethodPut, "/api/v1/admin/skills/current-version", `{"skill_id":"` + skill.Skill.SkillID + `","version_id":"` + skill.Version.VersionID + `"}`, "not_found"},
+		{http.MethodPost, "/api/v1/admin/skill-sources/disable", `{"source_id":"` + source.SourceID + `"}`, "skill_space_not_found"},
+	} {
+		assertSkillError(t, sourceJSONRequest(t, router, attempt.method, attempt.path, attempt.body, adminCookies), http.StatusNotFound, attempt.code)
+	}
+	if _, err := service.SetSpaceMember(ctx, space.SpaceID, adminID, []string{skillhub.SpaceActionRead}, owner.Account.UserID, false); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := service.RemoveSpaceMember(ctx, space.SpaceID, adminID); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+}
+
 func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
@@ -258,6 +352,12 @@ func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 	target, err := service.CreateSpace(ctx, "产品技能", "", "空间管理员")
 	if err != nil {
 		t.Fatal(err)
+	}
+	adminID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", adminCookies, http.StatusOK), "data", "account", "user_id")
+	for _, spaceID := range []string{target.SpaceID, skillhub.DefaultSpaceID} {
+		if _, err := service.SetSpaceMember(ctx, spaceID, adminID, []string{skillhub.SpaceActionRead, skillhub.SpaceActionWrite}, adminID, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 	first, err := uploadApprovedVersionForTest(service, ctx, skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackageNamed(t, "move-first")), CreatedBy: "空间管理员"})
 	if err != nil {

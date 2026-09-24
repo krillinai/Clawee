@@ -36,6 +36,42 @@ func (s *Service) ListSpaces(ctx context.Context) ([]SpaceSummary, error) {
 	return s.spaces.ListSpaces(ctx)
 }
 
+func (s *Service) ListSpacesForUser(ctx context.Context, userID string) ([]SpaceSummary, error) {
+	allowed, err := s.ListAuthorizedSpaces(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	spaces, err := s.ListSpaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool, len(allowed))
+	for _, space := range allowed {
+		visible[space.SpaceID] = true
+	}
+	result := make([]SpaceSummary, 0, len(spaces))
+	for _, space := range spaces {
+		if visible[space.SpaceID] {
+			result = append(result, space)
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) CheckSpaceRead(ctx context.Context, userID, spaceID string) error {
+	if s == nil || s.spaces == nil || strings.TrimSpace(userID) == "" || strings.TrimSpace(spaceID) == "" {
+		return ErrSpaceNotFound
+	}
+	return s.spaces.CheckSpaceAccess(ctx, userID, spaceID, SpaceActionRead)
+}
+
+func (s *Service) CheckSkillRead(ctx context.Context, userID, skillID string) error {
+	if s == nil || s.spaces == nil || strings.TrimSpace(userID) == "" || strings.TrimSpace(skillID) == "" {
+		return ErrNotFound
+	}
+	return s.spaces.CheckSkillAccess(ctx, userID, skillID, SpaceActionRead)
+}
+
 func (s *Service) GetSpace(ctx context.Context, spaceID string) (SpaceSummary, error) {
 	if s == nil || s.spaces == nil || strings.TrimSpace(spaceID) == "" {
 		return SpaceSummary{}, ErrInvalidRequest
