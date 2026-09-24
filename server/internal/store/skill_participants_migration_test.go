@@ -31,7 +31,8 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 		('viewer','viewer@example.com','查看者','unused','active',now(),now()),
 		('creator','creator@example.com','原创建者','unused','active',now(),now()),
 		('updater-1','updater-1@example.com','原参与者一','unused','active',now(),now()),
-		('updater-2','updater-2@example.com','历史参与者二','unused','active',now(),now());
+		('updater-2','updater-2@example.com','历史参与者二','unused','active',now(),now()),
+		('market-reviewer','market-reviewer@example.com','市场审批人','unused','active',now(),now());
 		INSERT INTO skill_spaces (space_id,name,created_by,updated_by,created_at,updated_at) VALUES
 		('product','产品空间','system','system',now(),now()),
 		('market','市场空间','system','system',now(),now());
@@ -40,7 +41,8 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 		('legacy','product','legacy','历史创建者',now(),now()),
 		('hidden','market','hidden','原创建者',now(),now());
 		INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
-		VALUES ('viewer-read','viewer','skill_space','product','read','system',now(),now());
+		VALUES ('viewer-read','viewer','skill_space','product','read','system',now(),now()),
+		('market-reviewer-read','market-reviewer','skill_space','market','read','system',now(),now());
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -94,16 +96,24 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 56); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 62); err != nil {
+	if _, err := provider.UpTo(ctx, 64); err != nil {
 		t.Fatal(err)
 	}
 	for _, spaceID := range []string{"product", "market"} {
-		if err := service.SetSpaceApprover(ctx, spaceID, "viewer", "system"); err != nil {
+		reviewer := "viewer"
+		if spaceID == "market" {
+			reviewer = "market-reviewer"
+		}
+		if err := service.SetSpaceApprover(ctx, spaceID, reviewer, "system"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, version := range []struct{ skillID, versionID string }{{"tracked", "tracked-5"}, {"legacy", "legacy-2"}, {"hidden", "hidden-1"}} {
-		if _, err := service.ReviewVersion(ctx, version.skillID, version.versionID, "viewer", true, "测试发布前审批"); err != nil {
+		reviewer := "viewer"
+		if version.skillID == "hidden" {
+			reviewer = "market-reviewer"
+		}
+		if _, err := service.ReviewVersion(ctx, version.skillID, version.versionID, reviewer, true, "测试发布前审批"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := service.SetCurrentVersion(ctx, version.skillID, version.versionID); err != nil {
@@ -140,7 +150,7 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 			}
 		}
 	}
-	for version := 56; version >= 52; version-- {
+	for version := 64; version >= 52; version-- {
 		if _, err := provider.Down(ctx); err != nil {
 			t.Fatal(err)
 		}

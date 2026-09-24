@@ -210,7 +210,7 @@ FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id W
 			return Version{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status=$2,approved_space_id=CASE WHEN $2='approved' THEN $3 ELSE NULL END,reviewed_by=CASE WHEN $2='pending' THEN NULL ELSE $4 END,reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE $5 END,review_comment=CASE WHEN $2='pending' THEN '' ELSE $6 END WHERE version_id=$1`, versionID, status, spaceID, reviewer, now, comment); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status=$2,approved_space_id=CASE WHEN $2='approved' THEN $3 ELSE NULL END,reviewed_by=CASE WHEN $2='pending' THEN NULL ELSE $4 END,reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE $5::timestamptz END,review_comment=CASE WHEN $2='pending' THEN '' ELSE $6 END WHERE version_id=$1`, versionID, status, spaceID, reviewer, now, comment); err != nil {
 		return Version{}, err
 	}
 	version.LocalApproval, err = readLocalProgress(ctx, tx, versionID, spaceID, version.PackageSHA256)

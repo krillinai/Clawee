@@ -109,7 +109,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceMember(ctx, target.SpaceID, "reviewer", []string{skillhub.SpaceActionRead}, "writer", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, false, "writer"); err != nil {
+	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.GetPublished(ctx, "legacy"); err != nil {
