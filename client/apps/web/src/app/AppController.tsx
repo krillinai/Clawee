@@ -5986,6 +5986,8 @@ export function AppController(props: AppControllerProps) {
     state.selectedThreadId !== undefined
     && historyLoadedThreadId !== state.selectedThreadId;
   const conversationConfirmedEmpty = conversationEmpty && !conversationHistoryPending;
+  const activeWorkflowDraft = workflowDraft !== undefined
+    && workflowDraft.threadId === state.selectedThreadId;
   const conversationFilePaths = useMemo(() => (
     collectConversationFilePaths(timelineItems)
       .map(path => toWorkspaceRelativePath(path, selectedThread))
@@ -6159,7 +6161,7 @@ export function AppController(props: AppControllerProps) {
           projectId={currentProject?.id ?? ''}
           projectName={currentProjectName}
           projects={projects}
-          showProjectSelector={workflowDraft?.threadId === state.selectedThreadId ? false : shouldShowComposerProjectSelector({
+          showProjectSelector={activeWorkflowDraft ? false : shouldShowComposerProjectSelector({
             conversationEmpty: conversationConfirmedEmpty,
             threadPurpose: selectedThread?.purpose
           })}
@@ -6175,7 +6177,7 @@ export function AppController(props: AppControllerProps) {
           disabledReason={composerDisabledReason}
           running={currentRunBusy}
           canceling={currentRunCanceling}
-          permissionChangeDisabled={workflowDraft?.threadId === state.selectedThreadId || selectedThread !== undefined && currentRunBusy}
+          permissionChangeDisabled={activeWorkflowDraft || selectedThread !== undefined && currentRunBusy}
           modelChangeDisabled={currentRunBusy}
           slashCommands={slashCommands}
           slashCommandsLoading={capabilitiesLoading}
@@ -6223,7 +6225,7 @@ export function AppController(props: AppControllerProps) {
           onPermissionChange={handleComposerPermissionChange}
           onModelConfigChange={handleComposerModelConfigChange}
           initialPrompt={composerPromptByScope[composerAttachmentScope] ?? ''}
-          workflowDraft={workflowDraft?.threadId === state.selectedThreadId ? workflowDraft : undefined}
+          workflowDraft={activeWorkflowDraft ? workflowDraft : undefined}
           onPromptChange={handleComposerPromptChange}
           onDraftApplied={handleComposerDraftApplied}
           onSkillApplied={handleComposerSkillApplied}
@@ -6233,7 +6235,7 @@ export function AppController(props: AppControllerProps) {
           onCancel={() => void cancelActiveRun()}
           onCancelQueuedRun={(runId) => void cancelQueuedRun(runId)}
           onSteerQueuedRun={(runId) => void steerQueuedRun(runId)}
-          onUploadAttachment={workflowDraft?.threadId === state.selectedThreadId ? undefined : async file => {
+          onUploadAttachment={activeWorkflowDraft ? undefined : async file => {
             if (attachmentService === null) throw new Error('附件服务暂不可用');
             const response = await attachmentService.upload({
               file,
@@ -6241,7 +6243,7 @@ export function AppController(props: AppControllerProps) {
             });
             return response.attachment;
           }}
-          onDeleteAttachment={workflowDraft?.threadId === state.selectedThreadId ? undefined : async attachment => {
+          onDeleteAttachment={activeWorkflowDraft ? undefined : async attachment => {
             if (attachmentService === null || attachment.draftId === undefined) return;
             await attachmentService.delete({
               id: attachment.id,
