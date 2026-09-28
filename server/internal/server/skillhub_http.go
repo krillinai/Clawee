@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 
 	"github.com/krillinai/Clawee/server/internal/accounts"
@@ -1096,7 +1097,10 @@ func decodeSkillJSON(c *gin.Context, target any) error {
 
 func skillError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "技能中心操作失败"
+	var pgErr *pgconn.PgError
 	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == "42501":
+		status, code, message = http.StatusInternalServerError, "skill_database_permission_denied", "技能中心数据库权限不足，请联系管理员检查服务账号授权"
 	case errors.Is(err, skillhub.ErrExternalApprovalConflict):
 		status, code, message = http.StatusConflict, "skill_external_approval_conflict", "审批申请正在进行或状态不允许此操作"
 	case errors.Is(err, skillhub.ErrApprovalRequired):
