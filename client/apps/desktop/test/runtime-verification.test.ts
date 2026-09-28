@@ -117,13 +117,15 @@ describe('Desktop Runtime verification', () => {
             stderr: ''
           }
     ));
+    const stages: string[] = [];
 
     await expect(verifyDesktopRuntimeDirectory({
       directory: runtimeDirectory,
       manifest,
       target,
       packageDescriptor,
-      commandRunner
+      commandRunner,
+      onStage: stage => stages.push(stage)
     })).resolves.toMatchObject({
       entrypoint: 'bin/codex.exe'
     });
@@ -140,6 +142,11 @@ describe('Desktop Runtime verification', () => {
         expect.stringContaining('Get-AuthenticodeSignature')
       ]
     );
+    expect(stages).toEqual([
+      'hashing_start', 'hashing_complete',
+      'version_start', 'version_complete',
+      'trust_start', 'trust_complete'
+    ]);
   });
 
   unixIt('accepts the pinned directory and rejects content or signature drift', async () => {

@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
 import { execPath } from 'node:process';
+import { spawnCodexProcess } from '../../src/codex/process.js';
 import {
   applyCapabilityMatrix,
   collectCodexCapabilityMatrix,
@@ -9,6 +12,11 @@ import {
   parseCodexExecHelp,
   probeCodexVersionAsync
 } from '../../src/codex/capabilities.js';
+
+vi.mock('../../src/codex/process.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/codex/process.js')>();
+  return { ...actual, spawnCodexProcess: vi.fn(actual.spawnCodexProcess) };
+});
 
 const EXEC_HELP_01425 = `
 Usage: codex exec [OPTIONS] [PROMPT]
@@ -85,6 +93,26 @@ describe('codex capability parsing', () => {
     })).resolves.toMatchObject({
       ready: false,
       warning: expect.stringContaining('failed')
+    });
+  });
+
+  it('waits for piped stdout to close before accepting the version', async () => {
+    const child = new EventEmitter() as ReturnType<typeof spawnCodexProcess>;
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    Object.assign(child, { stdout, stderr });
+    vi.mocked(spawnCodexProcess).mockReturnValueOnce(child);
+    queueMicrotask(() => {
+      child.emit('exit', 0);
+      stdout.write('codex-cli 0.151.0\n');
+      stdout.end();
+      stderr.end();
+      child.emit('close', 0);
+    });
+
+    await expect(probeCodexVersionAsync({ codexBin: 'codex' })).resolves.toMatchObject({
+      ready: true,
+      version: 'codex-cli 0.151.0'
     });
   });
 

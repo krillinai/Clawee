@@ -24,6 +24,7 @@ import type {
 } from '@clawee/protocol';
 import {
   expect,
+  test,
   type Page
 } from '@playwright/test';
 import {
@@ -66,6 +67,10 @@ import {
 
 const e2eDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(e2eDir, '..');
+const startupEvidence = new WeakMap<Page, {
+  userData: string;
+  modelServer: ControlledModelServer;
+}>();
 
 export type LegacyRuntimeThread = {
   claweeThreadId: string;
@@ -195,15 +200,19 @@ export async function createEmbeddedRuntimeFixture(input: {
       legacyThreads,
       modelServer,
       async launch() {
-        return await launchPackagedApp({
+        const app = await launchPackagedApp({
           executablePath,
           args,
           env,
           timeoutMs: 45_000
         });
+        startupEvidence.set(app.page, { userData, modelServer });
+        return app;
       },
       async relaunch(app) {
-        return await relaunchPackagedApp(app, 45_000);
+        const relaunched = await relaunchPackagedApp(app, 45_000);
+        startupEvidence.set(relaunched.page, { userData, modelServer });
+        return relaunched;
       },
       writeControlledRuntimeConfig() {
         writeControlledRuntimeConfig({
@@ -277,12 +286,14 @@ export async function waitForEmbeddedRuntimeReady(
       return;
     }
     if (state?.phase === 'failed') {
+      await attachStartupEvidence(page).catch(() => undefined);
       throw new Error(
         `Desktop Runtime 启动失败：${JSON.stringify(state.error ?? state)}`
       );
     }
     await page.waitForTimeout(250);
   }
+  await attachStartupEvidence(page).catch(() => undefined);
   throw new Error(
     `等待 Desktop Runtime 就绪超时（${timeoutMs}ms）：`
     + `url=${page.url()} state=${JSON.stringify(lastState)}`
@@ -293,8 +304,70 @@ export async function ensureEmbeddedWorkspaceSignedIn(
   page: Page
 ): Promise<void> {
   await ensureEmbeddedEnterpriseSignedIn(page);
-  await expect(page.locator('.clawee-shell')).toBeVisible({
-    timeout: 60_000
+  try {
+    await expect(page.locator('.clawee-shell')).toBeVisible({
+      timeout: 60_000
+    });
+  } catch (error) {
+    await attachStartupEvidence(page).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function attachStartupEvidence(page: Page): Promise<void> {
+  const fixture = startupEvidence.get(page);
+  const bootstrap = await page.evaluate(
+    () => window.claweeDesktop?.readBootstrapState()
+  ).catch(() => undefined);
+  const model = bootstrap?.phase === 'ready' ? await runtimeRequest<{
+    status?: string;
+    code?: string;
+    mode?: string;
+  }>(page, 'GET', '/runtime/model-service').catch(() => undefined) : undefined;
+  const logPath = fixture === undefined
+    ? undefined
+    : join(fixture.userData, 'logs', 'desktop-main.log');
+  const logEntries = logPath !== undefined && existsSync(logPath)
+    ? readFileSync(logPath, 'utf8').trim().split('\n').slice(-100).flatMap(line => {
+        try {
+          const entry = JSON.parse(line) as {
+            at?: string;
+            level?: string;
+            message?: string;
+            details?: { stage?: string; durationMs?: number; code?: string };
+          };
+          return [{
+            at: entry.at,
+            level: entry.level,
+            message: entry.message,
+            stage: entry.details?.stage,
+            durationMs: entry.details?.durationMs,
+            code: entry.details?.code
+          }];
+        } catch {
+          return [];
+        }
+      })
+    : [];
+  await test.info().attach('desktop-startup-evidence', {
+    body: JSON.stringify({
+      bootstrap: bootstrap === undefined ? undefined : {
+        phase: bootstrap.phase,
+        attempt: bootstrap.attempt,
+        durationMs: bootstrap.durationMs,
+        errorCode: bootstrap.error?.code,
+        startupMetrics: bootstrap.startupMetrics
+      },
+      modelAccess: model === undefined ? undefined : {
+        httpStatus: model.status,
+        status: model.body.status,
+        code: model.body.code,
+        mode: model.body.mode
+      },
+      controlledModelRequestCount: fixture?.modelServer.requests.length,
+      desktopLog: logEntries
+    }, null, 2),
+    contentType: 'application/json'
   });
 }
 

@@ -74,6 +74,7 @@ export async function resolveEmbeddedRuntime(input: {
   homeDir?: string;
   processEnv?: NodeJS.ProcessEnv;
   verifyDirectory?: RuntimeDirectoryVerifier;
+  onVerificationStage?: (stage: string, durationMs: number) => void;
 }): Promise<ResolvedDesktopRuntime> {
   const resourcesPath = resolve(input.resourcesPath);
   const manifestPath = resolve(
@@ -116,6 +117,8 @@ export async function resolveEmbeddedRuntime(input: {
     'codex',
     'runtime-verification.json'
   );
+  const cacheStartedAt = Date.now();
+  input.onVerificationStage?.('cache_start', 0);
   const cachedVerification = readEmbeddedRuntimeVerificationCache({
     path: verificationCachePath,
     directory: runtimeDirectory,
@@ -124,9 +127,13 @@ export async function resolveEmbeddedRuntime(input: {
     packageDescriptor,
     expectedFiles: target.expectedFiles
   });
+  input.onVerificationStage?.('cache_complete', Date.now() - cacheStartedAt);
   const verification = cachedVerification ?? await verifyDirectory({
     directory: runtimeDirectory,
-    ...verificationInput
+    ...verificationInput,
+    ...(input.onVerificationStage === undefined
+      ? {}
+      : { onStage: input.onVerificationStage })
   });
   if (
     verification.contentSha256 !== packageDescriptor.contentSha256

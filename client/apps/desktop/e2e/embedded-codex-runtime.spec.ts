@@ -278,9 +278,11 @@ test('packaged App ignores external Codex sessions and starts with an isolated R
     expect(findMigrationJournal(fixture.dataDir)).toBe(false);
 
     await ensureEmbeddedWorkspaceSignedIn(app.page);
-    await expect(app.page.locator('.sidebar-brand-version')).toHaveText(
-      `v${fixture.appVersion}`
-    );
+    await app.page.getByRole('button', { name: '设置' }).click();
+    await app.page.getByRole('button', { name: '关于 Clawee' }).click();
+    await expect(app.page.locator('.settings-row').filter({ hasText: 'Clawee 版本' }).locator('strong'))
+      .toHaveText(fixture.appVersion);
+    await app.page.getByRole('button', { name: '返回应用' }).click();
 
     const probe = await waitForAvailabilityProbe(app.page);
     expect(probe).toMatchObject({

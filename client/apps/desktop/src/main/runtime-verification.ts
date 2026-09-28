@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   createReadStream,
@@ -72,6 +72,7 @@ export type RuntimeDirectoryVerifier = (
     manifest: CodexRuntimeManifest;
     target: CodexRuntimeTarget;
     packageDescriptor: CodexRuntimePackageDescriptor;
+    onStage?: (stage: string, durationMs: number) => void;
   }
 ) => Promise<RuntimeDirectoryVerification>;
 
@@ -188,6 +189,7 @@ export async function verifyDesktopRuntimeDirectory(
     target: CodexRuntimeTarget;
     packageDescriptor: CodexRuntimePackageDescriptor;
     commandRunner?: CommandRunner;
+    onStage?: (stage: string, durationMs: number) => void;
   }
 ): Promise<RuntimeDirectoryVerification> {
   assertPackageDescriptorMatches(
@@ -196,7 +198,10 @@ export async function verifyDesktopRuntimeDirectory(
     input.packageDescriptor
   );
   const root = resolve(input.directory);
+  let stageStartedAt = Date.now();
+  input.onStage?.('hashing_start', 0);
   const inspection = await inspectDirectory(root);
+  input.onStage?.('hashing_complete', Date.now() - stageStartedAt);
   const expectedFiles = [...input.target.expectedFiles].sort();
   if (!isDeepStrictEqual(inspection.files, expectedFiles)) {
     throw new Error('CODEX_RUNTIME_FILE_LIST_MISMATCH');
@@ -235,12 +240,18 @@ export async function verifyDesktopRuntimeDirectory(
   }
 
   const commandRunner = input.commandRunner ?? runCommand;
+  stageStartedAt = Date.now();
+  input.onStage?.('version_start', 0);
   await verifyVersion(
     join(root, input.packageDescriptor.entrypoint),
     input.manifest.codexVersion,
     commandRunner
   );
+  input.onStage?.('version_complete', Date.now() - stageStartedAt);
+  stageStartedAt = Date.now();
+  input.onStage?.('trust_start', 0);
   await verifyPlatformTrust(root, input.target, commandRunner);
+  input.onStage?.('trust_complete', Date.now() - stageStartedAt);
   return {
     entrypoint: input.packageDescriptor.entrypoint,
     contentSha256: inspection.contentSha256,
@@ -393,20 +404,23 @@ async function runCommand(
   command: string,
   args: string[]
 ): Promise<CommandResult> {
-  const result = spawnSync(command, args, {
-    encoding: 'utf8',
-    ...(command.toLowerCase().endsWith('powershell.exe')
-      ? { env: windowsPowerShellEnvironment() }
-      : {}),
-    shell: false,
-    timeout: 2 * 60_000,
-    windowsHide: true
+  return await new Promise(resolveResult => {
+    execFile(command, args, {
+      encoding: 'utf8',
+      ...(command.toLowerCase().endsWith('powershell.exe')
+        ? { env: windowsPowerShellEnvironment() }
+        : {}),
+      shell: false,
+      timeout: 2 * 60_000,
+      windowsHide: true
+    }, (error, stdout, stderr) => {
+      resolveResult({
+        status: error === null ? 0 : typeof error.code === 'number' ? error.code : null,
+        stdout,
+        stderr: stderr || error?.message || ''
+      });
+    });
   });
-  return {
-    status: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.error?.message ?? result.stderr ?? ''
-  };
 }
 
 export function windowsPowerShellEnvironment(

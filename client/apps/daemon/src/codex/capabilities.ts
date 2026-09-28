@@ -426,7 +426,7 @@ function runCodexInfoAsync(
     child.once('error', error => {
       finish([`${command} failed: ${error.message}`]);
     });
-    child.once('exit', code => {
+    child.once('close', code => {
       if (aborted) {
         finish([`${command} canceled`]);
         return;
