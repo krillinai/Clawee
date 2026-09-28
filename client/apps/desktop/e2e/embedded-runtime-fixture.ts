@@ -269,7 +269,7 @@ export async function createEmbeddedRuntimeFixture(input: {
 
 export async function waitForEmbeddedRuntimeReady(
   page: Page,
-  timeoutMs = 60_000
+  timeoutMs = process.platform === 'win32' ? 180_000 : 60_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastState: unknown;

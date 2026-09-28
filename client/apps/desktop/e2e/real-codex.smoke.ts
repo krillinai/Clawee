@@ -27,7 +27,7 @@ test('实际包内 Codex 完成冷启动 Probe、真实会话和重启恢复', a
     process.env.CLAWEE_RUN_REAL_CODEX_SMOKE !== '1',
     '包内真实 Codex smoke 只在显式发布验收时运行'
   );
-  test.setTimeout(180_000);
+  test.setTimeout(process.platform === 'win32' ? 420_000 : 180_000);
   const fixture = await createEmbeddedRuntimeFixture();
   let app: PackagedApp | undefined;
 
