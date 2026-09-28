@@ -200,6 +200,12 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
             manifestPath: this.input.runtimeManifestPath,
             claweeVersion: this.input.claweeVersion,
             processEnv: this.input.processEnv ?? process.env,
+            onVerificationStage: (stage, durationMs) => {
+              this.input.logger.info('Codex Runtime verification stage', {
+                stage,
+                durationMs
+              });
+            },
             ...(this.input.runtimePackageDescriptorPath === undefined
               ? {}
               : {
