@@ -9,7 +9,7 @@ import (
 )
 
 func TestWorkflowOutputSchemasAcceptJSONObjectInputs(t *testing.T) {
-	task := workflow.Task{Input: json.RawMessage(`{"start":"good"}`), Output: json.RawMessage(`{"text":"done"}`)}
+	task := workflow.Task{AssigneeUsers: []string{"a", "b"}, Input: json.RawMessage(`{"start":"good"}`), Output: json.RawMessage(`{"text":"done"}`)}
 	for _, test := range []struct {
 		name   string
 		schema *jsonschema.Schema

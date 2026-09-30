@@ -33,12 +33,15 @@ function assigneeName(account?: WorkflowAssignee) {
 function instanceUserName(instance: WorkflowInstance, id: string) {
   return instance.user_names?.[id] || "账号已删除";
 }
+function directUsers(node?: WorkflowNode) {
+  return [...new Set([...(node?.assignee_user_ids ?? []), ...(node?.assignee_user_id ? [node.assignee_user_id] : [])])];
+}
 function nodeError(nodes: WorkflowNode[]) {
   if (nodes.length === 0) return { index: 0, message: "至少添加一个节点" };
   for (const [index, node] of nodes.entries()) {
     if (!node.title.trim()) return { index, message: `节点 ${index + 1}：请填写标题` };
     if (!node.instruction.trim()) return { index, message: `节点 ${index + 1}：请填写说明 / 任务指令` };
-    if (!node.assignee_user_id) return { index, message: `节点 ${index + 1}：请选择负责人` };
+    if (!directUsers(node).length && !node.assignee_role_ids?.length) return { index, message: `节点 ${index + 1}：请选择负责人账户或角色` };
   }
   return null;
 }
@@ -67,7 +70,8 @@ function WorkflowStep({ instance, node, task, index, current, last }: { instance
     <span className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border bg-background text-xs font-medium">{index + 1}</span>
     <div className="min-w-0 flex-1 border-b border-border pb-5 last:border-0">
       <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{title}</h3><Badge variant="outline">{node.type === "agent" ? "Agent" : "审批"}</Badge>{task && <StatusBadge status={task.status} />}{current && <Badge variant="accent">当前节点</Badge>}</div>
-      <p className="mt-1 break-all text-xs text-muted-foreground">负责人：{instanceUserName(instance, node.assignee_user_id)}{task?.completed_at && ` · 完成于 ${new Date(task.completed_at).toLocaleString()}`}</p>
+      <p className="mt-1 break-all text-xs text-muted-foreground">负责人：{[...new Set(task?.assignee_user_ids ?? node.resolved_user_ids ?? directUsers(node))].map((id) => instanceUserName(instance, id)).join("、") || "未配置"}{task?.completed_at && ` · 完成于 ${new Date(task.completed_at).toLocaleString()}`}</p>
+      {task?.handled_by && <p className="mt-1 text-xs text-muted-foreground">实际处理人：{instanceUserName(instance, task.handled_by)}</p>}
       <Collapsible onOpenChange={setOpen} open={open}>
         <CollapsibleTrigger asChild><Button aria-label={`${open ? "收起" : "展开"}节点“${title}”的内容`} className="mt-2" size="sm" variant="ghost"><ChevronDown aria-hidden="true" className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />{open ? "收起内容" : "查看内容"}</Button></CollapsibleTrigger>
         <CollapsibleContent className="mt-3 space-y-4 border-t border-border pt-4">
@@ -83,7 +87,7 @@ function WorkflowSteps({ instance }: { instance: WorkflowInstance }) {
   return <ol className="space-y-0">{instance.nodes.map((node, index) => <WorkflowStep current={instance.current_node_id === node.node_id} index={index} instance={instance} key={node.node_id} last={index === instance.nodes.length - 1} node={node} task={instance.tasks?.find((item) => item.node_id === node.node_id)} />)}</ol>;
 }
 
-function AssigneePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+function AssigneePicker({ values, onChange, role = false, disabled = false }: { values: string[]; onChange: (ids: string[]) => void; role?: boolean; disabled?: boolean }) {
   const cache = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -92,26 +96,32 @@ function AssigneePicker({ value, onChange }: { value: string; onChange: (id: str
     const timer = window.setTimeout(() => setQuery(search), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
-  const selected = useQuery({ queryKey: ["workflow-assignees", value], queryFn: () => workflowAdmin.assignees(value), enabled: Boolean(value) });
-  const candidates = useQuery({ queryKey: ["workflow-assignees", query], queryFn: () => workflowAdmin.assignees(query), enabled: open });
-  const account = selected.data?.items.find((item) => item.user_id === value);
+  const queryKey = role ? "workflow-assignee-roles-picker" : "workflow-assignees-picker";
+  const lookup = async (value: string) => role
+    ? { items: (await workflowAdmin.roles(value)).items.map((item) => ({ id: item.role_id, name: item.name, detail: item.role_id })) }
+    : { items: (await workflowAdmin.assignees(value)).items.map((item) => ({ id: item.user_id, name: assigneeName(item), detail: `${item.email} · ${item.user_id}` })) };
+  const selected = useQueries({ queries: values.map((value) => ({ queryKey: [queryKey, value], queryFn: () => lookup(value) })) });
+  const candidates = useQuery({ queryKey: [queryKey, query], queryFn: () => lookup(query), enabled: open });
+  const label = role ? "负责人角色" : "负责人";
+  const names = values.map((value, index) => selected[index].data?.items.find((item) => item.id === value)?.name || value);
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setSearch(""); setQuery(""); } }}>
-    <PopoverTrigger asChild><Button aria-label="选择负责人" className="w-full justify-between" type="button" variant="outline">
-      <span className="truncate">{value ? account ? assigneeName(account) : selected.isLoading ? "正在查询负责人..." : selected.isError ? "负责人查询失败" : "账号已停用或不存在" : "搜索并选择负责人"}</span>
+    <PopoverTrigger asChild><Button aria-label={`选择${label}`} disabled={disabled} className="w-full justify-between" type="button" variant="outline">
+      <span className="truncate">{values.length ? names.join("、") : `搜索并选择${label}`}</span>
       <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0" />
     </Button></PopoverTrigger>
     <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
       <Command shouldFilter={false}>
-        <CommandInput aria-label="搜索负责人" onValueChange={setSearch} placeholder="搜索姓名、邮箱或账号 ID" value={search} />
+        <CommandInput aria-label={`搜索${label}`} onValueChange={setSearch} placeholder={role ? "搜索角色名称或角色 ID" : "搜索姓名、邮箱或账号 ID"} value={search} />
         <CommandList>
-          <CommandEmpty>{candidates.isFetching ? "正在查询成员..." : candidates.isError ? "成员查询失败" : "没有匹配的成员"}</CommandEmpty>
-          <CommandGroup heading="成员">
-            {candidates.data?.items.map((item) => <CommandItem key={item.user_id} onSelect={() => { cache.setQueryData(["workflow-assignees", item.user_id], { items: [item], meta: { next_cursor: "" } }); onChange(item.user_id); setOpen(false); setSearch(""); }} value={item.user_id}>
-              <div className="min-w-0 flex-1"><span className="block truncate font-medium">{assigneeName(item)}</span><span className="block truncate text-xs text-muted-foreground">{item.email} · {item.user_id}</span></div>
-              {item.user_id === value && <Check aria-hidden="true" className="size-4" />}
+          <CommandEmpty>{candidates.isFetching ? `正在查询${label}...` : candidates.isError ? `${label}查询失败` : `没有匹配的${label}`}</CommandEmpty>
+          <CommandGroup heading={role ? "角色" : "账户"}>
+            {candidates.data?.items.map((item) => <CommandItem disabled={disabled} key={item.id} onSelect={() => { cache.setQueryData([queryKey, item.id], { items: [item] }); onChange(values.includes(item.id) ? values.filter((id) => id !== item.id) : [...new Set([...values, item.id])]); }} value={item.id}>
+              <div className="min-w-0 flex-1"><span className="block truncate font-medium">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.detail}</span></div>
+              {values.includes(item.id) && <Check aria-hidden="true" className="size-4" />}
             </CommandItem>)}
           </CommandGroup>
         </CommandList>
+        {values.length > 0 && <div className="flex flex-wrap gap-1 border-t p-2">{values.map((id, index) => <Button disabled={disabled} key={id} type="button" size="sm" variant="outline" onClick={() => onChange(values.filter((value) => value !== id))} aria-label={`移除${label} ${names[index]}`}>{names[index]} ×</Button>)}</div>}
       </Command>
     </PopoverContent>
   </Popover>;
@@ -121,8 +131,11 @@ export function WorkflowTemplatesPage() {
   const [cursor, setCursor] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const templates = useQuery({ queryKey: ["workflow-templates", cursor], queryFn: () => workflowAdmin.templates(cursor) });
-  const assigneeIds = [...new Set(templates.data?.items.map((item) => item.nodes[0]?.assignee_user_id).filter((id): id is string => Boolean(id)) ?? [])];
+  const assigneeIds = [...new Set(templates.data?.items.flatMap((item) => directUsers(item.nodes[0])) ?? [])];
+  const roleIds = [...new Set(templates.data?.items.flatMap((item) => item.nodes[0]?.assignee_role_ids ?? []) ?? [])];
   const assignees = useQueries({ queries: assigneeIds.map((id) => ({ queryKey: ["workflow-assignees", id], queryFn: () => workflowAdmin.assignees(id) })) });
+  const roles = useQueries({ queries: roleIds.map((id) => ({ queryKey: ["workflow-assignee-roles", id], queryFn: () => workflowAdmin.roles(id) })) });
+  const roleNames = new Map(roleIds.map((id, index) => [id, roles[index].data?.items.find((item) => item.role_id === id)?.name || id]));
   const names = new Map(assigneeIds.map((id, index) => {
     const lookup = assignees[index];
     const account = assignees[index]?.data?.items.find((item) => item.user_id === id);
@@ -139,7 +152,7 @@ export function WorkflowTemplatesPage() {
         {templates.data?.items.map((item) => <TableRow key={item.id}>
           <TableCell className="max-w-64 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell>
           <TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.revision}</TableCell><TableCell>{item.nodes.length}</TableCell>
-          <TableCell className="max-w-48 truncate text-muted-foreground" title={names.get(item.nodes[0]?.assignee_user_id)}>{item.nodes[0]?.assignee_user_id ? names.get(item.nodes[0].assignee_user_id) : "未配置"}</TableCell>
+          <TableCell className="max-w-48 text-muted-foreground">{[...directUsers(item.nodes[0]).map((id) => names.get(id)), ...(item.nodes[0]?.assignee_role_ids ?? []).map((id) => `角色：${roleNames.get(id)}`)].join("、") || "未配置"}</TableCell>
           <TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link aria-label={`编辑${item.name}，版本 ${item.revision}`} to={`/admin/workflow-templates/${encodeURIComponent(item.id)}`}>编辑</Link></Button></TableCell>
         </TableRow>)}
       </TableBody>
@@ -196,7 +209,9 @@ export function WorkflowTemplateEditorPage() {
           {form.nodes[selectedNode] && <div className="space-y-3">
           <label className="grid gap-1 text-sm">类型<NativeSelect onChange={(e) => editNode({ type: e.target.value as WorkflowNode["type"] })} value={form.nodes[selectedNode].type}><option value="agent">Agent 执行</option><option value="approval">审批</option></NativeSelect></label>
           <label className="grid gap-1 text-sm">标题<Input onChange={(e) => editNode({ title: e.target.value })} value={form.nodes[selectedNode].title} /></label>
-          <div className="grid gap-1 text-sm"><span>负责人</span><AssigneePicker onChange={(assignee_user_id) => editNode({ assignee_user_id })} value={form.nodes[selectedNode].assignee_user_id} /></div>
+          <div className="grid gap-1 text-sm"><span>负责人账户</span><AssigneePicker disabled={busy} onChange={(assignee_user_ids) => editNode({ assignee_user_id: "", assignee_user_ids })} values={directUsers(form.nodes[selectedNode])} /></div>
+          <div className="grid gap-1 text-sm"><span>负责人角色</span><AssigneePicker disabled={busy} role onChange={(assignee_role_ids) => editNode({ assignee_role_ids })} values={form.nodes[selectedNode].assignee_role_ids ?? []} /></div>
+          <p className="text-xs text-muted-foreground">账户与角色成员合并去重；实例发起时固定候选名单，任一候选完成即可流转。</p>
           <label className="grid gap-1 text-sm">说明 / 任务指令<Textarea onChange={(e) => editNode({ instruction: e.target.value })} rows={5} value={form.nodes[selectedNode].instruction} /></label>
           </div>}
         </section></div>

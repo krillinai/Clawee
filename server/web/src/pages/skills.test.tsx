@@ -85,7 +85,47 @@ const productSpace: SkillSpace = {
   createdAt: "2026-08-24T08:00:00Z", updatedAt: "2026-08-24T08:00:00Z"
 };
 
+const approvalConfigurations: Array<{ name: string; config: Partial<SkillSpace> }> = [
+  { name: "仅账户", config: { approvers: defaultSpace.approvers } },
+  { name: "仅角色", config: { approvers: [], approverRoleIds: ["reviewers"] } },
+  { name: "账户与角色", config: { approvers: defaultSpace.approvers, approverRoleIds: ["reviewers"] } },
+  { name: "仅角色详情", config: { approvers: [], approverRoles: [{ roleId: "reviewers", name: "审核组" }] } }
+];
+
 describe("SkillsPage", () => {
+  it.each(approvalConfigurations)("$name 审批通过后，管理员可选择并批量发布", async ({ config }) => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, ...config }, productSpace]);
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "approved", uploadedByUserId: "usr_writer", localApproval: { status: "approved", total: 2, approved: 2, approvers: [] } } }]);
+    publishLatestSkillVersionsMock.mockResolvedValue({ published: [{ skill: unpublished, version: version({ skillId: unpublished.skillId }) }], failed: [] });
+    renderPage([permissions.skillRead, permissions.skillPublish]);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择当前可见的 Skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量发布（1）" }));
+    expect(publishLatestSkillVersionsMock).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "批量发布 Skill" })).getByRole("button", { name: "确认发布 1 个" }));
+    await waitFor(() => expect(publishLatestSkillVersionsMock).toHaveBeenCalledWith([{ skillId: unpublished.skillId, name: unpublished.name }]));
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it.each(approvalConfigurations)("$name 待审时，列表不提供上传者免审发布", async ({ config }) => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, ...config }, productSpace]);
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_reader" } }]);
+    renderPage([permissions.skillRead]);
+    const row = (await screen.findByText(unpublished.name)).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it("钉钉空间不提供本地批量发布或上传者免审入口", async () => {
+    listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approvalProvider: "dingtalk", approvers: [], externalApprovalTemplateId: "PROC-1" }, productSpace]);
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_reader" } }]);
+    renderPage([permissions.skillRead, permissions.skillPublish]);
+    await screen.findByText(unpublished.name);
+    expect(screen.queryByRole("checkbox", { name: "选择当前可见的 Skill" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /批量发布/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
   it("starts with spaces and opens only the selected space's Skills", async () => {
     listSkillsMock.mockResolvedValue([published, { ...unpublished, spaceId: "skillspace_product", spaceName: "产品技能空间" }]);
     renderPage(undefined, "");

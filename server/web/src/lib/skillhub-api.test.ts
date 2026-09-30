@@ -35,10 +35,32 @@ import {
 	uploadSkillVersion,
   listSkillSpaceApproverCandidates,
   setSkillSpaceApprover,
+  setSkillSpaceApproval,
+  listSkillSpaceApproverRoleCandidates,
   reviewSkillVersion
 } from "./skillhub-api";
 
 describe("skillhub api", () => {
+  it("返回直接账户与角色配置来源，角色选择使用空间专用接口", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ space_id: "space-1", name: "审核空间", description: "", updated_at: "2026-09-30T00:00:00Z", approvers: [{ user_id: "a", name: "张三" }], approver_role_ids: ["r"], approver_roles: [{ role_id: "r", name: "审核组" }] }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ role_id: "r", name: "审核组" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listSkillSpaces()).resolves.toMatchObject([{ approvers: [{ userId: "a", name: "张三" }], approverRoleIds: ["r"], approverRoles: [{ roleId: "r", name: "审核组" }] }]);
+    await expect(listSkillSpaceApproverRoleCandidates("space-1", "审核")).resolves.toEqual([{ roleId: "r", name: "审核组" }]);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/admin/skill-spaces/approver-role-candidates?space_id=space-1&query=%E5%AE%A1%E6%A0%B8");
+  });
+
+  it("审批账户和角色各自去重，兼容旧接口并隔离外部提供方", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await setSkillSpaceApprover("space-1", ["a", "a"], true, ["r", "r"]);
+    await setSkillSpaceApproval("space-1", "local", "", [], false, ["r"]);
+    await setSkillSpaceApproval("space-1", "dingtalk", "PROC-1", [], false, ["r"]);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({ space_id: "space-1", approver_user_ids: ["a"], approver_role_ids: ["r"], confirm_reset: true });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toMatchObject({ approver_user_ids: [], approver_role_ids: ["r"], approval_provider: "local" });
+    expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string)).toMatchObject({ approver_role_ids: [], approval_provider: "dingtalk" });
+  });
   it("maps reviewer candidates and sends approval configuration and decisions", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [{ user_id: "reviewer", name: "审批人", email: "reviewer@example.com" }] }))

@@ -1,16 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { workflowAdmin, type WorkflowTemplate } from "@/lib/workflow-api";
 import { WorkflowInstanceDetailPage, WorkflowInstancesPage, WorkflowTemplateEditorPage, WorkflowTemplatesPage } from "./workflow";
 
 vi.mock("@/lib/workflow-api", () => ({
   workflowAdmin: {
-    templates: vi.fn(), template: vi.fn(), assignees: vi.fn(), save: vi.fn(), status: vi.fn(), instances: vi.fn(), instance: vi.fn(), terminate: vi.fn()
+    templates: vi.fn(), template: vi.fn(), assignees: vi.fn(), roles: vi.fn(async () => ({ items: [], meta: { next_cursor: "" } })), save: vi.fn(), status: vi.fn(), instances: vi.fn(), instance: vi.fn(), terminate: vi.fn()
   }
 }));
+
+beforeEach(() => vi.clearAllMocks());
 
 function renderTemplates(path = "/admin/workflow-templates") {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -32,6 +34,35 @@ function renderInstances(path = "/admin/workflow-instances") {
 }
 
 describe("WorkflowTemplatesPage", () => {
+  it("可多选账户与角色，保存全部主体而不是第一人", async () => {
+    vi.mocked(workflowAdmin.assignees).mockResolvedValue({ items: [{ user_id: "a", name: "张三", email: "a@example.com" }, { user_id: "b", name: "李四", email: "b@example.com" }], meta: { next_cursor: "" } });
+    vi.mocked(workflowAdmin.roles).mockResolvedValue({ items: [{ role_id: "reviewers", name: "审核组" }, { role_id: "writers", name: "编写组" }], meta: { next_cursor: "" } });
+    vi.mocked(workflowAdmin.save).mockImplementation(async input => ({ ...input, id: "multi", status: "draft", revision: 1, created_at: "" }) as WorkflowTemplate);
+    renderTemplates("/admin/workflow-templates/new");
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "多人审核" } });
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择负责人" }));
+    fireEvent.click(await screen.findByRole("option", { name: /张三/ }));
+    fireEvent.click(screen.getByRole("option", { name: /李四/ }));
+    await act(async () => { fireEvent.keyDown(screen.getByLabelText("搜索负责人"), { key: "Escape" }); });
+    await waitFor(() => expect(screen.queryByLabelText("搜索负责人")).not.toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "选择负责人角色" })); });
+    fireEvent.click(await screen.findByRole("option", { name: /审核组/ }));
+    fireEvent.click(screen.getByRole("option", { name: /编写组/ }));
+    await act(async () => { fireEvent.keyDown(screen.getByLabelText("搜索负责人角色"), { key: "Escape" }); });
+    expect(screen.getByText(/任一候选完成即可流转/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(workflowAdmin.save).toHaveBeenCalledWith(expect.objectContaining({ nodes: [expect.objectContaining({ assignee_user_ids: ["a", "b"], assignee_role_ids: ["reviewers", "writers"] })] })));
+  });
+
+  it("仅角色节点可以通过前端启用校验", async () => {
+    const template: WorkflowTemplate = { id: "role-template", name: "角色审核", description: "", status: "draft", revision: 1, created_at: "", nodes: [{ node_id: "review", order: 0, type: "approval", title: "审核", instruction: "审核", assignee_user_ids: [], assignee_role_ids: ["reviewers"] }] };
+    vi.mocked(workflowAdmin.template).mockResolvedValue(template);
+    vi.mocked(workflowAdmin.status).mockResolvedValue({ ...template, status: "enabled" });
+    renderTemplates("/admin/workflow-templates/role-template");
+    fireEvent.click(await screen.findByRole("button", { name: "启用" }));
+    await waitFor(() => expect(workflowAdmin.status).toHaveBeenCalledWith("role-template", true));
+  });
   it("shows both editor sections before nodes are added and after the last node is removed", () => {
     renderTemplates("/admin/workflow-templates/new");
     expect(screen.getByRole("heading", { name: "执行顺序" })).toBeInTheDocument();
@@ -126,20 +157,26 @@ describe("WorkflowTemplatesPage", () => {
     expect(screen.getByRole("button", { name: "选择负责人" })).toHaveTextContent("张三");
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(workflowAdmin.save).toHaveBeenCalledWith(expect.objectContaining({
-      nodes: [expect.objectContaining({ assignee_user_id: "user-1" })]
+      nodes: [expect.objectContaining({ assignee_user_ids: ["user-1"] })]
     })));
     expect(await screen.findByRole("heading", { name: "编辑工作流模板" })).toBeInTheDocument();
   });
 });
 
 describe("WorkflowInstancesPage", () => {
+  it("展示实例候选快照和实际处理人，不依赖角色当前成员", async () => {
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "shared-instance", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", started_at: "2026-09-30T00:00:00Z", user_names: { a: "张三", b: "李四" }, nodes: [{ node_id: "review", order: 0, type: "approval", title: "审核", instruction: "审核", assignee_user_id: "a", assignee_role_ids: ["reviewers"], resolved_user_ids: ["a", "b"] }], tasks: [{ task_id: "task-1", node_id: "review", status: "completed", input: {}, assignee_user_id: "a", assignee_user_ids: ["a", "b"], handled_by: "b" }] });
+    renderInstances("/admin/workflow-instances/shared-instance");
+    expect(await screen.findByText("负责人：张三、李四")).toBeInTheDocument();
+    expect(screen.getByText("实际处理人：李四")).toBeInTheDocument();
+  });
   it("shows an empty state when no instances match", async () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [], meta: { next_cursor: "" } });
     renderInstances();
     expect(await screen.findByText("暂无工作流实例")).toBeInTheDocument();
   });
 
-  it("shows the assignee and completion time without a separate handler", async () => {
+  it("shows the assignee, completion time and actual handler", async () => {
     vi.mocked(workflowAdmin.instances).mockResolvedValue({ items: [{ id: "instance-1", template_id: "template-1", template_revision: 1, nodes: [], status: "succeeded", started_by: "a", user_names: { a: "发起人姓名" }, started_at: "2026-09-21T00:00:00Z" }], meta: { next_cursor: "" } });
     vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "instance-1", template_id: "template-1", template_revision: 1, status: "succeeded", started_by: "a", user_names: { a: "发起人姓名", b: "负责人姓名", c: "处理人姓名" }, started_at: "2026-09-21T00:00:00Z", nodes: [{ node_id: "one", order: 0, type: "agent", title: "生成", instruction: "生成", assignee_user_id: "b" }], tasks: [{ task_id: "task-1", node_id: "one", status: "completed", assignee_user_id: "b", input: { text: "初始内容", internal: "不展示" }, output: { text: "**完成**\n\n[参考](https://example.com)\n<script>unsafe()</script>", internal: "也不展示" }, handled_by: "c", completed_at: "2026-09-21T01:00:00Z" }] });
     renderInstances();
@@ -148,7 +185,7 @@ describe("WorkflowInstancesPage", () => {
     expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回列表" })).toHaveAttribute("href", "/admin/workflow-instances");
     expect(await screen.findByText(/负责人：负责人姓名 · 完成于 /)).toBeInTheDocument();
-    expect(screen.queryByText(/处理人：/)).not.toBeInTheDocument();
+    expect(screen.getByText(/实际处理人：/)).toBeInTheDocument();
     expect(screen.getByText("发起人姓名")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开节点“生成”的内容" }));
     expect(screen.getByText("初始内容")).toBeInTheDocument();

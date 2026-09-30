@@ -108,7 +108,10 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
       return response;
     } catch (error) {
       if (error instanceof EnterpriseHttpError) {
-        return reply.code(error.statusCode ?? 503).send(apiError(error.code, '工作流请求失败'));
+        const message = error.upstreamCode === 'invalid_assignees'
+          ? '节点负责人不存在、已禁用，或角色没有有效成员，请联系管理员调整模板'
+          : error.statusCode === 409 ? '任务状态或幂等键已变化，可能已由其他候选处理，请刷新工作流' : '工作流请求失败';
+        return reply.code(error.stage === 'decode' ? 502 : error.statusCode ?? 503).send(apiError(error.code, message));
       }
       return reply.code(503).send(apiError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务暂不可用'));
     }

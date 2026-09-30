@@ -15,6 +15,8 @@ import (
 func workflowError(c *gin.Context, err error) {
 	status, code, message := 500, "internal_error", "工作流操作失败"
 	switch {
+	case errors.Is(err, workflow.ErrAssignees):
+		status, code, message = 400, "invalid_assignees", "节点负责人不存在、已禁用，或角色没有有效成员"
 	case errors.Is(err, workflow.ErrInvalid):
 		status, code, message = 400, "invalid_request", "请求字段无效"
 	case errors.Is(err, workflow.ErrLarge):
@@ -74,10 +76,16 @@ func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow
 			if node.Assignee != "" {
 				ids[node.Assignee] = struct{}{}
 			}
+			for _, user := range node.ResolvedUsers {
+				ids[user] = struct{}{}
+			}
 		}
 		for _, task := range item.Tasks {
 			if task.Assignee != "" {
 				ids[task.Assignee] = struct{}{}
+			}
+			for _, user := range task.AssigneeUsers {
+				ids[user] = struct{}{}
 			}
 			if task.HandledBy != "" {
 				ids[task.HandledBy] = struct{}{}
@@ -126,10 +134,20 @@ func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow
 			if name, ok := names[node.Assignee]; ok {
 				item.UserNames[node.Assignee] = name
 			}
+			for _, user := range node.ResolvedUsers {
+				if name, ok := names[user]; ok {
+					item.UserNames[user] = name
+				}
+			}
 		}
 		for _, task := range item.Tasks {
 			if name, ok := names[task.Assignee]; ok {
 				item.UserNames[task.Assignee] = name
+			}
+			for _, user := range task.AssigneeUsers {
+				if name, ok := names[user]; ok {
+					item.UserNames[user] = name
+				}
 			}
 			if name, ok := names[task.HandledBy]; ok {
 				item.UserNames[task.HandledBy] = name
@@ -176,6 +194,33 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 				return
 			}
 			items = append(items, gin.H{"user_id": id, "name": name, "email": email})
+		}
+		if err = rows.Err(); err != nil {
+			workflowError(c, err)
+			return
+		}
+		workflowList(c, items, "")
+	})
+	admin.GET("/workflow-assignee-roles", requirePermission(opts.RBACService, rbac.PermissionWorkflowTemplateManage), func(c *gin.Context) {
+		query := strings.TrimSpace(c.Query("q"))
+		if len(query) > 100 {
+			workflowError(c, workflow.ErrInvalid)
+			return
+		}
+		rows, err := s.DB.Query(c.Request.Context(), `SELECT role_id,name FROM rbac_roles WHERE ($1='' OR role_id ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%') ORDER BY CASE WHEN role_id=$1 THEN 0 ELSE 1 END,name,role_id LIMIT 50`, query)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		defer rows.Close()
+		items := []gin.H{}
+		for rows.Next() {
+			var id, name string
+			if err = rows.Scan(&id, &name); err != nil {
+				workflowError(c, err)
+				return
+			}
+			items = append(items, gin.H{"role_id": id, "name": name})
 		}
 		if err = rows.Err(); err != nil {
 			workflowError(c, err)

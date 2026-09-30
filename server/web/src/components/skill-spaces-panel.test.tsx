@@ -12,7 +12,9 @@ import {
   removeSkillSpaceMember,
   updateSkillSpaceMember,
   listSkillSpaceApproverCandidates,
-  setSkillSpaceApproval
+  listSkillSpaceApproverRoleCandidates,
+  setSkillSpaceApproval,
+  type SkillSpace
 } from "@/lib/skillhub-api";
 
 import { SkillSpacesPanel } from "./skill-spaces-panel";
@@ -29,6 +31,7 @@ vi.mock("@/lib/skillhub-api", async () => {
     removeSkillSpaceMember: vi.fn(),
     updateSkillSpaceMember: vi.fn(),
     listSkillSpaceApproverCandidates: vi.fn(),
+    listSkillSpaceApproverRoleCandidates: vi.fn(async () => []),
     setSkillSpaceApproval: vi.fn()
   };
 });
@@ -59,6 +62,60 @@ const member = {
 };
 
 describe("SkillSpacesPanel", () => {
+  it.each<{ name: string; config: Partial<SkillSpace>; summary: string }>([
+    { name: "无审批", config: {}, summary: "无需审批" },
+    { name: "仅账户", config: { approvers: [{ userId: "usr_2", name: "李四" }] }, summary: "李四" },
+    { name: "多账户", config: { approvers: [{ userId: "usr_1", name: "张三" }, { userId: "usr_2", name: "李四" }, { userId: "usr_3", name: "王五" }] }, summary: "3 人" },
+    { name: "仅角色", config: { approverRoleIds: ["reviewers"] }, summary: "1 个角色" },
+    { name: "仅角色详情", config: { approverRoles: [{ roleId: "reviewers", name: "审核组" }] }, summary: "1 个角色" },
+    { name: "账户与角色", config: { approvers: [{ userId: "usr_2", name: "李四" }], approverRoleIds: ["reviewers", "writers"] }, summary: "李四、2 个角色" },
+    { name: "钉钉", config: { approvalProvider: "dingtalk", externalApprovalTemplateId: "PROC-1", approverRoleIds: ["reviewers"] }, summary: "钉钉 OA" }
+  ])("$name 空间正确展示审批摘要", async ({ config, summary }) => {
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: false, canUpdateMembers: false });
+    const row = (await screen.findByText(space.name)).closest("tr")!;
+    expect(within(row).getByRole("cell", { name: summary })).toBeInTheDocument();
+    if (summary !== "无需审批") {
+      expect(within(row).queryByText("无需审批")).not.toBeInTheDocument();
+    }
+  });
+
+  it("仅角色配置保持审批开启，不要求选择角色内某个用户", async () => {
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approverRoleIds: ["reviewers"], approverRoles: [{ roleId: "reviewers", name: "审核组" }] }]);
+    vi.mocked(listSkillSpaceApproverRoleCandidates).mockResolvedValue([{ roleId: "reviewers", name: "审核组" }]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const drawer = screen.getByRole("dialog", { name: "空间设置" });
+    expect(within(drawer).getByRole("checkbox", { name: "开启审批" })).toBeChecked();
+    expect(await within(drawer).findByRole("checkbox", { name: "审核组" })).toBeChecked();
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "保存" })).toBeEnabled());
+    fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", [], false, ["reviewers"]));
+  });
+
+  it("账户与多个角色可以同时配置，说明全员通过规则", async () => {
+    vi.mocked(listSkillSpaceApproverRoleCandidates).mockResolvedValue([{ roleId: "reviewers", name: "审核组" }, { roleId: "writers", name: "编写组" }]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const drawer = screen.getByRole("dialog", { name: "空间设置" });
+    fireEvent.click(within(drawer).getByRole("checkbox", { name: "开启审批" }));
+    fireEvent.click(await within(drawer).findByRole("checkbox", { name: /李四/ }));
+    fireEvent.click(await within(drawer).findByRole("checkbox", { name: "审核组" }));
+    fireEvent.click(within(drawer).getByRole("checkbox", { name: "编写组" }));
+    expect(within(drawer).getByText(/账户与角色成员合并去重.*全员通过/)).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2"], false, ["reviewers", "writers"]));
+  });
+
+  it("角色候选加载失败时给出错误且禁止提交", async () => {
+    vi.mocked(listSkillSpaceApproverRoleCandidates).mockRejectedValue(new Error("不可用"));
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
+    fireEvent.click(await screen.findByRole("button", { name: "设置 研发技能" }));
+    const drawer = screen.getByRole("dialog", { name: "空间设置" });
+    fireEvent.click(within(drawer).getByRole("checkbox", { name: "开启审批" }));
+    expect(await within(drawer).findByText("审批角色列表加载失败")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
+  });
   it("hides DingTalk OA when disabled", async () => {
     vi.mocked(getSkillOAAvailability).mockResolvedValue(false);
     renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate: true, canUpdateMembers: false });
@@ -80,7 +137,7 @@ describe("SkillSpacesPanel", () => {
     expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "改为本地审批" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", [], false));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", [], false, []));
   });
 
   it("requires a reviewer when approval is enabled in the settings drawer", async () => {
@@ -90,11 +147,11 @@ describe("SkillSpacesPanel", () => {
     expect(within(dialog).queryByRole("textbox", { name: "空间技能审批人" })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "开启审批" }));
     expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
-    const search = within(dialog).getByRole("textbox", { name: "空间技能审批人" });
+    const search = within(dialog).getByRole("textbox", { name: "直接审批账户" });
     await waitFor(() => expect(search).toBeEnabled());
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /李四/ }));
     fireEvent.submit(dialog.querySelector("form")!);
-    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2"], false));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2"], false, []));
   });
 
   it("requires a template when switching to DingTalk OA", async () => {
@@ -107,7 +164,7 @@ describe("SkillSpacesPanel", () => {
     expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
     fireEvent.change(within(dialog).getByRole("textbox", { name: /钉钉审批模板 ID/ }), { target: { value: "PROC-1" } });
     fireEvent.submit(dialog.querySelector("form")!);
-    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "dingtalk", "PROC-1", [], false));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "dingtalk", "PROC-1", [], false, []));
   });
 
   it("turns approval off without requiring a reviewer", async () => {
@@ -117,7 +174,7 @@ describe("SkillSpacesPanel", () => {
     const drawer = screen.getByRole("dialog", { name: "空间设置" });
     fireEvent.click(within(drawer).getByRole("checkbox", { name: "开启审批" }));
     fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", [], false));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", [], false, []));
   });
 
   it("saves two approvers and confirms a reset only after the server requests it", async () => {
@@ -134,9 +191,9 @@ describe("SkillSpacesPanel", () => {
     fireEvent.click(within(drawer).getByRole("checkbox", { name: /王五/ }));
     fireEvent.click(within(drawer).getByRole("button", { name: "保存" }));
     expect(await screen.findByText(/3 个未发布版本/)).toBeInTheDocument();
-    expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2", "usr_3"], false);
+    expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2", "usr_3"], false, []);
     fireEvent.click(within(screen.getByRole("dialog", { name: "重新审批未发布版本" })).getByRole("button", { name: "确认修改" }));
-    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2", "usr_3"], true));
+    await waitFor(() => expect(setSkillSpaceApproval).toHaveBeenCalledWith("skillspace_dev", "local", "", ["usr_2", "usr_3"], true, []));
   });
 
   beforeEach(() => {
@@ -152,6 +209,7 @@ describe("SkillSpacesPanel", () => {
     vi.mocked(updateSkillSpaceMember).mockResolvedValue(member);
     vi.mocked(removeSkillSpaceMember).mockResolvedValue(undefined);
     vi.mocked(listSkillSpaceApproverCandidates).mockResolvedValue([{ userId: "usr_2", name: "李四", email: "lisi@example.com" }]);
+    vi.mocked(listSkillSpaceApproverRoleCandidates).mockResolvedValue([]);
     vi.mocked(setSkillSpaceApproval).mockResolvedValue(undefined);
   });
 

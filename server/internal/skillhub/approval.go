@@ -9,17 +9,28 @@ import (
 )
 
 func (s *Service) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator)
+}
+
+func (s *Service) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string) (int64, error) {
 	store, ok := s.store.(ReviewStore)
-	if !ok || strings.TrimSpace(spaceID) == "" || strings.TrimSpace(operator) == "" || (provider != "local" && provider != "dingtalk") || provider == "dingtalk" && (template == "" || len(template) > 128 || len(userIDs) != 0) {
+	if !ok || strings.TrimSpace(spaceID) == "" || strings.TrimSpace(operator) == "" || (provider != "local" && provider != "dingtalk") || provider == "dingtalk" && (template == "" || len(template) > 128 || len(userIDs) != 0 || len(roleIDs) != 0) {
 		return 0, ErrInvalidRequest
 	}
-	seen := map[string]bool{}
-	for i, id := range userIDs {
-		if id == "" || id != strings.TrimSpace(id) || seen[id] {
-			return 0, ErrInvalidRequest
+	for _, ids := range [][]string{userIDs, roleIDs} {
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if id == "" || id != strings.TrimSpace(id) || seen[id] {
+				return 0, ErrInvalidRequest
+			}
+			seen[id] = true
 		}
-		seen[id] = true
-		userIDs[i] = id
+	}
+	if roleStore, ok := s.store.(RoleReviewStore); ok {
+		return roleStore.SetSpaceApprovalSubjects(ctx, strings.TrimSpace(spaceID), provider, strings.TrimSpace(template), userIDs, roleIDs, confirmed, operator, s.clock().UTC())
+	}
+	if len(roleIDs) != 0 {
+		return 0, ErrInvalidRequest
 	}
 	return store.SetSpaceApprovers(ctx, strings.TrimSpace(spaceID), provider, strings.TrimSpace(template), userIDs, confirmed, operator, s.clock().UTC())
 }
@@ -50,7 +61,11 @@ func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewe
 	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, s.clock().UTC())
 }
 
-func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+func (s *MemoryStore) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator, now)
+}
+
+func (s *MemoryStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	space, ok := s.spaces[spaceID]
@@ -58,10 +73,34 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 		return 0, ErrSpaceNotFound
 	}
 	if provider == "dingtalk" {
+		if len(roleIDs) != 0 {
+			return 0, ErrInvalidRequest
+		}
 		userIDs = nil
 	}
-	if space.ApprovalProvider == provider && space.ExternalApprovalTemplateID == template && sameApprovers(space.Approvers, userIDs) {
+	if provider == "local" {
+		template = ""
+	}
+	if space.ApprovalProvider == provider && space.ExternalApprovalTemplateID == template && sameApprovers(space.Approvers, userIDs) && sameIDSet(space.ApproverRoleIDs, roleIDs) {
 		return 0, nil
+	}
+	configured := space
+	configured.ApprovalProvider, configured.ExternalApprovalTemplateID = provider, template
+	configured.Approvers = make([]Approver, 0, len(userIDs))
+	for _, id := range userIDs {
+		configured.Approvers = append(configured.Approvers, Approver{UserID: id, Name: id})
+	}
+	configured.ApproverRoleIDs = append([]string{}, roleIDs...)
+	configured.ApproverRoles = []ApprovalRole{}
+	for _, id := range roleIDs {
+		if s.approvalRoleLookup == nil {
+			return 0, ErrInvalidRequest
+		}
+		role, _, err := s.approvalRoleLookup(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		configured.ApproverRoles = append(configured.ApproverRoles, role)
 	}
 	if space.ApprovalProvider != provider || space.ExternalApprovalTemplateID != template {
 		for _, skill := range s.skills {
@@ -90,11 +129,15 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 	if affected > 0 && !confirmed {
 		return affected, nil
 	}
-	space.ApprovalProvider, space.ExternalApprovalTemplateID = provider, template
-	space.Approvers = make([]Approver, 0, len(userIDs))
-	for _, id := range userIDs {
-		space.Approvers = append(space.Approvers, Approver{UserID: id, Name: id})
+	var resolved []Approver
+	if affected > 0 {
+		var err error
+		resolved, err = s.resolveLocalApproversLocked(ctx, configured)
+		if err != nil {
+			return 0, err
+		}
 	}
+	space = configured
 	space.UpdatedBy, space.UpdatedAt = operator, now
 	s.spaces[spaceID] = space
 	for _, skill := range s.skills {
@@ -108,7 +151,7 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 				s.invalidateLocalLocked(v.VersionID)
 				v.ApprovalStatus, v.ApprovedSpaceID, v.ReviewedBy, v.ReviewedAt, v.ReviewComment = "pending", "", "", nil, ""
 				if provider == "local" {
-					s.createLocalLocked(*v, space, now)
+					s.createLocalResolvedLocked(*v, space, resolved, now)
 				}
 			}
 		}

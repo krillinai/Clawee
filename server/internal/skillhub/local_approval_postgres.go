@@ -10,16 +10,27 @@ import (
 
 func createLocalRequest(ctx context.Context, tx pgx.Tx, versionID, spaceID, digest string, now time.Time) error {
 	id := newID("approval")
-	_, err := tx.Exec(ctx, `INSERT INTO approval_requests(id,business_type,business_id,action,scope_type,scope_id,content_digest,status,created_at)
-SELECT $1,'skill_version',$2,'publish','skill_space',$3,$4,'pending',$5 WHERE EXISTS
-(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$3)
+	requestTag, err := tx.Exec(ctx, `INSERT INTO approval_requests(id,business_type,business_id,action,scope_type,scope_id,content_digest,status,created_at,approver_user_ids,approver_role_ids)
+SELECT $1,'skill_version',$2,'publish','skill_space',$3,$4,'pending',$5,
+ARRAY(SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$3 ORDER BY user_id),
+ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$3 ORDER BY role_id)
+WHERE (EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$3)
+OR EXISTS(SELECT 1 FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$3))
 AND (SELECT approval_provider FROM skill_spaces WHERE space_id=$3)='local'`, id, versionID, spaceID, digest, now)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO approval_request_approvers(request_id,user_id,status)
-SELECT $1,user_id,'pending' FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$2
+	tag, err := tx.Exec(ctx, `INSERT INTO approval_request_approvers(request_id,user_id,status)
+SELECT $1,a.user_id,'pending' FROM accounts a JOIN (
+SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$2
+UNION
+SELECT ar.user_id FROM approval_config_roles c JOIN account_roles ar ON ar.role_id=c.role_id
+WHERE c.scope_type='skill_space' AND c.scope_id=$2
+) resolved ON resolved.user_id=a.user_id WHERE a.status='active'
 AND EXISTS (SELECT 1 FROM approval_requests WHERE id=$1)`, id, spaceID)
+	if err == nil && requestTag.RowsAffected() > 0 && tag.RowsAffected() == 0 {
+		return ErrMemberNotFound
+	}
 	return err
 }
 
@@ -36,10 +47,8 @@ func resetStaleLocalRequest(ctx context.Context, tx pgx.Tx, versionID, spaceID, 
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(
 SELECT 1 FROM approval_requests r WHERE r.business_type='skill_version' AND r.business_id=$1 AND r.action='publish'
 AND r.scope_type='skill_space' AND r.scope_id=$2 AND r.content_digest=$3 AND r.status='approved'
-AND NOT EXISTS (SELECT user_id FROM approval_request_approvers WHERE request_id=r.id
-                EXCEPT SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$2)
-AND NOT EXISTS (SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$2
-                EXCEPT SELECT user_id FROM approval_request_approvers WHERE request_id=r.id))`, versionID, spaceID, digest).Scan(&valid); err != nil {
+AND r.approver_user_ids=ARRAY(SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$2 ORDER BY user_id)
+AND r.approver_role_ids=ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$2 ORDER BY role_id))`, versionID, spaceID, digest).Scan(&valid); err != nil {
 		return err
 	}
 	if valid {
@@ -79,7 +88,8 @@ JOIN approval_request_approvers a ON a.request_id=r.id JOIN accounts u ON u.user
 WHERE r.business_type='skill_version' AND r.action='publish' AND r.scope_type='skill_space'
 AND r.status<>'invalidated' AND r.business_id=ANY($1)
 AND EXISTS (SELECT 1 FROM skill_spaces sp WHERE sp.space_id=r.scope_id AND sp.approval_provider='local'
-            AND EXISTS (SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id))
+            AND (EXISTS (SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)
+                 OR EXISTS (SELECT 1 FROM approval_config_roles c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)))
 ORDER BY r.business_id,r.created_at DESC,r.id DESC,u.name,a.user_id`, ids)
 	if err != nil {
 		return nil, err
@@ -122,7 +132,8 @@ func readLocalProgress(ctx context.Context, reader approvalReader, versionID, sp
 	var id, status string
 	err := reader.QueryRow(ctx, `SELECT id,status FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status<>'invalidated'
 AND EXISTS (SELECT 1 FROM skill_spaces sp WHERE sp.space_id=$2 AND sp.approval_provider='local'
-            AND EXISTS (SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id))
+            AND (EXISTS (SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)
+                 OR EXISTS (SELECT 1 FROM approval_config_roles c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)))
 ORDER BY created_at DESC,id DESC LIMIT 1`, versionID, spaceID, digest).Scan(&id, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EnterpriseHttpClient } from '../../src/enterprise/http-client-2026-07-30.js';
+import { createEnterpriseHttpClient, EnterpriseHttpError, type EnterpriseHttpClient } from '../../src/enterprise/http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from '../../src/enterprise/session-manager-2026-07-30.js';
 import { createProjectManager } from '../../src/projects/manager.js';
 import type { RunManager } from '../../src/runs/manager.js';
@@ -17,7 +17,7 @@ import { createWorkflowRunHistory } from '../../src/enterprise/workflow-run-hist
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
     async connect() {}
-    async callTool() { return { structuredContent: { instance_id: 'instance-1', node_id: 'node-1', node_order: 0, instruction: '整理内容', input: { text: '测试主题' } } }; }
+    async callTool() { return { structuredContent: { instance_id: 'instance-1', node_id: 'node-1', node_order: 0, instruction: '整理内容', input: { text: '测试主题' }, assignee_user_id: 'other-user', assignee_user_ids: ['other-user', 'user-1'] } }; }
     async close() {}
   }
 }));
@@ -29,6 +29,73 @@ afterEach(() => {
 });
 
 describe('enterprise workflow execution', () => {
+  it('真实多节点 approve 与历史 null 摘要返回成功，协议失败返回502且保留401/403', async () => {
+    const server = Fastify();
+    const origin = 'https://enterprise.example';
+    const nextTask = { task_id: 'next', instance_id: 'instance-1', node_id: 'next-node', node_order: 1, type: 'agent', status: 'pending', instruction: '执行下一步', assignee_user_id: 'a', assignee_user_ids: ['a', 'b'], input: null };
+    const data = { instance_id: 'instance-1', task_id: 'task-1', status: 'running', next_task: nextTask };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ data }))
+      .mockResolvedValueOnce(Response.json({ data }))
+      .mockResolvedValueOnce(Response.json({ data: { ...data, next_task: { ...nextTask, input: [] } } }))
+      .mockResolvedValueOnce(Response.json({ data: [nextTask], meta: { next_cursor: '', has_next: false } }))
+      .mockResolvedValueOnce(Response.json({ error: { code: 'unauthorized' } }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ error: { code: 'forbidden' } }, { status: 403 }));
+    const db = { prepare: () => ({ run: vi.fn(), get: vi.fn(), all: () => [] }), transaction: <Callback extends (...args: unknown[]) => unknown>(callback: Callback) => callback } as unknown as Database.Database;
+    await registerEnterpriseWorkflowRoutes(server, {
+      db, runs: {} as RunManager, threads: {} as ReturnType<typeof createThreadManager>,
+      session: { getSnapshot: () => ({ status: 'signed_in', account: { subjectId: 'b' } }), requireAccessToken: async () => 'token' } as unknown as EnterpriseSessionManager,
+      http: createEnterpriseHttpClient({ origin, fetch: fetchMock }), origin: () => origin, canExecute: () => false
+    });
+    try {
+      const request = { method: 'POST' as const, url: '/enterprise/workflow-tasks/task-1/decision', payload: { decision: 'approve', comment: '', idempotencyKey: 'same-user-key' } };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await server.inject(request);
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ data });
+      }
+      const malformed = await server.inject(request);
+      expect(malformed.statusCode).toBe(502);
+      expect(malformed.json()).toMatchObject({ error: { code: 'ENTERPRISE_PROTOCOL_ERROR' } });
+      const invalidTasks = await server.inject('/enterprise/workflow-tasks');
+      expect(invalidTasks.statusCode).toBe(502);
+      expect(invalidTasks.json()).toMatchObject({ error: { code: 'ENTERPRISE_PROTOCOL_ERROR' } });
+      for (const statusCode of [401, 403]) {
+        const response = await server.inject(request);
+        expect(response.statusCode).toBe(statusCode);
+        expect(response.json()).toMatchObject({ error: { code: statusCode === 401 ? 'ENTERPRISE_UNAUTHORIZED' : 'ENTERPRISE_FORBIDDEN' } });
+      }
+    } finally { await server.close(); }
+  });
+  it('透传多候选快照和实际处理人，仅转换操作请求的 camel 字段', async () => {
+    const server = Fastify();
+    const data = { id: 'instance-1', nodes: [{ assignee_role_ids: ['reviewers'], resolved_user_ids: ['a', 'b'] }], tasks: [{ task_id: 'task-1', assignee_user_id: 'a', assignee_user_ids: ['a', 'b'], handled_by: 'b' }] };
+    const workflowRequest = vi.fn(async () => ({ data }));
+    const db = { prepare: () => ({ run: vi.fn(), get: vi.fn(), all: () => [] }), transaction: <Callback extends (...args: unknown[]) => unknown>(callback: Callback) => callback } as unknown as Database.Database;
+    await registerEnterpriseWorkflowRoutes(server, {
+      db, runs: {} as RunManager, threads: {} as ReturnType<typeof createThreadManager>,
+      session: { getSnapshot: () => ({ status: 'signed_in', account: { subjectId: 'b' } }), requireAccessToken: async () => 'token' } as unknown as EnterpriseSessionManager,
+      http: { workflowRequest } as unknown as EnterpriseHttpClient,
+      origin: () => 'https://enterprise.example', canExecute: () => false
+    });
+    try {
+      const detail = await server.inject('/enterprise/workflow-instances/instance-1');
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json()).toEqual({ data });
+      await server.inject({ method: 'POST', url: '/enterprise/workflow-tasks/task-1/decision', payload: { decision: 'approve', comment: '通过', idempotencyKey: 'key-b' } });
+      expect(workflowRequest).toHaveBeenLastCalledWith('token', 'POST', '/api/v1/app/workflow-tasks/task-1/decision', { decision: 'approve', comment: '通过', idempotency_key: 'key-b' });
+      await server.inject({ method: 'POST', url: '/enterprise/workflow-templates/template-1/instances', payload: { initialInput: { text: '内容' }, idempotencyKey: 'start-b' } });
+      expect(workflowRequest).toHaveBeenLastCalledWith('token', 'POST', '/api/v1/app/workflow-templates/template-1/instances', { initial_input: { text: '内容' }, idempotency_key: 'start-b' });
+      workflowRequest.mockRejectedValueOnce(new EnterpriseHttpError('ENTERPRISE_INVALID_REQUEST', 'response', 400, 'invalid_assignees'));
+      const invalid = await server.inject({ method: 'POST', url: '/enterprise/workflow-templates/template-1/instances', payload: { initialInput: {}, idempotencyKey: 'invalid' } });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({ error: { code: 'ENTERPRISE_INVALID_REQUEST', message: expect.stringContaining('角色没有有效成员') } });
+      workflowRequest.mockRejectedValueOnce(new EnterpriseHttpError('ENTERPRISE_SKILL_VERSION_CHANGED', 'response', 409, 'conflict'));
+      const conflict = await server.inject({ method: 'POST', url: '/enterprise/workflow-tasks/task-1/decision', payload: { decision: 'approve', comment: '', idempotencyKey: 'again' } });
+      expect(conflict.statusCode).toBe(409);
+      expect(conflict.json().error.message).toContain('其他候选处理');
+    } finally { await server.close(); }
+  });
   it('creates a visible project conversation and binds the run to it without duplicating pending runs', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'clawee-workflow-thread-'));
     directories.push(directory);

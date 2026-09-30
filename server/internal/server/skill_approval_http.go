@@ -62,6 +62,7 @@ func handleSkillSpaceApproval(opts Options) gin.HandlerFunc {
 			Provider        string   `json:"approval_provider"`
 			Template        string   `json:"external_approval_template_id"`
 			ApproverUserIDs []string `json:"approver_user_ids"`
+			ApproverRoleIDs []string `json:"approver_role_ids"`
 			Confirmed       bool     `json:"confirm_reset"`
 		}
 		if decodeSkillJSON(c, &req) != nil {
@@ -97,7 +98,10 @@ func handleSkillSpaceApproval(opts Options) gin.HandlerFunc {
 				return
 			}
 		}
-		count, err := opts.SkillHubService.SetSpaceApprovers(c.Request.Context(), req.SpaceID, req.Provider, req.Template, req.ApproverUserIDs, req.Confirmed, account.UserID)
+		if !checkSkillApprovalRoles(c, opts.RBACService, req.ApproverRoleIDs) {
+			return
+		}
+		count, err := opts.SkillHubService.SetSpaceApprovalSubjects(c.Request.Context(), req.SpaceID, req.Provider, req.Template, req.ApproverUserIDs, req.ApproverRoleIDs, req.Confirmed, account.UserID)
 		if err != nil {
 			skillError(c, err)
 			return

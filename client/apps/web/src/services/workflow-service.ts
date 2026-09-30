@@ -1,11 +1,12 @@
 import type { RuntimeClient } from '../runtime/client.js';
+import type { EnterpriseWorkflowNode, EnterpriseWorkflowTemplate, EnterpriseWorkflowTask, EnterpriseWorkflowInstance, EnterpriseWorkflowResult } from '@clawee/protocol';
 
-export type Node = { node_id: string; order: number; type: 'agent' | 'approval'; title: string; assignee_user_id: string; instruction: string };
-export type Template = { id: string; name: string; description: string; status: string; revision: number; nodes: Node[] };
-export type Task = { task_id: string; instance_id: string; node_id: string; type: 'agent' | 'approval'; status: string; assignee_user_id: string; instruction: string; input: Record<string, unknown>; output?: Record<string, unknown>; decision?: string; comment?: string };
-export type Instance = { id: string; template_id: string; status: string; current_node_id?: string; nodes: Node[]; tasks?: Task[]; started_at: string };
+export type Node = EnterpriseWorkflowNode;
+export type Template = EnterpriseWorkflowTemplate;
+export type Task = EnterpriseWorkflowTask;
+export type Instance = EnterpriseWorkflowInstance;
 export type Page<T> = { data: T[]; meta: { next_cursor: string; has_next: boolean } };
-export type Result = { instance_id: string; task_id: string; status: string };
+export type Result = EnterpriseWorkflowResult;
 
 export function createWorkflowService(client: Pick<RuntimeClient, 'get' | 'post'>) {
   return {

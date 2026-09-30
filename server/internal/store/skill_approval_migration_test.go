@@ -42,7 +42,7 @@ INSERT INTO skill_versions(version_id,skill_id,version,description,package_path,
 VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),now(),'legacy','approved','skillspace_default','writer',now());`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.UpTo(ctx, 64); err != nil {
+	if _, err = provider.UpTo(ctx, 66); err != nil {
 		t.Fatal(err)
 	}
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
@@ -109,7 +109,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceMember(ctx, target.SpaceID, "reviewer", []string{skillhub.SpaceActionRead}, "writer", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, false, "writer"); err != nil {
+	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.GetPublished(ctx, "legacy"); err != nil {
@@ -151,7 +151,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.Down(ctx); err != nil {
+	if _, err = provider.DownTo(ctx, 63); err != nil {
 		t.Fatal(err)
 	}
 	var restored string

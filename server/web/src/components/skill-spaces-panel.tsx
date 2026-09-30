@@ -16,10 +16,12 @@ import {
   addSkillSpaceMember,
   createSkillSpace,
   getSkillOAAvailability,
+  hasLocalSkillApproval,
   listSkillSpaceCandidates,
   listSkillSpaceMembers,
   listSkillSpaces,
   listSkillSpaceApproverCandidates,
+  listSkillSpaceApproverRoleCandidates,
   setSkillSpaceApproval,
   removeSkillSpaceMember,
   updateSkillSpace,
@@ -54,16 +56,19 @@ export function SkillSpacesPanel({
   const [description, setDescription] = useState("");
   const [approverTarget, setApproverTarget] = useState<SkillSpace | null>(null);
   const [approverUserIds, setApproverUserIds] = useState<string[]>([]);
+  const [approverRoleIds, setApproverRoleIds] = useState<string[]>([]);
   const [candidateSearch, setCandidateSearch] = useState("");
+  const [roleSearch, setRoleSearch] = useState("");
   const [resetCount, setResetCount] = useState(0);
   const [approvalEnabled, setApprovalEnabled] = useState(false);
   const [approvalProvider, setApprovalProvider] = useState<"local" | "dingtalk">("local");
   const [templateId, setTemplateId] = useState("");
   const candidatesQuery = useQuery({ queryKey: ["skill-space-approver-candidates",approverTarget?.spaceId], queryFn: () => listSkillSpaceApproverCandidates(approverTarget!.spaceId), enabled: Boolean(approverTarget) });
+  const roleCandidatesQuery = useQuery({ queryKey: ["skill-space-approver-role-candidates", approverTarget?.spaceId], queryFn: () => listSkillSpaceApproverRoleCandidates(approverTarget!.spaceId), enabled: Boolean(approverTarget) && approvalProvider === "local" && approvalEnabled });
   const approverMutation = useMutation({
     mutationFn: async (confirmed: boolean) => {
       const spaceId = approverTarget!.spaceId;
-      await setSkillSpaceApproval(spaceId, approvalProvider, approvalProvider === "dingtalk" ? trimInput(templateId) : "", approvalProvider === "local" && approvalEnabled ? approverUserIds : [], confirmed);
+      await setSkillSpaceApproval(spaceId, approvalProvider, approvalProvider === "dingtalk" ? trimInput(templateId) : "", approvalProvider === "local" && approvalEnabled ? approverUserIds : [], confirmed, approvalProvider === "local" && approvalEnabled ? approverRoleIds : []);
     },
     onError: (error) => {
       if (error instanceof APIError && error.code === "approval_reset_required") setResetCount(Number(error.details[0]?.affected_versions ?? 0));
@@ -128,10 +133,10 @@ export function SkillSpacesPanel({
         {!spacesQuery.isLoading && !spacesQuery.isError && spaces.length === 0 ? <TableStateRow colSpan={7}><EmptyState title="暂无技能空间" /></TableStateRow> : null}
         {spaces.map((space) => <TableRow key={space.spaceId}>
           <TableCell><div className="text-sm font-medium leading-5">{space.name}</div><div className="mt-0.5 max-w-96 truncate text-[13px] leading-5 text-muted-foreground">{space.description || "-"}</div></TableCell>
-          <TableCell>{space.approvalProvider === "dingtalk" ? "钉钉 OA" : space.approvers.length ? space.approvers.length <= 2 ? space.approvers.map((person) => person.name || person.userId).join("、") : `${space.approvers.length} 人` : "无需审批"}</TableCell>
+          <TableCell>{approvalSummary(space)}</TableCell>
           <TableCell className="text-right font-mono text-sm">{space.memberCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.skillCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.publishedCount}</TableCell>
           <TableCell className="font-mono text-[13px] text-muted-foreground">{formatDateTime(space.updatedAt)}</TableCell>
-          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`查看 ${space.name} Skill`} onClick={() => onOpenSpace(space.spaceId)} size="sm" variant="secondary">查看 Skill</Button><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <><Button aria-label={`设置 ${space.name}`} onClick={() => { setApproverTarget(space); setApprovalEnabled(Boolean(space.approvers.length)); setApproverUserIds(space.approvers.map((person) => person.userId)); setCandidateSearch(""); setResetCount(0); setApprovalProvider(space.approvalProvider ?? "local"); setTemplateId(space.externalApprovalTemplateId ?? ""); approverMutation.reset(); }} size="sm" variant="secondary"><Settings2 data-icon="inline-start" aria-hidden="true" />设置</Button><Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button></> : null}</div></TableCell>
+          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`查看 ${space.name} Skill`} onClick={() => onOpenSpace(space.spaceId)} size="sm" variant="secondary">查看 Skill</Button><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <><Button aria-label={`设置 ${space.name}`} onClick={() => { setApproverTarget(space); setApprovalEnabled(Boolean(space.approvers.length || space.approverRoleIds?.length || space.approverRoles?.length)); setApproverRoleIds(space.approverRoleIds ?? space.approverRoles?.map((role) => role.roleId) ?? []); setRoleSearch(""); setApproverUserIds(space.approvers.map((person) => person.userId)); setCandidateSearch(""); setResetCount(0); setApprovalProvider(space.approvalProvider ?? "local"); setTemplateId(space.externalApprovalTemplateId ?? ""); approverMutation.reset(); }} size="sm" variant="secondary"><Settings2 data-icon="inline-start" aria-hidden="true" />设置</Button><Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button></> : null}</div></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
@@ -146,17 +151,29 @@ export function SkillSpacesPanel({
           {!oaEnabled && approvalProvider === "dingtalk" ? <Field><FieldLabel>审批方式</FieldLabel><span>当前为钉钉 OA（已停用）</span><Button type="button" variant="outline" onClick={() => setApprovalProvider("local")}>改为本地审批</Button></Field> : <Field><FieldLabel htmlFor="skill-space-provider">审批方式</FieldLabel><Select value={approvalProvider} onValueChange={(value) => setApprovalProvider(value as "local" | "dingtalk")}><SelectTrigger id="skill-space-provider"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="local">本地审批</SelectItem>{oaEnabled ? <SelectItem value="dingtalk">钉钉 OA</SelectItem> : null}</SelectContent></Select></Field>}
           {approvalProvider === "dingtalk" && oaEnabled ? <Field><FieldLabel htmlFor="skill-space-template">钉钉审批模板 ID（processCode）</FieldLabel><Input id="skill-space-template" maxLength={128} required value={templateId} onChange={(event) => setTemplateId(event.target.value)} /></Field> : null}
           {approvalProvider === "local" ? <Field orientation="horizontal"><Checkbox id="skill-space-approval" checked={approvalEnabled} onCheckedChange={(checked) => setApprovalEnabled(checked === true)} /><FieldLabel htmlFor="skill-space-approval">开启审批</FieldLabel></Field> : null}
-          {approvalProvider === "local" && approvalEnabled ? <Field><FieldLabel htmlFor="skill-space-approver">空间技能审批人</FieldLabel><span className="text-xs text-muted-foreground">需全部通过</span>
+          {approvalProvider === "local" && approvalEnabled ? <Field><FieldLabel htmlFor="skill-space-approver">直接审批账户</FieldLabel><span className="text-xs text-muted-foreground">账户与角色成员合并去重，提交时固定名单；需全员通过。</span>
             <div className="flex flex-wrap gap-2">{approverUserIds.map((id) => { const person = candidatesQuery.data?.find((candidate) => candidate.userId === id) ?? approverTarget?.approvers.find((candidate) => candidate.userId === id); return <Button key={id} type="button" variant="outline" size="sm" onClick={() => setApproverUserIds((items) => items.filter((item) => item !== id))} aria-label={`移除 ${person?.name || id}`}>{person?.name || id}<X aria-hidden="true" /></Button>; })}</div>
             <Input id="skill-space-approver" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} placeholder="搜索审批人" />
             <div className="max-h-48 overflow-y-auto border border-border p-2" role="group" aria-label="可选审批人">
               {candidatesQuery.isLoading ? <LoadingState label="正在加载审批人" /> : null}
-              {candidatesQuery.data?.filter((person) => `${person.name} ${person.email}`.toLowerCase().includes(candidateSearch.toLowerCase())).map((person) => <label key={person.userId} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm"><Checkbox checked={approverUserIds.includes(person.userId)} onCheckedChange={(checked) => setApproverUserIds((items) => checked ? [...items, person.userId] : items.filter((id) => id !== person.userId))} />{person.name} · {person.email}</label>)}
+              {candidatesQuery.data?.filter((person) => `${person.name} ${person.email}`.toLowerCase().includes(candidateSearch.toLowerCase())).map((person) => <label key={person.userId} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm"><Checkbox checked={approverUserIds.includes(person.userId)} onCheckedChange={(checked) => setApproverUserIds((items) => checked ? [...new Set([...items, person.userId])] : items.filter((id) => id !== person.userId))} />{person.name} · {person.email}</label>)}
             </div>
           </Field> : null}
+          {approvalProvider === "local" && approvalEnabled ? <Field>
+            <FieldLabel htmlFor="skill-space-approver-role">审批角色</FieldLabel>
+            <div className="flex flex-wrap gap-2">{approverRoleIds.map((id) => { const role = roleCandidatesQuery.data?.find((item) => item.roleId === id) ?? approverTarget?.approverRoles?.find((item) => item.roleId === id); return <Button key={id} type="button" variant="outline" size="sm" onClick={() => setApproverRoleIds((items) => items.filter((item) => item !== id))} aria-label={`移除审批角色 ${role?.name || id}`}>{role?.name || id}<X aria-hidden="true" /></Button>; })}</div>
+            <Input id="skill-space-approver-role" value={roleSearch} onChange={(event) => setRoleSearch(event.target.value)} placeholder="搜索审批角色" />
+            <div className="max-h-48 overflow-y-auto border border-border p-2" role="group" aria-label="可选审批角色">
+              {roleCandidatesQuery.isLoading ? <LoadingState label="正在加载审批角色" /> : null}
+              {roleCandidatesQuery.data?.filter((role) => `${role.name} ${role.roleId}`.toLowerCase().includes(roleSearch.toLowerCase())).map((role) => <label key={role.roleId} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm"><Checkbox checked={approverRoleIds.includes(role.roleId)} onCheckedChange={(checked) => setApproverRoleIds((items) => checked ? [...new Set([...items, role.roleId])] : items.filter((id) => id !== role.roleId))} />{role.name}</label>)}
+              {!roleCandidatesQuery.isLoading && !roleCandidatesQuery.isError && !roleCandidatesQuery.data?.some((role) => `${role.name} ${role.roleId}`.toLowerCase().includes(roleSearch.toLowerCase())) ? <p className="text-sm text-muted-foreground">暂无匹配角色</p> : null}
+            </div>
+            <span className="text-xs text-muted-foreground">所选角色的全部有效成员参与审批，无需再从角色内挑选账户。</span>
+          </Field> : null}
           {approvalProvider === "local" && approvalEnabled && candidatesQuery.isError ? <ErrorAlert>审批人列表加载失败</ErrorAlert> : null}
+          {approvalProvider === "local" && approvalEnabled && roleCandidatesQuery.isError ? <ErrorAlert>审批角色列表加载失败</ErrorAlert> : null}
           {approverMutation.isError && !resetCount ? <ErrorAlert>保存失败：{errorText(approverMutation.error)}</ErrorAlert> : null}
-          <Field className="justify-end" orientation="horizontal"><Button disabled={approverMutation.isPending} type="button" variant="outline" onClick={() => setApproverTarget(null)}>取消</Button><Button disabled={approverMutation.isPending || (approvalProvider === "dingtalk" ? !oaEnabled || !trimInput(templateId) : approvalEnabled && (approverUserIds.length === 0 || candidatesQuery.isLoading || candidatesQuery.isError))} type="submit" variant="primary">保存</Button></Field>
+          <Field className="justify-end" orientation="horizontal"><Button disabled={approverMutation.isPending} type="button" variant="outline" onClick={() => setApproverTarget(null)}>取消</Button><Button disabled={approverMutation.isPending || (approvalProvider === "dingtalk" ? !oaEnabled || !trimInput(templateId) : approvalEnabled && (approverUserIds.length + approverRoleIds.length === 0 || candidatesQuery.isLoading || candidatesQuery.isError || roleCandidatesQuery.isLoading || roleCandidatesQuery.isError))} type="submit" variant="primary">保存</Button></Field>
         </FieldGroup>
       </form>
     </DetailDrawer>
@@ -181,6 +198,18 @@ export function SkillSpacesPanel({
       resourceName={authorizationTarget?.name ?? ""}
     />
   </section>;
+}
+
+function approvalSummary(space: SkillSpace): string {
+  if (space.approvalProvider === "dingtalk") return "钉钉 OA";
+  if (!hasLocalSkillApproval(space)) return "无需审批";
+  const summaries: string[] = [];
+  if (space.approvers.length) {
+    summaries.push(space.approvers.length <= 2 ? space.approvers.map((person) => person.name || person.userId).join("、") : `${space.approvers.length} 人`);
+  }
+  const roleCount = space.approverRoleIds?.length || space.approverRoles?.length || 0;
+  if (roleCount) summaries.push(`${roleCount} 个角色`);
+  return summaries.join("、");
 }
 
 function errorText(error: unknown) { return error instanceof Error ? error.message : String(error); }

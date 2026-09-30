@@ -9,6 +9,10 @@ import (
 )
 
 func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator, now)
+}
+
+func (s *PostgresStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -21,6 +25,9 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 	if provider == "local" {
 		template = ""
 	} else {
+		if len(roleIDs) != 0 {
+			return 0, ErrInvalidRequest
+		}
 		userIDs = nil
 	}
 	rows, err := tx.Query(ctx, `SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1 ORDER BY user_id`, spaceID)
@@ -41,16 +48,28 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 	if err != nil {
 		return 0, err
 	}
-	if oldProvider == provider && oldTemplate == template && sameIDSet(oldIDs, userIDs) {
+	var oldRoleIDs []string
+	if err = tx.QueryRow(ctx, `SELECT ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1 ORDER BY role_id)`, spaceID).Scan(&oldRoleIDs); err != nil {
+		return 0, err
+	}
+	if oldProvider == provider && oldTemplate == template && sameIDSet(oldIDs, userIDs) && sameIDSet(oldRoleIDs, roleIDs) {
 		return 0, nil
 	}
 	for _, id := range userIDs {
 		var allowed bool
-		err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM data_resource_grants WHERE resource_type='skill_space' AND resource_id=$2 AND action='read' AND user_id=$1) FROM accounts WHERE user_id=$1 FOR SHARE`, id, spaceID).Scan(&allowed)
+		err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM effective_data_resource_permissions WHERE resource_type='skill_space' AND resource_id=$2 AND action='read' AND user_id=$1) FROM accounts WHERE user_id=$1 FOR SHARE`, id, spaceID).Scan(&allowed)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !allowed {
 			return 0, ErrMemberNotFound
 		}
 		if err != nil {
+			return 0, err
+		}
+	}
+	for _, id := range roleIDs {
+		var found string
+		if err = tx.QueryRow(ctx, `SELECT role_id FROM rbac_roles WHERE role_id=$1 FOR SHARE`, id).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrInvalidRequest
+		} else if err != nil {
 			return 0, err
 		}
 	}
@@ -96,6 +115,14 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 	}
 	for _, id := range userIDs {
 		if _, err = tx.Exec(ctx, `INSERT INTO approval_config_approvers(scope_type,scope_id,user_id) VALUES('skill_space',$1,$2)`, spaceID, id); err != nil {
+			return 0, err
+		}
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1`, spaceID); err != nil {
+		return 0, err
+	}
+	for _, id := range roleIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO approval_config_roles(scope_type,scope_id,role_id) VALUES('skill_space',$1,$2)`, spaceID, id); err != nil {
 			return 0, err
 		}
 	}
@@ -159,7 +186,7 @@ func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, r
 		return Version{}, ErrConflict
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, reviewer).Scan(&active); err != nil || !active {
+	if err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM effective_data_resource_permissions WHERE user_id=$1 AND resource_type='skill_space' AND resource_id=$2 AND action='read') FROM accounts WHERE user_id=$1 FOR SHARE`, reviewer, spaceID).Scan(&active); err != nil || !active {
 		return Version{}, ErrReviewForbidden
 	}
 	var version Version
@@ -210,7 +237,7 @@ FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id W
 			return Version{}, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status=$2,approved_space_id=CASE WHEN $2='approved' THEN $3 ELSE NULL END,reviewed_by=CASE WHEN $2='pending' THEN NULL ELSE $4 END,reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE $5 END,review_comment=CASE WHEN $2='pending' THEN '' ELSE $6 END WHERE version_id=$1`, versionID, status, spaceID, reviewer, now, comment); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status=$2,approved_space_id=CASE WHEN $2='approved' THEN $3 ELSE NULL END,reviewed_by=CASE WHEN $2='pending' THEN NULL ELSE $4 END,reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE $5::timestamptz END,review_comment=CASE WHEN $2='pending' THEN '' ELSE $6 END WHERE version_id=$1`, versionID, status, spaceID, reviewer, now, comment); err != nil {
 		return Version{}, err
 	}
 	version.LocalApproval, err = readLocalProgress(ctx, tx, versionID, spaceID, version.PackageSHA256)

@@ -11,10 +11,11 @@ import (
 )
 
 const spaceSummarySelect = `SELECT sp.space_id,sp.name,sp.description,sp.created_by,sp.updated_by,sp.created_at,sp.updated_at,
-(SELECT count(DISTINCT g.user_id) FROM data_resource_grants g WHERE g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.action='read'),
+(SELECT count(DISTINCT g.user_id) FROM effective_data_resource_permissions g WHERE g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.action='read'),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id),
 (SELECT count(*) FROM skills s WHERE s.space_id=sp.space_id AND s.current_version_id IS NOT NULL),
-COALESCE((SELECT json_agg(json_build_object('user_id',c.user_id,'name',COALESCE(a.name,'')) ORDER BY a.name,c.user_id) FROM approval_config_approvers c JOIN accounts a ON a.user_id=c.user_id WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id),'[]'::json),sp.approval_provider,sp.external_approval_template_id
+COALESCE((SELECT json_agg(json_build_object('user_id',c.user_id,'name',COALESCE(a.name,'')) ORDER BY a.name,c.user_id) FROM approval_config_approvers c JOIN accounts a ON a.user_id=c.user_id WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id),'[]'::json),sp.approval_provider,sp.external_approval_template_id,
+COALESCE((SELECT json_agg(json_build_object('role_id',c.role_id,'name',r.name) ORDER BY r.name,c.role_id) FROM approval_config_roles c JOIN rbac_roles r ON r.role_id=c.role_id WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id),'[]'::json)
 FROM skill_spaces sp`
 
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
@@ -80,7 +81,7 @@ func (s *PostgresStore) GetSpace(ctx context.Context, spaceID string) (SpaceSumm
 func (s *PostgresStore) ListAuthorizedSpaces(ctx context.Context, userID string) ([]Space, error) {
 	rows, err := s.pool.Query(ctx, `SELECT sp.space_id,sp.name,sp.description,sp.updated_at,
 	bool_or(g.action='read'),bool_or(g.action='write'),sp.approval_provider,sp.external_approval_template_id
-FROM skill_spaces sp JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.user_id=$1
+FROM skill_spaces sp JOIN effective_data_resource_permissions g ON g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.user_id=$1
 GROUP BY sp.space_id ORDER BY sp.updated_at DESC,sp.space_id`, userID)
 	if err != nil {
 		return nil, err
@@ -108,7 +109,7 @@ GROUP BY sp.space_id ORDER BY sp.updated_at DESC,sp.space_id`, userID)
 
 func (s *PostgresStore) CheckSpaceAccess(ctx context.Context, userID, spaceID, action string) error {
 	var found string
-	err := s.pool.QueryRow(ctx, `SELECT sp.space_id FROM skill_spaces sp JOIN data_resource_grants g
+	err := s.pool.QueryRow(ctx, `SELECT sp.space_id FROM skill_spaces sp JOIN effective_data_resource_permissions g
 ON g.resource_type='skill_space' AND g.resource_id=sp.space_id AND g.user_id=$1 AND g.action=$2
 WHERE sp.space_id=$3`, userID, action, spaceID).Scan(&found)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -119,7 +120,7 @@ WHERE sp.space_id=$3`, userID, action, spaceID).Scan(&found)
 
 func (s *PostgresStore) CheckSkillAccess(ctx context.Context, userID, skillID, action string) error {
 	var found string
-	err := s.pool.QueryRow(ctx, `SELECT sk.skill_id FROM skills sk JOIN data_resource_grants g
+	err := s.pool.QueryRow(ctx, `SELECT sk.skill_id FROM skills sk JOIN effective_data_resource_permissions g
 ON g.resource_type='skill_space' AND g.resource_id=sk.space_id AND g.user_id=$1 AND g.action=$2
 WHERE sk.skill_id=$3`, userID, action, skillID).Scan(&found)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -214,13 +215,20 @@ func (s *PostgresStore) RemoveSpaceMember(ctx context.Context, spaceID, userID s
 }
 
 func scanSpaceSummary(row rowScanner, item *SpaceSummary) error {
-	var approvers []byte
+	var approvers, roles []byte
 	if err := row.Scan(&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt,
-		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &approvers, &item.ApprovalProvider, &item.ExternalApprovalTemplateID); err != nil {
+		&item.MemberCount, &item.SkillCount, &item.PublishedCount, &approvers, &item.ApprovalProvider, &item.ExternalApprovalTemplateID, &roles); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(approvers, &item.Approvers); err != nil {
 		return err
+	}
+	if err := json.Unmarshal(roles, &item.ApproverRoles); err != nil {
+		return err
+	}
+	item.ApproverRoleIDs = make([]string, 0, len(item.ApproverRoles))
+	for _, role := range item.ApproverRoles {
+		item.ApproverRoleIDs = append(item.ApproverRoleIDs, role.RoleID)
 	}
 	item.CreatedAt, item.UpdatedAt = item.CreatedAt.UTC(), item.UpdatedAt.UTC()
 	return nil

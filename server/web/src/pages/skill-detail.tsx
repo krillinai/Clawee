@@ -42,6 +42,7 @@ import {
   getSkill,
   getSkillVersionFile,
   getSkillVersionPackageURL,
+  hasLocalSkillApproval,
   listSkillVersionFiles,
   listSkillSpaces,
   publishOwnSkillVersion,
@@ -134,7 +135,7 @@ export function SkillDetailPage() {
   });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const space = spacesQuery.data?.find((item) => item.spaceId === detailQuery.data?.skill.spaceId);
-  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !space.approvers.length && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
+  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !hasLocalSkillApproval(space) && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
   const canSubmitApproval = (version: SkillVersion) => Boolean(space?.approvalProvider === "dingtalk" && !version.source && version.versionId !== detailQuery.data?.skill.currentVersionId && account?.userId === version.uploadedByUserId && (!version.approvalInstance || ["failed", "terminated"].includes(version.approvalInstance.status) || version.approvalInstance.status === "finished" && version.approvalInstance.decision === "rejected"));
   const approvalMutation = useMutation({
     mutationFn: (input: { version: SkillVersion; action: "submit" | "sync" | "not_created" | "bind_instance"; providerId?: string }) => {
@@ -215,7 +216,7 @@ export function SkillDetailPage() {
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
           onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
-          canPublish: canPublish && Boolean(space?.approvers.length || space?.approvalProvider === "dingtalk"),
+          canPublish: canPublish && (hasLocalSkillApproval(space) || space?.approvalProvider === "dingtalk"),
           canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,

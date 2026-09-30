@@ -14,6 +14,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/rbac"
+	"github.com/krillinai/Clawee/server/internal/skillhub"
 )
 
 type dataResourceGrantSearchRequest struct {
@@ -27,6 +28,7 @@ type dataResourceGrantSearchRequest struct {
 
 type dataResourceGrantMutationRequest struct {
 	UserID       string   `json:"user_id"`
+	RoleID       string   `json:"role_id"`
 	ResourceType string   `json:"resource_type"`
 	ResourceID   string   `json:"resource_id"`
 	Actions      []string `json:"actions"`
@@ -95,6 +97,14 @@ type dataResourceGrantCandidateResponse struct {
 	Email  string `json:"email"`
 }
 
+type dataResourceGrantRoleResponse struct {
+	RoleID    string     `json:"role_id"`
+	Name      string     `json:"name"`
+	Actions   []string   `json:"actions"`
+	Granted   bool       `json:"granted"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
 func mountDataResourceGrantRoutes(admin *gin.RouterGroup, opts Options) {
 	if opts.DataAccessService == nil || opts.AccountService == nil {
 		return
@@ -106,6 +116,9 @@ func mountDataResourceGrantRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/data-resource-grants/users/search", read, handleDataResourceGrantUsers(opts))
 	admin.POST("/data-resource-grants/members/search", read, handleDataResourceGrantMembers(opts))
 	admin.POST("/data-resource-grants/member-candidates/search", requireAnyPermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMemberCandidates(opts))
+	admin.POST("/data-resource-grants/roles/search", read, handleDataResourceGrantRoles(opts, "actions"))
+	admin.POST("/data-resource-grants/role-members/search", read, handleDataResourceGrantRoles(opts, "members"))
+	admin.POST("/data-resource-grants/role-candidates/search", requireAnyPermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantRoles(opts, "candidates"))
 	admin.POST("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantCreate), handleDataResourceGrantMutation(opts, false))
 	admin.PUT("/data-resource-grants", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantUpdate), handleDataResourceGrantMutation(opts, true))
 	admin.POST("/data-resource-grants/remove", requirePermission(opts.RBACService, rbac.PermissionDataResourceGrantDelete), handleDataResourceGrantRemove(opts))
@@ -119,13 +132,14 @@ func handleDataResourceGrantMutation(opts Options, replace bool) gin.HandlerFunc
 			return
 		}
 		operator, _ := currentAccount(c)
-		input := dataaccess.SetInput{UserID: request.UserID, ResourceType: request.ResourceType, ResourceID: request.ResourceID,
+		normalizeDataResourceGrantSubject(&request)
+		input := dataaccess.SetInput{UserID: request.UserID, RoleID: request.RoleID, ResourceType: request.ResourceType, ResourceID: request.ResourceID,
 			Actions: request.Actions, CreatedBy: operator.UserID, OperatorID: operator.UserID, RequestID: requestIDFromContext(c.Request.Context())}
-		if target, err := opts.AccountService.Account(c.Request.Context(), request.UserID); err != nil || target.Status != accounts.StatusActive {
+		if err := validateDataResourceGrantSubject(c.Request.Context(), opts, request, true); err != nil {
 			if !recordDataResourceGrantFailure(c, opts, input) {
 				return
 			}
-			dataResourceGrantMutationError(c, dataaccess.ErrNotFound)
+			dataResourceGrantMutationError(c, err)
 			return
 		}
 		var (
@@ -160,10 +174,15 @@ func handleDataResourceGrantRemove(opts Options) gin.HandlerFunc {
 			return
 		}
 		operator, _ := currentAccount(c)
-		err := opts.DataAccessService.RemoveBy(c.Request.Context(), request.UserID, request.ResourceType, request.ResourceID, operator.UserID, requestIDFromContext(c.Request.Context()))
+		normalizeDataResourceGrantSubject(&request)
+		input := dataaccess.SetInput{UserID: request.UserID, RoleID: request.RoleID, ResourceType: request.ResourceType,
+			ResourceID: request.ResourceID, CreatedBy: operator.UserID, OperatorID: operator.UserID, RequestID: requestIDFromContext(c.Request.Context())}
+		err := validateDataResourceGrantSubject(c.Request.Context(), opts, request, false)
+		if err == nil {
+			err = opts.DataAccessService.RemoveSubject(c.Request.Context(), input)
+		}
 		if err != nil {
-			if !recordDataResourceGrantFailure(c, opts, dataaccess.SetInput{UserID: request.UserID, ResourceType: request.ResourceType,
-				ResourceID: request.ResourceID, CreatedBy: operator.UserID, OperatorID: operator.UserID, RequestID: requestIDFromContext(c.Request.Context())}) {
+			if !recordDataResourceGrantFailure(c, opts, input) {
 				return
 			}
 			dataResourceGrantMutationError(c, err)
@@ -171,6 +190,48 @@ func handleDataResourceGrantRemove(opts Options) gin.HandlerFunc {
 		}
 		c.Status(http.StatusNoContent)
 	}
+}
+
+func normalizeDataResourceGrantSubject(request *dataResourceGrantMutationRequest) {
+	request.UserID = strings.TrimSpace(request.UserID)
+	request.RoleID = strings.TrimSpace(request.RoleID)
+	request.ResourceType = strings.TrimSpace(request.ResourceType)
+	request.ResourceID = strings.TrimSpace(request.ResourceID)
+}
+
+func validateDataResourceGrantSubject(ctx context.Context, opts Options, request dataResourceGrantMutationRequest, requireActive bool) error {
+	if (request.UserID == "") == (request.RoleID == "") {
+		return dataaccess.ErrInvalidRequest
+	}
+	if request.RoleID == "" {
+		if !requireActive {
+			return nil
+		}
+		target, err := opts.AccountService.Account(ctx, request.UserID)
+		if err != nil || target.Status != accounts.StatusActive {
+			return dataaccess.ErrNotFound
+		}
+		return nil
+	}
+	if request.ResourceType != dataaccess.ResourceSkillSpace || request.ResourceID == "" {
+		return dataaccess.ErrInvalidRequest
+	}
+	if opts.RBACService == nil || opts.SkillHubService == nil {
+		return dataaccess.ErrNotFound
+	}
+	if _, err := opts.RBACService.GetRole(ctx, request.RoleID); err != nil {
+		if errors.Is(err, rbac.ErrRoleNotFound) {
+			return dataaccess.ErrNotFound
+		}
+		return err
+	}
+	if _, err := opts.SkillHubService.GetSpace(ctx, request.ResourceID); err != nil {
+		if errors.Is(err, skillhub.ErrSpaceNotFound) {
+			return dataaccess.ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func recordDataResourceGrantFailure(c *gin.Context, opts Options, input dataaccess.SetInput) bool {
@@ -191,7 +252,7 @@ func dataResourceGrantMutationError(c *gin.Context, err error) {
 	case errors.Is(err, dataaccess.ErrConflict):
 		activityError(c, http.StatusConflict, "grant_conflict", "数据资源授权已存在")
 	case errors.Is(err, dataaccess.ErrNotFound):
-		activityError(c, http.StatusNotFound, "grant_not_found", "数据资源授权或目标账户不存在")
+		activityError(c, http.StatusNotFound, "grant_not_found", "数据资源授权、资源或目标账户/角色不存在")
 	default:
 		activityError(c, http.StatusInternalServerError, "data_resource_grant_failed", "数据资源授权操作失败")
 	}
@@ -368,6 +429,83 @@ func bindDataResourceGrantSearch(c *gin.Context, request *dataResourceGrantSearc
 	request.Action = strings.TrimSpace(request.Action)
 	request.Query = strings.TrimSpace(request.Query)
 	return true
+}
+
+func handleDataResourceGrantRoles(opts Options, mode string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request dataResourceGrantSearchRequest
+		if !bindDataResourceGrantSearch(c, &request) {
+			return
+		}
+		if request.ResourceType != dataaccess.ResourceSkillSpace || request.ResourceID == "" ||
+			(mode == "actions" && request.Action != dataaccess.ActionRead && request.Action != dataaccess.ActionWrite) ||
+			(mode != "actions" && request.Action != "") {
+			dataResourceGrantInvalidRequest(c)
+			return
+		}
+		if opts.SkillHubService == nil || opts.RBACService == nil {
+			dataResourceGrantMutationError(c, dataaccess.ErrNotFound)
+			return
+		}
+		if _, err := opts.SkillHubService.GetSpace(c.Request.Context(), request.ResourceID); err != nil {
+			if errors.Is(err, skillhub.ErrSpaceNotFound) {
+				dataResourceGrantMutationError(c, dataaccess.ErrNotFound)
+			} else {
+				dataResourceGrantError(c, err)
+			}
+			return
+		}
+		grants, err := opts.DataAccessService.List(c.Request.Context(), dataaccess.Filter{
+			ResourceType: request.ResourceType, ResourceID: request.ResourceID, Action: request.Action, RoleGrants: true,
+		})
+		if err != nil {
+			dataResourceGrantError(c, err)
+			return
+		}
+		roles, err := opts.RBACService.ListRoles(c.Request.Context())
+		if err != nil {
+			dataResourceGrantError(c, err)
+			return
+		}
+		items := dataResourceGrantRoles(grants, roles, request.Query, mode == "candidates")
+		page, pageSize := normalizeDataResourceGrantPage(request.Page, request.PageSize)
+		c.JSON(http.StatusOK, gin.H{"data": paginate(items, page, pageSize), "meta": pageMeta(page, pageSize, len(items))})
+	}
+}
+
+func dataResourceGrantRoles(grants []dataaccess.Grant, roles []rbac.Role, query string, candidates bool) []dataResourceGrantRoleResponse {
+	byRole := make(map[string]*dataResourceGrantRoleResponse, len(roles))
+	for _, role := range roles {
+		byRole[role.RoleID] = &dataResourceGrantRoleResponse{RoleID: role.RoleID, Name: role.Name, Actions: []string{}}
+	}
+	for _, grant := range grants {
+		item := byRole[grant.RoleID]
+		if item == nil {
+			continue
+		}
+		item.Granted = true
+		item.Actions = append(item.Actions, grant.Action)
+		if item.UpdatedAt == nil || grant.UpdatedAt.After(*item.UpdatedAt) {
+			updatedAt := grant.UpdatedAt
+			item.UpdatedAt = &updatedAt
+		}
+	}
+	items := []dataResourceGrantRoleResponse{}
+	query = strings.ToLower(strings.TrimSpace(query))
+	for _, item := range byRole {
+		if item.Granted == candidates || (query != "" && !strings.Contains(strings.ToLower(item.RoleID+" "+item.Name), query)) {
+			continue
+		}
+		sort.Strings(item.Actions)
+		items = append(items, *item)
+	}
+	sort.Slice(items, func(left, right int) bool {
+		if items[left].Name != items[right].Name {
+			return items[left].Name < items[right].Name
+		}
+		return items[left].RoleID < items[right].RoleID
+	})
+	return items
 }
 
 func dataResourceGrantURLHasNoParameters(c *gin.Context) bool {

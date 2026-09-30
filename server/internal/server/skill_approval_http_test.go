@@ -1,7 +1,9 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +17,105 @@ import (
 	"github.com/krillinai/Clawee/server/internal/server"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
 )
+
+func TestSkillApprovalRoleConfigurationHTTP(t *testing.T) {
+	ctx := context.Background()
+	accountService := newTestAccountService(accounts.NewMemoryStore())
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountService})
+	if err := rbacService.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	store := skillhub.NewMemoryStore()
+	store.SetApprovalRoleLookup(func(ctx context.Context, roleID string) (skillhub.ApprovalRole, []skillhub.Approver, error) {
+		role, err := rbacService.GetRole(ctx, roleID)
+		if err != nil {
+			return skillhub.ApprovalRole{}, nil, err
+		}
+		people, err := accountService.ListAccounts(ctx)
+		if err != nil {
+			return skillhub.ApprovalRole{}, nil, err
+		}
+		resolved := []skillhub.Approver{}
+		for _, person := range people {
+			if person.Status != accounts.StatusActive {
+				continue
+			}
+			roles, err := rbacService.ListAccountRoles(ctx, person.UserID)
+			if err != nil {
+				return skillhub.ApprovalRole{}, nil, err
+			}
+			for _, assigned := range roles {
+				if assigned.RoleID == roleID {
+					resolved = append(resolved, skillhub.Approver{UserID: person.UserID, Name: person.DisplayName()})
+				}
+			}
+		}
+		return skillhub.ApprovalRole{RoleID: role.RoleID, Name: role.Name}, resolved, nil
+	})
+	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
+	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, RBACService: rbacService, SkillHubService: service})
+	admin := register(t, router, `{"email":"role-approval-admin@example.com","password":"passw0rd!"}`)
+	reviewer := register(t, router, `{"email":"role-approval-reviewer@example.com","password":"passw0rd!"}`)
+	adminID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", admin, http.StatusOK), "data", "account", "user_id")
+	reviewerID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", reviewer, http.StatusOK), "data", "account", "user_id")
+	for _, id := range []string{adminID, reviewerID} {
+		if _, err := service.SetSpaceMember(ctx, skillhub.DefaultSpaceID, id, []string{skillhub.SpaceActionRead}, adminID, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roleResponse := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"role_skill_review","name":"角色审核候选","permission_codes":["console:skill:read"]}`, admin, http.StatusCreated)
+	roleID := nestedString(t, roleResponse, "data", "role_id")
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+reviewerID+`","role_id":"`+roleID+`"}`, admin, http.StatusCreated)
+	reviewer = loginCookies(t, router, `{"email":"role-approval-reviewer@example.com","password":"passw0rd!"}`)
+	candidates := doJSON(t, router, http.MethodGet, "/api/v1/admin/skill-spaces/approver-role-candidates?space_id=skillspace_default&query=role_skill_review", "", admin, http.StatusOK)
+	items := candidates["data"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["role_id"] != roleID || items[0].(map[string]any)["name"] != "角色审核候选" {
+		t.Fatalf("角色候选契约: %#v", candidates)
+	}
+	configBody := func(userIDs, roleIDs []string, confirmed bool) string {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"space_id": skillhub.DefaultSpaceID, "approval_provider": "local", "approver_user_ids": userIDs, "approver_role_ids": roleIDs, "confirm_reset": confirmed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	put := func(path, body string, cookies []*http.Cookie, want int) {
+		t.Helper()
+		response := sourceJSONRequest(t, router, http.MethodPut, path, body, cookies)
+		if response.Code != want {
+			t.Fatalf("PUT %s: %d %s", path, response.Code, response.Body.String())
+		}
+	}
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approval", configBody(nil, []string{"missing"}, true), admin), http.StatusBadRequest, "invalid_request")
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approval", configBody(nil, []string{roleID, roleID}, true), admin), http.StatusBadRequest, "invalid_request")
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approval", configBody(nil, []string{roleID}, true), reviewer), http.StatusForbidden, "forbidden")
+	put("/api/v1/admin/skill-spaces/approval", configBody([]string{reviewerID}, []string{roleID}, true), admin, http.StatusNoContent)
+	configured := doJSON(t, router, http.MethodGet, "/api/v1/admin/skill-spaces/detail?space_id=skillspace_default", "", admin, http.StatusOK)["data"].(map[string]any)
+	if len(configured["approvers"].([]any)) != 1 || len(configured["approver_role_ids"].([]any)) != 1 || configured["approver_roles"].([]any)[0].(map[string]any)["role_id"] != roleID {
+		t.Fatalf("配置回显契约: %#v", configured)
+	}
+	result, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{Version: "1", CreatedBy: adminID, UploadedByUserID: adminID, Origin: "admin_upload", Package: bytes.NewReader(skillPackage(t))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetAdmin(ctx, result.Skill.SkillID)
+	if err != nil || detail.Versions[0].LocalApproval.Total != 1 {
+		t.Fatalf("重叠配置未去重: %#v %v", detail, err)
+	}
+	put("/api/v1/admin/skill-spaces/approval", configBody(nil, []string{roleID}, false), admin, http.StatusConflict)
+	put("/api/v1/admin/skill-spaces/approval", configBody(nil, []string{roleID}, true), admin, http.StatusNoContent)
+	configured = doJSON(t, router, http.MethodGet, "/api/v1/admin/skill-spaces/detail?space_id=skillspace_default", "", admin, http.StatusOK)["data"].(map[string]any)
+	if len(configured["approvers"].([]any)) != 0 || len(configured["approver_role_ids"].([]any)) != 1 {
+		t.Fatalf("纯角色回显: %#v", configured)
+	}
+	put("/api/v1/admin/skill-spaces/approver", `{"space_id":"skillspace_default","approver_user_ids":["`+reviewerID+`"],"approver_role_ids":["`+roleID+`"],"confirm_reset":true}`, admin, http.StatusNoContent)
+	put("/api/v1/admin/skill-spaces/approver", `{"space_id":"skillspace_default","approver_user_ids":["`+reviewerID+`"],"confirm_reset":true}`, admin, http.StatusNoContent)
+	space, err := service.GetSpace(ctx, skillhub.DefaultSpaceID)
+	if err != nil || len(space.Approvers) != 1 || len(space.ApproverRoleIDs) != 0 {
+		t.Fatalf("旧账户契约兼容性: %#v %v", space, err)
+	}
+}
 
 func TestSkillApprovalHTTPRequiresConfiguredReviewer(t *testing.T) {
 	ctx := context.Background()

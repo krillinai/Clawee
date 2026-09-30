@@ -94,7 +94,10 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 56); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 62); err != nil {
+	if _, err := provider.UpTo(ctx, 66); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetSpaceMember(ctx, "market", "viewer", []string{skillhub.SpaceActionRead}, "system", false); err != nil {
 		t.Fatal(err)
 	}
 	for _, spaceID := range []string{"product", "market"} {
@@ -109,6 +112,9 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 		if _, err := service.SetCurrentVersion(ctx, version.skillID, version.versionID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := service.RemoveSpaceMember(ctx, "market", "viewer"); err != nil {
+		t.Fatal(err)
 	}
 	detail, err := service.GetPublished(ctx, "tracked")
 	if err != nil {
@@ -140,10 +146,8 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 			}
 		}
 	}
-	for version := 56; version >= 52; version-- {
-		if _, err := provider.Down(ctx); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := provider.DownTo(ctx, 51); err != nil {
+		t.Fatal(err)
 	}
 	var remainingColumns int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns

@@ -14,15 +14,30 @@ type PostgresStore struct{ pool *pgxpool.Pool }
 
 func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore { return &PostgresStore{pool: pool} }
 
+func grantSource(roleID string) (string, string) {
+	if roleID != "" {
+		return "data_resource_role_grants", "role_id"
+	}
+	return "data_resource_grants", "user_id"
+}
+
+func auditSubject(audit Audit) string {
+	if audit.TargetRoleID != "" {
+		return audit.TargetRoleID
+	}
+	return audit.TargetUserID
+}
+
 func (s *PostgresStore) CreateGrants(ctx context.Context, grants []Grant, audit Audit) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT action FROM data_resource_grants
-WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3
-ORDER BY action FOR UPDATE`, audit.TargetUserID, audit.ResourceType, audit.ResourceID)
+	table, subjectColumn := grantSource(audit.TargetRoleID)
+	rows, err := tx.Query(ctx, `SELECT action FROM `+table+`
+WHERE `+subjectColumn+`=$1 AND resource_type=$2 AND resource_id=$3
+ORDER BY action FOR UPDATE`, auditSubject(audit), audit.ResourceType, audit.ResourceID)
 	if err != nil {
 		return err
 	}
@@ -43,9 +58,9 @@ ORDER BY action FOR UPDATE`, audit.TargetUserID, audit.ResourceType, audit.Resou
 	audit.AfterActions = append(audit.BeforeActions[:len(audit.BeforeActions):len(audit.BeforeActions)], audit.AfterActions...)
 	sort.Strings(audit.AfterActions)
 	for _, grant := range grants {
-		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants
-(grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, grant.GrantID, grant.UserID, grant.ResourceType, grant.ResourceID, grant.Action, grant.CreatedBy, grant.CreatedAt, grant.UpdatedAt); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO `+table+`
+(grant_id,`+subjectColumn+`,resource_type,resource_id,action,created_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, grant.GrantID, auditSubject(audit), grant.ResourceType, grant.ResourceID, grant.Action, grant.CreatedBy, grant.CreatedAt, grant.UpdatedAt); err != nil {
 			return mapStoreError(err)
 		}
 	}
@@ -61,9 +76,10 @@ func (s *PostgresStore) ReplaceGrants(ctx context.Context, userID, resourceType,
 		return err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT action FROM data_resource_grants
-WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3
-	ORDER BY action FOR UPDATE`, userID, resourceType, resourceID)
+	table, subjectColumn := grantSource(audit.TargetRoleID)
+	rows, err := tx.Query(ctx, `SELECT action FROM `+table+`
+WHERE `+subjectColumn+`=$1 AND resource_type=$2 AND resource_id=$3
+		ORDER BY action FOR UPDATE`, auditSubject(audit), resourceType, resourceID)
 	if err != nil {
 		return err
 	}
@@ -84,13 +100,13 @@ WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3
 	if len(audit.BeforeActions) == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3`, userID, resourceType, resourceID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE `+subjectColumn+`=$1 AND resource_type=$2 AND resource_id=$3`, auditSubject(audit), resourceType, resourceID); err != nil {
 		return err
 	}
 	for _, grant := range grants {
-		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants
-(grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, grant.GrantID, grant.UserID, grant.ResourceType, grant.ResourceID, grant.Action, grant.CreatedBy, grant.CreatedAt, grant.UpdatedAt); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO `+table+`
+(grant_id,`+subjectColumn+`,resource_type,resource_id,action,created_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, grant.GrantID, auditSubject(audit), grant.ResourceType, grant.ResourceID, grant.Action, grant.CreatedBy, grant.CreatedAt, grant.UpdatedAt); err != nil {
 			return mapStoreError(err)
 		}
 	}
@@ -106,7 +122,8 @@ func (s *PostgresStore) DeleteGrants(ctx context.Context, userID, resourceType, 
 		return err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT action FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 ORDER BY action FOR UPDATE`, userID, resourceType, resourceID)
+	table, subjectColumn := grantSource(audit.TargetRoleID)
+	rows, err := tx.Query(ctx, `SELECT action FROM `+table+` WHERE `+subjectColumn+`=$1 AND resource_type=$2 AND resource_id=$3 ORDER BY action FOR UPDATE`, auditSubject(audit), resourceType, resourceID)
 	if err != nil {
 		return err
 	}
@@ -127,7 +144,7 @@ func (s *PostgresStore) DeleteGrants(ctx context.Context, userID, resourceType, 
 	if len(audit.BeforeActions) == 0 {
 		return ErrNotFound
 	}
-	tag, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3`, userID, resourceType, resourceID)
+	tag, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE `+subjectColumn+`=$1 AND resource_type=$2 AND resource_id=$3`, auditSubject(audit), resourceType, resourceID)
 	if err != nil {
 		return err
 	}
@@ -145,8 +162,46 @@ func (s *PostgresStore) RecordAudit(ctx context.Context, audit Audit) error {
 }
 
 func (s *PostgresStore) ListGrants(ctx context.Context, filter Filter) ([]Grant, error) {
-	rows, err := s.pool.Query(ctx, `SELECT grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at
-FROM data_resource_grants
+	if filter.Effective {
+		return s.listEffectivePermissions(ctx, filter)
+	}
+	table, subjectColumn := grantSource("")
+	subjectID := filter.UserID
+	if filter.RoleGrants {
+		table, subjectColumn = "data_resource_role_grants", "role_id"
+		subjectID = filter.RoleID
+	}
+	rows, err := s.pool.Query(ctx, `SELECT grant_id,`+subjectColumn+`,resource_type,resource_id,action,created_by,created_at,updated_at
+FROM `+table+`
+WHERE ($1='' OR `+subjectColumn+`=$1)
+  AND ($2='' OR resource_type=$2)
+  AND ($3='' OR resource_id=$3)
+  AND ($4='' OR action=$4)
+ORDER BY `+subjectColumn+`,resource_id,action`, subjectID, filter.ResourceType, filter.ResourceID, filter.Action)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Grant{}
+	for rows.Next() {
+		var grant Grant
+		var subject string
+		if err := rows.Scan(&grant.GrantID, &subject, &grant.ResourceType, &grant.ResourceID, &grant.Action, &grant.CreatedBy, &grant.CreatedAt, &grant.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if filter.RoleGrants {
+			grant.RoleID = subject
+		} else {
+			grant.UserID = subject
+		}
+		out = append(out, grant)
+	}
+	return out, rows.Err()
+}
+
+func (s *PostgresStore) listEffectivePermissions(ctx context.Context, filter Filter) ([]Grant, error) {
+	rows, err := s.pool.Query(ctx, `SELECT user_id,resource_type,resource_id,action
+FROM effective_data_resource_permissions
 WHERE ($1='' OR user_id=$1)
   AND ($2='' OR resource_type=$2)
   AND ($3='' OR resource_id=$3)
@@ -156,15 +211,15 @@ ORDER BY user_id,resource_id,action`, filter.UserID, filter.ResourceType, filter
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Grant{}
+	items := []Grant{}
 	for rows.Next() {
 		var grant Grant
-		if err := rows.Scan(&grant.GrantID, &grant.UserID, &grant.ResourceType, &grant.ResourceID, &grant.Action, &grant.CreatedBy, &grant.CreatedAt, &grant.UpdatedAt); err != nil {
+		if err := rows.Scan(&grant.UserID, &grant.ResourceType, &grant.ResourceID, &grant.Action); err != nil {
 			return nil, err
 		}
-		out = append(out, grant)
+		items = append(items, grant)
 	}
-	return out, rows.Err()
+	return items, rows.Err()
 }
 
 type auditExecutor interface {
@@ -173,9 +228,9 @@ type auditExecutor interface {
 
 func insertAudit(ctx context.Context, executor auditExecutor, audit Audit) error {
 	_, err := executor.Exec(ctx, `INSERT INTO data_resource_grant_audits
-(audit_id,operator_user_id,target_user_id,resource_type,resource_id,before_actions,after_actions,result,request_id,created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, audit.AuditID, audit.OperatorID, audit.TargetUserID, audit.ResourceType,
-		audit.ResourceID, audit.BeforeActions, audit.AfterActions, audit.Result, audit.RequestID, audit.CreatedAt)
+(audit_id,operator_user_id,target_user_id,resource_type,resource_id,before_actions,after_actions,result,request_id,created_at,target_role_id)
+VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''))`, audit.AuditID, audit.OperatorID, audit.TargetUserID, audit.ResourceType,
+		audit.ResourceID, audit.BeforeActions, audit.AfterActions, audit.Result, audit.RequestID, audit.CreatedAt, audit.TargetRoleID)
 	return err
 }
 

@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { openAsBlob } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { z } from 'zod';
+import { workflowResponseSchema } from './workflow-schema.js';
 import {
   ENTERPRISE_DOCUMENT_UPLOAD_TIMEOUT_MS,
   ENTERPRISE_DOWNLOAD_TIMEOUT_MS,
@@ -1222,7 +1223,7 @@ export function createEnterpriseHttpClient(input: {
       }
       return requestJson({
         accessToken, method, path, body,
-        schema: z.object({ data: z.unknown(), meta: z.unknown().optional() })
+        schema: workflowResponseSchema(method, path)
       }).then(response => ({ data: response.data, meta: response.meta }));
     },
     async register(request, agentId) {

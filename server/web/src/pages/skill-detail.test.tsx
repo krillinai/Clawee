@@ -16,6 +16,7 @@ import {
   reviewSkillVersion,
   SkillHubAPIError,
   type AdminSkillDetail,
+  type SkillSpace,
   type SkillVersion
 } from "@/lib/skillhub-api";
 
@@ -60,7 +61,81 @@ const detail: AdminSkillDetail = {
   ]
 };
 
+const approvalConfigurations: Array<{ name: string; config: Partial<SkillSpace> }> = [
+  { name: "仅账户", config: { approvers: [{ userId: "reviewer", name: "审批人" }] } },
+  { name: "仅角色", config: { approvers: [], approverRoleIds: ["reviewers"] } },
+  { name: "账户与角色", config: { approvers: [{ userId: "reviewer", name: "审批人" }], approverRoleIds: ["reviewers"] } },
+  { name: "仅角色详情", config: { approvers: [], approverRoles: [{ roleId: "reviewers", name: "审核组" }] } }
+];
+
 describe("SkillDetailPage", () => {
+  it.each(approvalConfigurations)("$name 审批全员通过后，非上传者管理员使用正常发布接口", async ({ config }) => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);
+    const approvedVersion = version({
+      uploadedByUserId: "writer-id",
+      localApproval: { status: "approved", total: 2, approved: 2, approvers: [
+        { userId: "reviewer", name: "审批人", status: "approved", comment: "", decidedAt: null },
+        { userId: "role-reviewer", name: "角色审批人", status: "approved", comment: "", decidedAt: null }
+      ] }
+    });
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [approvedVersion] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "设为当前查看版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "设为当前版本" })).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(setCurrentSkillVersionMock).toHaveBeenCalledWith("skill-1", "version-default"));
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it.each(approvalConfigurations)("$name 审批待审时，上传者没有免审发布入口", async ({ config }) => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id", localApproval: reviewerProgress() })] });
+    renderPage(true);
+    await screen.findByText("当前查看版本 1.0.0");
+    expect(screen.queryByRole("button", { name: /设为当前/ })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it("仅角色审批部分通过时，管理员不能发布", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvers: [], approverRoleIds: ["reviewers"] }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", localApproval: { ...reviewerProgress(), total: 2, approved: 1 } })] });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "设为当前查看版本 1.0.0" })).toBeDisabled();
+    expect(setCurrentSkillVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("无审批配置时，非上传者管理员不获得发布入口", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvers: [] }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ uploadedByUserId: "writer-id" })] });
+    renderPage();
+    await screen.findByText("当前查看版本 1.0.0");
+    expect(screen.queryByRole("button", { name: /设为当前/ })).not.toBeInTheDocument();
+  });
+
+  it("钉钉待审仍提供提交审批入口，上传者不能免审发布", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvalProvider: "dingtalk", approvers: [], externalApprovalTemplateId: "PROC-1" }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });
+    renderPage(true);
+    expect(await screen.findByRole("button", { name: "提交钉钉审批" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /设为当前/ })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it("钉钉审批通过后，管理员仍使用正常发布接口", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvalProvider: "dingtalk", approvers: [], externalApprovalTemplateId: "PROC-1" }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ uploadedByUserId: "writer-id", approvalInstance: { id: "approval-1", status: "finished", decision: "approved", providerInstanceId: "oa-1" } })] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "设为当前查看版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "设为当前版本" })).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(setCurrentSkillVersionMock).toHaveBeenCalledWith("skill-1", "version-default"));
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
   it("allows the uploader to publish a pending version when approval is off", async () => {
     vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", description: "", approvers: [], actions: [], memberCount: 0, skillCount: 1, publishedCount: 0, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });

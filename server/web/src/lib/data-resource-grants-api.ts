@@ -66,6 +66,11 @@ export type DataResourceGrantUser = {
 type PageMeta = { page: number; page_size: number; total: number };
 type ListResponse<T> = { items: T[]; meta: PageMeta };
 
+export type DataResourceGrantRole = { roleId: string; name: string; actions: string[]; granted: boolean; updatedAt: string };
+type DataResourceGrantRoleResponse = { role_id: string; name: string; actions?: string[]; granted?: boolean; updated_at?: string | null };
+type DataResourceGrantSubject = { userId: string; roleId?: never } | { roleId: string; userId?: never };
+type DataResourceGrantMutation = DataResourceGrantSubject & { resourceType: string; resourceId: string };
+
 type DataResourceTypeResponse = {
   resource_type: DataResourceType["resourceType"];
   name: string;
@@ -231,17 +236,17 @@ export async function listDataResourceGrantMemberCandidates(input: {
   };
 }
 
-export function createDataResourceGrant(input: { userId: string; resourceType: string; resourceId: string; actions: string[] }) {
+export function createDataResourceGrant(input: DataResourceGrantMutation & { actions: string[] }) {
   return adminApi.post(`${basePath}`, dataResourceGrantMutationInput(input));
 }
 
-export function replaceDataResourceGrant(input: { userId: string; resourceType: string; resourceId: string; actions: string[] }) {
+export function replaceDataResourceGrant(input: DataResourceGrantMutation & { actions: string[] }) {
   return adminApi.put(`${basePath}`, dataResourceGrantMutationInput(input));
 }
 
-export function removeDataResourceGrant(input: { userId: string; resourceType: string; resourceId: string }) {
+export function removeDataResourceGrant(input: DataResourceGrantMutation) {
   return adminApi.post<void>(`${basePath}/remove`, {
-    user_id: input.userId,
+    ...dataResourceGrantSubject(input),
     resource_type: input.resourceType,
     resource_id: input.resourceId
   });
@@ -288,13 +293,45 @@ function mapActionDefinition(item: DataResourceGrantActionDefinitionResponse): D
   };
 }
 
-function dataResourceGrantMutationInput(input: { userId: string; resourceType: string; resourceId: string; actions: string[] }) {
+function dataResourceGrantSubject(input: DataResourceGrantSubject) {
+  if (Boolean(input.userId) === Boolean(input.roleId)) throw new Error("账户与角色必须且只能选择一个");
+  return input.roleId ? { role_id: input.roleId } : { user_id: input.userId };
+}
+
+function dataResourceGrantMutationInput(input: DataResourceGrantMutation & { actions: string[] }) {
   return {
-    user_id: input.userId,
+    ...dataResourceGrantSubject(input),
     resource_type: input.resourceType,
     resource_id: input.resourceId,
     actions: input.actions
   };
+}
+
+export async function searchDataResourceGrantRoles(input: { resourceType: string; resourceId: string; action: string; query?: string; page?: number; pageSize?: number }) {
+  const response = await adminApi.post<ListResponse<DataResourceGrantRoleResponse>>(`${basePath}/roles/search`, {
+    resource_type: input.resourceType, resource_id: input.resourceId, action: input.action,
+    query: input.query ?? "", page: input.page ?? 1, page_size: input.pageSize ?? 20
+  });
+  return { items: response.items.map(mapGrantRole), meta: response.meta };
+}
+
+export function listDataResourceGrantRoleMembers(input: { resourceType: string; resourceId: string; query?: string; cursor?: string }) {
+  return listGrantRoles("role-members", input);
+}
+
+export function listDataResourceGrantRoleCandidates(input: { resourceType: string; resourceId: string; query?: string; cursor?: string }) {
+  return listGrantRoles("role-candidates", input);
+}
+
+async function listGrantRoles(kind: "role-members" | "role-candidates", input: { resourceType: string; resourceId: string; query?: string; cursor?: string }) {
+  const response = await adminApi.post<ListResponse<DataResourceGrantRoleResponse>>(`${basePath}/${kind}/search`, {
+    resource_type: input.resourceType, resource_id: input.resourceId, query: input.query ?? "", page: pageFromCursor(input.cursor), page_size: 20
+  });
+  return { items: response.items.map(mapGrantRole), meta: cursorMeta(response.meta) };
+}
+
+function mapGrantRole(item: DataResourceGrantRoleResponse): DataResourceGrantRole {
+  return { roleId: item.role_id, name: item.name, actions: item.actions ?? [], granted: item.granted ?? false, updatedAt: item.updated_at ?? "" };
 }
 
 function pageFromCursor(cursor?: string) {

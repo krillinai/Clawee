@@ -68,6 +68,7 @@ export function MemberAuthorizationDrawer({
   resourceName,
   resourceLabel,
   memberCount,
+  subject = "account",
   canAdd,
   canUpdate,
   canRemove,
@@ -81,6 +82,7 @@ export function MemberAuthorizationDrawer({
   resourceName: string;
   resourceLabel: string;
   memberCount?: number;
+  subject?: "account" | "role";
   canAdd: boolean;
   canUpdate: boolean;
   canRemove: boolean;
@@ -89,6 +91,9 @@ export function MemberAuthorizationDrawer({
   onClose: () => void;
   onChanged?: () => void;
 }) {
+  const memberLabel = subject === "role" ? "角色" : "成员";
+  const subjectLabel = subject === "role" ? "角色" : "账户";
+  const countUnit = subject === "role" ? "个" : "位";
   const hasActions = canAdd || canUpdate || canRemove;
   const queryClient = useQueryClient();
   const [memberQuery, setMemberQuery] = useState("");
@@ -149,7 +154,7 @@ export function MemberAuthorizationDrawer({
       setAddOpen(false);
       setCandidateOpen(false);
       setSelectedCandidates({});
-      setNotice(`已添加 ${input.candidates.length} 位成员`);
+      setNotice(`已添加 ${input.candidates.length} ${countUnit}${memberLabel}`);
       refresh();
     }
   });
@@ -165,7 +170,7 @@ export function MemberAuthorizationDrawer({
     mutationFn: (member: AuthorizationMember) => adapter.removeMember(member.userId),
     onSuccess: (_result, member) => {
       setMemberToRemove(null);
-      setNotice(`“${member.name || member.email || member.userId}”的成员授权已删除`);
+      setNotice(`“${member.name || member.email || member.userId}”的${memberLabel}授权已删除`);
       refresh();
     }
   });
@@ -212,17 +217,17 @@ export function MemberAuthorizationDrawer({
   return (
     <>
       <DetailDrawer
-        contextLabel="成员授权"
+        contextLabel={`${memberLabel}授权`}
         onClose={closeDrawer}
         open={open}
-        subtitle={`${resourceLabel} · 账户权限管理`}
-        title={resourceName || "成员授权"}
-        titleAction={<Badge variant="muted">{memberCount ?? members.length} 位成员</Badge>}
+        subtitle={`${resourceLabel} · ${subjectLabel}${subject === "role" ? "继承授权" : "直接授权"}管理`}
+        title={resourceName || `${memberLabel}授权`}
+        titleAction={<Badge variant="muted">{memberCount ?? members.length} {countUnit}{memberLabel}</Badge>}
       >
         {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
         <FilterRow compact>
           <FilterSearchField
-            aria-label="搜索授权成员"
+            aria-label={`搜索授权${memberLabel}`}
             placeholder="搜索姓名、邮箱或账号 ID"
             value={memberQuery}
             onChange={(event) => {
@@ -234,32 +239,32 @@ export function MemberAuthorizationDrawer({
           {canAdd ? (
             <Button onClick={openAdd} size="sm">
               <Plus data-icon="inline-start" aria-hidden="true" />
-              添加成员授权
+              添加{memberLabel}授权
             </Button>
           ) : null}
         </FilterRow>
         <DataTableShell dense minWidth={620}>
           <TableHeader>
             <TableRow>
-              <TableHead>账户</TableHead>
+              <TableHead>{subjectLabel}</TableHead>
               <TableHead>权限</TableHead>
               <TableHead>更新时间</TableHead>
               {hasActions ? <TableHead className="text-right">操作</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {membersQuery.isLoading ? <TableStateRow colSpan={hasActions ? 4 : 3}><LoadingState label="正在加载授权成员" /></TableStateRow> : null}
-            {membersQuery.isError ? <TableStateRow colSpan={hasActions ? 4 : 3} tone="danger"><ErrorAlert error={membersQuery.error}>成员授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
+            {membersQuery.isLoading ? <TableStateRow colSpan={hasActions ? 4 : 3}><LoadingState label={`正在加载授权${memberLabel}`} /></TableStateRow> : null}
+            {membersQuery.isError ? <TableStateRow colSpan={hasActions ? 4 : 3} tone="danger"><ErrorAlert error={membersQuery.error}>{memberLabel}授权加载失败：{errorText(membersQuery.error)}</ErrorAlert></TableStateRow> : null}
             {!membersQuery.isLoading && !membersQuery.isError && members.length === 0 ? (
               <TableStateRow colSpan={hasActions ? 4 : 3}>
-                <EmptyState title={memberQuery ? "暂无匹配成员" : "暂无成员授权"} description={memberQuery ? "请调整搜索条件。" : "添加成员后即可配置当前资源的访问权限。"} />
+                <EmptyState title={memberQuery ? `暂无匹配${memberLabel}` : `暂无${memberLabel}授权`} description={memberQuery ? "请调整搜索条件。" : `添加${memberLabel}后即可配置当前资源的访问权限。`} />
               </TableStateRow>
             ) : null}
             {!membersQuery.isError ? members.map((member) => (
               <TableRow key={member.userId}>
                 <TableCell className="max-w-64">
                   <span className="block truncate font-medium" title={member.name || member.email}>{member.name || member.email || member.userId}</span>
-                  <span className="block truncate text-xs text-muted-foreground" title={member.email}>{member.email || "-"}</span>
+                  {subject !== "role" && <span className="block truncate text-xs text-muted-foreground" title={member.email}>{member.email || "-"}</span>}
                   <span className="block truncate font-mono text-xs text-muted-foreground" title={member.userId}>{member.userId}</span>
                 </TableCell>
                 <TableCell><div className="flex flex-wrap gap-1">{member.actions.map((action) => <Badge key={action} variant="muted">{permissionLabel(permissions, action)}</Badge>)}</div></TableCell>
@@ -269,11 +274,11 @@ export function MemberAuthorizationDrawer({
                     <TooltipProvider delayDuration={150}>
                       <div className="flex justify-end gap-1">
                         {canUpdate ? <Tooltip>
-                          <TooltipTrigger asChild><Button aria-label={`编辑${member.name || member.userId}成员授权`} onClick={() => openEdit(member)} size="icon" variant="ghost"><Pencil aria-hidden="true" /></Button></TooltipTrigger>
+                          <TooltipTrigger asChild><Button aria-label={`编辑${member.name || member.userId}${memberLabel}授权`} onClick={() => openEdit(member)} size="icon" variant="ghost"><Pencil aria-hidden="true" /></Button></TooltipTrigger>
                           <TooltipContent>编辑权限</TooltipContent>
                         </Tooltip> : null}
                         {canRemove ? <Tooltip>
-                          <TooltipTrigger asChild><Button aria-label={`删除${member.name || member.userId}成员授权`} onClick={() => { removeMutation.reset(); setMemberToRemove(member); }} size="icon" variant="ghost"><Trash2 aria-hidden="true" /></Button></TooltipTrigger>
+                          <TooltipTrigger asChild><Button aria-label={`删除${member.name || member.userId}${memberLabel}授权`} onClick={() => { removeMutation.reset(); setMemberToRemove(member); }} size="icon" variant="ghost"><Trash2 aria-hidden="true" /></Button></TooltipTrigger>
                           <TooltipContent>删除授权</TooltipContent>
                         </Tooltip> : null}
                       </div>
@@ -295,33 +300,33 @@ export function MemberAuthorizationDrawer({
         />
       </DetailDrawer>
 
-      <ModalShell open={addOpen} title="添加成员授权" subtitle={`为所选账户配置“${resourceName}”的访问权限。`} onClose={() => !addMutation.isPending && setAddOpen(false)}>
+      <ModalShell open={addOpen} title={`添加${memberLabel}授权`} subtitle={`为所选${subjectLabel}配置“${resourceName}”的访问权限。`} onClose={() => !addMutation.isPending && setAddOpen(false)}>
         <form className="flex flex-col gap-5" onSubmit={(event) => {
           event.preventDefault();
           if (selectedCandidateList.length > 0) addMutation.mutate({ candidates: selectedCandidateList, actions: formActions });
         }}>
           {addMutation.isError ? <ErrorAlert error={addMutation.error}>添加失败：{errorText(addMutation.error)}</ErrorAlert> : null}
-          {candidatesQuery.isError ? <ErrorAlert error={candidatesQuery.error}>候选成员加载失败：{errorText(candidatesQuery.error)}</ErrorAlert> : null}
+          {candidatesQuery.isError ? <ErrorAlert error={candidatesQuery.error}>候选{memberLabel}加载失败：{errorText(candidatesQuery.error)}</ErrorAlert> : null}
           <FieldGroup>
             <Field>
-              <FieldLabel>成员</FieldLabel>
+              <FieldLabel>{memberLabel}</FieldLabel>
               <Popover open={candidateOpen} onOpenChange={setCandidateOpen}>
                 <PopoverTrigger asChild>
-                  <Button aria-label="选择授权成员" className="w-full justify-between" disabled={addMutation.isPending} variant="outline">
-                    {selectedCandidateList.length > 0 ? `已选择 ${selectedCandidateList.length} 位成员` : "搜索并选择成员"}
+                  <Button aria-label={`选择授权${memberLabel}`} className="w-full justify-between" disabled={addMutation.isPending} variant="outline">
+                    {selectedCandidateList.length > 0 ? `已选择 ${selectedCandidateList.length} ${countUnit}${memberLabel}` : `搜索并选择${memberLabel}`}
                     <ChevronsUpDown data-icon="inline-end" aria-hidden="true" />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
                   <Command shouldFilter={false}>
-                    <CommandInput aria-label="搜索候选成员" placeholder="搜索姓名、邮箱或账号 ID" value={candidateQuery} onValueChange={(value) => {
+                    <CommandInput aria-label={`搜索候选${memberLabel}`} placeholder={subject === "role" ? "搜索角色名称或角色 ID" : "搜索姓名、邮箱或账号 ID"} value={candidateQuery} onValueChange={(value) => {
                       setCandidateQuery(value);
                       setCandidateCursor("");
                       setCandidateCursorHistory([]);
                     }} />
                     <CommandList className="max-h-72">
-                      <CommandEmpty>{candidatesQuery.isFetching ? "正在查询成员..." : "没有匹配的可添加成员"}</CommandEmpty>
-                      <CommandGroup heading="可添加成员">
+                      <CommandEmpty>{candidatesQuery.isFetching ? `正在查询${memberLabel}...` : `没有匹配的可添加${memberLabel}`}</CommandEmpty>
+                      <CommandGroup heading={`可添加${memberLabel}`}>
                         {candidates.map((candidate) => {
                           const selected = Boolean(selectedCandidates[candidate.userId]);
                           return (
@@ -329,7 +334,7 @@ export function MemberAuthorizationDrawer({
                               <Checkbox aria-hidden="true" checked={selected} className="pointer-events-none" tabIndex={-1} />
                               <div className="min-w-0 flex-1">
                                 <span className="block truncate font-medium">{candidate.name || candidate.email || candidate.userId}</span>
-                                <span className="block truncate text-xs text-muted-foreground">{candidate.email} · {candidate.userId}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{subject === "role" ? candidate.userId : `${candidate.email} · ${candidate.userId}`}</span>
                               </div>
                               {selected ? <Check aria-hidden="true" /> : null}
                             </CommandItem>
@@ -338,7 +343,7 @@ export function MemberAuthorizationDrawer({
                       </CommandGroup>
                     </CommandList>
                     <div className="flex items-center justify-between border-t p-2">
-                      <span className="text-xs text-muted-foreground">已选 {selectedCandidateList.length} 位</span>
+                      <span className="text-xs text-muted-foreground">已选 {selectedCandidateList.length} {countUnit}</span>
                       <PageButtons
                         compact
                         currentCursor={candidateCursor}
@@ -353,18 +358,18 @@ export function MemberAuthorizationDrawer({
                   </Command>
                 </PopoverContent>
               </Popover>
-              <FieldDescription>成员邮箱完整显示，可跨搜索和分页继续选择。</FieldDescription>
+              <FieldDescription>{subject === "role" ? "角色成员继承权限；账户直接授权与角色授权取并集，撤销一个来源不影响其他来源。" : "成员邮箱完整显示，可跨搜索和分页继续选择。"}</FieldDescription>
             </Field>
             <PermissionFields actions={formActions} disabled={addMutation.isPending} permissions={permissions} onToggle={toggleAction} />
           </FieldGroup>
           <div className="flex justify-end gap-2">
             <Button disabled={addMutation.isPending} onClick={() => setAddOpen(false)} type="button" variant="outline">取消</Button>
-            <Button disabled={addMutation.isPending || selectedCandidateList.length === 0} type="submit">{selectedCandidateList.length > 0 ? `添加 ${selectedCandidateList.length} 位成员` : "添加成员"}</Button>
+            <Button disabled={addMutation.isPending || selectedCandidateList.length === 0} type="submit">{selectedCandidateList.length > 0 ? `添加 ${selectedCandidateList.length} ${countUnit}${memberLabel}` : `添加${memberLabel}`}</Button>
           </div>
         </form>
       </ModalShell>
 
-      <ModalShell open={Boolean(memberToEdit)} title="编辑成员授权" subtitle={memberToEdit ? `${memberToEdit.name || memberToEdit.email || memberToEdit.userId} · ${memberToEdit.email}` : undefined} onClose={() => !updateMutation.isPending && setMemberToEdit(null)}>
+      <ModalShell open={Boolean(memberToEdit)} title={`编辑${memberLabel}授权`} subtitle={memberToEdit ? `${memberToEdit.name || memberToEdit.email || memberToEdit.userId} · ${memberToEdit.email}` : undefined} onClose={() => !updateMutation.isPending && setMemberToEdit(null)}>
         <form className="flex flex-col gap-5" onSubmit={(event: FormEvent<HTMLFormElement>) => {
           event.preventDefault();
           if (memberToEdit) updateMutation.mutate({ member: memberToEdit, actions: formActions });
@@ -372,7 +377,7 @@ export function MemberAuthorizationDrawer({
           {updateMutation.isError ? <ErrorAlert error={updateMutation.error}>更新失败：{errorText(updateMutation.error)}</ErrorAlert> : null}
           <FieldGroup>
             <Field>
-              <FieldLabel>账号 ID</FieldLabel>
+              <FieldLabel>{subject === "role" ? "角色 ID" : "账号 ID"}</FieldLabel>
               <div className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">{memberToEdit?.userId}</div>
             </Field>
             <PermissionFields actions={formActions} disabled={updateMutation.isPending} permissions={permissions} onToggle={toggleAction} />
@@ -386,13 +391,13 @@ export function MemberAuthorizationDrawer({
 
       <ConfirmDialog
         confirmLabel={removeMutation.isPending ? "删除中..." : "确认删除"}
-        description={`删除后，“${memberToRemove?.name || memberToRemove?.email || "该成员"}”将失去当前${resourceLabel}的访问权限。`}
+        description={`删除后将撤销“${memberToRemove?.name || memberToRemove?.email || `该${memberLabel}`}”的当前${resourceLabel}授权；其他直接或角色授权来源仍然保留。`}
         error={removeMutation.isError ? `删除失败：${errorText(removeMutation.error)}` : undefined}
         onClose={() => !removeMutation.isPending && setMemberToRemove(null)}
         onConfirm={() => memberToRemove && removeMutation.mutate(memberToRemove)}
         open={Boolean(memberToRemove)}
         pending={removeMutation.isPending}
-        title="删除成员授权"
+        title={`删除${memberLabel}授权`}
         variant="destructive"
       />
     </>

@@ -23,6 +23,8 @@ import {
   createDataResourceGrant,
   listDataResourceGrantMemberCandidates,
   listDataResourceGrantMembers,
+  listDataResourceGrantRoleMembers,
+  listDataResourceGrantRoleCandidates,
   listDataResourceTypes,
   removeDataResourceGrant,
   replaceDataResourceGrant,
@@ -49,6 +51,7 @@ export function DataResourceGrantsPage() {
   const [resourceQuery, setResourceQuery] = useState("");
   const [resourcePage, setResourcePage] = useState(1);
   const [selectedResource, setSelectedResource] = useState<DataResourceGrantResource | null>(null);
+  const [subject, setSubject] = useState<"account" | "role">("account");
 
   const resourceTypesQuery = useQuery({ queryKey: ["data-resource-grants", "resource-types"], queryFn: listDataResourceTypes });
   const resourcesQuery = useQuery({
@@ -63,37 +66,45 @@ export function DataResourceGrantsPage() {
     ? resources.find((item) => item.resourceType === selectedResource.resourceType && item.resourceId === selectedResource.resourceId) ?? selectedResource
     : null;
   const authorizationAdapter = useMemo<MemberAuthorizationAdapter>(() => ({
-    queryKey: `data-resource-grant-members-${authorizationTarget?.resourceType ?? "none"}`,
-    listMembers: ({ query, cursor }) => listDataResourceGrantMembers({
+    queryKey: `data-resource-grant-members-${authorizationTarget?.resourceType ?? "none"}-${subject}`,
+    listMembers: ({ query, cursor }) => subject === "role" ? listDataResourceGrantRoleMembers({
+      resourceType: authorizationTarget?.resourceType ?? "",
+      resourceId: authorizationTarget?.resourceId ?? "",
+      query, cursor
+    }).then((page) => ({ ...page, items: page.items.map((role) => ({ userId: role.roleId, name: role.name, email: "", accountStatus: "", actions: role.actions, updatedAt: role.updatedAt })) })) : listDataResourceGrantMembers({
       resourceType: authorizationTarget?.resourceType ?? "",
       resourceId: authorizationTarget?.resourceId ?? "",
       query,
       cursor
     }),
-    listCandidates: ({ query, cursor }) => listDataResourceGrantMemberCandidates({
+    listCandidates: ({ query, cursor }) => subject === "role" ? listDataResourceGrantRoleCandidates({
+      resourceType: authorizationTarget?.resourceType ?? "",
+      resourceId: authorizationTarget?.resourceId ?? "",
+      query, cursor
+    }).then((page) => ({ ...page, items: page.items.map((role) => ({ userId: role.roleId, name: role.name, email: "" })) })) : listDataResourceGrantMemberCandidates({
       resourceType: authorizationTarget?.resourceType ?? "",
       resourceId: authorizationTarget?.resourceId ?? "",
       query,
       cursor
     }),
     addMember: ({ userId, actions }) => createDataResourceGrant({
-      userId,
+      ...(subject === "role" ? { roleId: userId } : { userId }),
       resourceType: authorizationTarget?.resourceType ?? "",
       resourceId: authorizationTarget?.resourceId ?? "",
       actions
     }),
     updateMember: ({ userId, actions }) => replaceDataResourceGrant({
-      userId,
+      ...(subject === "role" ? { roleId: userId } : { userId }),
       resourceType: authorizationTarget?.resourceType ?? "",
       resourceId: authorizationTarget?.resourceId ?? "",
       actions
     }),
     removeMember: (userId) => removeDataResourceGrant({
-      userId,
+      ...(subject === "role" ? { roleId: userId } : { userId }),
       resourceType: authorizationTarget?.resourceType ?? "",
       resourceId: authorizationTarget?.resourceId ?? ""
     })
-  }), [authorizationTarget?.resourceId, authorizationTarget?.resourceType]);
+  }), [authorizationTarget?.resourceId, authorizationTarget?.resourceType, subject]);
 
   function changeResourceType(value: string) {
     if (!resourceTypes.some((item) => item.resourceType === value)) return;
@@ -103,7 +114,8 @@ export function DataResourceGrantsPage() {
     closeDetails();
   }
 
-  function openDetails(resource: DataResourceGrantResource) {
+  function openDetails(resource: DataResourceGrantResource, nextSubject: "account" | "role" = "account") {
+    setSubject(nextSubject);
     setSelectedResource(resource);
   }
 
@@ -119,7 +131,7 @@ export function DataResourceGrantsPage() {
   return (
     <PageShell>
       <PageHeader title="数据权限">
-        按数据资源查看可授权权限，并管理账户的数据访问范围。
+        管理账户直接授权；技能空间还支持角色继承授权，两种来源取并集并去重。
       </PageHeader>
 
       {resourceTypesQuery.isError ? <ErrorAlert>{resourceTypesQuery.error.message}</ErrorAlert> : null}
@@ -208,6 +220,7 @@ export function DataResourceGrantsPage() {
                       {canManage ? <ShieldCheck data-icon="inline-start" aria-hidden="true" /> : <Eye data-icon="inline-start" aria-hidden="true" />}
                       {canManage ? "管理授权" : "查看授权"}
                     </Button>
+                    {resource.resourceType === "skill_space" ? <div className="mt-1"><Button aria-label={`${canManage ? "管理" : "查看"}${resource.name}角色授权`} onClick={() => openDetails(resource, "role")} size="sm" variant="secondary">角色授权</Button></div> : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -222,11 +235,13 @@ export function DataResourceGrantsPage() {
       </div>
 
       <MemberAuthorizationDrawer
+        key={subject}
+        subject={subject}
         adapter={authorizationAdapter}
         canAdd={canCreate}
         canRemove={canDelete}
         canUpdate={canUpdate}
-        memberCount={authorizationTarget?.userCount}
+        memberCount={subject === "account" ? authorizationTarget?.userCount : undefined}
         onChanged={refreshAuthorizationSummary}
         onClose={closeDetails}
         open={Boolean(selectedResource)}

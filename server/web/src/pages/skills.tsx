@@ -38,6 +38,7 @@ import {
   enableGitHubSource,
   getGitHubSourceToken,
   getSkillSourceAvailability,
+  hasLocalSkillApproval,
   listGitHubSources,
   listSkillSpaces,
   listSkills,
@@ -112,7 +113,8 @@ export function SkillsPage() {
   const sourcesQuery = useQuery({ queryKey: skillSourcesKey, queryFn: listGitHubSources, enabled: skillSourceEnabled && activeTab === "sources" });
   const skills = skillsQuery.data ?? [];
   const selectedSpace = (spacesQuery.data ?? []).find((space) => space.spaceId === spaceId);
-  const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approvers.length));
+  const localApprovalEnabled = hasLocalSkillApproval(selectedSpace);
+  const canSelectSkills = canMove || (canPublish && localApprovalEnabled);
   const spaceSkills = skills.filter((item) => item.spaceId === spaceId);
   const filtered = useMemo(() => {
     const normalized = trimInput(query).toLowerCase();
@@ -454,7 +456,7 @@ export function SkillsPage() {
                   <FolderInput data-icon="inline-start" aria-hidden="true" />
                   调整空间（{selectedSkills.length}）
                 </Button> : null}
-                {canPublish && selectedSpace?.approvers.length ? <Button onClick={openBatchPublish} variant="outline">
+                {canPublish && localApprovalEnabled ? <Button onClick={openBatchPublish} variant="outline">
                   <PackageCheck data-icon="inline-start" aria-hidden="true" />
                   批量发布（{selectedSkills.length}）
                 </Button> : null}
@@ -560,7 +562,7 @@ export function SkillsPage() {
                         const pending = latest?.approvalStatus === "pending";
                         return <>
                           {pending && latest.localApproval?.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
-                          {pending && !selectedSpace?.approvers.length && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
+                          {pending && selectedSpace && selectedSpace.approvalProvider !== "dingtalk" && !localApprovalEnabled && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
                         </>;
                       })()}
                       {canUpload ? <Button aria-label={`替换上传 ${item.name}`} title="替换上传" size="icon" variant="ghost" onClick={() => openUpload(item)}><Upload /></Button> : null}

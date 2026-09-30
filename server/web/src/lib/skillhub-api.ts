@@ -183,6 +183,8 @@ export type SkillSpace = {
   approvalProvider?: "local" | "dingtalk";
   externalApprovalTemplateId?: string;
   approvers: Array<{ userId: string; name: string }>;
+  approverRoleIds?: string[];
+  approverRoles?: Array<{ roleId: string; name: string }>;
   spaceId: string;
   name: string;
   description: string;
@@ -195,6 +197,10 @@ export type SkillSpace = {
   createdAt: string;
   updatedAt: string;
 };
+
+export function hasLocalSkillApproval(space: SkillSpace | undefined): boolean {
+  return Boolean(space && space.approvalProvider !== "dingtalk" && (space.approvers.length || space.approverRoleIds?.length || space.approverRoles?.length));
+}
 
 export type SkillSpaceMember = {
   userId: string;
@@ -384,6 +390,8 @@ type SkillSpaceResponse = {
   approval_provider?: "local" | "dingtalk";
   external_approval_template_id?: string;
   approvers?: Array<{ user_id: string; name: string }>;
+  approver_role_ids?: string[] | null;
+  approver_roles?: Array<{ role_id: string; name: string }> | null;
   space_id: string;
   name: string;
   description: string;
@@ -504,12 +512,17 @@ export async function listSkillSpaceApproverCandidates(spaceId: string) {
   return response.items.map((item) => ({ userId: item.user_id, name: item.name, email: item.email }));
 }
 
-export function setSkillSpaceApprover(spaceId: string, userIds: string[], confirmReset = false) {
-  return adminApi.put<void>("/skill-spaces/approver", { space_id: spaceId, approver_user_ids: userIds, confirm_reset: confirmReset });
+export async function listSkillSpaceApproverRoleCandidates(spaceId: string, query = "") {
+  const response = await adminApi.get<ListResponse<{ role_id: string; name: string }>>(`/skill-spaces/approver-role-candidates?${new URLSearchParams({ space_id: spaceId, query })}`);
+  return response.items.map((item) => ({ roleId: item.role_id, name: item.name }));
 }
 
-export function setSkillSpaceApproval(spaceId: string, provider: "local" | "dingtalk", templateId: string, userIds: string[] = [], confirmReset = false) {
-  return adminApi.put<void>("/skill-spaces/approval", { space_id: spaceId, approval_provider: provider, external_approval_template_id: templateId, approver_user_ids: userIds, confirm_reset: confirmReset });
+export function setSkillSpaceApprover(spaceId: string, userIds: string[], confirmReset = false, roleIds?: string[]) {
+  return adminApi.put<void>("/skill-spaces/approver", { space_id: spaceId, approver_user_ids: [...new Set(userIds)], confirm_reset: confirmReset, ...(roleIds === undefined ? {} : { approver_role_ids: [...new Set(roleIds)] }) });
+}
+
+export function setSkillSpaceApproval(spaceId: string, provider: "local" | "dingtalk", templateId: string, userIds: string[] = [], confirmReset = false, roleIds?: string[]) {
+  return adminApi.put<void>("/skill-spaces/approval", { space_id: spaceId, approval_provider: provider, external_approval_template_id: templateId, approver_user_ids: [...new Set(userIds)], confirm_reset: confirmReset, ...(roleIds === undefined ? {} : { approver_role_ids: provider === "local" ? [...new Set(roleIds)] : [] }) });
 }
 
 export function submitSkillApproval(skillId: string, versionId: string, app = false) {
@@ -885,6 +898,8 @@ function mapSkillSpace(item: SkillSpaceResponse): SkillSpace {
     approvalProvider: item.approval_provider ?? "local",
     externalApprovalTemplateId: item.external_approval_template_id ?? "",
     approvers: (item.approvers ?? []).map((approver) => ({ userId: approver.user_id, name: approver.name })),
+    ...(item.approver_role_ids === undefined ? {} : { approverRoleIds: item.approver_role_ids ?? [] }),
+    ...(item.approver_roles === undefined ? {} : { approverRoles: (item.approver_roles ?? []).map((role) => ({ roleId: role.role_id, name: role.name })) }),
     spaceId: item.space_id,
     name: item.name,
     description: item.description,

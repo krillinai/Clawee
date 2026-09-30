@@ -50,6 +50,10 @@ type ReviewStore interface {
 	ReviewVersion(context.Context, string, string, string, bool, string, time.Time) (Version, error)
 }
 
+type RoleReviewStore interface {
+	SetSpaceApprovalSubjects(context.Context, string, string, string, []string, []string, bool, string, time.Time) (int64, error)
+}
+
 type CreateVersionOptions struct {
 	// 保留旧调用契约；创建版本不再直接发布，发布必须通过审批门禁。
 	Publish       bool
@@ -59,14 +63,15 @@ type CreateVersionOptions struct {
 }
 
 type MemoryStore struct {
-	mu             sync.Mutex
-	skills         map[string]Skill
-	byName         map[string]string
-	versions       map[string][]Version
-	spaces         map[string]Space
-	grants         map[string]map[string]map[string]bool
-	approvals      map[string][]ApprovalInstance
-	localApprovals map[string][]localRequest
+	approvalRoleLookup ApprovalRoleLookup
+	mu                 sync.Mutex
+	skills             map[string]Skill
+	byName             map[string]string
+	versions           map[string][]Version
+	spaces             map[string]Space
+	grants             map[string]map[string]map[string]bool
+	approvals          map[string][]ApprovalInstance
+	localApprovals     map[string][]localRequest
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -78,7 +83,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version Version, options CreateVersionOptions) (Skill, Version, error) {
+func (s *MemoryStore) CreateVersion(ctx context.Context, proposed Skill, version Version, options CreateVersionOptions) (Skill, Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if proposed.SpaceID == "" {
@@ -136,6 +141,10 @@ func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version V
 			}
 		}
 	}
+	resolved, err := s.resolveLocalApproversLocked(ctx, s.spaces[skill.SpaceID])
+	if err != nil {
+		return Skill{}, Version{}, err
+	}
 	if newSkill {
 		s.skills[skill.SkillID] = skill
 		s.byName[skill.Name] = skill.SkillID
@@ -145,7 +154,7 @@ func (s *MemoryStore) CreateVersion(_ context.Context, proposed Skill, version V
 	version.ApprovedSpaceID, version.ReviewedBy, version.ReviewComment, version.ReviewedAt = "", "", "", nil
 	version.SkillID = skill.SkillID
 	s.versions[skill.SkillID] = append([]Version{version}, s.versions[skill.SkillID]...)
-	s.createLocalLocked(version, s.spaces[skill.SpaceID], version.CreatedAt)
+	s.createLocalResolvedLocked(version, s.spaces[skill.SpaceID], resolved, version.CreatedAt)
 	s.skills[skill.SkillID] = skill
 	return s.adminSkill(skill), version, nil
 }
@@ -167,7 +176,7 @@ func (s *MemoryStore) ListOwnPendingVersions(_ context.Context, userID string) (
 	items := []OwnPendingVersion{}
 	for _, skill := range s.skills {
 		space := s.spaces[skill.SpaceID]
-		if (space.ApprovalProvider != "dingtalk" && len(space.Approvers) != 0) || !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionWrite) {
+		if (space.ApprovalProvider != "dingtalk" && localApprovalConfigured(space)) || !s.hasAccessLocked(userID, skill.SpaceID, SpaceActionWrite) {
 			continue
 		}
 		for _, version := range s.versions[skill.SkillID] {
@@ -216,7 +225,7 @@ func (s *MemoryStore) GetAdmin(_ context.Context, id string) (AdminDetail, error
 	for i := range versions {
 		versions[i].ApprovalInstance = s.latestApprovalLocked(versions[i].VersionID)
 		versions[i].LocalApproval = nil
-		if space.ApprovalProvider == "local" && len(space.Approvers) > 0 {
+		if space.ApprovalProvider == "local" && localApprovalConfigured(space) {
 			versions[i].LocalApproval = localProgress(s.currentLocalLocked(versions[i], skill.SpaceID))
 		}
 	}
@@ -293,15 +302,15 @@ func (s *MemoryStore) GetPublished(_ context.Context, id string) (PublishedDetai
 	return detail, nil
 }
 
-func (s *MemoryStore) SetCurrentVersion(_ context.Context, skillID, versionID string, now time.Time) (Skill, Version, error) {
-	return s.setCurrentVersion(skillID, versionID, "", now)
+func (s *MemoryStore) SetCurrentVersion(ctx context.Context, skillID, versionID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(ctx, skillID, versionID, "", now)
 }
 
-func (s *MemoryStore) PublishOwnVersion(_ context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
-	return s.setCurrentVersion(skillID, versionID, userID, now)
+func (s *MemoryStore) PublishOwnVersion(ctx context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
+	return s.setCurrentVersion(ctx, skillID, versionID, userID, now)
 }
 
-func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
+func (s *MemoryStore) setCurrentVersion(ctx context.Context, skillID, versionID, userID string, now time.Time) (Skill, Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	skill, ok := s.skills[skillID]
@@ -335,7 +344,7 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 		} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || !s.hasValidApprovalLocked(target, space) {
 			return Skill{}, Version{}, ErrApprovalRequired
 		}
-	} else if len(space.Approvers) == 0 && userID != "" {
+	} else if !localApprovalConfigured(space) && userID != "" {
 		if target.UploadedByUserID != userID {
 			return Skill{}, Version{}, ErrSelfPublishForbidden
 		}
@@ -345,13 +354,25 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 		target.ApprovalStatus, target.ApprovedSpaceID, target.ReviewedBy, target.ReviewedAt = "approved", skill.SpaceID, userID, &now
 	} else if userID != "" {
 		return Skill{}, Version{}, ErrApprovalRequired
-	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || len(space.Approvers) == 0 || s.currentLocalLocked(target, skill.SpaceID) == nil || s.currentLocalLocked(target, skill.SpaceID).Status != "approved" {
+	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || !localApprovalConfigured(space) || s.currentLocalLocked(target, skill.SpaceID) == nil || s.currentLocalLocked(target, skill.SpaceID).Status != "approved" {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
 	if target.SkillName != "" && target.SkillName != skill.Name {
 		if owner := s.byName[target.SkillName]; owner != "" && owner != skillID {
 			return Skill{}, Version{}, ErrConflict
 		}
+	}
+	if skill.CurrentVersionID != nil && *skill.CurrentVersionID != versionID {
+		for index := range s.versions[skillID] {
+			if s.versions[skillID][index].VersionID == *skill.CurrentVersionID {
+				if err := s.resetStaleLocalLocked(ctx, &s.versions[skillID][index], space, now); err != nil {
+					return Skill{}, Version{}, err
+				}
+				break
+			}
+		}
+	}
+	if target.SkillName != "" && target.SkillName != skill.Name {
 		delete(s.byName, skill.Name)
 		skill.Name = target.SkillName
 		s.byName[skill.Name] = skillID
@@ -365,35 +386,28 @@ func (s *MemoryStore) setCurrentVersion(skillID, versionID, userID string, now t
 		}
 	}
 	if skill.CurrentVersionID == nil || *skill.CurrentVersionID != versionID {
-		previous := skill.CurrentVersionID
 		value := versionID
 		skill.CurrentVersionID = &value
 		skill.UpdatedAt = now
 		s.skills[skillID] = skill
-		if previous != nil {
-			for i := range s.versions[skillID] {
-				if s.versions[skillID][i].VersionID == *previous {
-					s.resetStaleLocalLocked(&s.versions[skillID][i], space, now)
-					break
-				}
-			}
-		}
 	}
 	return s.adminSkill(skill), target, nil
 }
 
-func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, targetSpaceID string, now time.Time) (SkillSpaceMoveResult, error) {
+func (s *MemoryStore) MoveSkillsToSpace(ctx context.Context, skillIDs []string, targetSpaceID string, now time.Time) (SkillSpaceMoveResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := SkillSpaceMoveResult{TargetSpaceID: targetSpaceID}
 	if _, exists := s.spaces[targetSpaceID]; !exists {
 		return SkillSpaceMoveResult{}, ErrSpaceNotFound
 	}
+	needsApproval := false
 	for _, skillID := range skillIDs {
 		if _, exists := s.skills[skillID]; !exists {
 			return SkillSpaceMoveResult{}, ErrNotFound
 		}
 		if s.skills[skillID].SpaceID != targetSpaceID {
+			needsApproval = true
 			for _, version := range s.versions[skillID] {
 				for _, item := range s.approvals[version.VersionID] {
 					if approvalActive(item.Status) {
@@ -401,6 +415,14 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 					}
 				}
 			}
+		}
+	}
+	var resolved []Approver
+	if needsApproval {
+		var err error
+		resolved, err = s.resolveLocalApproversLocked(ctx, s.spaces[targetSpaceID])
+		if err != nil {
+			return SkillSpaceMoveResult{}, err
 		}
 	}
 	for _, skillID := range skillIDs {
@@ -421,7 +443,7 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 			s.versions[skillID][i].ReviewedBy = ""
 			s.versions[skillID][i].ReviewedAt = nil
 			s.versions[skillID][i].ReviewComment = ""
-			s.createLocalLocked(s.versions[skillID][i], s.spaces[targetSpaceID], now)
+			s.createLocalResolvedLocked(s.versions[skillID][i], s.spaces[targetSpaceID], resolved, now)
 		}
 		skill.UpdatedAt = now
 		s.skills[skillID] = skill
@@ -430,7 +452,7 @@ func (s *MemoryStore) MoveSkillsToSpace(_ context.Context, skillIDs []string, ta
 	return result, nil
 }
 
-func (s *MemoryStore) ClearCurrentVersion(_ context.Context, skillID string, now time.Time) (*Version, error) {
+func (s *MemoryStore) ClearCurrentVersion(ctx context.Context, skillID string, now time.Time) (*Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	skill, ok := s.skills[skillID]
@@ -444,7 +466,9 @@ func (s *MemoryStore) ClearCurrentVersion(_ context.Context, skillID string, now
 				copy := version
 				cleared = &copy
 				space := s.spaces[skill.SpaceID]
-				s.resetStaleLocalLocked(&s.versions[skillID][i], space, now)
+				if err := s.resetStaleLocalLocked(ctx, &s.versions[skillID][i], space, now); err != nil {
+					return nil, err
+				}
 				break
 			}
 		}
@@ -461,7 +485,7 @@ func (s *MemoryStore) adminSkill(skill Skill) Skill {
 	if len(versions) > 0 {
 		latest := versions[0]
 		var progress *LocalApproval
-		if space := s.spaces[skill.SpaceID]; space.ApprovalProvider == "local" && len(space.Approvers) > 0 {
+		if space := s.spaces[skill.SpaceID]; space.ApprovalProvider == "local" && localApprovalConfigured(space) {
 			progress = localProgress(s.currentLocalLocked(latest, skill.SpaceID))
 		}
 		skill.LatestVersion = &SkillLatestVersion{VersionID: latest.VersionID, Version: latest.Version, ApprovalStatus: latest.ApprovalStatus, UploadedByUserID: latest.UploadedByUserID, LocalApproval: progress}

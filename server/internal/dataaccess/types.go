@@ -123,6 +123,7 @@ var (
 type Grant struct {
 	GrantID      string    `json:"grant_id"`
 	UserID       string    `json:"user_id"`
+	RoleID       string    `json:"role_id,omitempty"`
 	ResourceType string    `json:"resource_type"`
 	ResourceID   string    `json:"resource_id"`
 	Action       string    `json:"action"`
@@ -133,6 +134,9 @@ type Grant struct {
 
 type Filter struct {
 	UserID       string
+	RoleID       string
+	RoleGrants   bool
+	Effective    bool
 	ResourceType string
 	ResourceID   string
 	Action       string
@@ -140,6 +144,7 @@ type Filter struct {
 
 type SetInput struct {
 	UserID       string
+	RoleID       string
 	ResourceType string
 	ResourceID   string
 	Actions      []string
@@ -152,6 +157,7 @@ type Audit struct {
 	AuditID       string
 	OperatorID    string
 	TargetUserID  string
+	TargetRoleID  string
 	ResourceType  string
 	ResourceID    string
 	BeforeActions []string

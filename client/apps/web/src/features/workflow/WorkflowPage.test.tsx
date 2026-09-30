@@ -29,6 +29,65 @@ function serviceFor(userId: string): WorkflowService {
 describe('WorkflowPage', () => {
   beforeEach(() => sessionStorage.clear());
 
+  it('第二个候选也能审批，并展示全体候选姓名', async () => {
+    const shared = { ...task, assignee_user_ids: ['a', 'b', 'a'] };
+    const service = serviceFor('a');
+    service.tasks = vi.fn(async () => ({ data: [shared], meta }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, tasks: [shared], user_names: { a: '张三', b: '李四' } } }));
+    service.decide = vi.fn(async () => ({ data: { instance_id: instance.id, task_id: task.task_id, status: 'succeeded' } }));
+    render(<WorkflowPage service={service} signedIn online userId="b" />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    expect(await screen.findByText(/负责人：张三、李四/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '批准' }));
+    await waitFor(() => expect(service.decide).toHaveBeenCalledWith(task.task_id, 'approve', '', expect.any(String)));
+  });
+
+  it.each(['c', 'a'])('快照之外账户 %s 不显示处理入口，即使旧首负责人字段匹配', async (userId) => {
+    const service = serviceFor('a');
+    service.instance = vi.fn(async () => ({ data: { ...instance, tasks: [{ ...task, assignee_user_ids: ['b'] }] } }));
+    render(<WorkflowPage service={service} signedIn online userId={userId} />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    expect(await screen.findByRole('heading', { name: `实例 ${instance.id}` })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '批准' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '驳回' })).not.toBeInTheDocument();
+  });
+
+  it('第二个 Agent 候选可以准备执行，完成后展示真实处理人而非首负责人', async () => {
+    const shared: Task = { ...task, type: 'agent', assignee_user_ids: ['a', 'b'] };
+    const service = serviceFor('a');
+    service.tasks = vi.fn(async () => ({ data: [shared], meta }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, nodes: [{ node_id: task.node_id, order: 0, type: 'agent' as const, title: '审核', instruction: '审核', resolved_user_ids: ['a', 'b'] }], tasks: [shared], user_names: { a: '张三', b: '李四' } } }));
+    service.capability = vi.fn(async () => ({ canExecute: true }));
+    service.execution = vi.fn(async () => ({ status: 'idle' }));
+    service.prepare = vi.fn(async () => ({ threadId: 'thread-b', instruction: '审核', input: '内容', firstNode: true }));
+    const prepared = vi.fn();
+    render(<WorkflowPage service={service} signedIn online userId="b" projectId="project-b" onTaskPrepared={prepared} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Agent · 审核/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '发起 Agent 执行' }));
+    await waitFor(() => expect(service.prepare).toHaveBeenCalledWith(task.task_id, 'project-b'));
+    expect(prepared).toHaveBeenCalledWith(task.task_id, expect.objectContaining({ threadId: 'thread-b' }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, status: 'succeeded', tasks: [{ ...shared, status: 'completed', handled_by: 'b' }], user_names: { a: '张三', b: '李四' } } }));
+    service.tasks = vi.fn(async () => ({ data: [], meta }));
+    fireEvent.click(screen.getByRole('button', { name: '刷新工作流' }));
+    expect(await screen.findByText('实际处理人：李四')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起 Agent 执行' })).not.toBeInTheDocument();
+  });
+
+  it('服务端授权的角色模板无需从角色中挑一人即可发起', async () => {
+    const template: Template = { id: 'role-template', name: '角色审核', description: '', status: 'enabled', revision: 1, nodes: [{ node_id: 'review', order: 0, type: 'approval', title: '审核', instruction: '审核', assignee_role_ids: ['reviewers'], assignee_user_ids: [] }] };
+    const service = serviceFor('a');
+    service.templates = vi.fn(async () => ({ data: [template], meta }));
+    service.template = vi.fn(async () => ({ data: template }));
+    service.start = vi.fn(async () => ({ data: { instance_id: instance.id, task_id: task.task_id, status: 'running' } }));
+    render(<WorkflowPage service={service} signedIn online userId="b" />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '模板' })); });
+    const templateButton = await screen.findByRole('button', { name: /角色审核/ });
+    await act(async () => { fireEvent.click(templateButton); });
+    const startButton = await screen.findByRole('button', { name: '发起任务' });
+    await act(async () => { fireEvent.click(startButton); });
+    await waitFor(() => expect(service.start).toHaveBeenCalledWith(template.id, { text: '' }, expect.any(String)));
+  });
+
   it('drops the previous account details when the account key changes', async () => {
     const view = render(<WorkflowPage key="a" service={serviceFor('a')} signedIn online userId="a" />);
     const taskButton = await screen.findByRole('button', { name: /审批 · 审核/ });

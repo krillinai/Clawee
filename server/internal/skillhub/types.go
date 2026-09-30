@@ -1,6 +1,7 @@
 package skillhub
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -117,6 +118,13 @@ type Approver struct {
 	Name   string `json:"name"`
 }
 
+type ApprovalRole struct {
+	RoleID string `json:"role_id"`
+	Name   string `json:"name"`
+}
+
+type ApprovalRoleLookup func(context.Context, string) (ApprovalRole, []Approver, error)
+
 type ApprovalDecision struct {
 	Approver
 	Status    string     `json:"status"`
@@ -207,17 +215,19 @@ type CreateVersionInput struct {
 }
 
 type Space struct {
-	Approvers                  []Approver `json:"approvers"`
-	ApprovalProvider           string     `json:"approval_provider"`
-	ExternalApprovalTemplateID string     `json:"external_approval_template_id"`
-	SpaceID                    string     `json:"space_id"`
-	Name                       string     `json:"name"`
-	Description                string     `json:"description"`
-	CreatedBy                  string     `json:"created_by,omitempty"`
-	UpdatedBy                  string     `json:"updated_by,omitempty"`
-	CreatedAt                  time.Time  `json:"created_at,omitempty"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
-	Actions                    []string   `json:"actions,omitempty"`
+	ApproverRoleIDs            []string       `json:"approver_role_ids"`
+	ApproverRoles              []ApprovalRole `json:"approver_roles"`
+	Approvers                  []Approver     `json:"approvers"`
+	ApprovalProvider           string         `json:"approval_provider"`
+	ExternalApprovalTemplateID string         `json:"external_approval_template_id"`
+	SpaceID                    string         `json:"space_id"`
+	Name                       string         `json:"name"`
+	Description                string         `json:"description"`
+	CreatedBy                  string         `json:"created_by,omitempty"`
+	UpdatedBy                  string         `json:"updated_by,omitempty"`
+	CreatedAt                  time.Time      `json:"created_at,omitempty"`
+	UpdatedAt                  time.Time      `json:"updated_at"`
+	Actions                    []string       `json:"actions,omitempty"`
 }
 
 type SpaceSummary struct {

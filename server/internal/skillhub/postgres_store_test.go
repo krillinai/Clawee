@@ -61,8 +61,8 @@ func TestPostgresCreateSpaceGrantsCreatorAtomically(t *testing.T) {
 			mock.ExpectCommit()
 			mock.ExpectQuery(`SELECT sp.space_id`).WithArgs(space.SpaceID).WillReturnRows(pgxmock.NewRows([]string{
 				"space_id", "name", "description", "created_by", "updated_by", "created_at", "updated_at",
-				"member_count", "skill_count", "published_count", "approvers", "approval_provider", "external_approval_template_id",
-			}).AddRow(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now, 1, 0, 0, []byte("[]"), "local", ""))
+				"member_count", "skill_count", "published_count", "approvers", "approval_provider", "external_approval_template_id", "approver_roles",
+			}).AddRow(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now, 1, 0, 0, []byte("[]"), "local", "", []byte("[]")))
 		}
 		created, err := store.CreateSpace(context.Background(), space)
 		if failGrant {
