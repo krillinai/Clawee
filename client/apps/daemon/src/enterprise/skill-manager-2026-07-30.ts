@@ -99,7 +99,7 @@ export function computeEnterpriseSkillState(input: {
       ...base,
       status: 'invalid',
       integrity: 'unknown',
-      actions: []
+      actions: ['update']
     };
   }
   if (
@@ -116,7 +116,7 @@ export function computeEnterpriseSkillState(input: {
       ...base,
       status: 'name_conflict',
       integrity: 'unknown',
-      actions: []
+      actions: ['update', 'use']
     };
   }
   if (input.enterpriseRecord === undefined) {
@@ -124,7 +124,7 @@ export function computeEnterpriseSkillState(input: {
       ...base,
       status: 'installed_unknown_source',
       integrity: 'unknown',
-      actions: ['use']
+      actions: ['update', 'use']
     };
   }
 
@@ -141,12 +141,9 @@ export function computeEnterpriseSkillState(input: {
       : input.remote.packageSha256 === input.enterpriseRecord.packageSha256
         ? 'installed'
         : 'update_available';
-  const actions =
-    integrity === 'local_changed'
-      ? ['use'] as const
-      : status === 'update_available' || status === 'installed'
-        ? ['update', 'use'] as const
-        : ['use'] as const;
+  const actions = status === 'update_available' || status === 'installed'
+    ? ['update', 'use'] as const
+    : ['use'] as const;
 
   return {
     ...base,
@@ -393,17 +390,6 @@ export function createEnterpriseSkillManager(input: {
             overwrite,
             transaction
           });
-          if (overwrite) {
-            const local = transaction.getSkill(detail.name)!;
-            const currentDigest = await computeContentDigest(local.skillPath);
-            if (currentDigest !== record!.installedContentSha256) {
-              throw new EnterpriseSkillManagerError(
-                'ENTERPRISE_SKILL_LOCAL_CHANGED',
-                409
-              );
-            }
-          }
-
           const result = await transaction.installSkill({
             id: detail.name,
             sourcePath: extracted.sourcePath,
@@ -516,11 +502,7 @@ export function createEnterpriseSkillManager(input: {
       return correctRecord;
     }
 
-    if (
-      local?.status !== 'valid' ||
-      publicRecord !== undefined ||
-      correctRecord === undefined
-    ) {
+    if (local === undefined) {
       throw new EnterpriseSkillManagerError(
         'ENTERPRISE_SKILL_SOURCE_CONFLICT',
         409

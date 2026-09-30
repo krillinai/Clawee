@@ -62,13 +62,13 @@ describe('enterprise skill manager', () => {
       {
         expected: 'invalid',
         input: { remote: remoteSkill(), local: localSkill('invalid') },
-        actions: [],
+        actions: ['update'],
         integrity: 'unknown'
       },
       {
         expected: 'installed_unknown_source',
         input: { remote: remoteSkill(), local: localSkill() },
-        actions: ['use'],
+        actions: ['update', 'use'],
         integrity: 'unknown'
       },
       {
@@ -78,7 +78,7 @@ describe('enterprise skill manager', () => {
           local: localSkill(),
           publicRecordExists: true
         },
-        actions: [],
+        actions: ['update', 'use'],
         integrity: 'unknown'
       },
       {
@@ -130,7 +130,7 @@ describe('enterprise skill manager', () => {
     })).toMatchObject({
       status: 'update_available',
       integrity: 'local_changed',
-      actions: ['use']
+      actions: ['update', 'use']
     });
   });
 
@@ -246,23 +246,47 @@ describe('enterprise skill manager', () => {
     expect(installSkill).not.toHaveBeenCalled();
   });
 
-  it('blocks an update when the local tree changed during download', async () => {
-    const installSkill = vi.fn();
-    const records = createEnterpriseRecords(enterpriseRecord());
+  it.each(['valid', 'invalid'] as const)('replaces a %s same-name skill without an enterprise source record', async status => {
+    const installSkill = vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }));
+    const digest = vi.fn(async () => 'b'.repeat(64));
+    const skillManager = createSkillManager(createTransaction({ getSkill: vi.fn(() => localSkill(status)), installSkill }));
     const manager = createManager({
-      records,
-      digest: vi.fn(async () => 'd'.repeat(64)),
-      skillManager: createSkillManager(createTransaction({
-        getSkill: vi.fn(() => localSkill()),
-        installSkill
-      }))
+      digest,
+      skillManager
     });
 
-    await expect(manager.updateSkill('skill_1')).rejects.toMatchObject({
-      code: 'ENTERPRISE_SKILL_LOCAL_CHANGED'
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({
+      skill: { status: 'installed', integrity: 'verified' },
+      operation: { operation: 'overwrite' }
     });
-    expect(installSkill).not.toHaveBeenCalled();
-    expect(records.upsertRecord).not.toHaveBeenCalled();
+    expect(installSkill).toHaveBeenCalledWith(expect.objectContaining({ overwrite: true }));
+    expect(digest).toHaveBeenCalledOnce();
+  });
+
+  it('replaces a same-name skill owned by another enterprise record', async () => {
+    const installSkill = vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }));
+    const skillManager = createSkillManager(createTransaction({ getSkill: vi.fn(() => localSkill()), installSkill }));
+    const records = createEnterpriseRecords({ ...enterpriseRecord(), skillId: 'skill_old' });
+    const manager = createManager({ skillManager, records });
+
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({ skill: { status: 'installed' } });
+    expect(records.upsertRecord).toHaveBeenCalledWith(expect.objectContaining({ skillId: 'skill_1', name: 'code-review' }));
+  });
+
+  it('replaces a same-name skill previously installed from the public market', async () => {
+    const publicRecords = createPublicRecords();
+    vi.mocked(publicRecords.getRecord).mockReturnValue({
+      skillId: 'code-review', repository: 'owner/repo', skillPath: '.',
+      commit: 'a'.repeat(40), marketRevision: 1,
+      installedAt: '2026-07-30T09:00:00.000Z', updatedAt: '2026-07-30T09:00:00.000Z'
+    });
+    const skillManager = createSkillManager(createTransaction({
+      getSkill: vi.fn(() => localSkill()),
+      installSkill: vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }))
+    }));
+    const manager = createManager({ skillManager, publicRecords });
+
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({ skill: { status: 'installed' } });
   });
 
   it('downloads and replaces an installed skill on explicit update even at the same version', async () => {
@@ -350,6 +374,7 @@ function createManager(overrides: {
   client?: EnterpriseHttpClient;
   sessionManager?: EnterpriseSessionManager;
   records?: EnterpriseInstallRecordRepository;
+  publicRecords?: SkillMarketRecordRepository;
   skillManager?: SkillManager;
   sleep?: (milliseconds: number) => Promise<void>;
   digest?: (path: string) => Promise<string>;
@@ -363,7 +388,7 @@ function createManager(overrides: {
     skillManager:
       overrides.skillManager ??
       createSkillManager(createTransaction()),
-    publicRecords: createPublicRecords(),
+    publicRecords: overrides.publicRecords ?? createPublicRecords(),
     records: overrides.records ?? createEnterpriseRecords(),
     sleep: overrides.sleep,
     computeContentDigest: overrides.digest ?? vi.fn(async () => 'b'.repeat(64)),

@@ -3903,6 +3903,7 @@ describe('App', () => {
     'posts enterprise $kind without a body and refreshes the list once',
     async ({ kind, actionLabel, initialSkill }) => {
       const user = userEvent.setup();
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
       window.location.hash = '#/plugins?source=enterprise';
       const hostBridge = createHostBridge();
       hostBridge.readConnectionConfig = async () => ({
@@ -3912,6 +3913,7 @@ describe('App', () => {
       const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
       let skillRequests = 0;
       let localSkillRequests = 0;
+      let marketRecordRequests = 0;
       const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const projectApiResponse = handleDefaultProjectApiRequest(url, init);
@@ -3951,6 +3953,10 @@ describe('App', () => {
               name: 'enterprise-name'
             })
           ]));
+        }
+        if (url.endsWith('/codex/skill-market/install-records')) {
+          marketRecordRequests += 1;
+          return jsonResponse({ records: [] });
         }
         if (
           url.endsWith(`/enterprise/skills/enterprise-skill/${kind}`)
@@ -3998,6 +4004,8 @@ describe('App', () => {
 
       await waitFor(() => expect(skillRequests).toBe(2));
       await waitFor(() => expect(localSkillRequests).toBe(1));
+      await waitFor(() => expect(marketRecordRequests).toBe(1));
+      expect(confirm).toHaveBeenCalledTimes(kind === 'update' ? 1 : 0);
       const mutationCalls = fetchCalls.filter(call => (
         call.url.endsWith(`/enterprise/skills/enterprise-skill/${kind}`)
         && call.init?.method === 'POST'
@@ -4009,6 +4017,7 @@ describe('App', () => {
       expect(localSkillRequests).toBe(1);
       expect(within(screen.getByTestId('enterprise-skill-enterprise-skill'))
         .getByRole('button', { name: '使用' })).toBeEnabled();
+      confirm.mockRestore();
     }
   );
 

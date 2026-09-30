@@ -223,6 +223,11 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
     setPendingUseSkill(skill);
   }
 
+  function requestUpdate(skill: EnterpriseSkillResponse) {
+    if (!window.confirm(`更新「${skill.name}」将用企业版本覆盖本地同名 Skill，确定继续吗？`)) return;
+    props.onUpdate(skill.skillId);
+  }
+
   if (props.session.status === 'checking') {
     return (
       <EnterpriseGate
@@ -319,7 +324,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
               onInstall={props.onInstall}
               onLoadParticipantAvatar={props.onLoadParticipantAvatar}
               onOpen={trigger => openDetail(skill, trigger)}
-              onUpdate={props.onUpdate}
+              onUpdate={() => requestUpdate(skill)}
               onReplace={props.onReplaceSkill}
               onUse={() => requestUse(skill)}
             />
@@ -336,7 +341,10 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
           operation={props.operation}
           onClose={closeDetail}
           onInstall={props.onInstall}
-          onUpdate={props.onUpdate}
+          onUpdate={skillId => {
+            const skill = activeDetail.detail ?? skills.find(item => item.skillId === skillId);
+            if (skill !== undefined) requestUpdate(skill);
+          }}
           onUse={requestUse}
         />
       ) : null}
@@ -666,7 +674,7 @@ function getEnterpriseSkillVisual(
   if (integrity === 'local_changed') {
     return {
       label: '本地内容已修改',
-      reason: '本地内容与安装记录不一致，只能继续使用，不能静默更新。',
+      reason: '本地内容与安装记录不一致，更新前需确认覆盖本地修改。',
       tone: 'warning',
       icon: <FileWarning size={18} />
     };
@@ -682,7 +690,7 @@ function getEnterpriseSkillVisual(
     case 'invalid':
       return {
         label: '本地内容无效',
-        reason: '同名本地 Skill 无法通过结构校验。',
+        reason: '同名本地 Skill 无法通过结构校验，可确认覆盖。',
         tone: 'danger',
         icon: <AlertCircle size={18} />
       };
@@ -696,7 +704,7 @@ function getEnterpriseSkillVisual(
     case 'name_conflict':
       return {
         label: '名称冲突',
-        reason: '该名称已由其他来源占用，企业 Hub 不会覆盖。',
+        reason: '该名称已由其他来源占用，可确认覆盖。',
         tone: 'danger',
         icon: <AlertCircle size={18} />
       };

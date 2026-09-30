@@ -4716,6 +4716,7 @@ export function AppController(props: AppControllerProps) {
     const generation = enterpriseHubGenerationRef.current;
     const capabilityGeneration = skillMarketRuntimeGenerationRef.current;
     const activeCapabilityService = capabilityServiceRef.current;
+    const activeSkillMarketService = skillMarketServiceRef.current;
     enterpriseSkillMutationInFlightRef.current = true;
     setEnterpriseSkillOperation({ skillId, kind });
     try {
@@ -4737,6 +4738,16 @@ export function AppController(props: AppControllerProps) {
           }
         } catch {
           // The enterprise mutation succeeded; capability refresh can retry later.
+        }
+        if (activeSkillMarketService !== null) {
+          try {
+            const response = await activeSkillMarketService.listInstallRecords();
+            if (isCurrentSkillMarketRuntime(capabilityGeneration, activeCapabilityService, activeSkillMarketService)) {
+              setSkillMarketInstallRecords(response.records);
+            }
+          } catch {
+            // The enterprise mutation succeeded; market records can refresh later.
+          }
         }
       }
       if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
@@ -7444,9 +7455,9 @@ function formatEnterpriseSkillError(error: unknown, fallback: string): string {
     case 'ENTERPRISE_SKILL_VERSION_CHANGED':
       return '企业 Skill 版本已变化，请刷新后重试';
     case 'ENTERPRISE_SKILL_SOURCE_CONFLICT':
-      return '本地同名 Skill 已由其他来源占用';
+      return '本地 Skill 状态已变化，请刷新后重试';
     case 'ENTERPRISE_SKILL_LOCAL_CHANGED':
-      return '本地 Skill 已被修改，无法自动覆盖';
+      return '本地 Skill 内容已变化，请刷新后确认是否覆盖';
     case 'ENTERPRISE_SKILL_PACKAGE_INVALID':
     case 'ENTERPRISE_SKILL_PACKAGE_HASH_MISMATCH':
       return '企业 Skill 包校验失败';

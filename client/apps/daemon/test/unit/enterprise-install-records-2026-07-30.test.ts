@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEnterpriseInstallRecordRepository
 } from '../../src/enterprise/install-records-2026-07-30.js';
+import { createSkillMarketRecordRepository } from '../../src/codex/skills/market-records.js';
 import { openRuntimeDatabase } from '../../src/storage/database.js';
 
 let tempDir = '';
@@ -70,13 +71,28 @@ describe('enterprise skill install records', () => {
     expect(records.listRecords()).toEqual([inserted]);
   });
 
+  it('atomically transfers a same-name market or enterprise record to the new enterprise skill', () => {
+    openDatabase();
+    const records = createEnterpriseInstallRecordRepository(db!);
+    const market = createSkillMarketRecordRepository(db!);
+    records.upsertRecord(recordInput({ skillId: 'skill_old', name: 'code-review' }));
+    market.upsertRecord({ skillId: 'code-review', repository: 'owner/repo', skillPath: '.', commit: 'a'.repeat(40), marketRevision: 1 });
+
+    const updated = records.upsertRecord(recordInput({ skillId: 'skill_1', name: 'code-review' }));
+    expect(records.getBySkillId('skill_old')).toBeUndefined();
+    expect(records.getByName('code-review')).toEqual(updated);
+    expect(market.getRecord('code-review')).toBeUndefined();
+  });
+
   it('preserves the previous enterprise record when an atomic upsert aborts', () => {
     openDatabase();
     const records = createEnterpriseInstallRecordRepository(db!);
+    const market = createSkillMarketRecordRepository(db!);
     const previous = records.upsertRecord(recordInput({
       skillId: 'skill_1',
       name: 'code-review'
     }));
+    market.upsertRecord({ skillId: 'code-review', repository: 'owner/repo', skillPath: '.', commit: 'a'.repeat(40), marketRevision: 1 });
     db!.exec(`
       CREATE TRIGGER abort_enterprise_update
       BEFORE UPDATE ON enterprise_skill_installs
@@ -103,9 +119,11 @@ describe('enterprise skill install records', () => {
 
     expect(() => records.upsertRecord(recordInput({
       skillId: 'skill_2',
-      name: 'new-skill'
+      name: 'code-review'
     }))).toThrow('forced enterprise insert failure');
     expect(records.getBySkillId('skill_2')).toBeUndefined();
+    expect(records.getByName('code-review')).toEqual(previous);
+    expect(market.getRecord('code-review')).toBeDefined();
   });
 });
 
