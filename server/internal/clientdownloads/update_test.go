@@ -30,10 +30,10 @@ func TestCustomerUpdateInvalidInputDoesNotPublish(t *testing.T) {
 		"build metadata":     func(m *CustomerUpdateManifest) { m.Version = "1.2.3+build" },
 		"leading zero":       func(m *CustomerUpdateManifest) { m.Version = "01.2.3" },
 		"incomplete version": func(m *CustomerUpdateManifest) { m.Version = "1.2" },
-		"unsafe major":       func(m *CustomerUpdateManifest) { m.Version = "9007199254740992.0.0" },
-		"unsafe minor":       func(m *CustomerUpdateManifest) { m.Version = "1.9007199254740992.0" },
-		"unsafe patch":       func(m *CustomerUpdateManifest) { m.Version = "1.2.9007199254740992" },
-		"overflow version":   func(m *CustomerUpdateManifest) { m.Version = "99999999999999999999.0.0" },
+		"unsafe major":       func(manifest *CustomerUpdateManifest) { manifest.Version = "9007199254740992.0.0" },
+		"unsafe minor":       func(manifest *CustomerUpdateManifest) { manifest.Version = "1.9007199254740992.0" },
+		"unsafe patch":       func(manifest *CustomerUpdateManifest) { manifest.Version = "1.2.9007199254740992" },
+		"overflow version":   func(manifest *CustomerUpdateManifest) { manifest.Version = "99999999999999999999.0.0" },
 		"empty packages":     func(m *CustomerUpdateManifest) { m.Packages = nil },
 		"duplicate platform": func(m *CustomerUpdateManifest) { m.Packages = append(m.Packages, m.Packages[0]) },
 		"linux":              func(m *CustomerUpdateManifest) { m.Packages[0].Platform = "linux" },
@@ -76,38 +76,38 @@ func TestCustomerUpdateInvalidInputDoesNotPublish(t *testing.T) {
 	}
 }
 
-func TestCustomerUpdateSafeVersionBoundary(t *testing.T) {
+func TestCustomerUpdateSafeVersionBoundary(testContext *testing.T) {
 	for _, version := range []string{"0.0.0", "9007199254740991.0.0", "1.9007199254740991.0", "1.2.9007199254740991", "9007199254740991.9007199254740991.9007199254740991"} {
-		t.Run(version, func(t *testing.T) {
+		testContext.Run(version, func(testContext *testing.T) {
 			service := NewService(settings.NewMemoryStore())
 			manifest := customerManifest()
 			manifest.Version = version
 			published, err := service.PublishUpdate(context.Background(), manifest, manifest.GatewayURL, "admin", 0)
 			if err != nil || published.Update == nil || published.Update.Version != version {
-				t.Fatalf("safe version rejected: %+v %v", published, err)
+				testContext.Fatalf("safe version rejected: %+v %v", published, err)
 			}
 		})
 	}
 }
 
-func TestCustomerUpdateUnsafeVersionPreservesPublishedSnapshot(t *testing.T) {
+func TestCustomerUpdateUnsafeVersionPreservesPublishedSnapshot(testContext *testing.T) {
 	ctx := context.Background()
 	service := NewService(settings.NewMemoryStore())
 	manifest := customerManifest()
 	if _, err := service.PublishUpdate(ctx, manifest, manifest.GatewayURL, "admin", 0); err != nil {
-		t.Fatal(err)
+		testContext.Fatal(err)
 	}
 	manifest.Version = "9007199254740992.0.0"
 	if _, err := service.PublishUpdate(ctx, manifest, manifest.GatewayURL, "admin", 1); !errors.Is(err, ErrInvalidUpdate) {
-		t.Fatalf("unsafe version accepted: %v", err)
+		testContext.Fatalf("unsafe version accepted: %v", err)
 	}
 	current, err := service.GetUpdate(ctx)
 	if err != nil || current.Revision != 1 || current.Update == nil || current.Update.Version != "1.2.3" {
-		t.Fatalf("published snapshot changed: %+v %v", current, err)
+		testContext.Fatalf("published snapshot changed: %+v %v", current, err)
 	}
 	manifest.Version = "1.2.4"
 	if _, err := service.PublishUpdate(ctx, manifest, manifest.GatewayURL, "admin", 1); err != nil {
-		t.Fatalf("normal update blocked: %v", err)
+		testContext.Fatalf("normal update blocked: %v", err)
 	}
 }
 
