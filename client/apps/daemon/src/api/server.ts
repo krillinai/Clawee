@@ -95,6 +95,7 @@ import {
 } from '../scheduler/coordinator.js';
 import { ScheduleRepository } from '../scheduler/repository.js';
 import { createSchedulerService, type SchedulerService } from '../scheduler/service.js';
+import { createWorkflowSchedules } from '../scheduler/workflow.js';
 import { openRuntimeDatabase } from '../storage/database.js';
 import { createRunRepository, createThreadRepository } from '../storage/repositories.js';
 import { createThreadManager } from '../threads/manager.js';
@@ -665,6 +666,10 @@ export async function buildServer(input: BuildServerInput) {
       }
     });
   let scheduler = input.scheduler;
+  const workflowSchedules = createWorkflowSchedules({
+    db, repository: scheduleRepository, session: enterpriseSessionManager,
+    http: enterpriseHttpClient, origin: () => enterpriseOrigin.origin
+  });
   const scheduleCoordinator = input.scheduleCoordinator ?? createScheduleCoordinator({
     db,
     repository: scheduleRepository,
@@ -672,6 +677,7 @@ export async function buildServer(input: BuildServerInput) {
     runManager,
     defaultCwd,
     profileValidator: profileManager,
+    workflowSchedules,
     onSchedulesChanged: () => scheduler?.refreshTimer()
   });
   prepareSchedulerStartup({
@@ -683,11 +689,13 @@ export async function buildServer(input: BuildServerInput) {
   scheduler ??= createSchedulerService({
     repository: scheduleRepository,
     runManager,
-    autostart: false
+    autostart: false,
+    workflowSchedules,
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true
   });
   if (input.modelServiceRuntime !== undefined) {
     handleModelServiceSignedOut = () => {
-      scheduler.stop();
+      scheduler.refreshTimer();
       runManager.cancelAll();
       invalidatePersistentRuntime('model_service_signed_out');
     };
@@ -877,6 +885,15 @@ export async function buildServer(input: BuildServerInput) {
     if (
       input.modelServiceRuntime !== undefined
       && !input.modelServiceRuntime.ready()
+      && isModelFreeWorkflowRequest(request.method, request.routeOptions.url)
+      && request.routeOptions.url?.startsWith('/enterprise/workflow-')
+      && enterpriseSessionManager.getSnapshot().status !== 'signed_in'
+    ) {
+      return reply.code(401).send(apiError('ENTERPRISE_UNAUTHORIZED', '企业会话不可用，请重新登录'));
+    }
+    if (
+      input.modelServiceRuntime !== undefined
+      && !input.modelServiceRuntime.ready()
       && !isPreModelConfigurationRequest(
         request.method,
         request.routeOptions.url,
@@ -991,7 +1008,7 @@ export async function buildServer(input: BuildServerInput) {
   if (taskMcpService !== undefined) {
     await registerTaskMcpRoutes(server, { service: taskMcpService });
   }
-  await registerScheduleRoutes(server, scheduleCoordinator, scheduler);
+  await registerScheduleRoutes(server, scheduleCoordinator, scheduler, () => input.modelServiceRuntime?.ready() ?? true);
   await registerAgentToolRoutes(server, {
     capabilities: agentCapabilityTokens,
     schedules: agentScheduleOperations
@@ -1101,10 +1118,8 @@ export async function buildServer(input: BuildServerInput) {
   );
 
   if (input.schedulerAutostart === true) {
-    if (input.modelServiceRuntime === undefined) {
-      scheduler.start();
-    } else {
-      if (input.modelServiceRuntime.ready()) scheduler.start();
+    scheduler.start();
+    if (input.modelServiceRuntime !== undefined) {
       unsubscribeRuntimeReady = input.modelServiceRuntime.subscribeReady(() => {
         scheduler.start();
       });
@@ -1152,6 +1167,8 @@ function isModelAccessRequest(
 ): boolean {
   return route === '/runtime/model-service'
     || route === '/runtime/model-service/configure'
+    || route === '/runtime/model-service/check'
+    || route === '/runtime/model-service/api-key'
     || route === '/runtime/model-service/retry'
     || route === '/enterprise/session'
     || route === '/enterprise/gateway'
@@ -1173,10 +1190,39 @@ function isPreModelConfigurationRequest(
   taskMcpEnabled: boolean
 ): boolean {
   return isModelAccessRequest(route)
+    || isModelFreeWorkflowRequest(method, route)
     || (
       taskMcpEnabled
       && (route === '/mcp' || (method === 'GET' && route === '/projects'))
     );
+}
+
+function isModelFreeWorkflowRequest(method: string, route: string | undefined): boolean {
+  if (route === undefined) return false;
+  if (method === 'GET') {
+    return [
+      '/enterprise/workflow-capability',
+      '/enterprise/workflow-templates',
+      '/enterprise/workflow-templates/:id',
+      '/enterprise/workflow-instances',
+      '/enterprise/workflow-instances/:id',
+      '/enterprise/workflow-tasks',
+      '/enterprise/workflow-tasks/:id',
+      '/enterprise/workflow-tasks/:id/execution',
+      '/schedules',
+      '/schedules/:id',
+      '/schedules/:id/operations'
+    ].includes(route);
+  }
+  if (method === 'POST') {
+    return [
+      '/enterprise/workflow-templates/:id/instances',
+      '/enterprise/workflow-tasks/:id/decision',
+      '/schedules',
+      '/schedules/:id/run-now'
+    ].includes(route);
+  }
+  return (method === 'PATCH' || method === 'DELETE') && route === '/schedules/:id';
 }
 
 function reportDaemonPerformance(details: Record<string, unknown>): void {

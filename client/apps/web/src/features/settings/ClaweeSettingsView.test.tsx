@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CLAWEE_APP_VERSION } from '../../app-version.js';
 import { createTestCodexRuntimeStatus } from '../../test/codex-runtime-status.js';
@@ -56,7 +56,7 @@ describe('ClaweeSettingsView', () => {
     expect(screen.queryByText('适用于编程')).not.toBeInTheDocument();
   });
 
-  it('configures the AI model service without exposing the saved API key', async () => {
+  it('configures the AI model service and keeps the key masked after saving', async () => {
     const onModelServiceConfigure = vi.fn().mockResolvedValue(undefined);
     render(
       <ClaweeSettingsView
@@ -86,15 +86,48 @@ describe('ClaweeSettingsView', () => {
     fireEvent.click(screen.getByRole('button', { name: '隐藏 API Key' }));
     fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(onModelServiceConfigure).toHaveBeenCalledWith({
         baseUrl: 'https://model.example.com/v1',
         model: 'gpt-5',
         apiKey: 'secret-key'
       });
-      expect(apiKey).toHaveValue('');
+      expect(apiKey).toHaveValue('secret-key');
     });
+    expect(await screen.findByText(/模型检测通过/)).toBeInTheDocument();
     expect(apiKey).toHaveAttribute('type', 'password');
+  });
+
+  it('loads the local key, checks the draft without saving, and invalidates results after edits', async () => {
+    const configure = vi.fn();
+    const check = vi.fn().mockResolvedValue({ status: 'succeeded', checkedAt: '2026-10-09T10:00:00Z' });
+    render(<ClaweeSettingsView runtimeStatus={runtimeStatus} initialTab="model"
+      modelServiceConfiguration={{ baseUrl: 'https://api.example.test/v1', model: 'model-1' }}
+      onModelServiceReadApiKey={vi.fn().mockResolvedValue({ apiKey: 'stored-secret' })}
+      onModelServiceCheck={check} onModelServiceConfigure={configure} onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText('API Key')).toHaveValue('stored-secret'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '检测模型' })).toBeEnabled());
+    expect(screen.getByLabelText('API Key')).toHaveAttribute('type', 'password');
+    fireEvent.click(screen.getByRole('button', { name: '检测模型' }));
+    expect(await screen.findByText(/模型检测通过/)).toBeInTheDocument();
+    expect(check).toHaveBeenCalledWith({ baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'stored-secret' });
+    expect(configure).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '模型名字' }), { target: { value: 'model-2' } });
+    expect(screen.queryByText(/模型检测通过/)).not.toBeInTheDocument();
+  });
+
+  it('shows check failures and keeps platform credentials inaccessible', async () => {
+    const readApiKey = vi.fn();
+    const check = vi.fn().mockResolvedValue({ status: 'failed', message: '模型检测超时', checkedAt: '2026-10-09T10:00:00Z' });
+    render(<ClaweeSettingsView runtimeStatus={runtimeStatus} initialTab="model" modelServiceMode="platform_managed"
+      modelServiceConfiguration={{ baseUrl: 'https://platform.example.test/v1', model: 'model-1' }}
+      onModelServiceReadApiKey={readApiKey} onModelServiceCheck={check} onBack={vi.fn()} />);
+    expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+    expect(readApiKey).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '检测模型' }));
+    expect(await screen.findByText(/模型检测超时/)).toBeInTheDocument();
+    expect(check).toHaveBeenCalledWith(undefined);
   });
 
   it('notifies when the global default permission changes', () => {
@@ -163,7 +196,7 @@ describe('ClaweeSettingsView', () => {
     expect(onColorModeChange).toHaveBeenCalledWith('light');
   });
 
-  it('renders seven accent color swatches and notifies when the selection changes', () => {
+  it('renders brand following and seven accent color swatches and notifies when the selection changes', () => {
     const onAccentColorChange = vi.fn();
     render(
       <ClaweeSettingsView
@@ -175,7 +208,7 @@ describe('ClaweeSettingsView', () => {
     );
 
     const accentControl = screen.getByRole('radiogroup', { name: '重点色' });
-    expect(within(accentControl).getAllByRole('radio')).toHaveLength(7);
+    expect(within(accentControl).getAllByRole('radio')).toHaveLength(8);
     expect(within(accentControl).getByRole('radio', { name: '默认灰' }))
       .toHaveAttribute('aria-checked', 'true');
     const customAccent = within(accentControl).getByRole('radio', { name: '自定义' });

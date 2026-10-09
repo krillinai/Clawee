@@ -7,9 +7,11 @@ import {
 } from 'react';
 import { Check, Eye, EyeOff, KeyRound, LoaderCircle, Moon, Server, Sun } from 'lucide-react';
 import type {
+  CodexAvailabilityProbe,
   CodexProfileListResponse,
   CodexStatusResponse,
   ConfigureModelServiceRequest,
+  ModelAccessMode,
   ModelServiceConfiguration
 } from '@clawee/protocol';
 import { CLAWEE_APP_VERSION } from '../../app-version.js';
@@ -43,6 +45,7 @@ export type RuntimeStatus = {
 export type DefaultPermissionPreference = 'follow-project' | ProjectPermission;
 
 export type ClaweeSettingsViewProps = {
+  initialTab?: 'general' | 'model';
   runtimeStatus: RuntimeStatus;
   agentId?: string;
   defaultPermission?: DefaultPermissionPreference;
@@ -53,6 +56,7 @@ export type ClaweeSettingsViewProps = {
   accentColor?: AccentColor;
   onAccentColorChange?(color: AccentColor): void;
   customAccentColor?: string;
+  brandAccentColor?: string;
   onCustomAccentColorChange?(color: string): void;
   desktopCloseBehavior?: 'hide' | 'quit';
   onDesktopCloseBehaviorChange?(behavior: 'hide' | 'quit'): void;
@@ -65,6 +69,9 @@ export type ClaweeSettingsViewProps = {
   memoryThreads?: MemoryScopeOption[];
   codexStatus?: CodexStatusResponse;
   modelServiceConfiguration?: ModelServiceConfiguration | null;
+  modelServiceMode?: ModelAccessMode;
+  onModelServiceReadApiKey?(): Promise<{ apiKey: string | null }>;
+  onModelServiceCheck?(input?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe>;
   onModelServiceConfigure?(input: ConfigureModelServiceRequest): Promise<void>;
   onReadGateway?: GatewayConfigurationProps['onRead'];
   onSaveGateway?: GatewayConfigurationProps['onSave'];
@@ -95,7 +102,8 @@ const defaultPermissionOptions: Array<{
 ];
 
 export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(props.initialTab ?? 'general');
+  useEffect(() => { setActiveTab(props.initialTab ?? 'general'); }, [props.initialTab]);
 
   return (
     <div className="settings-page">
@@ -139,6 +147,7 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
             accentColor={props.accentColor ?? 'neutral'}
             onAccentColorChange={props.onAccentColorChange}
             customAccentColor={props.customAccentColor ?? defaultCustomAccentColor}
+            brandAccentColor={props.brandAccentColor}
             onCustomAccentColorChange={props.onCustomAccentColorChange}
             desktopCloseBehavior={props.desktopCloseBehavior}
             onDesktopCloseBehaviorChange={props.onDesktopCloseBehaviorChange}
@@ -149,6 +158,9 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
           <ModelServiceSettings
             connected={props.runtimeStatus.connected}
             configuration={props.modelServiceConfiguration ?? null}
+            mode={props.modelServiceMode}
+            onReadApiKey={props.onModelServiceReadApiKey}
+            onCheck={props.onModelServiceCheck}
             onConfigure={props.onModelServiceConfigure}
           />
         ) : null}
@@ -192,6 +204,9 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
 function ModelServiceSettings(props: {
   connected: boolean;
   configuration: ModelServiceConfiguration | null;
+  mode?: ModelAccessMode;
+  onReadApiKey?(): Promise<{ apiKey: string | null }>;
+  onCheck?(input?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe>;
   onConfigure?(input: ConfigureModelServiceRequest): Promise<void>;
 }) {
   const [baseUrl, setBaseUrl] = useState(props.configuration?.baseUrl ?? '');
@@ -199,6 +214,9 @@ function ModelServiceSettings(props: {
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingKey, setLoadingKey] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<CodexAvailabilityProbe>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
@@ -206,22 +224,57 @@ function ModelServiceSettings(props: {
     setModel(props.configuration?.model ?? '');
   }, [props.configuration?.baseUrl, props.configuration?.model]);
 
-  const available = props.connected && props.onConfigure !== undefined;
+  const platformManaged = props.mode === 'platform_managed';
+  const available = props.connected && props.onConfigure !== undefined && !platformManaged;
+  const busy = saving || checking || loadingKey;
+
+  useEffect(() => {
+    let canceled = false;
+    setApiKey('');
+    setShowApiKey(false);
+    setLoadingKey(false);
+    if (!props.connected || platformManaged || props.onReadApiKey === undefined) return;
+    setLoadingKey(true);
+    void props.onReadApiKey().then(response => {
+      if (!canceled) setApiKey(response.apiKey ?? '');
+    }).catch(() => {
+      if (!canceled) setError('本机密钥读取失败，请重新输入或稍后重试');
+    }).finally(() => {
+      if (!canceled) setLoadingKey(false);
+    });
+    return () => { canceled = true; };
+  }, [props.connected, platformManaged, props.onReadApiKey]);
+
+  useEffect(() => { setCheckResult(undefined); }, [baseUrl, model, apiKey]);
+
+  function draft(): ConfigureModelServiceRequest {
+    return { baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() };
+  }
+
+  async function check(form: HTMLFormElement | null) {
+    if (!props.connected || props.onCheck === undefined || busy) return;
+    if (!platformManaged && !form?.reportValidity()) return;
+    setChecking(true);
+    setCheckResult(undefined);
+    setError(undefined);
+    try {
+      setCheckResult(await props.onCheck(platformManaged ? undefined : draft()));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '模型检测失败');
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!available || saving || !event.currentTarget.reportValidity()) return;
+    if (!available || busy || !event.currentTarget.reportValidity()) return;
     setSaving(true);
     setError(undefined);
     try {
-      await props.onConfigure!({
-        baseUrl: baseUrl.trim(),
-        model: model.trim(),
-        apiKey: apiKey.trim()
-      });
-      setApiKey('');
+      await props.onConfigure!(draft());
+      setCheckResult({ status: 'succeeded', checkedAt: new Date().toISOString() });
     } catch (reason) {
-      setApiKey('');
       setError(reason instanceof Error ? reason.message : '模型配置保存失败');
     } finally {
       setSaving(false);
@@ -246,6 +299,7 @@ function ModelServiceSettings(props: {
         <p className="settings-notice">模型配置服务当前不可用。</p>
       ) : null}
       {error ? <p className="settings-error" role="alert">{error}</p> : null}
+      {platformManaged ? <p className="settings-notice">模型由平台统一管理，配置只读，密钥不回显。</p> : null}
       <form className="settings-card settings-form-grid" aria-label="AI模型配置" onSubmit={save}>
         <label className="settings-form-wide">
           <span><Server size={15} aria-hidden="true" />Base URL</span>
@@ -258,11 +312,12 @@ function ModelServiceSettings(props: {
             maxLength={2048}
             value={baseUrl}
             placeholder="https://api.example.com/v1"
-            disabled={!available || saving}
+            readOnly={platformManaged}
+            disabled={!props.connected || busy}
             onChange={event => setBaseUrl(event.target.value)}
           />
         </label>
-        <label className="settings-form-wide">
+        {!platformManaged ? <label className="settings-form-wide">
           <span><KeyRound size={15} aria-hidden="true" />API Key</span>
           <span className="settings-secret-field">
             <input
@@ -272,14 +327,14 @@ function ModelServiceSettings(props: {
               required
               value={apiKey}
               placeholder="输入 API Key"
-              disabled={!available || saving}
+              disabled={!available || busy}
               onChange={event => setApiKey(event.target.value)}
             />
             <button
               type="button"
               aria-label={showApiKey ? '隐藏 API Key' : '显示 API Key'}
               title={showApiKey ? '隐藏 API Key' : '显示 API Key'}
-              disabled={saving}
+              disabled={busy}
               onClick={() => setShowApiKey(value => !value)}
             >
               {showApiKey
@@ -287,8 +342,8 @@ function ModelServiceSettings(props: {
                 : <Eye size={15} aria-hidden="true" />}
             </button>
           </span>
-          <small>API Key 仅保存到本机私有凭据文件，不会在界面回显。</small>
-        </label>
+          <small>API Key 仅保存到本机私有凭据文件，默认隐藏，点击眼睛可查看。</small>
+        </label> : null}
         <label className="settings-form-wide">
           <span>模型名字</span>
           <input
@@ -299,16 +354,25 @@ function ModelServiceSettings(props: {
             maxLength={200}
             value={model}
             placeholder="手动输入模型名字"
-            disabled={!available || saving}
+            readOnly={platformManaged}
+            disabled={!props.connected || busy}
             onChange={event => setModel(event.target.value)}
           />
         </label>
-        <button className="settings-primary-button" type="submit" disabled={!available || saving}>
+        <button className="settings-primary-button" type="button" disabled={!props.connected || props.onCheck === undefined || busy}
+          onClick={event => void check(event.currentTarget.form)}>
+          {checking ? '正在检测' : '检测模型'}
+        </button>
+        {!platformManaged ? <button className="settings-primary-button" type="submit" disabled={!available || busy}>
           {saving
             ? <LoaderCircle className="settings-spin" size={15} aria-hidden="true" />
             : <Check size={15} aria-hidden="true" />}
           {saving ? '正在保存' : '保存配置'}
-        </button>
+        </button> : null}
+        {checkResult ? <p className={checkResult.status === 'succeeded' ? 'settings-notice settings-form-wide' : 'settings-error settings-form-wide'} role="status">
+          {checkResult.status === 'succeeded' ? '模型检测通过' : checkResult.message ?? '模型检测失败'}
+          {checkResult.checkedAt ? ` · 检测时间：${new Date(checkResult.checkedAt).toLocaleString()}` : ''}
+        </p> : null}
       </form>
     </section>
   );
@@ -323,6 +387,7 @@ function GeneralSettings(props: {
   accentColor: AccentColor;
   onAccentColorChange?(color: AccentColor): void;
   customAccentColor: string;
+  brandAccentColor?: string;
   onCustomAccentColorChange?(color: string): void;
   desktopCloseBehavior?: 'hide' | 'quit';
   onDesktopCloseBehaviorChange?(behavior: 'hide' | 'quit'): void;
@@ -341,6 +406,7 @@ function GeneralSettings(props: {
         <SettingsAccentColorRow
           value={props.accentColor}
           customColor={props.customAccentColor}
+          brandColor={props.brandAccentColor}
           onChange={(color) => props.onAccentColorChange?.(color)}
           onCustomColorChange={(color) => props.onCustomAccentColorChange?.(color)}
         />
@@ -433,6 +499,7 @@ const accentColorOptions: Array<{
 function SettingsAccentColorRow(props: {
   value: AccentColor;
   customColor: string;
+  brandColor?: string;
   onChange(color: AccentColor): void;
   onCustomColorChange(color: string): void;
 }) {
@@ -464,6 +531,13 @@ function SettingsAccentColorRow(props: {
       <div className="settings-accent-controls">
         <div className="settings-accent-color">
           <div className="settings-accent-options" role="radiogroup" aria-labelledby={labelId}>
+            <button className="settings-brand-accent-choice" type="button" role="radio" aria-checked={props.value === 'brand'} aria-label="跟随品牌" title="跟随品牌"
+              style={{ '--settings-accent-swatch': normalizeHexColor(props.brandColor ?? '') ?? '#85858b' } as CSSProperties}
+              onClick={() => props.onChange('brand')}>
+              <span className="settings-accent-swatch" aria-hidden="true" />
+              跟随品牌
+              {props.value === 'brand' ? <Check size={11} strokeWidth={2.5} aria-hidden="true" /> : null}
+            </button>
             {accentColorOptions.map(option => {
               const selected = props.value === option.value;
               return (

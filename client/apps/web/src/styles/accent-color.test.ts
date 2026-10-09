@@ -20,11 +20,26 @@ describe('accent color preference', () => {
     document.documentElement.style.removeProperty('--custom-on-accent');
   });
 
-  it('defaults to neutral and ignores invalid stored values', () => {
-    expect(readAccentColorPreference()).toBe(defaultAccentColor);
+  it('follows branding by default without changing the built-in neutral color', () => {
+    expect(readAccentColorPreference()).toBe('brand');
+    applyAccentColor(readAccentColorPreference());
+    expect(document.documentElement.dataset.accent).toBe(defaultAccentColor);
 
     window.localStorage.setItem(accentColorStorageKey, 'green');
-    expect(readAccentColorPreference()).toBe('neutral');
+    expect(readAccentColorPreference()).toBe('brand');
+  });
+
+  it('applies branding only when following the brand and uses dark text for a pale highlight', () => {
+    applyAccentColor('brand', '#3b82f6', '#F2E9EA');
+    expect(document.documentElement.dataset.accent).toBe('custom');
+    expect(document.documentElement.style.getPropertyValue('--custom-accent-value')).toBe('#f2e9ea');
+    expect(document.documentElement.style.getPropertyValue('--custom-on-accent')).toBe('#111113');
+    writeAccentColorPreference('purple');
+    applyAccentColor(readAccentColorPreference(), '#3b82f6', '#F2E9EA');
+    expect(document.documentElement.dataset.accent).toBe('purple');
+    writeAccentColorPreference('brand');
+    applyAccentColor(readAccentColorPreference(), '#3b82f6');
+    expect(document.documentElement.dataset.accent).toBe('neutral');
   });
 
   it('persists and applies a supported accent color', () => {

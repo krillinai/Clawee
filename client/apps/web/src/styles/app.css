@@ -5255,6 +5255,42 @@ html.is-pane-resizing * {
   overflow: hidden;
 }
 
+.model-runtime-main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.model-runtime-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.model-runtime-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.model-runtime-notice span {
+  flex: 1;
+}
+
+.model-runtime-notice button {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
 .mobile-navigation-toolbar,
 .mobile-navigation-backdrop,
 .mobile-navigation-close {
@@ -6966,6 +7002,17 @@ html.is-pane-resizing * {
 
 .settings-accent-options > button:hover {
   background: color-mix(in srgb, var(--settings-accent-swatch) 9%, transparent);
+}
+
+.settings-accent-options > .settings-brand-accent-choice {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .settings-accent-options > button[aria-checked="true"] {

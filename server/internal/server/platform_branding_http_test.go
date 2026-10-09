@@ -116,6 +116,25 @@ func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
 	}
 }
 
+func TestPlatformBrandingAccentColorHTTP(t *testing.T) {
+	service := platformbranding.NewService(nil)
+	router := newTestRouter(t, server.Options{PlatformBrandingService: service})
+	fields := map[string]string{"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep", "accent_color": "#F2E9EA"}
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	app := doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", nil, http.StatusOK)
+	if nestedString(t, app, "data", "accent_color") != "#f2e9ea" {
+		t.Fatalf("客户端未收到品牌高亮色: %#v", app)
+	}
+	fields["accent_color"] = "invalid"
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusBadRequest)
+	fields["accent_color"] = ""
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	current, _ := service.Get(context.Background())
+	if current.AccentColor != "" {
+		t.Fatalf("未恢复默认颜色: %#v", current)
+	}
+}
+
 func TestPlatformBrandingAdminURLHTTP(t *testing.T) {
 	service := platformbranding.NewService(platformbranding.NewMemoryStore())
 	router := newTestRouter(t, server.Options{PlatformBrandingService: service})

@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +21,8 @@ type Service struct {
 	store Store
 	clock func() time.Time
 }
+
+var accentColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 func NewService(store Store) *Service {
 	if store == nil {
@@ -75,6 +78,13 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration,
 			}
 		}
 		input.AdminURL = &value
+	}
+	if input.AccentColor != nil {
+		value := strings.ToLower(strings.TrimSpace(*input.AccentColor))
+		if value != "" && !accentColorPattern.MatchString(value) {
+			return Configuration{}, ErrInvalidAccentColor
+		}
+		input.AccentColor = &value
 	}
 	return s.store.Update(ctx, input)
 }

@@ -61,6 +61,7 @@ export function PlatformBrandingPage() {
   const [compactLogo, setCompactLogo] = useState<LogoDraft>({ action: "keep" });
   const [menuDraft, setMenuDraft] = useState<Partial<Record<SidebarMenuKey, string | null>>>({});
   const [adminUrlDraft, setAdminUrlDraft] = useState<string>();
+  const [accentColorDraft, setAccentColorDraft] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string }>();
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -77,13 +78,16 @@ export function PlatformBrandingPage() {
   }
 
   const branding = query.data;
-  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0 || adminUrlDraft !== undefined;
+  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0 || adminUrlDraft !== undefined || accentColorDraft !== undefined;
   const hasInvalidMenu = Object.values(menuDraft).some(value => menuLabelError(value) !== undefined);
   const urlError = adminUrlDraft === undefined ? undefined : adminUrlError(adminUrlDraft);
+  const accentError = accentColorDraft?.trim() && !/^#[\da-f]{6}$/i.test(accentColorDraft.trim())
+    ? "请输入 #RRGGBB 格式的 HEX 色值" : undefined;
   const hasCustomBranding = hasCustomLogo(sidebarLogo, branding.sidebarLogoConfigured)
     || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured)
     || sidebarMenus.some(({ key }) => (menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key]) != null)
-    || Boolean(adminUrlDraft === undefined ? branding.adminUrl : adminUrlDraft);
+    || Boolean(adminUrlDraft === undefined ? branding.adminUrl : adminUrlDraft)
+    || Boolean(accentColorDraft === undefined ? branding.accentColor : accentColorDraft);
 
   function replaceDraft(current: LogoDraft, file: File, update: (draft: LogoDraft) => void) {
     if (!isSupportedImage(file)) {
@@ -110,10 +114,11 @@ export function PlatformBrandingPage() {
       .filter(({ key }) => current[key] !== undefined || branding.sidebarMenuLabels?.[key] !== undefined)
       .map(({ key }) => [key, null])));
     if (adminUrlDraft !== undefined || branding.adminUrl) setAdminUrlDraft("");
+    if (accentColorDraft !== undefined || branding.accentColor) setAccentColorDraft("");
   }
 
   async function save() {
-    if (hasInvalidMenu || urlError) return;
+    if (hasInvalidMenu || urlError || accentError) return;
     setSaving(true);
     setNotice(undefined);
     try {
@@ -123,6 +128,7 @@ export function PlatformBrandingPage() {
         sidebarCompactLogoAction: compactLogo.action,
         sidebarCompactLogo: compactLogo.file,
         ...(adminUrlDraft === undefined ? {} : { adminUrl: adminUrlDraft.trim() }),
+        ...(accentColorDraft === undefined ? {} : { accentColor: accentColorDraft.trim() }),
         ...(Object.keys(menuDraft).length === 0 ? {} : {
           sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value == null ? null : trimInput(value)]))
         })
@@ -133,6 +139,7 @@ export function PlatformBrandingPage() {
       setCompactLogo({ action: "keep" });
       setMenuDraft({});
       setAdminUrlDraft(undefined);
+      setAccentColorDraft(undefined);
       queryClient.setQueryData(["platform-branding"], updated);
       setPreviewRevision((value) => value + 1);
       setNotice({ kind: "success", message: "平台外观已保存。" });
@@ -156,7 +163,7 @@ export function PlatformBrandingPage() {
               <RotateCcw aria-hidden="true" />
               恢复默认配置
             </Button>
-            <Button disabled={!hasChanges || saving || hasInvalidMenu || Boolean(urlError)} onClick={() => void save()}>
+            <Button disabled={!hasChanges || saving || hasInvalidMenu || Boolean(urlError) || Boolean(accentError)} onClick={() => void save()}>
               <Save aria-hidden="true" />
               {saving ? "保存中" : "保存"}
             </Button>
@@ -248,6 +255,16 @@ export function PlatformBrandingPage() {
             );
           })}
         </div>
+      </section>
+      <section className="mt-6 border-t pt-5" aria-labelledby="accent-color-title">
+        <h2 id="accent-color-title" className="mb-4 text-sm font-semibold">客户端品牌高亮色</h2>
+        <Label htmlFor="brand-accent-color">品牌高亮色 HEX</Label>
+        <Input className="mt-2 max-w-sm" id="brand-accent-color" type="text" placeholder="#RRGGBB"
+          value={accentColorDraft ?? branding.accentColor ?? ""} disabled={!canUpdate || saving}
+          aria-invalid={Boolean(accentError)} aria-describedby={accentError ? "brand-accent-error" : "brand-accent-help"}
+          onChange={event => setAccentColorDraft(event.target.value)} />
+        {accentError ? <p id="brand-accent-error" className="mt-1 text-xs text-destructive">{accentError}</p> : null}
+        <p id="brand-accent-help" className="mt-2 text-xs text-muted-foreground">留空使用客户端现有默认颜色；员工可在客户端设置中覆盖。不影响管理后台主题。</p>
       </section>
       <section className="mt-6 border-t pt-5" aria-labelledby="admin-url-title">
         <h2 id="admin-url-title" className="mb-4 text-sm font-semibold">客户端管理后台入口</h2>

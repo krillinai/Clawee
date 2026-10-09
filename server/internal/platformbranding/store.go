@@ -39,6 +39,9 @@ func (s *MemoryStore) Update(ctx context.Context, input UpdateInput) (Configurat
 	if input.AdminURL != nil {
 		configuration.AdminURL = *input.AdminURL
 	}
+	if input.AccentColor != nil {
+		configuration.AccentColor = *input.AccentColor
+	}
 	for key, target := range map[string]*string{
 		"skills":    &configuration.SidebarMenuLabels.Skills,
 		"knowledge": &configuration.SidebarMenuLabels.Knowledge,

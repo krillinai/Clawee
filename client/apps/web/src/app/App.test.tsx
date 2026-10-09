@@ -138,6 +138,55 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '技能' })).not.toBeInTheDocument();
   });
 
+  it('applies the backend brand color by default while preserving employee choices', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/platform-branding')) return jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#F2E9EA'
+      });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--custom-accent-value')).toBe('#f2e9ea'));
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    expect(await screen.findByRole('radio', { name: '跟随品牌' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: '紫色' }));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'purple');
+    fireEvent.click(screen.getByRole('radio', { name: '跟随品牌' }));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'custom');
+    expect(document.documentElement.style.getPropertyValue('--custom-accent-value')).toBe('#f2e9ea');
+  });
+
+  it('keeps the workbench accessible when the model check fails and opens model settings', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    let checked = false;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/runtime/model-service/check')) {
+        checked = true;
+        return jsonResponse({ status: 'succeeded', checkedAt: '2026-10-09T10:00:00Z' });
+      }
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse({
+        availabilityProbe: checked ? { status: 'succeeded' } : { status: 'failed', message: '模型检测超时，请检查网络后重试' }
+      }));
+      if (url.endsWith('/runtime/model-service')) return jsonResponse({ status: 'ready', mode: 'platform_managed', configuration: { baseUrl: 'https://model.example.test/v1', model: 'model-1' } });
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText('模型检测超时，请检查网络后重试')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '模型设置' }));
+    expect(await screen.findByRole('heading', { name: 'AI模型配置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检测模型' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '检测模型' }));
+    expect(await screen.findByText(/模型检测通过/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('模型检测超时，请检查网络后重试')).not.toBeInTheDocument());
+    expect(checked).toBe(true);
+  });
+
   it('shows the configured admin link only for an admin session and clears it on sign-out', async () => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -1661,6 +1710,7 @@ describe('App', () => {
     vi.unstubAllGlobals();
     testRuntimeProjects = undefined;
     window.localStorage.clear();
+    window.sessionStorage.clear();
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   });
 
@@ -2225,6 +2275,249 @@ describe('App', () => {
     expect(screen.queryByText(prompt)).not.toBeInTheDocument();
     expect(screen.queryByText(/收到。我会先围绕/)).not.toBeInTheDocument();
     expect(screen.queryByText(/mock 文件变更/)).not.toBeInTheDocument();
+  });
+
+  it('keeps workflow plans out of the ordinary Agent sidebar without showing a broken task', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/gateway')) return jsonResponse({ gateway: 'https://gateway.example', configurable: true });
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [
+        createScheduleResponse(), createScheduleResponse({ id: 'workflow-plan', name: '前账号流程计划', action: 'workflow_start', threadId: null })
+      ] });
+      if (url.endsWith('/tasks?status=all&limit=50')) return jsonResponse({ tasks: [], hasMore: false });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await screen.findByRole('button', { name: '定时任务' }));
+    expect(await screen.findByText('每日总结')).toBeInTheDocument();
+    expect(screen.queryByText('前账号流程计划')).not.toBeInTheDocument();
+    expect(screen.queryByText('任务会话需要修复')).not.toBeInTheDocument();
+  });
+
+  it.each(['configuration_required', 'resolving', 'unavailable'] as const)('R2 延迟 Gateway %s 身份稳定前无变更，稳定后未知发起保留原 key', async modelStatus => {
+    window.location.hash = '#/workflow';
+    let resolveGateway!: (response: Response) => void;
+    const gateway = new Promise<Response>(resolve => { resolveGateway = resolve; });
+    const fixture = createModelGatedWorkflowFetch(modelStatus);
+    const starts: unknown[] = [];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/enterprise/gateway') return (await gateway).clone();
+      if (path.endsWith('/instances') && init?.method === 'POST') {
+        starts.push(JSON.parse(init.body as string));
+        if (starts.length === 1) throw new Error('发起响应丢失');
+      }
+      return fixture.runtimeFetch(input, init);
+    });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText(/正在确认工作流身份/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '模板' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '创建定时计划' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.method !== 'GET')).toBe(false);
+    await act(async () => resolveGateway(jsonResponse({ gateway: 'https://stable.example', configurable: true })));
+    await userEvent.click(await screen.findByRole('button', { name: '模板' }));
+    await userEvent.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: '任务要求' }), { target: { value: '原要求' } });
+    await userEvent.click(screen.getByRole('button', { name: '发起任务' }));
+    const retry = await screen.findByRole('button', { name: '重试发起' });
+    expect(screen.getByRole('textbox', { name: '任务要求' })).toBeDisabled();
+    await userEvent.click(retry);
+    await waitFor(() => expect(starts).toHaveLength(2));
+    expect(starts[1]).toEqual(starts[0]);
+    expect(starts[0]).toMatchObject({ initialInput: { text: '原要求' }, idempotencyKey: expect.any(String) });
+    expect(await screen.findByRole('heading', { name: '实例 model-gated-instance' })).toBeInTheDocument();
+    expect(fixture.requests.some(request => request.path.endsWith('/prepare') || request.path.endsWith('/execute'))).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: '定时任务' }));
+    expect(screen.queryByRole('heading', { name: '定时任务' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '进入工作流（无需模型）' })).toBeInTheDocument();
+  });
+
+  it('R2 Gateway 解析失败时明确不可用，不挂载可变更界面', async () => {
+    window.location.hash = '#/workflow';
+    const fixture = createModelGatedWorkflowFetch('configuration_required');
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === '/enterprise/gateway') throw new Error('私密内部路径');
+      return fixture.runtimeFetch(input, init);
+    };
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText(/工作流身份不可用/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '模板' })).not.toBeInTheDocument();
+    expect(screen.queryByText('私密内部路径')).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.method !== 'GET')).toBe(false);
+  });
+
+  it.each(['logout', 'account', 'origin', 'failed-new-session'] as const)('R2 %s 不接纳前会话迟到 Origin 或暂存身份', async change => {
+    window.location.hash = '#/workflow';
+    let session = createEnterpriseSessionResponse();
+    let resolveOldGateway!: (response: Response) => void;
+    let resolveNewGateway!: (response: Response) => void;
+    const oldGateway = new Promise<Response>(resolve => { resolveOldGateway = resolve; });
+    const newGateway = new Promise<Response>(resolve => { resolveNewGateway = resolve; });
+    const fixture = createModelGatedWorkflowFetch('unavailable');
+    let connectionChanged!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.subscribeConnectionConfig = listener => { connectionChanged = listener; return () => undefined; };
+    let newGatewayCalls = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/enterprise/session') return jsonResponse(session);
+      if (path === '/enterprise/gateway') {
+        const newSession = new Headers(init?.headers).get('Authorization') === 'Bearer new-runtime-token';
+        if (newSession) {
+          newGatewayCalls += 1;
+          if (change === 'failed-new-session') throw new Error('新会话身份读取失败');
+        }
+        return (await (newSession ? newGateway : oldGateway)).clone();
+      }
+      return fixture.runtimeFetch(input, init);
+    };
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await screen.findByText(/正在确认工作流身份/);
+    if (change === 'failed-new-session') {
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      await screen.findByRole('button', { name: '模板' });
+    }
+    if (change === 'logout') session = createEnterpriseSessionResponse({ status: 'signed_out', account: undefined });
+    if (change === 'account') session = createEnterpriseSessionResponse({ account: { subjectId: 'other-account', email: 'other@example.com', name: '其他账户' } });
+    await act(async () => connectionChanged({ baseUrl: 'http://127.0.0.1:60764', token: 'new-runtime-token' }));
+    if (change === 'logout') {
+      await screen.findByRole('heading', { name: '欢迎使用 Clawee' });
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      expect(screen.queryByRole('button', { name: '模板' })).not.toBeInTheDocument();
+    } else if (change === 'failed-new-session') {
+      expect(await screen.findByText(/工作流身份不可用/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '模板' })).not.toBeInTheDocument();
+    } else {
+      await waitFor(() => expect(newGatewayCalls).toBeGreaterThan(0));
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      expect(screen.getByText(/正在确认工作流身份/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '模板' })).not.toBeInTheDocument();
+      await act(async () => resolveNewGateway(jsonResponse({ gateway: 'https://new.example', configurable: true })));
+      expect(await screen.findByRole('button', { name: '模板' })).toBeInTheDocument();
+    }
+    expect(fixture.requests.some(request => request.method !== 'GET')).toBe(false);
+  });
+
+  it.each([
+    ['configuration_required', '配置 Codex 模型服务', 'browser'],
+    ['resolving', '正在准备模型服务', 'browser'],
+    ['unavailable', '模型服务暂不可用', 'browser'],
+    ['configuration_required', '配置 Codex 模型服务', 'desktop'],
+    ['resolving', '正在准备模型服务', 'desktop'],
+    ['unavailable', '模型服务暂不可用', 'desktop']
+  ] as const)('model-independent workflow: %s / %s / %s keeps Agent gated', async (modelStatus, modelHeading, hostKind) => {
+    window.location.hash = '#/settings';
+    persistProjects('/workspace/model-gated-project');
+    const user = userEvent.setup();
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch(modelStatus);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    expect(await screen.findByRole('heading', { name: modelHeading })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '进入工作流（无需模型）' }));
+    expect(await screen.findByRole('heading', { name: '工作流' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '模板' }));
+    await user.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    await user.click(await screen.findByRole('button', { name: '创建定时计划' }));
+    await user.click(await screen.findByRole('button', { name: '保存计划' }));
+    await waitFor(() => expect(fixture.requests.some(request => request.path === '/schedules' && request.method === 'POST')).toBe(true));
+    const create = fixture.requests.find(request => request.path === '/schedules' && request.method === 'POST')!;
+    expect(create.body).toMatchObject({ action: 'workflow_start', workflow: { templateId: 'model-gated-template', initialInput: {} } });
+    expect(create.body).not.toHaveProperty('prompt');
+    expect(create.body).not.toHaveProperty('model');
+    await user.click(screen.getByRole('button', { name: '模板' }));
+    await user.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    const start = await screen.findByRole('button', { name: '发起任务' });
+    expect(start).toBeEnabled();
+    await user.click(start);
+    expect(await screen.findByRole('heading', { name: '实例 model-gated-instance' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起 Agent 执行' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/模型尚未就绪/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^待办/ }));
+    await user.click(await screen.findByRole('button', { name: /审批 · 无需模型审批/ }));
+    await user.click(await screen.findByRole('button', { name: '批准' }));
+    await waitFor(() => expect(fixture.requests.some(request => request.path.endsWith('/decision'))).toBe(true));
+    expect(fixture.requests.some(request => request.path.endsWith('/prepare') || request.path.endsWith('/execute') || request.path === '/runs')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '定时任务' }));
+    expect(await screen.findByRole('heading', { name: modelHeading })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '定时任务' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '进入工作流（无需模型）' }));
+    await user.click(await screen.findByRole('button', { name: '返回模型设置' }));
+    expect(await screen.findByRole('heading', { name: modelHeading })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/settings');
+  });
+
+  it('model-independent workflow: direct route remains usable without ready models', async () => {
+    window.location.hash = '#/workflow';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch('configuration_required');
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    expect(await screen.findByRole('button', { name: '定时计划' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '配置 Codex 模型服务' })).not.toBeInTheDocument();
+  });
+
+  it('model-independent workflow: sign-in is still required for direct workflow routes', async () => {
+    window.location.hash = '#/workflow';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch('configuration_required', false);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    expect(await screen.findByRole('heading', { name: '欢迎使用 Clawee' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入工作流（无需模型）' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '定时计划' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.path.startsWith('/enterprise/workflow-'))).toBe(false);
+  });
+
+  it('model-independent workflow: losing daemon connectivity disables plan creation', async () => {
+    let connectionChanged!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.subscribeConnectionConfig = listener => { connectionChanged = listener; return () => undefined; };
+    const fixture = createModelGatedWorkflowFetch('unavailable');
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await userEvent.click(await screen.findByRole('button', { name: '进入工作流（无需模型）' }));
+    await userEvent.click(await screen.findByRole('button', { name: '模板' }));
+    await userEvent.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    expect(await screen.findByRole('button', { name: '创建定时计划' })).toBeInTheDocument();
+    await act(async () => connectionChanged(null));
+    expect(screen.queryByRole('button', { name: '创建定时计划' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存计划' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入工作流（无需模型）' })).not.toBeInTheDocument();
+  });
+
+  it('loads Gateway identity and exposes workflow plan creation through the shared page', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const template = { id: 'workflow-template', name: '客户端定时审核', description: '', revision: 1, status: 'enabled',
+      nodes: [{ node_id: 'review', order: 0, type: 'approval', title: '审核', instruction: '审核', assignee_user_id: 'acct-member' }] };
+    const meta = { next_cursor: '', has_next: false };
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/gateway')) return jsonResponse({ gateway: 'https://gateway.example/path', configurable: true });
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      if (url.includes('/enterprise/workflow-templates?')) return jsonResponse({ data: [template], meta });
+      if (url.endsWith('/enterprise/workflow-templates/workflow-template')) return jsonResponse({ data: template });
+      if (url.includes('/enterprise/workflow-instances?') || url.includes('/enterprise/workflow-tasks?')) return jsonResponse({ data: [], meta });
+      if (url.endsWith('/enterprise/workflow-capability')) return jsonResponse({ canExecute: false });
+      if (url.endsWith('/tasks?status=all&limit=50')) return jsonResponse({ tasks: [], hasMore: false });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await screen.findByRole('button', { name: '工作流' }));
+    await user.click(await screen.findByRole('button', { name: '模板' }));
+    await user.click(await screen.findByRole('button', { name: /客户端定时审核/ }));
+    await user.click(await screen.findByRole('button', { name: '创建定时计划' }));
+    expect(await screen.findByRole('form', { name: '创建工作流定时计划' })).toBeInTheDocument();
+    expect(screen.getByText(/由当前客户端发起/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存计划' })).toBeEnabled();
   });
 
   it('opens a previous schedule run in its task thread without opening diagnostics', async () => {
@@ -10501,6 +10794,51 @@ function createActivityDetailResponse(input: {
       activeWorkMs: 0,
       toolTypeVariety: 0,
       toolCallCount: 0
+    }
+  };
+}
+
+function createModelGatedWorkflowFetch(modelStatus: 'configuration_required' | 'resolving' | 'unavailable', signedIn = true) {
+  const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+  const meta = { next_cursor: '', has_next: false };
+  const node = { node_id: 'agent', order: 0, type: 'agent', title: '等待模型执行', instruction: '等待模型执行', assignee_user_id: 'acct-member' };
+  const template = { id: 'model-gated-template', name: '无需模型发起模板', description: '', status: 'enabled', revision: 1, nodes: [node] };
+  const agentTask = { task_id: 'model-gated-task', instance_id: 'model-gated-instance', node_id: node.node_id, type: 'agent', status: 'pending', instruction: node.instruction, input: {}, assignee_user_id: 'acct-member' };
+  const approvalTask = { ...agentTask, task_id: 'model-gated-approval', instance_id: 'model-gated-approval-instance', node_id: 'approval', type: 'approval', instruction: '无需模型审批' };
+  const instance = { id: agentTask.instance_id, template_id: template.id, status: 'running', current_node_id: node.node_id, nodes: [node], tasks: [agentTask], started_at: '2026-10-09T00:00:00Z' };
+  const approvalInstance = { ...instance, id: approvalTask.instance_id, current_node_id: 'approval', nodes: [{ ...node, node_id: 'approval', type: 'approval' }], tasks: [approvalTask] };
+  let plan: ScheduleResponse | undefined;
+  return {
+    requests,
+    async runtimeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      const url = new URL(String(input));
+      const path = url.pathname;
+      const method = init?.method ?? 'GET';
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      requests.push({ path, method, body });
+      if (path === '/healthz') return jsonResponse({ ok: true, runtimeState: 'configuration_required' });
+      if (path === '/runtime/model-service') return jsonResponse({ status: modelStatus, mode: 'enterprise_managed' });
+      if (path === '/enterprise/session') return jsonResponse(createEnterpriseSessionResponse(signedIn ? {} : { status: 'signed_out', account: undefined }));
+      if (path === '/enterprise/gateway') return jsonResponse({ gateway: 'https://gateway.example', configurable: true });
+      if (path === '/enterprise/workflow-templates') return jsonResponse({ data: [template], meta });
+      if (path === `/enterprise/workflow-templates/${template.id}`) return jsonResponse({ data: template });
+      if (path === `/enterprise/workflow-templates/${template.id}/instances`) return jsonResponse({ data: { instance_id: instance.id, task_id: agentTask.task_id, status: 'running' } });
+      if (path === '/enterprise/workflow-instances') return jsonResponse({ data: [instance, approvalInstance], meta });
+      if (path === `/enterprise/workflow-instances/${instance.id}`) return jsonResponse({ data: instance });
+      if (path === `/enterprise/workflow-instances/${approvalInstance.id}`) return jsonResponse({ data: approvalInstance });
+      if (path === '/enterprise/workflow-tasks') return jsonResponse({ data: [agentTask, approvalTask], meta });
+      if (path === '/enterprise/workflow-capability') return jsonResponse({ canExecute: true });
+      if (path.endsWith('/execution')) return jsonResponse({ status: 'idle' });
+      if (path.endsWith('/prepare')) return jsonResponse({ threadId: 'should-not-prepare', instruction: '', input: '', firstNode: true });
+      if (path.endsWith('/decision')) return jsonResponse({ data: { instance_id: approvalInstance.id, status: 'succeeded' } });
+      if (path === '/schedules' && method === 'GET') return jsonResponse({ schedules: plan ? [plan] : [] });
+      if (path === '/schedules' && method === 'POST') {
+        plan = createScheduleResponse({ id: 'model-gated-plan', action: 'workflow_start', threadId: null,
+          workflow: { templateId: template.id, initialInput: {} }, name: '无需模型计划' });
+        return jsonResponse(plan);
+      }
+      if (path === '/schedules/model-gated-plan/operations') return jsonResponse({ operations: [] });
+      return jsonResponse({ error: { code: 'TEST_UNEXPECTED_ENDPOINT', message: 'Unexpected test endpoint' } }, { status: 404 });
     }
   };
 }

@@ -1,4 +1,5 @@
 import type {
+  CodexAvailabilityProbe,
   ConfigureModelServiceRequest,
   ConfigureModelServiceResponse,
   ModelAccessMode,
@@ -48,6 +49,8 @@ export type ModelServiceRuntime = {
   configure(
     input: ConfigureModelServiceRequest
   ): Promise<ConfigureModelServiceResponse>;
+  check(input?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe>;
+  readApiKey(): Promise<string | null>;
   subscribeReady(listener: () => void): () => void;
 };
 
@@ -147,10 +150,13 @@ export function createModelServiceRuntime(input: {
     context: ModelServiceActivationContext
   ): Promise<void>;
   deactivate(): Promise<void>;
+  onAvailabilityChange?(probe: CodexAvailabilityProbe): void;
 }): ModelServiceRuntime {
   let current: ModelAccessState = { status: 'resolving' };
   let configuring = false;
   let resolutionId = 0;
+  let checkId = 0;
+  let activeRequest: ConfigureModelServiceRequest | undefined;
   let transition = Promise.resolve();
   const listeners = new Set<() => void>();
 
@@ -170,8 +176,10 @@ export function createModelServiceRuntime(input: {
 
   function publishReady(
     mode: ModelAccessMode,
-    configuration: ModelServiceConfiguration
+    configuration: ModelServiceConfiguration,
+    apiKey: string
   ): void {
+    activeRequest = { ...configuration, apiKey };
     current = { status: 'ready', mode, configuration };
     for (const listener of listeners) listener();
   }
@@ -193,8 +201,57 @@ export function createModelServiceRuntime(input: {
         await input.deactivate();
         return;
       }
-      publishReady(mode, configuration);
+      publishReady(mode, configuration, apiKey);
     });
+  }
+
+  async function check(request?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe> {
+    if (request !== undefined && 'mode' in current && current.mode === 'platform_managed') {
+      throw new ModelServiceConfigurationError(
+        'model_configuration_managed_by_platform', '平台托管模型不允许修改检测配置'
+      );
+    }
+    const target = request ?? activeRequest;
+    if (target === undefined || current.status === 'resolving' || configuring) {
+      throw new ModelServiceConfigurationError(
+        'MODEL_SERVICE_CONFIGURATION_BUSY', '模型配置尚未就绪，请稍后重试'
+      );
+    }
+    const operationId = resolutionId;
+    const detectionId = request === undefined ? ++checkId : undefined;
+    const publish = (probe: CodexAvailabilityProbe) => {
+      if (detectionId === checkId && operationId === resolutionId) {
+        input.onAvailabilityChange?.(probe);
+      }
+    };
+    publish({ status: 'pending' });
+    const startedAt = Date.now();
+    let result: CodexAvailabilityProbe;
+    try {
+      await input.validate(target);
+      result = { status: 'succeeded', responseReceived: true };
+    } catch (error) {
+      if (request !== undefined && error instanceof ModelServiceConfigurationError && error.code === 'MODEL_SERVICE_CONFIGURATION_INVALID') {
+        throw error;
+      }
+      const details = error instanceof ModelServiceConfigurationError ? error.details : undefined;
+      const timedOut = typeof details?.terminationReason === 'string' && details.terminationReason.includes('timeout');
+      const diagnostic = typeof details?.message === 'string' ? details.message : '';
+      const message = timedOut ? '模型检测超时，请检查网络后重试'
+        : /\b401\b|unauthorized|invalid.?api.?key/i.test(diagnostic) ? '模型服务认证失败，请检查 API Key'
+        : /\b403\b|forbidden/i.test(diagnostic) ? '模型服务拒绝访问，请检查密钥权限'
+        : /model[^\n]*(?:not found|does not exist)/i.test(diagnostic) ? '模型不存在或不可访问，请检查模型名称'
+        : '模型检测失败，请检查网络、Base URL、API Key 和模型名称';
+      result = {
+        status: 'failed',
+        errorCode: error instanceof ModelServiceConfigurationError ? error.code : 'MODEL_SERVICE_VALIDATION_FAILED',
+        message
+      };
+    }
+    result.checkedAt = new Date().toISOString();
+    result.durationMs = Date.now() - startedAt;
+    publish(result);
+    return result;
   }
 
   return {
@@ -206,6 +263,8 @@ export function createModelServiceRuntime(input: {
     },
     async resolve(accessToken, fetchConfiguration) {
       const operationId = ++resolutionId;
+      activeRequest = undefined;
+      input.onAvailabilityChange?.({ status: 'skipped' });
       let resolvedMode: ModelAccessMode | undefined;
       current = { status: 'resolving' };
       try {
@@ -243,16 +302,13 @@ export function createModelServiceRuntime(input: {
             return;
           }
           try {
-            const validated = await input.validate({
-              ...stored.configuration,
-              apiKey: stored.apiKey
-            });
             await activateResolved(
               operationId,
               remote.mode,
-              validated.configuration,
-              validated.apiKey
+              stored.configuration,
+              stored.apiKey
             );
+            if (operationId === resolutionId) void check().catch(() => undefined);
           } catch {
             if (operationId === resolutionId) {
               current = {
@@ -274,16 +330,12 @@ export function createModelServiceRuntime(input: {
           remote.credentialVersion
         );
         if (operationId !== resolutionId) return;
-        const validated = await input.validate({
-          ...platformConfiguration,
-          apiKey: remote.apiKey
-        });
         if (operationId !== resolutionId) return;
         await runTransition(async () => {
           if (operationId !== resolutionId) return;
           await input.credentialStore.delete();
           if (operationId !== resolutionId) return;
-          await input.activate(validated.configuration, validated.apiKey, {
+          await input.activate(platformConfiguration, remote.apiKey, {
             mode: remote.mode,
             credentialVersion: remote.credentialVersion,
             ...(preparedCatalog === undefined
@@ -294,8 +346,9 @@ export function createModelServiceRuntime(input: {
             await input.deactivate();
             return;
           }
-          publishReady(remote.mode, validated.configuration);
+          publishReady(remote.mode, platformConfiguration, remote.apiKey);
         });
+        if (operationId === resolutionId) void check().catch(() => undefined);
       } catch (error) {
         if (operationId !== resolutionId) return;
         current = {
@@ -309,6 +362,8 @@ export function createModelServiceRuntime(input: {
     },
     async signOut() {
       resolutionId += 1;
+      activeRequest = undefined;
+      input.onAvailabilityChange?.({ status: 'skipped' });
       current = { status: 'resolving' };
       await runTransition(() => input.deactivate());
     },
@@ -323,7 +378,7 @@ export function createModelServiceRuntime(input: {
         );
       }
       if (
-        current.status !== 'configuration_required'
+        (current.status !== 'configuration_required' && current.status !== 'ready')
         || current.mode !== 'enterprise_managed'
       ) {
         throw new ModelServiceConfigurationError(
@@ -338,7 +393,7 @@ export function createModelServiceRuntime(input: {
         );
       }
       configuring = true;
-      const operationId = ++resolutionId;
+      const operationId = resolutionId;
       try {
         let previousApiKey: string | undefined;
         try {
@@ -396,7 +451,9 @@ export function createModelServiceRuntime(input: {
               'model service configuration was superseded'
             );
           }
-          publishReady('enterprise_managed', validated.configuration);
+          resolutionId += 1;
+          publishReady('enterprise_managed', validated.configuration, validated.apiKey);
+          input.onAvailabilityChange?.({ status: 'succeeded', checkedAt: new Date().toISOString(), responseReceived: true });
         });
         return {
           status: 'ready',
@@ -406,6 +463,13 @@ export function createModelServiceRuntime(input: {
       } finally {
         configuring = false;
       }
+    },
+    check,
+    async readApiKey() {
+      if (!('mode' in current) || current.mode !== 'enterprise_managed') return null;
+      const operationId = resolutionId;
+      const apiKey = await input.credentialStore.read();
+      return operationId === resolutionId ? apiKey ?? null : null;
     },
     subscribeReady(listener) {
       listeners.add(listener);

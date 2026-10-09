@@ -15,6 +15,7 @@ const updateBrandingMock = vi.mocked(updatePlatformBranding);
 
 describe("PlatformBrandingPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     getBrandingMock.mockResolvedValue({
       sidebarLogoConfigured: false,
       sidebarLogoUrl: null,
@@ -29,6 +30,18 @@ describe("PlatformBrandingPage", () => {
     });
     vi.spyOn(URL, "createObjectURL").mockImplementation((file) => `blob:${(file as File).name}`);
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+  });
+
+  it("校验并保存可选的品牌高亮色", async () => {
+    renderPage();
+    const input = await screen.findByLabelText("品牌高亮色 HEX");
+    expect(input).toHaveValue("");
+    fireEvent.change(input, { target: { value: "invalid" } });
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(screen.getByText("请输入 #RRGGBB 格式的 HEX 色值")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "#F2E9EA" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ accentColor: "#F2E9EA" })));
   });
 
   it("previews both files locally, preserves them across backgrounds, and resets one position", async () => {

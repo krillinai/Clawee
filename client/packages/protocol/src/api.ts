@@ -927,6 +927,7 @@ export type EnterpriseSidebarMenuLabels = Partial<Record<
 >>;
 
 export type EnterprisePlatformBrandingResponse = {
+  accentColor?: string;
   adminUrl?: string;
   sidebarLogoConfigured: boolean;
   sidebarCompactLogoConfigured: boolean;
@@ -1747,7 +1748,25 @@ export type ScheduleRunTrace = {
 };
 export type ScheduleRunSummary = Pick<RunResponse, 'id' | 'threadId' | 'status'>;
 
+export type ScheduleAction = 'agent_run' | 'workflow_start';
+export type WorkflowScheduleConfiguration = {
+  templateId: string;
+  initialInput: Record<string, unknown>;
+};
+export type CreateWorkflowScheduleRequest = {
+  action: 'workflow_start';
+  requestId?: string;
+  name: string;
+  cron: string;
+  timezone?: string;
+  enabled?: boolean;
+  workflow: WorkflowScheduleConfiguration;
+};
+export type UpdateWorkflowScheduleRequest = Partial<Omit<CreateWorkflowScheduleRequest, 'requestId'>>;
+export type RunScheduleNowRequest = { triggerId?: string };
+
 export type CreateScheduleRequest = {
+  action?: 'agent_run';
   name: string;
   cron: string;
   timezone?: string;
@@ -1773,7 +1792,10 @@ export type UpdateScheduleRequest = Partial<
 
 export type ScheduleResponse = {
   id: string;
-  threadId: string;
+  threadId: string | null;
+  action?: ScheduleAction;
+  workflow?: WorkflowScheduleConfiguration;
+  lastWorkflowInstanceId?: string | null;
   name: string;
   cron: string;
   timezone: string;
@@ -1810,6 +1832,8 @@ export type RunScheduleNowResponse = {
   schedule: ScheduleResponse;
   skipped: boolean;
   queued: boolean;
+  triggerId?: string;
+  workflowInstanceId?: string;
 };
 
 export type ScheduleOperationResponse = {
@@ -1818,6 +1842,8 @@ export type ScheduleOperationResponse = {
   scheduleId: string;
   status: ScheduleOperationStatus;
   runId?: string | null;
+  triggerId?: string | null;
+  workflowInstanceId?: string | null;
   actorType?: ScheduleActorType | null;
   actorRunId?: string | null;
   diagnosticEvent?: ScheduleDiagnosticEventType;

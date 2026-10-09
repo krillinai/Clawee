@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCodexAppServerClient } from '../../src/codex/app-server-client.js';
 import {
   createModelServiceRuntime,
+  ModelServiceConfigurationError,
   resolveStoredModelServiceConfiguration,
   type ResolvedModelServiceConfiguration,
   validateModelServiceConfiguration
@@ -225,6 +226,31 @@ describe('model service configuration', () => {
     expect(listeners).toHaveBeenCalledOnce();
   });
 
+  it('activates stored configuration without waiting for model availability', async () => {
+    const request = { baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'secret' };
+    const validation = deferred<{ configuration: typeof request; apiKey: string }>();
+    const runtime = createModelServiceRuntime({
+      credentialStore: credentialStore(request.apiKey),
+      async loadStored() {
+        return {
+          status: { status: 'ready', configuration: request, apiKeyConfigured: true },
+          configuration: request,
+          apiKey: request.apiKey
+        };
+      },
+      validate: () => validation.promise,
+      async activate() {},
+      async deactivate() {}
+    });
+    const resolving = runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    try {
+      await vi.waitFor(() => expect(runtime.ready()).toBe(true), { timeout: 200 });
+    } finally {
+      validation.resolve({ configuration: request, apiKey: request.apiKey });
+      await resolving;
+    }
+  });
+
   it('applies platform configuration in memory without writing credentials', async () => {
     const operations: string[] = [];
     const runtime = createModelServiceRuntime({
@@ -285,9 +311,9 @@ describe('model service configuration', () => {
     expect(operations).toEqual([
       'deactivate',
       'catalog',
-      'validate',
       'delete',
-      'activate'
+      'activate',
+      'validate'
     ]);
     expect(runtime.status()).toEqual({
       status: 'ready',
@@ -307,9 +333,10 @@ describe('model service configuration', () => {
     });
   });
 
-  it('installs the platform catalog before validation even when validation fails', async () => {
+  it('keeps platform configuration ready when background validation fails', async () => {
     const operations: string[] = [];
     const activate = vi.fn();
+    const availability = vi.fn();
     const runtime = createModelServiceRuntime({
       credentialStore: credentialStore(undefined),
       async loadStored() {
@@ -324,6 +351,7 @@ describe('model service configuration', () => {
         throw new Error('validation failed');
       },
       activate,
+      onAvailabilityChange: availability,
       async deactivate() {
         operations.push('deactivate');
       }
@@ -339,10 +367,11 @@ describe('model service configuration', () => {
 
     expect(operations).toEqual(['deactivate', 'catalog', 'validate']);
     expect(runtime.status()).toMatchObject({
-      status: 'unavailable',
+      status: 'ready',
       mode: 'platform_managed'
     });
-    expect(activate).not.toHaveBeenCalled();
+    expect(activate).toHaveBeenCalled();
+    await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
   });
 
   it('does not activate platform configuration when deleting old credentials fails', async () => {
@@ -549,6 +578,84 @@ describe('model service configuration', () => {
       status: 'ready',
       configuration: { model: 'second-model' }
     });
+  });
+
+  it('checks drafts without saving or activating them and allows updating ready enterprise configuration', async () => {
+    const request = { baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'old-secret' };
+    const store = credentialStore(request.apiKey);
+    const write = vi.spyOn(store, 'write');
+    const activate = vi.fn();
+    const runtime = createModelServiceRuntime({
+      credentialStore: store,
+      async loadStored() {
+        return { status: { status: 'ready', configuration: request, apiKeyConfigured: true }, configuration: request, apiKey: request.apiKey };
+      },
+      async validate(target) { return { configuration: { baseUrl: target.baseUrl, model: target.model }, apiKey: target.apiKey }; },
+      activate,
+      async deactivate() {}
+    });
+    await runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    expect(await runtime.readApiKey()).toBe('old-secret');
+    activate.mockClear();
+    const draft = { ...request, model: 'model-2', apiKey: 'new-secret' };
+    expect(await runtime.check(draft)).toMatchObject({ status: 'succeeded', checkedAt: expect.any(String) });
+    expect(write).not.toHaveBeenCalled();
+    expect(activate).not.toHaveBeenCalled();
+    expect(runtime.status()).toMatchObject({ configuration: { model: 'model-1' } });
+    await runtime.configure(draft);
+    expect(write).toHaveBeenCalledWith('new-secret');
+    expect(runtime.status()).toMatchObject({ configuration: { model: 'model-2' } });
+  });
+
+  it('retains the current background check when saving an invalid draft fails', async () => {
+    const configuration = { baseUrl: 'https://api.example.test/v1', model: 'model-1' };
+    const validation = deferred<{ configuration: typeof configuration; apiKey: string }>();
+    const availability = vi.fn();
+    const runtime = createModelServiceRuntime({
+      credentialStore: credentialStore('saved-secret'),
+      async loadStored() {
+        return { status: { status: 'ready', configuration, apiKeyConfigured: true }, configuration, apiKey: 'saved-secret' };
+      },
+      validate: vi.fn().mockImplementationOnce(() => validation.promise).mockRejectedValue(
+        new ModelServiceConfigurationError('MODEL_SERVICE_VALIDATION_FAILED', '检测失败', { message: '401 Unauthorized api_key=draft-secret' })
+      ),
+      async activate() {},
+      async deactivate() {},
+      onAvailabilityChange: availability
+    });
+    await runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    const draft = { ...configuration, apiKey: 'draft-secret' };
+    await expect(runtime.configure(draft)).rejects.toMatchObject({ code: 'MODEL_SERVICE_VALIDATION_FAILED' });
+    validation.resolve({ configuration, apiKey: 'saved-secret' });
+    await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'succeeded' })));
+    const result = await runtime.check(draft);
+    expect(result).toMatchObject({ status: 'failed', message: '模型服务认证失败，请检查 API Key' });
+    expect(JSON.stringify(result)).not.toContain('draft-secret');
+    expect(runtime.ready()).toBe(true);
+  });
+
+  it('does not expose platform keys or publish stale checks after sign-out', async () => {
+    const validation = deferred<{ configuration: { baseUrl: string; model: string }; apiKey: string }>();
+    const availability = vi.fn();
+    const read = vi.fn();
+    const runtime = createModelServiceRuntime({
+      credentialStore: { ...credentialStore(undefined), read },
+      async loadStored() { throw new Error('unexpected'); },
+      validate: () => validation.promise,
+      async activate() {},
+      async deactivate() {},
+      onAvailabilityChange: availability
+    });
+    await runtime.resolve('token', async () => ({ mode: 'platform_managed', baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'platform-secret', credentialVersion: 1 }));
+    expect(await runtime.readApiKey()).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    await expect(runtime.check({ baseUrl: 'https://draft.example/v1', model: 'draft', apiKey: 'draft-secret' })).rejects.toMatchObject({ code: 'model_configuration_managed_by_platform' });
+    await runtime.signOut();
+    availability.mockClear();
+    validation.reject(new Error('old check failed'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(availability).not.toHaveBeenCalled();
+    expect(await runtime.readApiKey()).toBeNull();
   });
 
   it('restores the previous enterprise API key when activation fails', async () => {

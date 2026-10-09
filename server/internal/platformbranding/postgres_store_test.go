@@ -49,7 +49,7 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql", "00063_platform_branding_admin_url.sql"} {
+	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql", "00063_platform_branding_admin_url.sql", "00068_platform_branding_accent_color.sql"} {
 		raw, err := migrations.FS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -77,18 +77,26 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 	}
 	input.SidebarMenuLabels = nil
 	adminURL := "https://gateway.example/admin"
+	accentColor := "#f2e9ea"
 	input.AdminURL = &adminURL
+	input.AccentColor = &accentColor
 	current, err = service.Update(ctx, input)
 	if err != nil || current.SidebarMenuLabels.Skills != label || current.AdminURL != adminURL {
 		t.Fatalf("legacy update configuration=%#v error=%v", current, err)
 	}
 	input.SidebarMenuLabels = map[string]*string{"skills": nil}
 	input.AdminURL = nil
+	input.AccentColor = nil
 	current, err = service.Update(ctx, input)
 	if err != nil || current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Drive != drive || current.AdminURL != adminURL {
 		t.Fatalf("reset configuration=%#v error=%v", current, err)
 	}
 	var resetIsNull bool
+	service = NewService(NewPostgresStore(pool))
+	current, err = service.Get(ctx)
+	if err != nil || current.AccentColor != accentColor {
+		t.Fatalf("品牌高亮色未持久化: %#v, %v", current, err)
+	}
 	if err := pool.QueryRow(ctx, `SELECT sidebar_skills_label IS NULL FROM platform_branding`).Scan(&resetIsNull); err != nil || !resetIsNull {
 		t.Fatalf("reset is null=%v error=%v", resetIsNull, err)
 	}

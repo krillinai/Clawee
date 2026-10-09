@@ -187,7 +187,7 @@ describe('runtime api', () => {
     expect(scheduler.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks business APIs and scheduler startup until model configuration succeeds', async () => {
+  it('starts workflow scheduling while gating Agent APIs until model configuration succeeds', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-model-gate-'));
     db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
     const runManager = createRunManager({
@@ -197,11 +197,14 @@ describe('runtime api', () => {
       codexHome: join(tempDir, 'codex-home')
     });
     const cancelAll = vi.spyOn(runManager, 'cancelAll');
+    const startRun = vi.spyOn(runManager, 'startRun');
     const schedulerStart = vi.fn();
     const schedulerStop = vi.fn();
+    const schedulerRefresh = vi.fn();
     const scheduler = createFakeScheduler({
       start: schedulerStart,
-      stop: schedulerStop
+      stop: schedulerStop,
+      refreshTimer: schedulerRefresh
     });
     let ready = false;
     let resolveReady = false;
@@ -214,6 +217,8 @@ describe('runtime api', () => {
       ready = false;
     });
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ready
         ? {
             status: 'ready',
@@ -331,6 +336,8 @@ describe('runtime api', () => {
       mode: 'enterprise_managed'
     });
     expect((await authGet('/enterprise/platform-branding')).statusCode).toBe(200);
+    expect((await authGet('/runtime/model-service/api-key')).statusCode).toBe(200);
+    expect((await server.inject({ method: 'POST', url: '/runtime/model-service/check', headers: { authorization: 'Bearer secret' } })).statusCode).toBe(200);
     expect((await authGet('/enterprise/platform-branding/sidebar-logo')).statusCode).toBe(200);
     expect((await authGet('/enterprise/platform-branding/sidebar-compact-logo')).statusCode).toBe(200);
     const blocked = await authGet('/projects');
@@ -341,7 +348,11 @@ describe('runtime api', () => {
         message: '请先配置并验证 Codex 模型服务'
       }
     });
-    expect(schedulerStart).not.toHaveBeenCalled();
+    const blockedRun = await authPost('/runs', { prompt: '模型配置前不能执行 Agent' });
+    expect(blockedRun.statusCode).toBe(428);
+    expect(blockedRun.json().error.code).toBe('MODEL_SERVICE_CONFIGURATION_REQUIRED');
+    expect(startRun).not.toHaveBeenCalled();
+    expect(schedulerStart).toHaveBeenCalledOnce();
 
     const configured = await server.inject({
       method: 'POST',
@@ -354,7 +365,7 @@ describe('runtime api', () => {
       }
     });
     expect(configured.statusCode).toBe(200);
-    expect(schedulerStart).toHaveBeenCalledOnce();
+    expect(schedulerStart).toHaveBeenCalledTimes(2);
     expect((await server.inject({
       method: 'GET',
       url: '/healthz'
@@ -364,10 +375,15 @@ describe('runtime api', () => {
     });
     expect((await authGet('/projects')).statusCode).toBe(200);
 
+    const refreshCount = schedulerRefresh.mock.calls.length;
     const logout = await authPost('/enterprise/logout', {});
     expect(logout.statusCode).toBe(200);
     expect(signOut).toHaveBeenCalled();
-    expect(schedulerStop).toHaveBeenCalled();
+    expect(schedulerStop).not.toHaveBeenCalled();
+    expect(schedulerRefresh.mock.calls.length).toBeGreaterThan(refreshCount);
+    expect(modelServiceRuntime.ready()).toBe(false);
+    expect((await authPost('/runs', { prompt: '退出后不能执行 Agent' })).statusCode).toBe(428);
+    expect(startRun).not.toHaveBeenCalled();
     expect(cancelAll).toHaveBeenCalled();
 
     resolveReady = true;
@@ -376,7 +392,8 @@ describe('runtime api', () => {
       password: 'password-123'
     });
     expect(login.statusCode).toBe(200);
-    expect(schedulerStart).toHaveBeenCalledTimes(2);
+    expect(schedulerStart).toHaveBeenCalledTimes(3);
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it('closes the run manager before server shutdown completes', async () => {
@@ -1652,6 +1669,8 @@ describe('runtime api', () => {
       close
     };
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',
@@ -1714,6 +1733,8 @@ describe('runtime api', () => {
   it('returns the configured default model when Codex model/list fails', async () => {
     const close = vi.fn(async () => undefined);
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',
@@ -1765,6 +1786,8 @@ describe('runtime api', () => {
   it('returns the configured default model when Codex model/list is empty', async () => {
     const close = vi.fn(async () => undefined);
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',

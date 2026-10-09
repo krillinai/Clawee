@@ -300,29 +300,23 @@ async function main(): Promise<void> {
     try {
       let prepared;
       const modelCatalogPath = context.modelCatalogPath
-        ?? (await serializeCatalogOperation(
-          () => installModelCatalog({
-            codexBin,
-            codexHome,
-            codexVersion: versionProbe.version,
-            baseUrl: configuration.baseUrl,
-            apiKey,
-            defaultModel: configuration.model,
-            credentialVersion: context.credentialVersion ?? 1
-          })
-        )).path;
+        ?? (await serializeCatalogOperation(async () => installFallbackModelCatalog({
+          codexBin,
+          codexHome,
+          defaultModel: configuration.model
+        }))).path;
       prepared = await preparePlatformClientWithFallback(
         configuration,
         modelCatalogPath
       );
       codexAppServerClient.activate(prepared.client);
       stopModelCatalogRefresh();
+      activePlatformCatalog = {
+        configuration,
+        apiKey,
+        credentialVersion: context.credentialVersion ?? 1
+      };
       if (context.mode === 'platform_managed') {
-        activePlatformCatalog = {
-          configuration,
-          apiKey,
-          credentialVersion: context.credentialVersion ?? 1
-        };
         catalogRefreshTimer = setInterval(() => {
           void refreshPlatformCatalog().catch(error => {
             console.warn(`Remote model catalog refresh failed: ${
@@ -333,6 +327,7 @@ async function main(): Promise<void> {
         catalogRefreshTimer.unref();
       }
       notifyModelRuntimeChanged('model_service_reactivated');
+      void refreshPlatformCatalog().catch(() => undefined);
     } catch (error) {
       delete codexEnv[CLAWEE_MODEL_API_KEY_ENV];
       throw error;
@@ -351,27 +346,19 @@ async function main(): Promise<void> {
       dataDir,
       request
     }),
-    async preparePlatformCatalog(configuration, apiKey, credentialVersion) {
-      const installed = await serializeCatalogOperation(
-        () => installModelCatalog({
-          codexBin,
-          codexHome,
-          codexVersion: versionProbe.version,
-          baseUrl: configuration.baseUrl,
-          apiKey,
-          defaultModel: configuration.model,
-          credentialVersion
-        })
-      );
+    async preparePlatformCatalog(configuration) {
+      const installed = await serializeCatalogOperation(async () => installFallbackModelCatalog({
+        codexBin,
+        codexHome,
+        defaultModel: configuration.model
+      }));
       return { modelCatalogPath: installed.path };
     },
     async activate(configuration, apiKey, context) {
       await activateModelService(configuration, apiKey, context);
-      availabilityProbe = {
-        status: 'succeeded',
-        checkedAt: new Date().toISOString(),
-        responseReceived: true
-      };
+    },
+    onAvailabilityChange(probe) {
+      availabilityProbe = probe;
     },
     async deactivate() {
       stopModelCatalogRefresh();

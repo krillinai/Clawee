@@ -16,7 +16,7 @@ func (s *PostgresStore) Get(ctx context.Context) (Configuration, error) {
 	row := s.pool.QueryRow(ctx, `SELECT sidebar_logo, sidebar_logo_content_type,
 sidebar_compact_logo, sidebar_compact_logo_content_type, updated_by, created_at, updated_at,
 COALESCE(sidebar_skills_label,''), COALESCE(sidebar_knowledge_label,''),
-COALESCE(sidebar_drive_label,''), COALESCE(sidebar_dashboard_label,''), COALESCE(admin_url,'')
+COALESCE(sidebar_drive_label,''), COALESCE(sidebar_dashboard_label,''), COALESCE(admin_url,''), COALESCE(accent_color,'')
 FROM platform_branding WHERE id=$1`, DefaultID)
 	configuration, err := scanConfiguration(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -35,8 +35,8 @@ func (s *PostgresStore) Update(ctx context.Context, input UpdateInput) (Configur
 	row := s.pool.QueryRow(ctx, `INSERT INTO platform_branding
 (id, sidebar_logo, sidebar_logo_content_type, sidebar_compact_logo,
  sidebar_compact_logo_content_type, updated_by, created_at, updated_at,
- sidebar_skills_label, sidebar_knowledge_label, sidebar_drive_label, sidebar_dashboard_label, admin_url)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$10,$11,$12,$13,$18)
+ sidebar_skills_label, sidebar_knowledge_label, sidebar_drive_label, sidebar_dashboard_label, admin_url, accent_color)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$10,$11,$12,$13,$18,$20)
 ON CONFLICT (id) DO UPDATE SET
  sidebar_logo=CASE WHEN $8='keep' THEN platform_branding.sidebar_logo ELSE EXCLUDED.sidebar_logo END,
  sidebar_logo_content_type=CASE WHEN $8='keep' THEN platform_branding.sidebar_logo_content_type ELSE EXCLUDED.sidebar_logo_content_type END,
@@ -47,16 +47,17 @@ ON CONFLICT (id) DO UPDATE SET
  sidebar_drive_label=CASE WHEN $16 THEN EXCLUDED.sidebar_drive_label ELSE platform_branding.sidebar_drive_label END,
  sidebar_dashboard_label=CASE WHEN $17 THEN EXCLUDED.sidebar_dashboard_label ELSE platform_branding.sidebar_dashboard_label END,
  admin_url=CASE WHEN $19 THEN EXCLUDED.admin_url ELSE platform_branding.admin_url END,
+ accent_color=CASE WHEN $21 THEN EXCLUDED.accent_color ELSE platform_branding.accent_color END,
  updated_by=EXCLUDED.updated_by,
  updated_at=EXCLUDED.updated_at
 RETURNING sidebar_logo, sidebar_logo_content_type, sidebar_compact_logo,
  sidebar_compact_logo_content_type, updated_by, created_at, updated_at,
  COALESCE(sidebar_skills_label,''), COALESCE(sidebar_knowledge_label,''),
- COALESCE(sidebar_drive_label,''), COALESCE(sidebar_dashboard_label,''), COALESCE(admin_url,'')`,
+ COALESCE(sidebar_drive_label,''), COALESCE(sidebar_dashboard_label,''), COALESCE(admin_url,''), COALESCE(accent_color,'')`,
 		DefaultID, logoContent, logoContentType, compactContent, compactContentType,
 		input.UpdatedBy, input.UpdatedAt, input.SidebarLogoAction, input.SidebarCompactLogoAction,
 		skills, knowledge, drive, dashboard, updateSkills, updateKnowledge, updateDrive, updateDashboard,
-		input.AdminURL, input.AdminURL != nil)
+		input.AdminURL, input.AdminURL != nil, input.AccentColor, input.AccentColor != nil)
 	return scanConfiguration(row)
 }
 
@@ -69,7 +70,7 @@ func scanConfiguration(row rowScanner) (Configuration, error) {
 	err := row.Scan(&logoContent, &logoContentType, &compactContent, &compactContentType,
 		&configuration.UpdatedBy, &configuration.CreatedAt, &configuration.UpdatedAt,
 		&configuration.SidebarMenuLabels.Skills, &configuration.SidebarMenuLabels.Knowledge,
-		&configuration.SidebarMenuLabels.Drive, &configuration.SidebarMenuLabels.Dashboard, &configuration.AdminURL)
+		&configuration.SidebarMenuLabels.Drive, &configuration.SidebarMenuLabels.Dashboard, &configuration.AdminURL, &configuration.AccentColor)
 	if err != nil {
 		return Configuration{}, err
 	}

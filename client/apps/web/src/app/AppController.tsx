@@ -409,8 +409,16 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseCheckingTimedOut, setEnterpriseCheckingTimedOut] = useState(false);
   const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
   const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
+  const workflowSessionKey = JSON.stringify([enterpriseSession.status, enterpriseSession.account?.subjectId, enterpriseSession.agentId, enterpriseSessionProbeKey]);
+  const [workflowGatewayIdentity, setWorkflowGatewayIdentity] = useState<{ connection: ConnectionConfig | null; sessionKey: string; origin?: string; failed: boolean }>();
+  const workflowGatewayResolved = enterpriseSessionInitialized && workflowGatewayIdentity?.connection === connectionConfig && workflowGatewayIdentity?.sessionKey === workflowSessionKey;
+  const workflowGatewayOrigin = workflowGatewayResolved ? workflowGatewayIdentity?.origin : undefined;
+  const workflowIdentityStatus = !enterpriseSession.account?.subjectId || !enterpriseSession.agentId || workflowGatewayResolved && workflowGatewayIdentity?.failed
+    ? 'unavailable' : workflowGatewayOrigin === undefined ? 'confirming' : 'ready';
   const [platformBrandingUrls, setPlatformBrandingUrls] = useState<PlatformBrandingUrls>({});
   const [adminUrl, setAdminUrl] = useState<string>();
+  const [brandAccentColor, setBrandAccentColor] = useState<string>();
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'model'>('general');
   const [sidebarMenuLabels, setSidebarMenuLabels] = useState<EnterpriseSidebarMenuLabels>({});
   const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
   const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
@@ -500,7 +508,7 @@ export function AppController(props: AppControllerProps) {
   const [workflowDraft, setWorkflowDraft] = useState<{
     taskId: string; threadId: string; instruction: string; input: string; firstNode: boolean;
   }>();
-  useEffect(() => { setWorkflowDraft(undefined); }, [enterpriseSession.account?.subjectId]);
+  useEffect(() => { setWorkflowDraft(undefined); }, [enterpriseSession.account?.subjectId, enterpriseSession.agentId, workflowGatewayOrigin]);
   const [pendingComposerSkill, setPendingComposerSkill] = useState<{
     projectId: string | undefined;
     threadId: string | undefined;
@@ -589,8 +597,8 @@ export function AppController(props: AppControllerProps) {
     applyColorMode(colorMode);
   }, [colorMode]);
   useEffect(() => {
-    applyAccentColor(accentColor, customAccentColor);
-  }, [accentColor, customAccentColor]);
+    applyAccentColor(accentColor, customAccentColor, brandAccentColor);
+  }, [accentColor, customAccentColor, brandAccentColor]);
   const navigationPersistenceReadyRef = useRef(
     persistedNavigation !== null || props.route.view !== 'home'
   );
@@ -976,12 +984,25 @@ export function AppController(props: AppControllerProps) {
   }, []);
 
   useEffect(() => {
+    setWorkflowGatewayIdentity(undefined);
+    if (enterpriseService === null || !enterpriseSessionInitialized || enterpriseSession.status !== 'signed_in' || !enterpriseSession.account?.subjectId || !enterpriseSession.agentId) return;
+    let canceled = false;
+    void enterpriseService.getGateway().then(result => {
+      if (!canceled) setWorkflowGatewayIdentity({ connection: connectionConfig, sessionKey: workflowSessionKey, origin: new URL(result.gateway).origin, failed: false });
+    }).catch(() => {
+      if (!canceled) setWorkflowGatewayIdentity({ connection: connectionConfig, sessionKey: workflowSessionKey, failed: true });
+    });
+    return () => { canceled = true; };
+  }, [enterpriseService, enterpriseSessionInitialized, connectionConfig, workflowSessionKey]);
+
+  useEffect(() => {
     for (const url of platformBrandingObjectUrlsRef.current) {
       URL.revokeObjectURL(url);
     }
     platformBrandingObjectUrlsRef.current = [];
     setPlatformBrandingUrls({});
     setAdminUrl(undefined);
+    setBrandAccentColor(undefined);
     setSidebarMenuLabels({});
 
     if (enterpriseService === null || enterpriseSession.status !== 'signed_in') {
@@ -1011,6 +1032,7 @@ export function AppController(props: AppControllerProps) {
         if (canceled) return;
         setSidebarMenuLabels(branding.sidebarMenuLabels ?? {});
         setAdminUrl(branding.adminUrl);
+        setBrandAccentColor(branding.accentColor);
         const [sidebarLogoUrl, sidebarCompactLogoUrl] = await Promise.all([
           loadImage(branding.sidebarLogoConfigured, 'sidebar-logo'),
           loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo')
@@ -1576,7 +1598,7 @@ export function AppController(props: AppControllerProps) {
     scheduleService
       .listSchedules()
       .then(response => {
-        if (!canceled) setRuntimeSchedules(response.schedules);
+        if (!canceled) setRuntimeSchedules(response.schedules.filter(schedule => schedule.action !== 'workflow_start'));
       })
       .catch(() => {
         if (!canceled) setRuntimeSchedules([]);
@@ -3164,6 +3186,7 @@ export function AppController(props: AppControllerProps) {
     const previous = await service.getGateway();
     const saved = await service.setGateway(gateway, gateways);
     if (previous.gateway === saved.gateway) return;
+    setWorkflowGatewayIdentity(undefined);
     setSidebarMenuLabels({});
     setEnterpriseSessionProbeKey(current => current + 1);
     setEnterpriseSession(await service.getSession());
@@ -3309,7 +3332,7 @@ export function AppController(props: AppControllerProps) {
   ): Promise<boolean> {
     if (workflowDraft !== undefined && workflowDraft.threadId === state.selectedThreadId) {
       const draft = workflowDraft;
-      if (!workflowService || !currentProject || attachments.length > 0 || submissionMode) return false;
+      if (connectionState.status !== 'connected' || !workflowService || !currentProject || attachments.length > 0 || submissionMode) return false;
       try {
         const result = await workflowService.execute(draft.taskId, currentProject.id, draft.threadId, draft.firstNode ? draft.input : prompt, config?.model, config?.reasoning);
         setWorkflowDraft(undefined);
@@ -5377,7 +5400,7 @@ export function AppController(props: AppControllerProps) {
         return;
       }
       setRuntimeThreads(previous => upsertThread(previous, threadResponse.thread));
-      setRuntimeSchedules(scheduleResponse.schedules);
+      setRuntimeSchedules(scheduleResponse.schedules.filter(schedule => schedule.action !== 'workflow_start'));
     } catch {
       // The draft stays usable when terminal-state reconciliation is unavailable.
     }
@@ -5621,6 +5644,9 @@ export function AppController(props: AppControllerProps) {
   }
 
   async function runScheduleNow(schedule: ScheduleResponse) {
+    if (schedule.action === 'workflow_start' || !schedule.threadId) {
+      throw new Error('此计划不属于普通 Agent 任务，请在工作流页面管理');
+    }
     const alreadyOpen =
       state.activeView === 'conversation'
       && state.selectedThreadId === schedule.threadId;
@@ -6441,8 +6467,13 @@ export function AppController(props: AppControllerProps) {
     <WorkflowPage
       key={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : 'signed-out'}
       service={workflowService}
+      scheduleService={workflowGatewayOrigin === undefined ? null : scheduleService}
+      identityKey={JSON.stringify([connectionConfig?.baseUrl, workflowGatewayOrigin, enterpriseSession.agentId])}
+      identityStatus={workflowIdentityStatus}
       signedIn={enterpriseSession.status === 'signed_in'}
-      online={connectionState.status === 'connected'}
+      online={runtimeSupportsEnterpriseSession(connectionState)}
+      modelReady={connectionState.status === 'connected'}
+      onOpenModelSettings={connectionState.status === 'configuration_required' ? () => openPrimaryView('settings') : undefined}
       userId={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined}
       projectId={currentProject?.id}
       onTaskPrepared={(taskId, draft) => {
@@ -6526,6 +6557,8 @@ export function AppController(props: AppControllerProps) {
       accentColor={accentColor}
       onAccentColorChange={handleAccentColorChange}
       customAccentColor={customAccentColor}
+      brandAccentColor={brandAccentColor}
+      initialTab={settingsInitialTab}
       onCustomAccentColorChange={handleCustomAccentColorChange}
       desktopCloseBehavior={desktopCloseBehavior}
       onDesktopCloseBehaviorChange={behavior => {
@@ -6550,14 +6583,24 @@ export function AppController(props: AppControllerProps) {
           ? modelAccessState.configuration
           : null
       }
+      modelServiceMode={'mode' in modelAccessState ? modelAccessState.mode : undefined}
+      onModelServiceReadApiKey={modelServiceConfigurationService?.readApiKey}
+      onModelServiceCheck={modelServiceConfigurationService === null ? undefined : async input => {
+        const result = await modelServiceConfigurationService.check(input);
+        if (input === undefined && connectionService !== null) {
+          setConnectionState(await connectionService.check());
+        }
+        return result;
+      }}
       onModelServiceConfigure={
         modelServiceConfigurationService === null
           ? undefined
           : async (input: ConfigureModelServiceRequest) => {
               const response = await modelServiceConfigurationService.configure(input);
+              if (connectionService !== null) setConnectionState(await connectionService.check());
               setModelAccessState(previous => ({
                 status: 'ready',
-                mode: previous.status === 'ready' ? previous.mode : 'platform_managed',
+                mode: previous.status === 'ready' ? previous.mode : 'enterprise_managed',
                 configuration: response.configuration
               }));
             }
@@ -6696,10 +6739,16 @@ export function AppController(props: AppControllerProps) {
     );
   }
 
-  if (connectionState.status === 'configuration_required') {
+  if (connectionState.status === 'configuration_required' && !(enterpriseSession.status === 'signed_in' && state.activeView === 'workflow')) {
     const modelAccess = connectionState.configuration;
+    const workflowEntry = enterpriseSession.status === 'signed_in' ? (
+      <div style={{ padding: '12px 24px', display: 'flex', justifyContent: 'center' }}>
+        <button className="model-service-setup__submit" type="button" onClick={() => openPrimaryView('workflow')}>进入工作流（无需模型）</button>
+      </div>
+    ) : null;
     if (modelAccess.status === 'configuration_required') {
       return (
+        <div className="app-drop-shell" style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
         <ModelServiceSetupPage
           status={{
             status: 'configuration_required',
@@ -6722,10 +6771,13 @@ export function AppController(props: AppControllerProps) {
             }
           }}
         />
+        {workflowEntry}
+        </div>
       );
     }
     if (modelAccess.status === 'resolving' || modelAccess.status === 'unavailable') {
       return (
+        <div className="app-drop-shell" style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
         <ModelAccessStatusPage
           status={modelAccess.status}
           integratedTitleBar={integratedTitleBar}
@@ -6747,6 +6799,8 @@ export function AppController(props: AppControllerProps) {
           }}
           onLogout={() => void logoutEnterprise()}
         />
+        {workflowEntry}
+        </div>
       );
     }
   }
@@ -6844,6 +6898,7 @@ export function AppController(props: AppControllerProps) {
           onDeleteTask={task => deleteSidebarTask(task)}
           onOpenSettings={() => {
             closeMobileSidebar();
+            setSettingsInitialTab('general');
             dispatch({ type: 'open_settings' });
             navigateToRoute({ view: 'settings' });
           }}
@@ -6854,9 +6909,32 @@ export function AppController(props: AppControllerProps) {
         useIntegratedConversationTitleBar ? conversationHeader : undefined
       }
       main={(
-        <Suspense fallback={<PageLoading />}>
-          {main}
-        </Suspense>
+        <div className="model-runtime-main">
+          {connectionState.status === 'connected' && connectionState.codexStatus.availabilityProbe?.status === 'failed' ? (
+            <div className="model-runtime-notice" role="alert">
+              <span>{connectionState.codexStatus.availabilityProbe.message ?? '模型暂不可用，请检查配置或稍后重试。'}</span>
+              <button type="button" onClick={() => {
+                if (modelServiceConfigurationService === null || connectionService === null) return;
+                setConnectionState(previous => previous.status === 'connected' ? {
+                  ...previous, codexStatus: { ...previous.codexStatus, availabilityProbe: { status: 'pending' } }
+                } : previous);
+                void modelServiceConfigurationService.check().then(() => connectionService.check())
+                  .then(setConnectionState).catch(() => {
+                    void connectionService.check().then(setConnectionState).catch(() => undefined);
+                  });
+              }}>重新检测</button>
+              <button type="button" onClick={() => {
+                closeMobileSidebar();
+                setSettingsInitialTab('model');
+                dispatch({ type: 'open_settings' });
+                navigateToRoute({ view: 'settings' });
+              }}>模型设置</button>
+            </div>
+          ) : null}
+          <div className="model-runtime-body">
+            <Suspense fallback={<PageLoading />}>{main}</Suspense>
+          </div>
+        </div>
       )}
       detail={detailPanel}
       detailOpen={detailPanel !== null && state.activeView === 'conversation'}

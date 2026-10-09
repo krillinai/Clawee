@@ -10,7 +10,15 @@ const response = {
 };
 
 describe("平台外观接口", () => {
+  it("下发品牌高亮色且支持清空，不设置内置默认色", async () => {
+    expect((await getPlatformBranding()).accentColor).toBeUndefined();
+    vi.mocked(adminApi.get).mockResolvedValue({ ...response, accent_color: "#f2e9ea" });
+    expect((await getPlatformBranding()).accentColor).toBe("#f2e9ea");
+    await updatePlatformBranding({ sidebarLogoAction: "keep", sidebarCompactLogoAction: "keep", accentColor: "" });
+    expect(vi.mocked(adminApi.putForm).mock.lastCall?.[1].get("accent_color")).toBe("");
+  });
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(adminApi.get).mockResolvedValue(response);
     vi.mocked(adminApi.putForm).mockResolvedValue(response);
   });

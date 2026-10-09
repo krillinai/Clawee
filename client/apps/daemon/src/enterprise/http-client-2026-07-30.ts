@@ -99,6 +99,7 @@ const sidebarMenuLabelSchema = z.string().refine(value =>
 const platformBrandingSchema = z.object({
   data: z.object({
     admin_url: z.union([z.literal(''), z.string().url().refine(value => /^https?:\/\//.test(value))]).optional(),
+    accent_color: z.union([z.literal(''), z.string().regex(/^#[\da-f]{6}$/i)]).optional(),
     sidebar_logo_configured: z.boolean(),
     sidebar_compact_logo_configured: z.boolean(),
     sidebar_menu_labels: z.object({
@@ -1440,6 +1441,7 @@ export function createEnterpriseHttpClient(input: {
       });
       return {
         ...(response.data.admin_url ? { adminUrl: response.data.admin_url } : {}),
+        ...(response.data.accent_color ? { accentColor: response.data.accent_color } : {}),
         sidebarLogoConfigured: response.data.sidebar_logo_configured,
         sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured,
         ...(response.data.sidebar_menu_labels === undefined

@@ -10,6 +10,16 @@ import type { EnterpriseSessionManager } from '../../src/enterprise/session-mana
 const ORIGIN = 'https://enterprise.example';
 
 describe('enterprise platform branding', () => {
+  it('maps the optional brand accent color without introducing a default', async () => {
+    const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ data: { ...data, accent_color: '#F2E9EA' } })));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getPlatformBranding!('token')).resolves.toMatchObject({ accentColor: '#F2E9EA' });
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data })));
+    expect((await client.getPlatformBranding!('token')).accentColor).toBeUndefined();
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data: { ...data, accent_color: 'invalid' } })));
+    await expect(client.getPlatformBranding!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+  });
   it('maps configured menu labels up to ten characters with the admin link and rejects invalid names', async () => {
     const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
     const fetch = vi.fn(async () => new Response(JSON.stringify({

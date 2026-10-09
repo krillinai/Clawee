@@ -1,4 +1,5 @@
 export const accentColors = [
+  'brand',
   'neutral',
   'blue',
   'cyan',
@@ -20,9 +21,9 @@ export function readAccentColorPreference(): AccentColor {
     const value = window.localStorage.getItem(accentColorStorageKey);
     return accentColors.includes(value as AccentColor)
       ? value as AccentColor
-      : defaultAccentColor;
+      : 'brand';
   } catch {
-    return defaultAccentColor;
+    return 'brand';
   }
 }
 
@@ -55,10 +56,14 @@ export function writeCustomAccentColorPreference(color: string): void {
 
 export function applyAccentColor(
   color: AccentColor,
-  customColor = defaultCustomAccentColor
+  customColor = defaultCustomAccentColor,
+  brandColor?: string
 ): void {
-  const normalizedCustomColor = normalizeHexColor(customColor) ?? defaultCustomAccentColor;
-  document.documentElement.dataset.accent = color;
+  const normalizedBrandColor = normalizeHexColor(brandColor ?? '');
+  const normalizedCustomColor = (color === 'brand' ? normalizedBrandColor : normalizeHexColor(customColor)) ?? defaultCustomAccentColor;
+  document.documentElement.dataset.accent = color === 'brand'
+    ? (normalizedBrandColor === undefined ? defaultAccentColor : 'custom')
+    : color;
   document.documentElement.style.setProperty('--custom-accent-value', normalizedCustomColor);
   document.documentElement.style.setProperty(
     '--custom-on-accent',

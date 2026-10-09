@@ -62,6 +62,14 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 		defer c.Request.MultipartForm.RemoveAll()
 		var menuLabels map[string]*string
 		var adminURL *string
+		var accentColor *string
+		if values, exists := c.Request.MultipartForm.Value["accent_color"]; exists {
+			if len(values) != 1 {
+				platformBrandingInvalid(c, "品牌高亮色无效")
+				return
+			}
+			accentColor = &values[0]
+		}
 		if values, exists := c.Request.MultipartForm.Value["admin_url"]; exists {
 			if len(values) != 1 {
 				platformBrandingInvalid(c, "管理后台地址无效")
@@ -91,9 +99,13 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 		configuration, err := opts.PlatformBrandingService.Update(c.Request.Context(), platformbranding.UpdateInput{
 			SidebarLogoAction: logoAction, SidebarLogo: logo,
 			SidebarCompactLogoAction: compactAction, SidebarCompactLogo: compactLogo,
-			UpdatedBy: account.UserID, SidebarMenuLabels: menuLabels, AdminURL: adminURL,
+			UpdatedBy: account.UserID, SidebarMenuLabels: menuLabels, AdminURL: adminURL, AccentColor: accentColor,
 		})
 		if err != nil {
+			if errors.Is(err, platformbranding.ErrInvalidAccentColor) {
+				platformBrandingInvalid(c, "品牌高亮色必须是 #RRGGBB 格式，留空恢复客户端默认颜色")
+				return
+			}
 			if errors.Is(err, platformbranding.ErrInvalidAdminURL) {
 				platformBrandingInvalid(c, "管理后台地址必须是有效的 HTTP 或 HTTPS 地址（最多 2048 字符）")
 				return
@@ -166,6 +178,7 @@ func appPlatformBrandingResponse(configuration platformbranding.Configuration) g
 	return gin.H{
 		"sidebar_menu_labels":             configuration.SidebarMenuLabels,
 		"admin_url":                       configuration.AdminURL,
+		"accent_color":                    configuration.AccentColor,
 		"sidebar_logo_configured":         configuration.SidebarLogo != nil,
 		"sidebar_compact_logo_configured": configuration.SidebarCompactLogo != nil,
 	}
@@ -175,6 +188,7 @@ func adminPlatformBrandingResponse(configuration platformbranding.Configuration)
 	return gin.H{
 		"sidebar_menu_labels":             configuration.SidebarMenuLabels,
 		"admin_url":                       configuration.AdminURL,
+		"accent_color":                    configuration.AccentColor,
 		"sidebar_logo_configured":         configuration.SidebarLogo != nil,
 		"sidebar_logo_url":                optionalBrandingURL(configuration.SidebarLogo, "/api/v1/admin/platform-branding/sidebar-logo"),
 		"sidebar_compact_logo_configured": configuration.SidebarCompactLogo != nil,

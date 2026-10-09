@@ -11,6 +11,38 @@ import (
 	"testing"
 )
 
+func TestServiceAccentColorValidationAndReset(t *testing.T) {
+	service := NewService(nil)
+	ctx := context.Background()
+	current, err := service.Get(ctx)
+	if err != nil || current.AccentColor != "" {
+		t.Fatalf("未配置时不应改变默认颜色: %#v, %v", current, err)
+	}
+	value := " #F2E9EA "
+	input := UpdateInput{SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep, AccentColor: &value}
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "#f2e9ea" {
+		t.Fatalf("颜色写入失败: %#v, %v", current, err)
+	}
+	input.AccentColor = nil
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "#f2e9ea" {
+		t.Fatalf("省略字段不应覆盖配置: %#v, %v", current, err)
+	}
+	for _, invalid := range []string{"#abc", "red", "#12345g", "#12345678", "#123456\nred"} {
+		input.AccentColor = &invalid
+		if _, err := service.Update(ctx, input); !errors.Is(err, ErrInvalidAccentColor) {
+			t.Fatalf("未拒绝无效颜色 %q: %v", invalid, err)
+		}
+	}
+	value = ""
+	input.AccentColor = &value
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "" {
+		t.Fatalf("清空颜色失败: %#v, %v", current, err)
+	}
+}
+
 func TestServiceUpdatesLogosIndependently(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	pngImage := encodePNG(t, 12, 8)
