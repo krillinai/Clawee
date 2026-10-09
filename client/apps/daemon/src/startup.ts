@@ -25,6 +25,7 @@ export type ServerModeConfiguration = {
   port: number;
   dataDir: string;
   defaultProjectRoot: string;
+  autoInstallUpdateSkills: boolean;
   tokenSource: 'config' | 'file';
   token?: string;
   tokenFile?: string;
@@ -103,6 +104,7 @@ export function resolveServerModeArguments(
       cwd,
       readServerArgument(argv, '--default-project-root') ?? resolve(dataDir, 'projects')
     ),
+    autoInstallUpdateSkills: false,
     tokenSource: 'file',
     tokenFile: resolve(
       cwd,
@@ -202,6 +204,7 @@ export function createProductionServerInput(
     ...input,
     schedulerAutostart: true,
     agentToolsEnabled: true,
+    autoInstallUpdateSkills: input.autoInstallUpdateSkills ?? false,
     mcpPresetProvider:
       input.mcpPresetProvider ?? createLocalMcpPresetProvider(),
     persistentAppServerEnabled: input.persistentAppServerEnabled ?? true

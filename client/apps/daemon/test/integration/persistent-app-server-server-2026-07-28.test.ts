@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../helpers/build-server.js';
 import {
   createAgentCapabilityTokenStore,
@@ -16,6 +16,8 @@ import {
 } from '../../src/agent-tools/capability-token.js';
 import { createUnknownCapabilityMatrix } from '../../src/codex/capabilities.js';
 import type { CodexSessionProvider } from '../../src/codex/sessions/app-server-provider.js';
+import type { EnterpriseCredential } from '../../src/enterprise/credential-store-2026-07-30.js';
+import { createEnterpriseHttpClient } from '../../src/enterprise/http-client-2026-07-30.js';
 
 let server: FastifyInstance | undefined;
 let tempDir = '';
@@ -28,6 +30,161 @@ afterEach(async () => {
 });
 
 describe('persistent app-server server integration', () => {
+  it.each([
+    { name: '默认配置', serverDeployment: undefined, autoInstallUpdateSkills: undefined },
+    { name: 'Server 模式未配置自动同步', serverDeployment: true, autoInstallUpdateSkills: undefined },
+    { name: 'Server 模式关闭自动同步', serverDeployment: true, autoInstallUpdateSkills: false },
+    { name: '非 Server 模式开启自动同步', serverDeployment: false, autoInstallUpdateSkills: true },
+    { name: '默认部署模式开启自动同步', serverDeployment: undefined, autoInstallUpdateSkills: true }
+  ])('$name：实际任务不调用 Skill 同步', async ({
+    serverDeployment, autoInstallUpdateSkills
+  }) => {
+    const syncSkills = vi.fn(async () => false);
+    const fixture = await createFixture({
+      serverDeployment, autoInstallUpdateSkills, syncSkills
+    });
+    const runId = await createRun(await createThread(), 'skill-sync-disabled');
+    await waitForRun(runId, 'succeeded');
+
+    expect(fixture.readSpawns()).toHaveLength(1);
+    expect(syncSkills).not.toHaveBeenCalled();
+  });
+
+  it('开启自动同步但未登录时，实际任务不调用 Skill 同步', async () => {
+    const syncSkills = vi.fn(async () => false);
+    const fixture = await createFixture({
+      serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseSignedIn: false, syncSkills
+    });
+    const runId = await createRun(await createThread(), 'skill-sync-signed-out');
+    await waitForRun(runId, 'succeeded');
+
+    expect(fixture.readSpawns()).toHaveLength(1);
+    expect(syncSkills).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('persistent=%s：登录与并发任务合并同步，执行前等待同步完成', async (
+    persistentAppServerEnabled
+  ) => {
+    let releaseSync!: (changed: boolean) => void;
+    const loginSync = new Promise<boolean>(resolve => { releaseSync = resolve; });
+    const syncSkills = vi.fn(() => loginSync);
+    const fixture = await createFixture({
+      persistentAppServerEnabled,
+      serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseSignedIn: false, syncSkills
+    });
+    const projectId = await createProject();
+    const firstThread = await createThread(projectId);
+    const secondThread = await createThread(projectId);
+    const runIds: string[] = [];
+    let syncTimeout = setTimeout(() => releaseSync(false), 5_000);
+    try {
+      const login = await server!.inject({
+        method: 'POST', url: '/enterprise/login',
+        headers: { authorization: 'Bearer secret' },
+        payload: { email: 'user@example.com', password: 'password-123' }
+      });
+      expect(login.statusCode).toBe(200);
+      expect(syncSkills).toHaveBeenCalledOnce();
+      runIds.push(...await Promise.all([
+        createRun(firstThread, 'first-after-login'),
+        createRun(secondThread, 'second-after-login')
+      ]));
+      await Promise.all(runIds.map(runId => waitForRun(runId, 'running')));
+      expect(syncSkills).toHaveBeenCalledOnce();
+      expect(fixture.readSpawns()).toHaveLength(0);
+      expect(fixture.readMessages()).toHaveLength(0);
+    } finally {
+      clearTimeout(syncTimeout);
+      releaseSync(false);
+    }
+    await Promise.all(runIds.map(runId => waitForRun(runId, 'succeeded')));
+    expect(syncSkills).toHaveBeenCalledOnce();
+
+    const taskSync = new Promise<boolean>(resolve => { releaseSync = resolve; });
+    syncSkills.mockImplementation(() => taskSync);
+    syncTimeout = setTimeout(() => releaseSync(false), 5_000);
+    try {
+      runIds.splice(0, runIds.length, ...await Promise.all([
+        createRun(firstThread, 'first-before-task-sync'),
+        createRun(secondThread, 'second-before-task-sync')
+      ]));
+      await Promise.all(runIds.map(runId => waitForRun(runId, 'running')));
+      expect(syncSkills).toHaveBeenCalledTimes(2);
+      expect(fixture.readSpawns()).toHaveLength(2);
+      expect(fixture.readMessages().filter(message => message.method === 'turn/start'))
+        .toHaveLength(2);
+    } finally {
+      clearTimeout(syncTimeout);
+      releaseSync(false);
+    }
+    await Promise.all(runIds.map(runId => waitForRun(runId, 'succeeded')));
+    expect(syncSkills).toHaveBeenCalledTimes(2);
+    expect(fixture.readSpawns()).toHaveLength(persistentAppServerEnabled ? 2 : 4);
+    expect(fixture.readMessages().filter(message => message.method === 'turn/start'))
+      .toHaveLength(4);
+  });
+
+  it.each([true, false])('persistent=%s：Skill 同步失败不阻断实际任务，后续任务继续同步', async (
+    persistentAppServerEnabled
+  ) => {
+    const syncSkills = vi.fn(async () => false)
+      .mockResolvedValueOnce(false)
+      .mockRejectedValueOnce(new Error('skill-sync-unavailable'));
+    const fixture = await createFixture({
+      persistentAppServerEnabled,
+      serverDeployment: true, autoInstallUpdateSkills: true, syncSkills
+    });
+    const threadId = await createThread();
+    const first = await createRun(threadId, 'sync-fails-but-task-succeeds');
+    await waitForRun(first, 'succeeded');
+    const second = await createRun(threadId, 'retry-sync-on-next-task');
+    await waitForRun(second, 'succeeded');
+
+    expect(syncSkills).toHaveBeenCalledTimes(3);
+    expect(fixture.readSpawns()).toHaveLength(persistentAppServerEnabled ? 1 : 2);
+    expect(fixture.readMessages().filter(message => message.method === 'turn/start'))
+      .toHaveLength(2);
+  });
+
+  it('Skill 指纹未变复用持久 Runtime，更新后重启并成功执行后续任务', async () => {
+    const syncSkills = vi.fn(async () => false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const fixture = await createFixture({
+      serverDeployment: true, autoInstallUpdateSkills: true, syncSkills
+    });
+    const threadId = await createThread();
+    const first = await createRun(threadId, 'initial-skill-fingerprint');
+    await waitForRun(first, 'succeeded');
+    const firstPid = fixture.readDiagnostics(first).appServerPid;
+    const second = await createRun(threadId, 'unchanged-skill-fingerprint');
+    await waitForRun(second, 'succeeded');
+    expect(fixture.readSpawns()).toHaveLength(1);
+    expect(fixture.readDiagnostics(second)).toMatchObject({
+      appServerPid: firstPid, appServerReused: true
+    });
+
+    const updated = await createRun(threadId, 'updated-skill-fingerprint');
+    await waitForRun(updated, 'succeeded');
+    const updatedPid = fixture.readDiagnostics(updated).appServerPid;
+    expect(fixture.readSpawns()).toHaveLength(2);
+    expect(fixture.readDiagnostics(updated)).toMatchObject({ appServerReused: false });
+    expect(updatedPid).not.toBe(firstPid);
+    expect(isProcessAlive(firstPid as number)).toBe(false);
+
+    const unchanged = await createRun(threadId, 'reuse-updated-skill-fingerprint');
+    await waitForRun(unchanged, 'succeeded');
+    expect(fixture.readSpawns()).toHaveLength(2);
+    expect(fixture.readDiagnostics(unchanged)).toMatchObject({
+      appServerPid: updatedPid, appServerReused: true
+    });
+    expect(syncSkills).toHaveBeenCalledTimes(5);
+  });
+
   it('enables one persistent manual app-server by default', async () => {
     const fixture = await createFixture();
     const threadId = await createThread();
@@ -354,6 +511,10 @@ async function createFixture(
   input: {
     persistentAppServerEnabled?: boolean;
     persistentAppServerMaxConcurrency?: number;
+    serverDeployment?: boolean;
+    autoInstallUpdateSkills?: boolean;
+    enterpriseSignedIn?: boolean;
+    syncSkills?(): Promise<boolean>;
     onBeforeCodexWritableRequest?(): Promise<void>;
     subscribeModelCatalogChanges?(
       listener: (reason: string) => void
@@ -369,6 +530,13 @@ async function createFixture(
   const capabilities = createUnknownCapabilityMatrix();
   capabilities.appServer = true;
   capabilities.appServerApprovals = true;
+  const agentId = 'clawee_550e8400-e29b-41d4-a716-446655440000';
+  const account = {
+    subjectId: 'acct_01JZ8W6A2M4S', email: 'user@example.com', name: 'User'
+  };
+  let credential: EnterpriseCredential | undefined = input.enterpriseSignedIn === false
+    ? undefined
+    : { accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z' };
   server = await buildServer({
     token: 'secret',
     dataDir: tempDir,
@@ -378,11 +546,52 @@ async function createFixture(
     resumeCapabilityVerified: true,
     persistentAppServerEnabled: input.persistentAppServerEnabled,
     persistentAppServerMaxConcurrency: input.persistentAppServerMaxConcurrency,
+    serverDeployment: input.serverDeployment,
+    autoInstallUpdateSkills: input.autoInstallUpdateSkills,
+    ...(input.syncSkills === undefined ? {} : {
+      enterpriseOrigin: 'https://enterprise.example',
+      enterpriseAgentIdentityStore: { getOrCreate: vi.fn(async () => agentId) },
+      enterpriseCredentialStore: {
+        async read() { return credential; },
+        async write(next: EnterpriseCredential) { credential = next; },
+        async delete() { credential = undefined; }
+      },
+      enterpriseHttpClient: {
+        ...createEnterpriseHttpClient({
+          origin: 'https://enterprise.example',
+          fetch: vi.fn(async () => { throw new Error('Unexpected enterprise request'); })
+        }),
+        login: vi.fn(async () => ({
+          account, agentId, accessToken: 'enterprise-token',
+          tokenType: 'Bearer' as const, expiresAt: '2099-01-01T00:00:00Z'
+        })),
+        getMe: vi.fn(async () => ({ account, agentId, status: 'active', frontendAllowed: true }))
+      },
+      enterpriseMcpManager: {
+        listConnections: vi.fn(), refreshConnections: vi.fn(), updatePreference: vi.fn(),
+        prepareRuntime: vi.fn(async () => undefined),
+        handleSessionAuthenticated: vi.fn(), handleSessionSignedOut: vi.fn(async () => undefined)
+      },
+      enterpriseSkillManager: {
+        syncSkills: input.syncSkills,
+        listSpaces: vi.fn(), uploadSkill: vi.fn(), listSkills: vi.fn(),
+        getSkillDetail: vi.fn(), installSkill: vi.fn(), updateSkill: vi.fn()
+      }
+    }),
     onBeforeCodexWritableRequest:
       input.onBeforeCodexWritableRequest,
     subscribeModelCatalogChanges: input.subscribeModelCatalogChanges,
     agentToolsEnabled: false
   });
+  if (input.syncSkills !== undefined) {
+    await expect.poll(async () => {
+      const response = await server!.inject({
+        method: 'GET', url: '/enterprise/session',
+        headers: { authorization: 'Bearer secret' }
+      });
+      return response.json().status as string;
+    }).toBe(input.enterpriseSignedIn === false ? 'signed_out' : 'signed_in');
+  }
   return {
     readSpawns: () => readNdjson(join(tempDir, 'spawns.ndjson')),
     readMessages: () => readNdjson(join(tempDir, 'messages.ndjson')),

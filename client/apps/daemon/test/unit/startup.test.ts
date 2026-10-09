@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import {
   createProductionServerInput,
   prepareSchedulerStartup,
@@ -28,6 +29,7 @@ describe('daemon production startup', () => {
       port: 19860,
       dataDir: '/srv/clawee/.runtime',
       defaultProjectRoot: '/srv/clawee/.runtime/projects',
+      autoInstallUpdateSkills: false,
       tokenSource: 'file',
       tokenFile: '/srv/clawee/.runtime/server-token',
       webDistDir: '/srv/clawee/apps/web/dist'
@@ -47,10 +49,58 @@ describe('daemon production startup', () => {
       port: 21000,
       dataDir: '/var/lib/clawee',
       defaultProjectRoot: '/srv/projects',
+      autoInstallUpdateSkills: false,
       tokenSource: 'file',
       tokenFile: '/run/secrets/clawee-token',
       webDistDir: '/opt/clawee/web'
     });
+  });
+
+  it.each([undefined, false, true])
+    ('passes configured auto_install_update_skills=%s into production startup', enabled => {
+      const configDir = mkdtempSync(join(tmpdir(), 'clawee-startup-config-'));
+      try {
+        writeFileSync(join(configDir, 'enterprise.toml'),
+          'gateway = "https://gateway.clawee.work"\n');
+        const content = [
+          '[server]',
+          ...(enabled === undefined
+            ? []
+            : [`auto_install_update_skills = ${enabled}`]),
+          '',
+          '[enterprise]',
+          'config_file = "./enterprise.toml"',
+          ''
+        ].join('\n');
+        const configPath = join(configDir, 'server.toml');
+        writeFileSync(configPath, content);
+
+        const serverMode = resolveServerModeArguments([
+          'node', 'main.js', '--server', '--server-config=./server.toml'
+        ], configDir);
+        expect(serverMode?.autoInstallUpdateSkills).toBe(enabled ?? false);
+        const input = createProductionServerInput({
+          token: 'runtime-token',
+          codexBin: '/opt/clawee/codex-runtime/bin/codex',
+          codexHome: '/var/lib/clawee/codex-home',
+          autoInstallUpdateSkills: serverMode?.autoInstallUpdateSkills
+        });
+        expect(input.autoInstallUpdateSkills).toBe(enabled ?? false);
+        expect(readFileSync(configPath, 'utf8')).toBe(content);
+      } finally {
+        rmSync(configDir, { recursive: true, force: true });
+      }
+    });
+
+  it('forwards the Server Mode skill setting from the main entrypoint', () => {
+    const source = readFileSync(
+      new URL('../../src/main.ts', import.meta.url),
+      'utf8'
+    );
+
+    expect(source).toContain(
+      'autoInstallUpdateSkills: serverMode?.autoInstallUpdateSkills ?? false'
+    );
   });
 
   it('rejects invalid Server Mode arguments', () => {
@@ -76,6 +126,7 @@ describe('daemon production startup', () => {
       token: 'runtime-token',
       schedulerAutostart: true,
       agentToolsEnabled: true,
+      autoInstallUpdateSkills: false,
       persistentAppServerEnabled: true
     });
   });

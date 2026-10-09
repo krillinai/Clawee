@@ -42,10 +42,63 @@ describe('packaged Server configuration', () => {
       port: 21000,
       dataDir: join(tempDir, 'state'),
       defaultProjectRoot: join(tempDir, 'projects'),
+      autoInstallUpdateSkills: false,
       tokenSource: 'file',
       tokenFile: join(tempDir, 'secrets/token'),
       enterpriseConfigFile: join(tempDir, 'config/enterprise.toml')
     });
+  });
+
+  it.each([
+    { enabled: true, token: 'token = "secret"' },
+    { enabled: false, token: 'token = "secret"' },
+    { enabled: true, token: 'token_file = "../secrets/token"' },
+    { enabled: false, token: 'token_file = "../secrets/token"' }
+  ])('reads auto_install_update_skills=$enabled with $token without rewriting it', ({ enabled, token }) => {
+    const configPath = createConfig([
+      '[server]',
+      `auto_install_update_skills = ${enabled}`,
+      token,
+      '',
+      '[enterprise]',
+      'config_file = "./enterprise.toml"'
+    ]);
+    const original = readFileSync(configPath, 'utf8');
+
+    expect(readPackagedServerConfiguration(configPath).autoInstallUpdateSkills)
+      .toBe(enabled);
+    expect(readFileSync(configPath, 'utf8')).toBe(original);
+  });
+
+  it.each(['"true"', '"false"', '0', '1', '1.5', '[]', '{}', '2026-10-09'])
+    ('rejects non-boolean auto_install_update_skills=%s', value => {
+      const configPath = createConfig([
+        '[server]',
+        `auto_install_update_skills = ${value}`,
+        '',
+        '[enterprise]',
+        'config_file = "./enterprise.toml"'
+      ]);
+      const original = readFileSync(configPath, 'utf8');
+
+      expect(() => readPackagedServerConfiguration(configPath))
+        .toThrow('SERVER_CONFIG_INVALID');
+      expect(readFileSync(configPath, 'utf8')).toBe(original);
+    });
+
+  it('keeps auto_install_update_skills out of the default configuration generator', () => {
+    const source = readFileSync(
+      new URL('../../../../scripts/server-package.mjs', import.meta.url),
+      'utf8'
+    );
+    const generator = source.match(
+      /function writeExampleConfiguration\(packageRoot\) \{[\s\S]*?\n\}/
+    )?.[0];
+
+    expect(generator).toContain('server.example.toml');
+    expect(generator).toContain("'[server]'");
+    expect(generator).not.toContain('auto_install_update_skills');
+    expect(generator).not.toContain('autoInstallUpdateSkills');
   });
 
   it('uses a direct token without touching token_file', () => {
@@ -60,6 +113,7 @@ describe('packaged Server configuration', () => {
 
     const config = readPackagedServerConfiguration(configPath);
 
+    expect(config.autoInstallUpdateSkills).toBe(false);
     expect(config.tokenSource).toBe('config');
     expect(config.token).toBe('direct-token');
     expect(config.tokenFile).toBeUndefined();
@@ -90,13 +144,16 @@ describe('packaged Server configuration', () => {
       '[enterprise]',
       'config_file = "./enterprise.toml"'
     ]);
+    const original = readFileSync(configPath, 'utf8');
 
     expect(readPackagedServerConfiguration(configPath)).toMatchObject({
       dataDir: join(tempDir, 'runtime data'),
       defaultProjectRoot: join(tempDir, 'runtime data/projects'),
+      autoInstallUpdateSkills: false,
       tokenSource: 'file',
       tokenFile: join(tempDir, 'runtime data/server-token')
     });
+    expect(readFileSync(configPath, 'utf8')).toBe(original);
   });
 
   it('rejects unknown fields, invalid ports, and symbolic links', () => {
