@@ -70,7 +70,7 @@ func TestExternalSkillApprovalHTTPFlow(t *testing.T) {
 	payload := `{"skill_id":"` + created.Skill.SkillID + `","version_id":"` + created.Version.VersionID + `"}`
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/current-version", payload, admin), http.StatusConflict, "skill_approval_required")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/current-version/own", payload, admin), http.StatusConflict, "skill_approval_required")
-	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", `{"skill_id":"`+created.Skill.SkillID+`","version_id":"`+created.Version.VersionID+`","decision":"approved"}`, admin), http.StatusForbidden, "skill_review_forbidden")
+	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", skillReviewBodyForTest(t, svc, created, "approved", ""), admin), http.StatusForbidden, "skill_review_forbidden")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/submit-approval", payload, nil), http.StatusUnauthorized, "unauthorized")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/submit-approval", payload, admin), http.StatusConflict, "dingtalk_not_bound")
 	if err := accountService.BindExternalIdentity(ctx, adminID, accounts.AccountIdentity{ProviderType: "dingtalk", ProviderKey: "default", ProviderSubject: "union-1", ExternalUserID: "staff-1", VerifiedAt: time.Now()}); err != nil {

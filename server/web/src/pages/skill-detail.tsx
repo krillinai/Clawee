@@ -27,15 +27,17 @@ import {
   BreadcrumbSeparator
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { permissions } from "@/lib/rbac-api";
 import { trimInput } from "@/lib/text";
+import { APIError } from "@/lib/api";
 import {
   clearCurrentSkillVersion,
   githubCommitURL,
@@ -48,12 +50,16 @@ import {
   publishOwnSkillVersion,
   setCurrentSkillVersion,
   reviewSkillVersion,
+  resubmitSkillReview,
   submitSkillApproval,
   syncSkillApproval,
   resolveSkillApproval,
   approvalStatusText,
   approvalInstanceURL,
   SkillHubAPIError,
+  type LocalApproval,
+  type SkillReviewInput,
+  type SkillReviewScores,
   type SkillVersion,
   type SkillVersionFile,
   type SkillVersionSource
@@ -62,6 +68,70 @@ import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { cn } from "@/lib/utils";
 
 const previewSizeLimit = 512 * 1024;
+
+const reviewDimensions: Array<{ key: keyof SkillReviewScores; label: string; description: string }> = [
+  { key: "scenario_value", label: "场景价值", description: "是否解决真实工作问题：1–2 场景模糊；3 能解决真实任务；4–5 高频、耗时或影响业务结果。" },
+  { key: "result_effectiveness", label: "结果有效", description: "输出是否准确、完整、可用：1–2 不可用或错误较多；3 基本可用；4–5 稳定、可直接使用并提效。" },
+  { key: "ease_of_use", label: "使用友好", description: "非作者能否成功使用：1–2 只有作者会用；3 稍加摸索可用；4–5 输入清楚，新用户基本一次成功。" },
+  { key: "reuse_value", label: "复用价值", description: "是否可反复使用：1–2 一次性个案；3 同岗位或同类场景可复用；4–5 通用方法，可供多人、多场景使用。" }
+];
+
+function completeReviewScores(scores?: SkillReviewScores) {
+  return reviewDimensions.every(({ key }) => Number.isInteger(scores?.[key]) && scores![key]! >= 1 && scores![key]! <= 5);
+}
+
+export function SkillReviewForm({ decision, pending, error, confirmLabel, onCancel, onSubmit }: {
+  decision: "approved" | "rejected";
+  pending: boolean;
+  error?: unknown;
+  confirmLabel: string;
+  onCancel: () => void;
+  onSubmit: (scores: SkillReviewScores, comment: string) => void;
+}) {
+  const [scores, setScores] = useState<SkillReviewScores>({});
+  const [comment, setComment] = useState("");
+  const valid = comment.length <= 2000 && Object.values(scores).every((score) => Number.isInteger(score) && score >= 1 && score <= 5)
+    && (decision === "approved" ? completeReviewScores(scores) : Boolean(trimInput(comment)));
+  return <form onSubmit={(event) => { event.preventDefault(); if (valid && !pending) onSubmit({ ...scores }, trimInput(comment)); }}><FieldGroup>
+    <FieldDescription>评分标准 manual-v1 · 各项为 1–5 整数；通过四项必填，驳回意见必填且允许部分评分。</FieldDescription>
+    <div className="grid gap-4 sm:grid-cols-2">{reviewDimensions.map(({ key, label, description }) => <Field key={key}>
+      <FieldLabel htmlFor={`skill-review-${key}`}>{label}</FieldLabel>
+      <Select disabled={pending} value={scores[key] === undefined ? "unset" : String(scores[key])} onValueChange={(value) => setScores((current) => {
+        const next = { ...current };
+        if (value === "unset") delete next[key]; else next[key] = Number(value);
+        return next;
+      })}>
+        <SelectTrigger aria-required={decision === "approved"} id={`skill-review-${key}`}><SelectValue /></SelectTrigger>
+        <SelectContent><SelectItem value="unset">未评分</SelectItem>{[1, 2, 3, 4, 5].map((score) => <SelectItem key={score} value={String(score)}>{score} 分</SelectItem>)}</SelectContent>
+      </Select>
+      <FieldDescription>{description}</FieldDescription>
+    </Field>)}</div>
+    <Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea disabled={pending} id="skill-review-comment" maxLength={2000} required={decision === "rejected"} value={comment} onChange={(event) => setComment(event.target.value)} /><FieldDescription>{decision === "rejected" ? "必填，不能只包含空白。" : "可选。"}最多 2000 字。</FieldDescription></Field>
+    {error ? <ErrorAlert error={error}>审核失败：{errorMessage(error)}</ErrorAlert> : null}
+    <Field className="justify-end" orientation="horizontal"><Button disabled={pending} type="button" variant="outline" onClick={onCancel}>取消</Button><Button disabled={pending || !valid} type="submit" variant={decision === "rejected" ? "destructive" : "primary"}>{pending ? "提交中..." : confirmLabel}</Button></Field>
+  </FieldGroup></form>;
+}
+
+function SkillApprovalProgress({ approval }: { approval: LocalApproval }) {
+  const incomplete = (approval.status === "approved" && !approval.scoreSummary)
+    || approval.approvers.some((person) => person.status === "approved" && !completeReviewScores(person.scores))
+    || (!approval.scoringStandardVersion && approval.status !== "pending" && approval.approvers.some((person) => person.status !== "pending" && !completeReviewScores(person.scores)));
+  const unscored = approval.status !== "pending" && approval.approvers.every((person) => !reviewDimensions.some(({ key }) => person.scores?.[key] != null));
+  return <div className="grid gap-2 text-sm">
+    <span>已通过 {approval.approved}/{approval.total}</span>
+    {approval.scoringStandardVersion ? <span className="text-xs text-muted-foreground">评分标准：{approval.scoringStandardVersion}</span> : null}
+    {approval.approvers.map((person) => <div className="space-y-1" key={person.userId}>
+      <p>{person.name || person.userId} · {person.status === "approved" ? "通过" : person.status === "rejected" ? "驳回" : "待审"}{person.decidedAt ? ` · ${formatDateTime(person.decidedAt)}` : ""}</p>
+      {person.status !== "pending" ? <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">{reviewDimensions.map(({ key, label }) => <span key={key}>{label}：{person.scores?.[key] == null ? "未评分" : `${person.scores[key]} 分`}</span>)}</div> : null}
+      {person.comment ? <p className="whitespace-pre-wrap break-words">{person.comment}</p> : null}
+    </div>)}
+    {incomplete ? <p className="text-muted-foreground">{unscored ? "历史记录未评分" : "历史评分不完整"}</p> : null}
+    {approval.status === "approved" && approval.scoreSummary ? <div aria-label="正式评分汇总" className="space-y-1 border-t pt-2" role="group">
+      <div className="grid gap-1 sm:grid-cols-2">{reviewDimensions.map(({ key, label }) => <span key={key}>{label}：{approval.scoreSummary![key].toFixed(2)}</span>)}</div>
+      <p className="font-medium">总分：{approval.scoreSummary.total.toFixed(2)} / 20</p>
+    </div> : null}
+  </div>;
+}
 
 type DetailTab = "overview" | "files" | "history";
 type PublishTarget = { versionId: string; version: string };
@@ -90,6 +160,9 @@ type SkillDetailManagement = {
   canSelfPublish?: (version: SkillVersion) => boolean;
   reviewPending?: boolean;
   onReview?: (version: SkillVersion, decision: "approved" | "rejected") => void;
+  canResubmitReview?: (version: SkillVersion) => boolean;
+  resubmitPending?: boolean;
+  onResubmitReview?: (version: SkillVersion) => void;
   canPublish: boolean;
   canUnpublish: boolean;
   clearPending: boolean;
@@ -117,14 +190,16 @@ export function SkillDetailPage() {
   const account = useAdminAccount();
   const canPublish = useAdminPermission(permissions.skillPublish);
   const canUnpublish = useAdminPermission(permissions.skillUnpublish);
+  const canUpload = useAdminPermission(permissions.skillVersionUpload);
   const [searchParams] = useSearchParams();
   const skillId = searchParams.get("skill_id") ?? "";
   const queryClient = useQueryClient();
   const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [reviewTarget, setReviewTarget] = useState<{ version: SkillVersion; decision: "approved" | "rejected" } | null>(null);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<{ version: SkillVersion; requestId: string; decision: "approved" | "rejected" } | null>(null);
+  const [reviewConflict, setReviewConflict] = useState("");
+  const [resubmitTarget, setResubmitTarget] = useState<{ skillId: string; versionId: string; version: string; requestId: string } | null>(null);
   const [providerInstanceId, setProviderInstanceId] = useState("");
   const [resolveTarget, setResolveTarget] = useState<SkillVersion | null>(null);
 
@@ -175,13 +250,46 @@ export function SkillDetailPage() {
     }
   });
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
-    onSuccess: () => {
-      setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
+    mutationFn: (input: SkillReviewInput) => reviewSkillVersion(input.skillId, input.versionId, input.requestId, input.decision, input.comment, input.scores),
+    onSuccess: (_result, input) => {
+      setNotice(input.decision === "approved" ? "版本审批通过" : "版本已驳回");
       setReviewTarget(null);
-      void queryClient.invalidateQueries({ queryKey: ["skill", skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (error, input) => {
+      if (error instanceof APIError && [403, 409].includes(error.status)) {
+        setReviewConflict(error.status === 403 ? "审核权限已变化，请刷新后确认可用操作。" : "审核状态已变化，请查看最新审核记录后重新操作。");
+        setReviewTarget(null);
+        void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+        void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      }
     }
   });
+  const resubmitMutation = useMutation({
+    mutationFn: (target: NonNullable<typeof resubmitTarget>) => resubmitSkillReview(target.skillId, target.versionId, target.requestId),
+    onSuccess: (_result, target) => {
+      setNotice("已重新提交审核");
+      setResubmitTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ["skill", target.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (error, target) => {
+      if (error instanceof APIError && [403, 409].includes(error.status)) {
+        setReviewConflict(error.status === 403 ? "审核权限已变化，请刷新后确认可用操作。" : "审核状态已变化，请查看最新审核记录后重新操作。");
+        setResubmitTarget(null);
+        void queryClient.invalidateQueries({ queryKey: ["skill", target.skillId] });
+        void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      }
+    }
+  });
+
+  useEffect(() => {
+    if (reviewTarget && !reviewMutation.isPending && detailQuery.data) {
+      const current = detailQuery.data.versions.find((version) => version.versionId === reviewTarget.version.versionId);
+      if (skillId !== reviewTarget.version.skillId || current?.localApproval?.requestId !== reviewTarget.requestId) setReviewTarget(null);
+    }
+  }, [skillId, detailQuery.data, reviewTarget, reviewMutation.isPending]);
 
   if (detailQuery.isLoading) {
     return <PageShell><LoadingState label="正在加载 Skill 详情" /></PageShell>;
@@ -196,6 +304,7 @@ export function SkillDetailPage() {
 
   return (
     <>
+      {reviewConflict ? <ErrorAlert>{reviewConflict}</ErrorAlert> : null}
       <SkillDetailView
         backHref={`/admin/skills?space_id=${encodeURIComponent(detail.skill.spaceId ?? "")}`}
         backLabel="返回 Skill 列表"
@@ -212,10 +321,13 @@ export function SkillDetailPage() {
           onSubmitApproval: (version) => approvalMutation.mutate({ version, action: "submit" }),
           onSyncApproval: (version) => approvalMutation.mutate({ version, action: "sync" }),
           onBeginResolveApproval: (version) => { approvalMutation.reset(); setProviderInstanceId(""); setResolveTarget(version); },
-          canReviewVersion: (version) => version.localApproval?.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending"),
+          canReviewVersion: (version) => Boolean(version.localApproval?.requestId && version.localApproval.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending")),
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
-          onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
+          onReview: (version, decision) => { setReviewTarget({ version, requestId: version.localApproval!.requestId!, decision }); setReviewConflict(""); reviewMutation.reset(); },
+          canResubmitReview: (version) => Boolean(canUpload && account?.userId && version.uploadedByUserId === account.userId && !version.source && version.versionId !== detail.skill.currentVersionId && version.localApproval?.requestId && version.localApproval.status === "rejected"),
+          resubmitPending: resubmitMutation.isPending,
+          onResubmitReview: (version) => { setResubmitTarget({ skillId, versionId: version.versionId, version: version.version, requestId: version.localApproval!.requestId! }); setReviewConflict(""); resubmitMutation.reset(); },
           canPublish: canPublish && (hasLocalSkillApproval(space) || space?.approvalProvider === "dingtalk"),
           canUnpublish,
           clearPending: clearMutation.isPending,
@@ -243,12 +355,9 @@ export function SkillDetailPage() {
       </ModalShell>
 
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "通过版本审批" : "驳回版本"} contextLabel={`版本 ${reviewTarget?.version.version ?? ""}`}>
-        <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}><FieldGroup>
-          <Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-          {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审核失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
-          <Field className="justify-end" orientation="horizontal"><Button disabled={reviewMutation.isPending} type="button" variant="outline" onClick={() => setReviewTarget(null)}>取消</Button><Button disabled={reviewMutation.isPending} type="submit" variant={reviewTarget?.decision === "rejected" ? "destructive" : "primary"}>{reviewMutation.isPending ? "提交中..." : "确认"}</Button></Field>
-        </FieldGroup></form>
+        {reviewTarget ? <SkillReviewForm key={`${reviewTarget.version.versionId}:${reviewTarget.requestId}:${reviewTarget.decision}`} decision={reviewTarget.decision} pending={reviewMutation.isPending} error={reviewMutation.isError ? reviewMutation.error : undefined} confirmLabel="确认" onCancel={() => setReviewTarget(null)} onSubmit={(scores, comment) => reviewMutation.mutate({ skillId: reviewTarget.version.skillId, versionId: reviewTarget.version.versionId, requestId: reviewTarget.requestId, decision: reviewTarget.decision, scores, comment })} /> : null}
       </ModalShell>
+      <ConfirmDialog open={Boolean(resubmitTarget)} onClose={() => { if (!resubmitMutation.isPending) setResubmitTarget(null); }} onConfirm={() => { if (resubmitTarget && !resubmitMutation.isPending) resubmitMutation.mutate({ ...resubmitTarget }); }} title="重新提交审核" description={`重新提交版本 ${resubmitTarget?.version ?? ""}，将按当前审批名单创建新审核记录，不复用旧评分。`} confirmLabel="确认重提" pending={resubmitMutation.isPending} error={resubmitMutation.isError ? `重提失败：${errorMessage(resubmitMutation.error)}` : undefined} />
 
       <ConfirmDialog
         open={Boolean(publishTarget)}
@@ -421,13 +530,14 @@ export function SkillDetailView({
                     {management.canPublish && ["submitting", "uncertain"].includes(viewedVersion.approvalInstance?.status ?? "") ? <Button disabled={management.approvalPending} size="sm" variant="outline" onClick={() => management.onBeginResolveApproval?.(viewedVersion)}>核对申请</Button> : null}
                   </div> : null}
                   {viewedVersion.skillName && viewedVersion.skillName !== detail.skill.name ? <p className="break-all text-xs text-muted-foreground">待发布名称：{viewedVersion.skillName}</p> : null}
-                  {viewedVersion.localApproval ? <div className="grid gap-1 text-sm"><span>已通过 {viewedVersion.localApproval.approved}/{viewedVersion.localApproval.total}</span>{viewedVersion.localApproval.approvers.map((person) => <span key={person.userId}>{person.name || person.userId} · {person.status === "approved" ? "通过" : person.status === "rejected" ? "驳回" : "待审"}{person.decidedAt ? ` · ${formatDateTime(person.decidedAt)}` : ""}{person.comment ? ` · ${person.comment}` : ""}</span>)}</div> : null}
+                  {viewedVersion.localApproval ? <SkillApprovalProgress approval={viewedVersion.localApproval} /> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
                   {management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "approved"); }} size="sm" variant="primary"><Check data-icon="inline-start" aria-hidden="true" />审批通过</Button>
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "rejected"); }} size="sm" variant="destructive"><X data-icon="inline-start" aria-hidden="true" />驳回</Button>
                   </div> : null}
+                  {management.canResubmitReview?.(viewedVersion) ? <Button disabled={management.resubmitPending} onClick={() => management.onResubmitReview?.(viewedVersion)} size="sm" variant="secondary">重新提交审核</Button> : null}
                   {management.canUnpublish && viewedVersion.versionId === detail.skill.currentVersionId ? (
                     <Button disabled={management.clearPending} onClick={management.onClear} size="sm" variant="destructive">
                       取消当前发布

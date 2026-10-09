@@ -95,6 +95,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
 	admin.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), read, handleSkillPublishOwn(opts.SkillHubService, false))
 	admin.POST("/skills/versions/review", skillOperationLog(opts.Logger, "skill_review"), read, handleSkillReview(opts.SkillHubService))
+	admin.POST("/skills/versions/resubmit-review", skillOperationLog(opts.Logger, "skill_review_resubmit"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSkillResubmitReview(opts.SkillHubService))
 	admin.POST("/skills/current-version/remove", skillOperationLog(opts.Logger, skillActionClear), skillRequirePermission(opts.RBACService, rbac.PermissionSkillUnpublish), handleSkillClearCurrent(opts.SkillHubService))
 	if opts.SkillSourceService == nil {
 		return
@@ -883,10 +884,12 @@ func handleSkillPublishOwn(service *skillhub.Service, requireSpaceWrite bool) gi
 func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
-			SkillID   string `json:"skill_id"`
-			VersionID string `json:"version_id"`
-			Decision  string `json:"decision"`
-			Comment   string `json:"comment"`
+			SkillID   string                 `json:"skill_id"`
+			VersionID string                 `json:"version_id"`
+			Decision  string                 `json:"decision"`
+			Comment   string                 `json:"comment"`
+			RequestID string                 `json:"request_id"`
+			Scores    *skillhub.ReviewScores `json:"scores"`
 		}
 		if decodeSkillJSON(c, &request) != nil || (request.Decision != "approved" && request.Decision != "rejected") {
 			skillError(c, skillhub.ErrInvalidRequest)
@@ -904,7 +907,40 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		c.Set(skillReviewDecisionKey, request.Decision)
-		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
+		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment, skillhub.ReviewInput{RequestID: request.RequestID, Scores: request.Scores})
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.Set(skillSHAKey, version.PackageSHA256)
+		c.Set(skillSpaceIDKey, detail.Skill.SpaceID)
+		c.JSON(http.StatusOK, version)
+	}
+}
+
+func handleSkillResubmitReview(service *skillhub.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request struct {
+			SkillID   string `json:"skill_id"`
+			VersionID string `json:"version_id"`
+			RequestID string `json:"request_id"`
+		}
+		if decodeSkillJSON(c, &request) != nil {
+			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		account, _ := currentAccount(c)
+		c.Set(skillIDKey, request.SkillID)
+		c.Set(skillVersionKey, request.VersionID)
+		if !checkAdminSkillRead(c, service, request.SkillID) {
+			return
+		}
+		version, err := service.ResubmitReview(c.Request.Context(), request.SkillID, request.VersionID, request.RequestID, account.UserID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		detail, err := service.GetAdmin(c.Request.Context(), request.SkillID)
 		if err != nil {
 			skillError(c, err)
 			return

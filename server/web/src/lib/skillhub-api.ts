@@ -16,7 +16,19 @@ export type AdminSkill = {
   latestVersion?: { versionId: string; version: string; approvalStatus: string; uploadedByUserId: string; localApproval?: LocalApproval };
 };
 
-export type LocalApproval = { status: string; total: number; approved: number; approvers: Array<{ userId: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decidedAt: string | null }> };
+export type SkillReviewScores = Partial<Record<"scenario_value" | "result_effectiveness" | "ease_of_use" | "reuse_value", number>>;
+export type SkillScoreSummary = Required<SkillReviewScores> & { total: number };
+export type SkillReviewInput = { skillId: string; versionId: string; requestId: string; decision: "approved" | "rejected"; comment: string; scores: SkillReviewScores };
+export type LocalApproval = {
+  requestId?: string;
+  contentDigest?: string;
+  scoringStandardVersion?: string;
+  status: string;
+  total: number;
+  approved: number;
+  approvers: Array<{ userId: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decidedAt: string | null; scores?: SkillReviewScores }>;
+  scoreSummary?: SkillScoreSummary;
+};
 
 export type ApprovalInstance = { id: string; status: "submitting" | "running" | "finished" | "terminated" | "failed" | "uncertain"; decision: string; providerInstanceId: string };
 export const approvalStatusText = (instance: ApprovalInstance | null | undefined) => !instance ? "待提交" : ({ submitting: "提交中", running: "审批中", finished: instance.decision === "approved" ? "通过" : "驳回", terminated: "已终止", failed: "提交失败", uncertain: "异常待核对" })[instance.status];
@@ -245,7 +257,7 @@ const mapApprovalInstance = (item: ApprovalInstanceResponse | null | undefined):
 type OwnPendingVersionResponse = { skill_id: string; space_id: string; name: string; version_id: string; version: string; created_at: string; approval_provider?: string; approval_instance?: ApprovalInstanceResponse | null };
 
 type SkillVersionResponse = {
-	local_approval?: { status: string; total: number; approved: number; approvers: Array<{ user_id: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decided_at: string | null }> };
+	local_approval?: { request_id?: string; content_digest?: string; scoring_standard_version?: string; status: string; total: number; approved: number; approvers: Array<{ user_id: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decided_at: string | null; scores?: SkillReviewScores | null }>; score_summary?: SkillScoreSummary | null };
   approval_instance?: ApprovalInstanceResponse | null;
   approval_status?: "pending" | "approved" | "rejected";
   skill_name?: string;
@@ -537,8 +549,12 @@ export function resolveSkillApproval(applicationId: string, resolution: "not_cre
   return adminApi.post("/skills/versions/resolve-approval", { application_id: applicationId, resolution, provider_instance_id: providerInstanceId });
 }
 
-export async function reviewSkillVersion(skillId: string, versionId: string, decision: "approved" | "rejected", comment: string) {
-  return mapVersion(await adminApi.post<SkillVersionResponse>("/skills/versions/review", { skill_id: skillId, version_id: versionId, decision, comment }));
+export async function reviewSkillVersion(skillId: string, versionId: string, requestId: string, decision: "approved" | "rejected", comment: string, scores: SkillReviewScores) {
+  return mapVersion(await adminApi.post<SkillVersionResponse>("/skills/versions/review", { skill_id: skillId, version_id: versionId, request_id: requestId, decision, comment, scores }));
+}
+
+export async function resubmitSkillReview(skillId: string, versionId: string, requestId: string) {
+  return mapVersion(await adminApi.post<SkillVersionResponse>("/skills/versions/resubmit-review", { skill_id: skillId, version_id: versionId, request_id: requestId }));
 }
 
 export async function moveSkillsToSpace(input: { skillIds: string[]; targetSpaceId: string }): Promise<SkillSpaceMoveResult> {
@@ -761,7 +777,8 @@ function mapVersion(item: SkillVersionResponse): SkillVersion {
   return {
 	...(item.local_approval ? { localApproval: mapLocalApproval(item.local_approval) } : {}),
     approvalInstance: mapApprovalInstance(item.approval_instance),
-    ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment, uploadedByUserId: item.uploaded_by_user_id }),
+    ...(item.approval_status === undefined ? {} : { approvalStatus: item.approval_status, skillName: item.skill_name, reviewedBy: item.reviewed_by, reviewedAt: item.reviewed_at, reviewComment: item.review_comment }),
+    ...(item.uploaded_by_user_id === undefined ? {} : { uploadedByUserId: item.uploaded_by_user_id }),
     versionId: item.version_id,
     skillId: item.skill_id,
     version: item.version,
@@ -915,7 +932,16 @@ function mapSkillSpace(item: SkillSpaceResponse): SkillSpace {
 }
 
 function mapLocalApproval(item: NonNullable<SkillVersionResponse["local_approval"]>): LocalApproval {
-  return { status: item.status, total: item.total, approved: item.approved, approvers: item.approvers.map((approver) => ({ userId: approver.user_id, name: approver.name, status: approver.status, comment: approver.comment, decidedAt: approver.decided_at })) };
+  return {
+    ...(item.request_id === undefined ? {} : { requestId: item.request_id }),
+    ...(item.content_digest === undefined ? {} : { contentDigest: item.content_digest }),
+    ...(item.scoring_standard_version ? { scoringStandardVersion: item.scoring_standard_version } : {}),
+    status: item.status,
+    total: item.total,
+    approved: item.approved,
+    approvers: item.approvers.map((approver) => ({ userId: approver.user_id, name: approver.name, status: approver.status, comment: approver.comment, decidedAt: approver.decided_at, ...(approver.scores == null ? {} : { scores: approver.scores }) })),
+    ...(item.score_summary == null ? {} : { scoreSummary: item.score_summary })
+  };
 }
 
 function mapSkillSpaceMember(item: SkillSpaceMemberResponse): SkillSpaceMember {

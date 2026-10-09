@@ -37,7 +37,9 @@ import {
   setSkillSpaceApprover,
   setSkillSpaceApproval,
   listSkillSpaceApproverRoleCandidates,
-  reviewSkillVersion
+  reviewSkillVersion,
+  resubmitSkillReview,
+  getSkill
 } from "./skillhub-api";
 
 describe("skillhub api", () => {
@@ -70,9 +72,43 @@ describe("skillhub api", () => {
     await expect(listSkillSpaceApproverCandidates("space-1")).resolves.toEqual([{ userId: "reviewer", name: "审批人", email: "reviewer@example.com" }]);
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/admin/skill-spaces/approver-candidates?space_id=space-1", expect.objectContaining({ method: "GET" }));
     await setSkillSpaceApprover("space-1", ["reviewer"]);
-    await expect(reviewSkillVersion("skill-1", "v1", "approved", "通过")).resolves.toMatchObject({ approvalStatus: "approved", reviewedBy: "reviewer", reviewComment: "通过" });
+    const scores = { scenario_value: 1, result_effectiveness: 5, ease_of_use: 3, reuse_value: 4 };
+    await expect(reviewSkillVersion("skill-1", "v1", "request-1", "approved", "通过", scores)).resolves.toMatchObject({ approvalStatus: "approved", reviewedBy: "reviewer", reviewComment: "通过" });
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/admin/skill-spaces/approver", expect.objectContaining({ method: "PUT", body: JSON.stringify({ space_id: "space-1", approver_user_ids: ["reviewer"], confirm_reset: false }) }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/skills/versions/review", expect.objectContaining({ method: "POST", body: JSON.stringify({ skill_id: "skill-1", version_id: "v1", decision: "approved", comment: "通过" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/admin/skills/versions/review", expect.objectContaining({ method: "POST", body: JSON.stringify({ skill_id: "skill-1", version_id: "v1", request_id: "request-1", decision: "approved", comment: "通过", scores }) }));
+  });
+
+  it("详情、列表与审批响应保留请求绑定、部分原始分和后端浮点汇总", async () => {
+    const scoreSummary = { scenario_value: 10 / 3, result_effectiveness: 11 / 3, ease_of_use: 13 / 3, reuse_value: 14 / 3, total: 16 };
+    const localApproval = { request_id: "request-1", content_digest: "digest-1", scoring_standard_version: "manual-v1", status: "approved", total: 1, approved: 1, approvers: [{ user_id: "reviewer", name: "审批人", status: "approved", comment: "旧记录", decided_at: null, scores: { scenario_value: 4 } }], score_summary: scoreSummary };
+    const response = mutationResponse();
+    const expected = { requestId: "request-1", contentDigest: "digest-1", scoringStandardVersion: "manual-v1", approvers: [expect.objectContaining({ scores: { scenario_value: 4 } })], scoreSummary };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ skill: response.skill, versions: [{ ...response.version, local_approval: localApproval, uploaded_by_user_id: "writer" }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ ...response.skill, latest_version: { version_id: "version-1", version: "1.2.0", approval_status: "approved", uploaded_by_user_id: "writer", local_approval: localApproval } }] }))
+      .mockResolvedValueOnce(jsonResponse({ ...response.version, local_approval: localApproval })));
+    await expect(getSkill("skill-1")).resolves.toMatchObject({ versions: [expect.objectContaining({ uploadedByUserId: "writer", localApproval: expect.objectContaining(expected) })] });
+    await expect(listSkills()).resolves.toMatchObject([{ latestVersion: { localApproval: expected } }]);
+    await expect(reviewSkillVersion("skill-1", "version-1", "request-1", "rejected", "需修改", { ease_of_use: 2 })).resolves.toMatchObject({ localApproval: expected });
+  });
+
+  it("历史缺分与无标准保持缺失，驳回不补造其他分值", async () => {
+    const response = mutationResponse();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...response.version, local_approval: { request_id: "old-request", content_digest: "digest", status: "rejected", total: 1, approved: 0, approvers: [{ user_id: "reviewer", name: "审批人", status: "rejected", comment: "需修改", decided_at: null }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await reviewSkillVersion("skill-1", "version-1", "old-request", "rejected", "需修改", { reuse_value: 1 });
+    expect(result.localApproval).not.toHaveProperty("scoringStandardVersion");
+    expect(result.localApproval).not.toHaveProperty("scoreSummary");
+    expect(result.localApproval?.approvers[0]).not.toHaveProperty("scores");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ skill_id: "skill-1", version_id: "version-1", request_id: "old-request", decision: "rejected", comment: "需修改", scores: { reuse_value: 1 } });
+  });
+
+  it("重提只发送原请求标识并映射新 Version，不复用钉钉提交", async () => {
+    const response = mutationResponse();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...response.version, approval_status: "pending", local_approval: { request_id: "new-request", content_digest: "digest", scoring_standard_version: "manual-v1", status: "pending", total: 1, approved: 0, approvers: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(resubmitSkillReview("skill-1", "version-1", "old-request")).resolves.toMatchObject({ versionId: "version-1", localApproval: { requestId: "new-request", scoringStandardVersion: "manual-v1" } });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/v1/admin/skills/versions/resubmit-review", expect.objectContaining({ method: "POST", body: JSON.stringify({ skill_id: "skill-1", version_id: "version-1", request_id: "old-request" }) }));
   });
 
   afterEach(() => vi.unstubAllGlobals());

@@ -94,7 +94,7 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 56); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 66); err != nil {
+	if _, err := provider.UpTo(ctx, 69); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetSpaceMember(ctx, "market", "viewer", []string{skillhub.SpaceActionRead}, "system", false); err != nil {
@@ -106,7 +106,7 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 		}
 	}
 	for _, version := range []struct{ skillID, versionID string }{{"tracked", "tracked-5"}, {"legacy", "legacy-2"}, {"hidden", "hidden-1"}} {
-		if _, err := service.ReviewVersion(ctx, version.skillID, version.versionID, "viewer", true, "测试发布前审批"); err != nil {
+		if _, err := reviewVersionForTest(service, ctx, version.skillID, version.versionID, "viewer", true, "测试发布前审批"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := service.SetCurrentVersion(ctx, version.skillID, version.versionID); err != nil {

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,6 +27,7 @@ import {
   type SkillVersion
 } from "@/lib/skillhub-api";
 import { permissions } from "@/lib/rbac-api";
+import { APIError } from "@/lib/api";
 
 import { SkillsPage } from "./skills";
 
@@ -141,13 +142,76 @@ describe("SkillsPage", () => {
 
   it("offers quick approval only to the space reviewer", async () => {
     listSkillSpacesMock.mockResolvedValue([{ ...defaultSpace, approvers: [{ userId: "usr_reader", name: "审批人" }] }, productSpace]);
-    listSkillsMock.mockResolvedValue([published, { ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending", comment: "", decidedAt: null }] } } }]);
+    listSkillsMock.mockResolvedValue([published, { ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { requestId: "request-1", status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending", comment: "", decidedAt: null }] } } }]);
     vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: "approved" }));
     renderPage([permissions.skillRead]);
     fireEvent.click(await screen.findByRole("button", { name: "审批通过 release-notes" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "审批通过" })).getByRole("button", { name: "确认通过" }));
-    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith(unpublished.skillId, "version-default", "approved", ""));
+    const dialog = screen.getByRole("dialog", { name: "审批通过" });
+    expect(within(dialog).getByRole("button", { name: "确认通过" })).toBeDisabled();
+    for (const label of ["场景价值", "结果有效", "使用友好", "复用价值"]) {
+      expect(within(dialog).getByRole("combobox", { name: label })).toHaveTextContent("未评分");
+      fireEvent.click(within(dialog).getByRole("combobox", { name: label }));
+      fireEvent.click(await screen.findByRole("option", { name: "4 分" }));
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认通过" }));
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith(unpublished.skillId, "version-default", "request-1", "approved", "", { scenario_value: 4, result_effectiveness: 4, ease_of_use: 4, reuse_value: 4 }));
     expect(getSkillMock).not.toHaveBeenCalled();
+  });
+
+  it("列表驳回需要非空意见，保留部分评分且取消后清空", async () => {
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { requestId: "request-1", status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending", comment: "", decidedAt: null }] } } }]);
+    vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: "rejected" }));
+    renderPage([permissions.skillRead]);
+    fireEvent.click(await screen.findByRole("button", { name: "驳回 release-notes" }));
+    let dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "   " } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "场景价值" }));
+    fireEvent.click(await screen.findByRole("option", { name: "2 分" }));
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "需完善" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "驳回 release-notes" }));
+    dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    expect(within(dialog).getByRole("combobox", { name: "场景价值" })).toHaveTextContent("未评分");
+    expect(within(dialog).getByLabelText("审批意见")).toHaveValue("");
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "场景价值" }));
+    fireEvent.click(await screen.findByRole("option", { name: "2 分" }));
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "  需完善  " } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith(unpublished.skillId, "version-default", "request-1", "rejected", "需完善", { scenario_value: 2 }));
+  });
+
+  it("列表版本或请求切换清空表单，不把评分带入最新审核", async () => {
+    const latestVersion = { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { requestId: "request-1", status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending" as const, comment: "", decidedAt: null }] } };
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion }]);
+    const { queryClient } = renderPage([permissions.skillRead]);
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过 release-notes" }));
+    let dialog = screen.getByRole("dialog", { name: "审批通过" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "场景价值" }));
+    fireEvent.click(await screen.findByRole("option", { name: "5 分" }));
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { ...latestVersion, versionId: "version-next", localApproval: { ...latestVersion.localApproval, requestId: "request-2" } } }]);
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["skills"] }); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "审批通过 release-notes" }));
+    dialog = screen.getByRole("dialog", { name: "审批通过" });
+    expect(within(dialog).getByRole("combobox", { name: "场景价值" })).toHaveTextContent("未评分");
+  });
+
+  it.each([403, 409])("列表审批 %s 刷新两处缓存并关闭旧表单", async (status) => {
+    listSkillsMock.mockResolvedValue([{ ...unpublished, latestVersion: { versionId: "version-default", version: "1.0.0", approvalStatus: "pending", uploadedByUserId: "usr_admin", localApproval: { requestId: "request-1", status: "pending", total: 1, approved: 0, approvers: [{ userId: "usr_reader", name: "审批人", status: "pending", comment: "", decidedAt: null }] } } }]);
+    vi.mocked(reviewSkillVersion).mockRejectedValueOnce(new APIError("审批冲突", status, "approval_conflict"));
+    const { queryClient } = renderPage([permissions.skillRead]);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    fireEvent.click(await screen.findByRole("button", { name: "驳回 release-notes" }));
+    const dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "需修改" } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(await screen.findByText(status === 403 ? /审核权限已变化/ : /审核状态已变化/)).toBeInTheDocument();
+    expect(reviewSkillVersion).toHaveBeenCalledExactlyOnceWith(unpublished.skillId, "version-default", "request-1", "rejected", "需修改", {});
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["skills"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["skill", unpublished.skillId] });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("lets the uploader publish when the space has no reviewer", async () => {
@@ -493,7 +557,7 @@ describe("SkillsPage", () => {
 
 function renderPage(adminPermissions?: string[], initialSpaceId = "skillspace_default") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialSpaceId ? `/admin/skills?space_id=${initialSpaceId}` : "/admin/skills"]}>
         {adminPermissions ? <AdminPermissionsProvider account={{
@@ -506,6 +570,7 @@ function renderPage(adminPermissions?: string[], initialSpaceId = "skillspace_de
       </MemoryRouter>
     </QueryClientProvider>
   );
+  return { ...result, queryClient };
 }
 
 function clickTab(tab: HTMLElement) {

@@ -47,7 +47,8 @@ type SpaceStore interface {
 
 type ReviewStore interface {
 	SetSpaceApprovers(context.Context, string, string, string, []string, bool, string, time.Time) (int64, error)
-	ReviewVersion(context.Context, string, string, string, bool, string, time.Time) (Version, error)
+	ReviewVersion(context.Context, string, string, string, bool, string, ReviewInput, time.Time) (Version, error)
+	ResubmitReview(context.Context, string, string, string, string, time.Time) (Version, error)
 }
 
 type RoleReviewStore interface {
@@ -390,6 +391,10 @@ func (s *MemoryStore) setCurrentVersion(ctx context.Context, skillID, versionID,
 		skill.CurrentVersionID = &value
 		skill.UpdatedAt = now
 		s.skills[skillID] = skill
+	}
+	target.LocalApproval = nil
+	if space.ApprovalProvider == "local" && localApprovalConfigured(space) {
+		target.LocalApproval = localProgress(s.currentLocalLocked(target, skill.SpaceID))
 	}
 	return s.adminSkill(skill), target, nil
 }

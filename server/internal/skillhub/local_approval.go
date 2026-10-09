@@ -7,6 +7,7 @@ import (
 )
 
 type localRequest struct {
+	ScoringStandardVersion      string
 	ID, SpaceID, Digest, Status string
 	UserIDs, RoleIDs            []string
 	Decisions                   map[string]ApprovalDecision
@@ -64,14 +65,20 @@ func localProgress(item *localRequest) *LocalApproval {
 	if item == nil {
 		return nil
 	}
-	result := &LocalApproval{Status: item.Status, Total: len(item.Decisions), Approvers: make([]ApprovalDecision, 0, len(item.Decisions))}
+	result := &LocalApproval{RequestID: item.ID, ContentDigest: item.Digest, ScoringStandardVersion: item.ScoringStandardVersion, Status: item.Status, Total: len(item.Decisions), Approvers: make([]ApprovalDecision, 0, len(item.Decisions))}
 	for _, decision := range item.Decisions {
+		decision.Scores = cloneScores(decision.Scores)
+		if decision.DecidedAt != nil {
+			copied := *decision.DecidedAt
+			decision.DecidedAt = &copied
+		}
 		result.Approvers = append(result.Approvers, decision)
 		if decision.Status == "approved" {
 			result.Approved++
 		}
 	}
 	sort.Slice(result.Approvers, func(i, j int) bool { return result.Approvers[i].UserID < result.Approvers[j].UserID })
+	summarizeScores(result)
 	return result
 }
 
@@ -95,7 +102,7 @@ func (s *MemoryStore) createLocalResolvedLocked(version Version, space Space, ap
 	if space.ApprovalProvider != "local" || !localApprovalConfigured(space) {
 		return
 	}
-	item := localRequest{ID: newID("approval"), SpaceID: space.SpaceID, Digest: version.PackageSHA256, Status: "pending", Decisions: map[string]ApprovalDecision{}}
+	item := localRequest{ID: newID("approval"), SpaceID: space.SpaceID, Digest: version.PackageSHA256, Status: "pending", ScoringStandardVersion: manualScoringStandard, Decisions: map[string]ApprovalDecision{}}
 	for _, approver := range space.Approvers {
 		item.UserIDs = append(item.UserIDs, approver.UserID)
 	}

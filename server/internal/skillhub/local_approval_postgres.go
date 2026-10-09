@@ -10,10 +10,10 @@ import (
 
 func createLocalRequest(ctx context.Context, tx pgx.Tx, versionID, spaceID, digest string, now time.Time) error {
 	id := newID("approval")
-	requestTag, err := tx.Exec(ctx, `INSERT INTO approval_requests(id,business_type,business_id,action,scope_type,scope_id,content_digest,status,created_at,approver_user_ids,approver_role_ids)
-SELECT $1,'skill_version',$2,'publish','skill_space',$3,$4,'pending',$5,
+	requestTag, err := tx.Exec(ctx, `INSERT INTO approval_requests(id,business_type,business_id,action,scope_type,scope_id,content_digest,status,created_at,approver_user_ids,approver_role_ids,scoring_standard_version)
+SELECT $1,'skill_version',$2,'publish','skill_space',$3,$4,'pending',GREATEST($5::timestamptz,COALESCE((SELECT max(created_at)+interval '1 microsecond' FROM approval_requests WHERE business_type='skill_version' AND business_id=$2 AND action='publish'),$5::timestamptz)),
 ARRAY(SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$3 ORDER BY user_id),
-ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$3 ORDER BY role_id)
+ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$3 ORDER BY role_id),'manual-v1'
 WHERE (EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$3)
 OR EXISTS(SELECT 1 FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$3))
 AND (SELECT approval_provider FROM skill_spaces WHERE space_id=$3)='local'`, id, versionID, spaceID, digest, now)
@@ -82,7 +82,7 @@ func (s *PostgresStore) listLocalProgress(ctx context.Context, items []Skill) (m
 	if len(ids) == 0 {
 		return result, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT r.id,r.business_id,r.scope_id,r.content_digest,r.status,a.user_id,COALESCE(u.name,''),a.status,a.comment,a.decided_at
+	rows, err := s.pool.Query(ctx, `SELECT r.id,r.business_id,r.scope_id,r.content_digest,r.status,a.user_id,COALESCE(u.name,''),a.status,a.comment,a.decided_at,COALESCE(r.scoring_standard_version,''),a.scenario_value,a.result_effectiveness,a.ease_of_use,a.reuse_value
 FROM approval_requests r
 JOIN approval_request_approvers a ON a.request_id=r.id JOIN accounts u ON u.user_id=a.user_id
 WHERE r.business_type='skill_version' AND r.action='publish' AND r.scope_type='skill_space'
@@ -99,8 +99,13 @@ ORDER BY r.business_id,r.created_at DESC,r.id DESC,u.name,a.user_id`, ids)
 	for rows.Next() {
 		var requestID, id, spaceID, digest, status string
 		var person ApprovalDecision
-		if err := rows.Scan(&requestID, &id, &spaceID, &digest, &status, &person.UserID, &person.Name, &person.Status, &person.Comment, &person.DecidedAt); err != nil {
+		var standard string
+		scores := &ReviewScores{}
+		if err := rows.Scan(&requestID, &id, &spaceID, &digest, &status, &person.UserID, &person.Name, &person.Status, &person.Comment, &person.DecidedAt, &standard, &scores.ScenarioValue, &scores.ResultEffectiveness, &scores.EaseOfUse, &scores.ReuseValue); err != nil {
 			return nil, err
+		}
+		if hasScores(scores) {
+			person.Scores = scores
 		}
 		if scope, ok := versions[id]; !ok || scope.spaceID != spaceID || scope.digest != digest {
 			continue
@@ -111,7 +116,7 @@ ORDER BY r.business_id,r.created_at DESC,r.id DESC,u.name,a.user_id`, ids)
 		selected[id] = requestID
 		progress := result[id]
 		if progress == nil {
-			progress = &LocalApproval{Status: status, Approvers: []ApprovalDecision{}}
+			progress = &LocalApproval{RequestID: requestID, ContentDigest: digest, ScoringStandardVersion: standard, Status: status, Approvers: []ApprovalDecision{}}
 			result[id] = progress
 		}
 		progress.Approvers = append(progress.Approvers, person)
@@ -119,6 +124,9 @@ ORDER BY r.business_id,r.created_at DESC,r.id DESC,u.name,a.user_id`, ids)
 		if person.Status == "approved" {
 			progress.Approved++
 		}
+	}
+	for _, progress := range result {
+		summarizeScores(progress)
 	}
 	return result, rows.Err()
 }
@@ -129,28 +137,32 @@ type approvalReader interface {
 }
 
 func readLocalProgress(ctx context.Context, reader approvalReader, versionID, spaceID, digest string) (*LocalApproval, error) {
-	var id, status string
-	err := reader.QueryRow(ctx, `SELECT id,status FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status<>'invalidated'
+	var id, status, standard string
+	err := reader.QueryRow(ctx, `SELECT id,status,COALESCE(scoring_standard_version,'') FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status<>'invalidated'
 AND EXISTS (SELECT 1 FROM skill_spaces sp WHERE sp.space_id=$2 AND sp.approval_provider='local'
             AND (EXISTS (SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)
                  OR EXISTS (SELECT 1 FROM approval_config_roles c WHERE c.scope_type='skill_space' AND c.scope_id=sp.space_id)))
-ORDER BY created_at DESC,id DESC LIMIT 1`, versionID, spaceID, digest).Scan(&id, &status)
+ORDER BY created_at DESC,id DESC LIMIT 1`, versionID, spaceID, digest).Scan(&id, &status, &standard)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	rows, err := reader.Query(ctx, `SELECT a.user_id,COALESCE(u.name,''),a.status,a.comment,a.decided_at FROM approval_request_approvers a JOIN accounts u ON u.user_id=a.user_id WHERE a.request_id=$1 ORDER BY u.name,a.user_id`, id)
+	rows, err := reader.Query(ctx, `SELECT a.user_id,COALESCE(u.name,''),a.status,a.comment,a.decided_at,a.scenario_value,a.result_effectiveness,a.ease_of_use,a.reuse_value FROM approval_request_approvers a JOIN accounts u ON u.user_id=a.user_id WHERE a.request_id=$1 ORDER BY u.name,a.user_id`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := &LocalApproval{Status: status, Approvers: []ApprovalDecision{}}
+	result := &LocalApproval{RequestID: id, ContentDigest: digest, ScoringStandardVersion: standard, Status: status, Approvers: []ApprovalDecision{}}
 	for rows.Next() {
 		var item ApprovalDecision
-		if err := rows.Scan(&item.UserID, &item.Name, &item.Status, &item.Comment, &item.DecidedAt); err != nil {
+		scores := &ReviewScores{}
+		if err := rows.Scan(&item.UserID, &item.Name, &item.Status, &item.Comment, &item.DecidedAt, &scores.ScenarioValue, &scores.ResultEffectiveness, &scores.EaseOfUse, &scores.ReuseValue); err != nil {
 			return nil, err
+		}
+		if hasScores(scores) {
+			item.Scores = scores
 		}
 		result.Approvers = append(result.Approvers, item)
 		if item.Status == "approved" {
@@ -158,5 +170,6 @@ ORDER BY created_at DESC,id DESC LIMIT 1`, versionID, spaceID, digest).Scan(&id,
 		}
 	}
 	result.Total = len(result.Approvers)
+	summarizeScores(result)
 	return result, rows.Err()
 }

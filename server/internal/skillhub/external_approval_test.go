@@ -32,7 +32,7 @@ func TestExternalApprovalLifecycleAndGates(t *testing.T) {
 	if err := svc.SetSpaceApprover(ctx, first.Skill.SpaceID, "reviewer", "admin"); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("local approver: %v", err)
 	}
-	if _, err := svc.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err := reviewVersionForTest(svc, ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("local review: %v", err)
 	}
 	item, _, _, err := svc.BeginApproval(ctx, first.Skill.SkillID, first.Version.VersionID, "writer", "staff-writer", false)

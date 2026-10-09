@@ -177,19 +177,20 @@ func TestSkillApprovalHTTPRequiresConfiguredReviewer(t *testing.T) {
 		t.Fatalf("upload: %s", recorder.Body.String())
 	}
 	created := decodeAPIJSONResource[skillhub.MutationResult](t, recorder.Body.Bytes())
-	reviewBody := `{"skill_id":"` + created.Skill.SkillID + `","version_id":"` + created.Version.VersionID + `","decision":"approved"}`
+	reviewBody := skillReviewBodyForTest(t, service, created, "approved", "")
 	publishBody := `{"skill_id":"` + created.Skill.SkillID + `","version_id":"` + created.Version.VersionID + `"}`
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", reviewBody, nil), http.StatusUnauthorized, "unauthorized")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", reviewBody, adminCookies), http.StatusForbidden, "skill_review_forbidden")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/current-version", publishBody, adminCookies), http.StatusConflict, "skill_approval_required")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approver", configBody, reviewerCookies), http.StatusForbidden, "forbidden")
 	doJSON(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approver", configBody, adminCookies, http.StatusNoContent)
+	reviewBody = skillReviewBodyForTest(t, service, created, "approved", "")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", reviewBody, adminCookies), http.StatusForbidden, "skill_review_forbidden")
 	detail := doJSON(t, router, http.MethodGet, "/api/v1/admin/skills/detail?skill_id="+created.Skill.SkillID, "", reviewerCookies, http.StatusOK)
 	if detail["data"].(map[string]any)["can_review"] != true {
 		t.Fatalf("reviewer detail: %#v", detail)
 	}
-	rejectBody := `{"skill_id":"` + created.Skill.SkillID + `","version_id":"` + created.Version.VersionID + `","decision":"rejected","comment":"需要修订"}`
+	rejectBody := skillReviewBodyForTest(t, service, created, "rejected", "需要修订")
 	doJSON(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", reviewBody, reviewerCookies, http.StatusOK)
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", rejectBody, reviewerCookies), http.StatusConflict, "conflict")
 	assertSkillError(t, sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/current-version", publishBody, reviewerCookies), http.StatusForbidden, "forbidden")
@@ -264,10 +265,16 @@ func uploadApprovedVersionForTest(service *skillhub.Service, ctx context.Context
 	if err != nil {
 		return result, err
 	}
+	if _, err := service.SetSpaceMember(ctx, result.Skill.SpaceID, "test-reviewer", []string{skillhub.SpaceActionRead}, "test-admin", false); err != nil {
+		return skillhub.MutationResult{}, err
+	}
 	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "test-reviewer", "test-admin"); err != nil {
 		return skillhub.MutationResult{}, err
 	}
-	if _, err := service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "test-reviewer", true, "测试发布前审批"); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, result.Skill.SkillID, result.Version.VersionID, "test-reviewer", true, "测试发布前审批"); err != nil {
+		return skillhub.MutationResult{}, err
+	}
+	if err := service.RemoveSpaceMember(ctx, result.Skill.SpaceID, "test-reviewer"); err != nil {
 		return skillhub.MutationResult{}, err
 	}
 	return service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID)
@@ -277,7 +284,7 @@ func approveAndPublishSkillHTTP(t *testing.T, router http.Handler, cookie *http.
 	t.Helper()
 	cookies := []*http.Cookie{cookie}
 	doJSON(t, router, http.MethodPut, "/api/v1/admin/skill-spaces/approver", `{"space_id":"`+result.Skill.SpaceID+`","approver_user_ids":["`+result.Version.UploadedByUserID+`"],"confirm_reset":true}`, cookies, http.StatusNoContent)
-	doJSON(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", `{"skill_id":"`+result.Skill.SkillID+`","version_id":"`+result.Version.VersionID+`","decision":"approved","comment":"审核通过"}`, cookies, http.StatusOK)
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/skills/versions/review", skillReviewBodyForTest(t, nil, result, "approved", "审核通过", doJSON(t, router, http.MethodGet, "/api/v1/admin/skills/detail?skill_id="+result.Skill.SkillID, "", cookies, http.StatusOK)), cookies, http.StatusOK)
 	recorder := sourceJSONRequest(t, router, http.MethodPut, "/api/v1/admin/skills/current-version", `{"skill_id":"`+result.Skill.SkillID+`","version_id":"`+result.Version.VersionID+`"}`, cookies)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("publish after approval: %d %s", recorder.Code, recorder.Body.String())

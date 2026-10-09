@@ -48,17 +48,17 @@ func TestLocalRoleApprovalKeepsConfiguredSubjectsAndHistoricalMembers(t *testing
 	if err != nil || detail.Versions[0].LocalApproval.Total != 2 || detail.Versions[0].LocalApproval.Approvers[1].UserID != "bob" || store.localApprovals[first.Version.VersionID][0].ID != requestID {
 		t.Fatalf("成员变化改写旧请求: %#v %v", detail, err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "carol", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "carol", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("新增成员审批旧请求: %v", err)
 	}
-	partial, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, "")
+	partial, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, "")
 	if err != nil || partial.ApprovalStatus != "pending" || partial.LocalApproval.Approved != 1 {
 		t.Fatalf("部分通过: %#v %v", partial, err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("部分通过允许发布: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
@@ -87,7 +87,7 @@ func TestLocalRoleApprovalKeepsConfiguredSubjectsAndHistoricalMembers(t *testing
 	if len(space.Approvers) != 0 || len(space.ApproverRoleIDs) != 1 {
 		t.Fatalf("纯角色配置: %#v", space)
 	}
-	rejected, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "carol", false, "驳回")
+	rejected, err := reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, "carol", false, "驳回")
 	if err != nil || rejected.ApprovalStatus != "rejected" {
 		t.Fatalf("驳回: %#v %v", rejected, err)
 	}

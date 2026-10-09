@@ -33,19 +33,19 @@ func TestLocalMultiApprovalSnapshotAndPublishGate(t *testing.T) {
 	if _, err = service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice", "alice"}, true, "admin"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("duplicate approvers: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("partial approval published: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate vote: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "mallory", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "mallory", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("outsider vote: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, "同意"); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, "同意"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
@@ -59,7 +59,7 @@ func TestLocalMultiApprovalSnapshotAndPublishGate(t *testing.T) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			_, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, id, true, "")
+			_, err := reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, id, true, "")
 			results <- err
 		}(id)
 	}
@@ -84,13 +84,13 @@ func TestLocalMultiApprovalSnapshotAndPublishGate(t *testing.T) {
 	if _, err = service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("stale approval published: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err = reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("old reviewer voted: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "carol", false, "修订"); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, "carol", false, "修订"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
+	if _, err = reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rejected version changed: %v", err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
@@ -109,7 +109,7 @@ func TestPublishedVersionNeedsNewApprovalAfterApproversChangeAndUnpublish(t *tes
 	if _, err = service.SetSpaceApprovers(ctx, result.Skill.SpaceID, "local", "", []string{"alice"}, true, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); err != nil {
@@ -131,10 +131,10 @@ func TestPublishedVersionNeedsNewApprovalAfterApproversChangeAndUnpublish(t *tes
 	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("old approval reused: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err = reviewVersionForTest(service, ctx, result.Skill.SkillID, result.Version.VersionID, "alice", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("old reviewer reused: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "bob", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, result.Skill.SkillID, result.Version.VersionID, "bob", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID); err != nil {
@@ -178,7 +178,7 @@ func TestReplacingCurrentVersionResetsStalePublishedApproval(t *testing.T) {
 	if _, err := service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"alice"}, true, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
@@ -188,7 +188,7 @@ func TestReplacingCurrentVersionResetsStalePublishedApproval(t *testing.T) {
 	if _, err := service.SetSpaceApprovers(ctx, first.Skill.SpaceID, "local", "", []string{"bob"}, true, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, "bob", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, second.Skill.SkillID, second.Version.VersionID); err != nil {
@@ -197,7 +197,7 @@ func TestReplacingCurrentVersionResetsStalePublishedApproval(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("superseded version reused old approval: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
 		t.Fatalf("superseded version was not resubmitted: %v", err)
 	}
 }
@@ -211,10 +211,16 @@ func uploadApprovedVersion(service *Service, ctx context.Context, input UploadVe
 	if err != nil {
 		return result, err
 	}
+	if _, err := service.SetSpaceMember(ctx, result.Skill.SpaceID, "test-reviewer", []string{SpaceActionRead}, "test-admin", false); err != nil {
+		return MutationResult{}, err
+	}
 	if err := service.SetSpaceApprover(ctx, result.Skill.SpaceID, "test-reviewer", "test-admin"); err != nil {
 		return MutationResult{}, err
 	}
-	if _, err := service.ReviewVersion(ctx, result.Skill.SkillID, result.Version.VersionID, "test-reviewer", true, "测试发布前审批"); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, result.Skill.SkillID, result.Version.VersionID, "test-reviewer", true, "测试发布前审批"); err != nil {
+		return MutationResult{}, err
+	}
+	if err := service.RemoveSpaceMember(ctx, result.Skill.SpaceID, "test-reviewer"); err != nil {
 		return MutationResult{}, err
 	}
 	return service.SetCurrentVersion(ctx, result.Skill.SkillID, result.Version.VersionID)
@@ -320,26 +326,26 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("publish without approval: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "admin", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "admin", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("unconfigured review: %v", err)
 	}
 	if err := service.SetSpaceApprover(ctx, DefaultSpaceID, "reviewer", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "writer", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "writer", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("non-reviewer: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", false, "需要修订"); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", false, "需要修订"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("rejected publish: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); !errors.Is(err, ErrConflict) {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rejected version changed: %v", err)
 	}
 	first = upload("approval-test", "1.1", first.Skill.SkillID, true)
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "reviewer", true, "已确认"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
@@ -353,7 +359,7 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, update.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("update bypassed: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, update.Version.VersionID, "reviewer", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, update.Version.VersionID, "reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, update.Version.VersionID); err != nil {
@@ -370,6 +376,9 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	if err := service.SetSpaceApprover(ctx, space.SpaceID, "target-reviewer", "admin"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := service.SetSpaceMember(ctx, space.SpaceID, "target-reviewer", []string{SpaceActionRead}, "admin", false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.MoveSkillsToSpace(ctx, []string{first.Skill.SkillID}, space.SpaceID); err != nil {
 		t.Fatal(err)
 	}
@@ -379,10 +388,10 @@ func TestSkillApprovalGatesUploadsUpdatesAndSpaceMoves(t *testing.T) {
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, update.Version.VersionID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("old space approval used: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, update.Version.VersionID, "reviewer", true, ""); !errors.Is(err, ErrReviewForbidden) {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, update.Version.VersionID, "reviewer", true, ""); !errors.Is(err, ErrReviewForbidden) {
 		t.Fatalf("old reviewer: %v", err)
 	}
-	if _, err := service.ReviewVersion(ctx, first.Skill.SkillID, update.Version.VersionID, "target-reviewer", true, ""); err != nil {
+	if _, err := reviewVersionForTest(service, ctx, first.Skill.SkillID, update.Version.VersionID, "target-reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetCurrentVersion(ctx, first.Skill.SkillID, update.Version.VersionID); err != nil {

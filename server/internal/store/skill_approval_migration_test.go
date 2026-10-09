@@ -42,7 +42,7 @@ INSERT INTO skill_versions(version_id,skill_id,version,description,package_path,
 VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),now(),'legacy','approved','skillspace_default','writer',now());`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.UpTo(ctx, 66); err != nil {
+	if _, err = provider.UpTo(ctx, 69); err != nil {
 		t.Fatal(err)
 	}
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
@@ -72,13 +72,13 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceApprovers(ctx, skillhub.DefaultSpaceID, "local", "", []string{"reviewer", "second"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("部分批准发布: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {
@@ -100,7 +100,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("迁移后旧批准发布: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {
@@ -125,7 +125,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("撤销后复用旧批准: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {

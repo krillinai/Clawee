@@ -127,16 +127,41 @@ type ApprovalRoleLookup func(context.Context, string) (ApprovalRole, []Approver,
 
 type ApprovalDecision struct {
 	Approver
-	Status    string     `json:"status"`
-	Comment   string     `json:"comment"`
-	DecidedAt *time.Time `json:"decided_at"`
+	Scores    *ReviewScores `json:"scores,omitempty"`
+	Status    string        `json:"status"`
+	Comment   string        `json:"comment"`
+	DecidedAt *time.Time    `json:"decided_at"`
 }
 
 type LocalApproval struct {
-	Status    string             `json:"status"`
-	Total     int                `json:"total"`
-	Approved  int                `json:"approved"`
-	Approvers []ApprovalDecision `json:"approvers"`
+	RequestID              string             `json:"request_id"`
+	ContentDigest          string             `json:"content_digest"`
+	ScoringStandardVersion string             `json:"scoring_standard_version,omitempty"`
+	ScoreSummary           *ScoreSummary      `json:"score_summary,omitempty"`
+	Status                 string             `json:"status"`
+	Total                  int                `json:"total"`
+	Approved               int                `json:"approved"`
+	Approvers              []ApprovalDecision `json:"approvers"`
+}
+
+type ReviewScores struct {
+	ScenarioValue       *int `json:"scenario_value,omitempty"`
+	ResultEffectiveness *int `json:"result_effectiveness,omitempty"`
+	EaseOfUse           *int `json:"ease_of_use,omitempty"`
+	ReuseValue          *int `json:"reuse_value,omitempty"`
+}
+
+type ScoreSummary struct {
+	ScenarioValue       float64 `json:"scenario_value"`
+	ResultEffectiveness float64 `json:"result_effectiveness"`
+	EaseOfUse           float64 `json:"ease_of_use"`
+	ReuseValue          float64 `json:"reuse_value"`
+	Total               float64 `json:"total"`
+}
+
+type ReviewInput struct {
+	RequestID string
+	Scores    *ReviewScores
 }
 
 type AdminDetail struct {

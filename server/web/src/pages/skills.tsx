@@ -31,6 +31,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { APIError } from "@/lib/api";
+import { SkillReviewForm } from "./skill-detail";
 import {
   createGitHubSource,
   deleteUnpublishedSkill,
@@ -50,6 +52,7 @@ import {
   updateGitHubSource,
   type GitHubSource,
   type AdminSkill,
+  type SkillReviewInput,
   uploadSkillVersion
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
@@ -96,8 +99,8 @@ export function SkillsPage() {
   const [batchSpaceOpen, setBatchSpaceOpen] = useState(false);
   const [targetSpaceId, setTargetSpaceId] = useState("");
   const [activeTab, setActiveTab] = useState("spaces");
-  const [reviewTarget, setReviewTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]>; decision: "approved" | "rejected" } | null>(null);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]>; requestId: string; decision: "approved" | "rejected" } | null>(null);
+  const [reviewConflict, setReviewConflict] = useState("");
   const [ownPublishTarget, setOwnPublishTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]> } | null>(null);
   const [sourceFormOpen, setSourceFormOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<GitHubSource | null>(null);
@@ -148,14 +151,29 @@ export function SkillsPage() {
   useEffect(() => { setSelectedSkillIds(new Set()); }, [spaceId]);
 
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(reviewTarget!.skill.skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
-    onSuccess: () => {
-      setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
+    mutationFn: (input: SkillReviewInput) => reviewSkillVersion(input.skillId, input.versionId, input.requestId, input.decision, input.comment, input.scores),
+    onSuccess: (_result, input) => {
+      setNotice(input.decision === "approved" ? "版本审批通过" : "版本已驳回");
       void queryClient.invalidateQueries({ queryKey: skillsKey });
-      void queryClient.invalidateQueries({ queryKey: ["skill", reviewTarget?.skill.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
       setReviewTarget(null);
+    },
+    onError: (error, input) => {
+      if (error instanceof APIError && [403, 409].includes(error.status)) {
+        setReviewConflict(error.status === 403 ? "审核权限已变化，请刷新后确认可用操作。" : "审核状态已变化，请查看最新审核记录后重新操作。");
+        setReviewTarget(null);
+        void queryClient.invalidateQueries({ queryKey: skillsKey });
+        void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+      }
     }
   });
+
+  useEffect(() => {
+    if (reviewTarget && !reviewMutation.isPending && skillsQuery.data) {
+      const current = skillsQuery.data.find((skill) => skill.skillId === reviewTarget.skill.skillId)?.latestVersion;
+      if (current?.versionId !== reviewTarget.version.versionId || current.localApproval?.requestId !== reviewTarget.requestId) setReviewTarget(null);
+    }
+  }, [skillsQuery.data, reviewTarget, reviewMutation.isPending]);
   const ownPublishMutation = useMutation({
     mutationFn: () => publishOwnSkillVersion(ownPublishTarget!.skill.skillId, ownPublishTarget!.version.versionId),
     onSuccess: (result) => {
@@ -473,6 +491,7 @@ export function SkillsPage() {
       </PageHeader>
 
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
+      {reviewConflict ? <ErrorAlert>{reviewConflict}</ErrorAlert> : null}
       {batchPublishError ? <ErrorAlert>{batchPublishError}</ErrorAlert> : null}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -561,7 +580,7 @@ export function SkillsPage() {
                         const latest = item.latestVersion;
                         const pending = latest?.approvalStatus === "pending";
                         return <>
-                          {pending && latest.localApproval?.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
+                          {pending && latest.localApproval?.requestId && latest.localApproval.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, requestId: latest.localApproval!.requestId!, decision: "approved" }); setReviewConflict(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, requestId: latest.localApproval!.requestId!, decision: "rejected" }); setReviewConflict(""); reviewMutation.reset(); }}><X /></Button></> : null}
                           {pending && selectedSpace && selectedSpace.approvalProvider !== "dingtalk" && !localApprovalEnabled && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
                         </>;
                       })()}
@@ -611,12 +630,7 @@ export function SkillsPage() {
       </Tabs>
 
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "审批通过" : "驳回版本"} contextLabel={reviewTarget?.skill.name}>
-        <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}>
-          <FieldGroup><Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-            {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审批失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
-            <Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" disabled={reviewMutation.isPending} onClick={() => setReviewTarget(null)}>取消</Button><Button type="submit" variant="primary" disabled={reviewMutation.isPending}>{reviewTarget?.decision === "approved" ? "确认通过" : "确认驳回"}</Button></Field>
-          </FieldGroup>
-        </form>
+        {reviewTarget ? <SkillReviewForm key={`${reviewTarget.version.versionId}:${reviewTarget.requestId}:${reviewTarget.decision}`} decision={reviewTarget.decision} pending={reviewMutation.isPending} error={reviewMutation.isError ? reviewMutation.error : undefined} confirmLabel={reviewTarget.decision === "approved" ? "确认通过" : "确认驳回"} onCancel={() => setReviewTarget(null)} onSubmit={(scores, comment) => reviewMutation.mutate({ skillId: reviewTarget.skill.skillId, versionId: reviewTarget.version.versionId, requestId: reviewTarget.requestId, decision: reviewTarget.decision, scores, comment })} /> : null}
       </ModalShell>
       <ConfirmDialog open={Boolean(ownPublishTarget)} onClose={() => { if (!ownPublishMutation.isPending) setOwnPublishTarget(null); }} onConfirm={() => ownPublishMutation.mutate()} title="发布 Skill" description={ownPublishTarget ? `将“${ownPublishTarget.skill.name}”版本 ${ownPublishTarget.version.version} 发布到当前空间。` : ""} confirmLabel="确认发布" pending={ownPublishMutation.isPending} error={ownPublishMutation.isError ? `发布失败：${errorMessage(ownPublishMutation.error)}` : undefined} />
 

@@ -126,7 +126,7 @@ INSERT INTO approval_request_approvers(request_id,user_id,status) VALUES('legacy
 
 func TestSkillApprovalRolesLifecycleOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 66)
+	pool, _ := skillRoleTestDatabase(t, 69)
 	seedSkillRoleAccounts(t, pool)
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
 	space, err := service.CreateSpace(ctx, "角色审核", "", "writer")
@@ -185,25 +185,25 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 		t.Fatal("版本不存在")
 	}
 	assertProgress(first.Version.VersionID, []string{"alice", "bob"}, "pending")
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "carol", true, ""); err == nil {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "carol", true, ""); err == nil {
 		t.Fatal("新成员可审批旧请求")
 	}
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "alice", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("部分通过允许发布: %v", err)
 	}
 	execSkillRoleSQL(t, pool, `UPDATE accounts SET status='disabled' WHERE user_id='bob'`)
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); !errors.Is(err, skillhub.ErrReviewForbidden) {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); !errors.Is(err, skillhub.ErrReviewForbidden) {
 		t.Fatalf("停用账户可以审批: %v", err)
 	}
 	execSkillRoleSQL(t, pool, `UPDATE accounts SET status='active' WHERE user_id='bob'; DELETE FROM account_roles WHERE user_id='bob' AND role_id='read-only'`)
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); !errors.Is(err, skillhub.ErrReviewForbidden) {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); !errors.Is(err, skillhub.ErrReviewForbidden) {
 		t.Fatalf("失去当前数据权限仍可审批: %v", err)
 	}
 	execSkillRoleSQL(t, pool, `INSERT INTO account_roles(user_id,role_id,created_at) VALUES('bob','read-only',now())`)
-	if _, err = service.ReviewVersion(ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, first.Skill.SkillID, first.Version.VersionID, "bob", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, first.Skill.SkillID, first.Version.VersionID); err != nil {
@@ -223,7 +223,7 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 	second := upload("2")
 	assertProgress(second.Version.VersionID, []string{"alice", "carol"}, "pending")
 	for _, id := range []string{"alice", "carol"} {
-		if _, err = service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, id, true, ""); err != nil {
+		if _, err = reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, id, true, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -252,7 +252,7 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 		wait.Add(1)
 		go func(userID string) {
 			defer wait.Done()
-			if _, err := service.ReviewVersion(ctx, second.Skill.SkillID, second.Version.VersionID, userID, true, ""); err != nil {
+			if _, err := reviewVersionForTest(service, ctx, second.Skill.SkillID, second.Version.VersionID, userID, true, ""); err != nil {
 				t.Error(err)
 			}
 		}(id)
@@ -266,10 +266,10 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 	if pending, err := service.ListOwnPendingVersions(ctx, "writer"); err != nil || len(pending) != 0 {
 		t.Fatalf("纯角色审核误入免审核发布列表: %#v %v", pending, err)
 	}
-	if _, err = service.ReviewVersion(ctx, third.Skill.SkillID, third.Version.VersionID, "carol", false, "驳回"); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, third.Skill.SkillID, third.Version.VersionID, "carol", false, "驳回"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.ReviewVersion(ctx, third.Skill.SkillID, third.Version.VersionID, "alice", true, ""); !errors.Is(err, skillhub.ErrConflict) {
+	if _, err = reviewVersionForTest(service, ctx, third.Skill.SkillID, third.Version.VersionID, "alice", true, ""); !errors.Is(err, skillhub.ErrConflict) {
 		t.Fatalf("驳回后仍能批准: %v", err)
 	}
 	assertProgress(third.Version.VersionID, []string{"alice", "carol"}, "rejected")
@@ -277,7 +277,7 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 
 func TestSkillEmptyRoleBlocksSubmissionOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 66)
+	pool, _ := skillRoleTestDatabase(t, 69)
 	seedSkillRoleAccounts(t, pool)
 	store := skillhub.NewPostgresStore(pool)
 	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
@@ -305,7 +305,7 @@ func TestSkillEmptyRoleBlocksSubmissionOnPostgres(t *testing.T) {
 
 func TestSkillEffectiveRolePermissionsReadWriteUploadDownloadOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 66)
+	pool, _ := skillRoleTestDatabase(t, 69)
 	seedSkillRoleAccounts(t, pool)
 	store := skillhub.NewPostgresStore(pool)
 	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})

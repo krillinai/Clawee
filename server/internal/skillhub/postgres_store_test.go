@@ -403,15 +403,16 @@ func TestPostgresStoreListsAdminAndPublishedSkills(t *testing.T) {
 	store := NewPostgresStore(mock)
 	now := time.Date(2026, 7, 27, 17, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
 	current := "version-1"
+	score := 3
 
 	mock.ExpectQuery(regexp.QuoteMeta(adminSkillSelect + ` ORDER BY s.updated_at DESC`)).
 		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", current, "admin", now, now, "version-2", "2.0", "pending", "writer-id", "sha").
 			AddRow("skill-2", DefaultSpaceID, "默认技能空间", "other-skill", "description", nil, "admin", now, now, "version-3", "1.0", "pending", "writer-id", "other-sha"))
 	mock.ExpectQuery(`SELECT r.id,r.business_id,r.scope_id,r.content_digest`).WithArgs([]string{"version-2", "version-3"}).
-		WillReturnRows(pgxmock.NewRows([]string{"id", "business_id", "scope_id", "content_digest", "status", "user_id", "name", "status", "comment", "decided_at"}).
-			AddRow("old-request", "version-2", "other-space", "sha", "approved", "old-reviewer", "旧审批人", "approved", "", nil).
-			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "reviewer", "审核员", "approved", "同意", nil).
-			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "second", "另一审批人", "pending", "", nil))
+		WillReturnRows(pgxmock.NewRows([]string{"id", "business_id", "scope_id", "content_digest", "status", "user_id", "name", "status", "comment", "decided_at", "scoring_standard_version", "scenario_value", "result_effectiveness", "ease_of_use", "reuse_value"}).
+			AddRow("old-request", "version-2", "other-space", "sha", "approved", "old-reviewer", "旧审批人", "approved", "", nil, "", nil, nil, nil, nil).
+			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "reviewer", "审核员", "approved", "同意", nil, "manual-v1", &score, &score, &score, &score).
+			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "second", "另一审批人", "pending", "", nil, "manual-v1", nil, nil, nil, nil))
 	adminItems, err := store.ListAdmin(context.Background())
 	if err != nil || len(adminItems) != 2 || adminItems[0].CurrentVersionID == nil {
 		t.Fatalf("ListAdmin() = %#v, %v", adminItems, err)
@@ -464,7 +465,7 @@ func TestPostgresStoreAdminDetailNormalizesVersionTimestampsToUTC(t *testing.T) 
 		if id == "version-manual" {
 			digest = "sha-manual"
 		}
-		mock.ExpectQuery(`SELECT id,status FROM approval_requests`).WithArgs(id, DefaultSpaceID, digest).WillReturnError(pgx.ErrNoRows)
+		mock.ExpectQuery(`SELECT id,status,COALESCE`).WithArgs(id, DefaultSpaceID, digest).WillReturnError(pgx.ErrNoRows)
 	}
 
 	detail, err := store.GetAdmin(context.Background(), "skill-1")

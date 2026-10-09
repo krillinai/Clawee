@@ -52,13 +52,16 @@ func (s *Service) SetSpaceApprover(ctx context.Context, spaceID, userID, operato
 	return err
 }
 
-func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string) (Version, error) {
+func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, inputs ...ReviewInput) (Version, error) {
 	store, ok := s.store.(ReviewStore)
 	comment = textutil.TrimInput(comment)
-	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(reviewer) == "" || len([]rune(comment)) > 2000 {
+	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(reviewer) == "" || len(inputs) != 1 {
 		return Version{}, ErrInvalidRequest
 	}
-	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, s.clock().UTC())
+	if err := validateReview(approve, comment, inputs[0]); err != nil {
+		return Version{}, err
+	}
+	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, inputs[0], s.clock().UTC())
 }
 
 func (s *MemoryStore) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
@@ -159,14 +162,17 @@ func (s *MemoryStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, pro
 	return affected, nil
 }
 
-func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, reviewer string, approve bool, comment string, now time.Time) (Version, error) {
+func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, reviewer string, approve bool, comment string, input ReviewInput, now time.Time) (Version, error) {
+	if err := validateReview(approve, comment, input); err != nil {
+		return Version{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	skill, ok := s.skills[skillID]
 	if !ok {
 		return Version{}, ErrNotFound
 	}
-	if s.spaces[skill.SpaceID].ApprovalProvider != "local" || reviewer == "" {
+	if s.spaces[skill.SpaceID].ApprovalProvider != "local" || reviewer == "" || !s.hasAccessLocked(reviewer, skill.SpaceID, SpaceActionRead) {
 		return Version{}, ErrReviewForbidden
 	}
 	for i, version := range s.versions[skillID] {
@@ -175,9 +181,17 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 		}
 		request := s.currentLocalLocked(version, skill.SpaceID)
 		if request == nil {
+			for _, old := range s.localApprovals[versionID] {
+				if old.Status != "invalidated" || old.ID == input.RequestID {
+					return Version{}, ErrConflict
+				}
+			}
 			return Version{}, ErrReviewForbidden
 		}
-		if request.Status != "pending" {
+		if request.Status != "pending" || request.ID != input.RequestID {
+			return Version{}, ErrConflict
+		}
+		if request.ScoringStandardVersion != "" && request.ScoringStandardVersion != manualScoringStandard {
 			return Version{}, ErrConflict
 		}
 		if _, ok := request.Decisions[reviewer]; !ok {
@@ -187,6 +201,10 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 			return Version{}, ErrConflict
 		}
 		decision := request.Decisions[reviewer]
+		decision.Scores = cloneScores(input.Scores)
+		if request.ScoringStandardVersion == "" && hasScores(input.Scores) {
+			request.ScoringStandardVersion = manualScoringStandard
+		}
 		decision.Status, decision.Comment, decision.DecidedAt = "rejected", comment, &now
 		if approve {
 			decision.Status = "approved"
@@ -224,8 +242,9 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 				s.localApprovals[versionID][j] = *request
 			}
 		}
-		version.LocalApproval = localProgress(request)
+		version.LocalApproval = nil
 		s.versions[skillID][i] = version
+		version.LocalApproval = localProgress(request)
 		return version, nil
 	}
 	return Version{}, ErrNotFound
