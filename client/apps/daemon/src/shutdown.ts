@@ -8,29 +8,54 @@ type SignalSource = {
 export function installParentPortShutdown(input: {
   parentPort?: {
     on(event: 'message', listener: (event: unknown) => void): unknown;
+    off(event: 'message', listener: (event: unknown) => void): unknown;
   };
   close(): Promise<void>;
   onError(error: unknown): void;
   finish(): void;
-}): void {
+  onShutdown?(reason: string): void;
+}): () => void {
+  if (input.parentPort === undefined) return () => undefined;
   let closing = false;
-  input.parentPort?.on('message', event => {
+  let finished = false;
+  let lastHeartbeat = Date.now();
+  let deadline: NodeJS.Timeout | undefined;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearInterval(watchdog);
+    clearTimeout(deadline);
+    input.finish();
+  };
+  const shutdown = (reason: string) => {
+    if (closing) return;
+    closing = true;
+    clearInterval(watchdog);
+    input.onShutdown?.(reason);
+    deadline = setTimeout(() => {
+      input.onError(new Error('DAEMON_SHUTDOWN_TIMEOUT'));
+      finish();
+    }, 5_000);
+    void input.close().catch(input.onError).finally(finish);
+  };
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastHeartbeat >= 10_000) shutdown('parent-heartbeat-timeout');
+  }, 1_000);
+  watchdog.unref();
+  const onMessage = (event: unknown) => {
     const payload = typeof event === 'object' && event !== null && 'data' in event
       ? event.data
       : event;
-    if (
-      typeof payload !== 'object' || payload === null
-      || !('type' in payload) || payload.type !== 'shutdown' || closing
-    ) return;
-    closing = true;
-    const keepAlive = setInterval(() => undefined, 1_000);
-    void input.close()
-      .catch(input.onError)
-      .finally(() => {
-        clearInterval(keepAlive);
-        input.finish();
-      });
-  });
+    if (typeof payload !== 'object' || payload === null || !('type' in payload)) return;
+    if (payload.type === 'parent-heartbeat') lastHeartbeat = Date.now();
+    if (payload.type === 'shutdown') shutdown('parent-request');
+  };
+  input.parentPort.on('message', onMessage);
+  return () => {
+    clearInterval(watchdog);
+    clearTimeout(deadline);
+    input.parentPort?.off('message', onMessage);
+  };
 }
 
 export function installGracefulShutdown(input: {

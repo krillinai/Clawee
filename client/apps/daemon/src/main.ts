@@ -1,5 +1,6 @@
 import {
   accessSync,
+  appendFileSync,
   constants,
   mkdirSync,
   readFileSync,
@@ -60,7 +61,7 @@ import {
   resolveServerModeArguments
 } from './startup.js';
 import { checkServerReadiness } from './server-mode/readiness.js';
-import { acquireRuntimeLock } from './runtime-lock.js';
+import { acquireRuntimeLock, RuntimeLockError } from './runtime-lock.js';
 import { createEnterpriseCredentialStore } from './enterprise/credential-store-2026-07-30.js';
 import {
   createPrivateCredentialFileStore,
@@ -72,14 +73,53 @@ type BootstrapPhase = 'starting_runtime';
 
 let server: FastifyInstance | undefined;
 let closeWork: Promise<void> | undefined;
-let releaseRuntimeLock: (() => void) | undefined;
+let releaseRuntimeLock: (() => Promise<void>) | undefined;
 let cancelCapabilityRefresh: (() => void) | undefined;
 let cancelModelCatalogRefresh: (() => void) | undefined;
 let serverModeDatabase: ReturnType<typeof openRuntimeDatabase> | undefined;
+let lifecycleLogPath: string | undefined;
 
 const MODEL_CATALOG_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 
-await main().catch(async error => {
+const parentPort = (process as NodeJS.Process & {
+  parentPort?: {
+    on(event: 'message', listener: (event: unknown) => void): unknown;
+    off(event: 'message', listener: (event: unknown) => void): unknown;
+  };
+}).parentPort;
+let startupWork = Promise.resolve();
+let shutdownRequested = false;
+const closeAfterStartup = async () => {
+  shutdownRequested = true;
+  await startupWork;
+  await closeServer();
+};
+installGracefulShutdown({
+  close: closeAfterStartup,
+  onError(error) {
+    console.error(`Failed to close daemon cleanly: ${String(error)}`);
+    process.exitCode = 1;
+  }
+});
+installParentPortShutdown({
+  parentPort,
+  close: closeAfterStartup,
+  onShutdown(reason) {
+    recordLifecycle({ event: 'DAEMON_SHUTDOWN_STARTED', reason });
+  },
+  onError(error) {
+    recordLifecycle({ event: 'DAEMON_SHUTDOWN_FAILED', code: error instanceof Error
+      && error.message === 'DAEMON_SHUTDOWN_TIMEOUT' ? 'DAEMON_SHUTDOWN_TIMEOUT' : 'DAEMON_CLOSE_FAILED' });
+    console.error(`Failed to close daemon after parent shutdown: ${String(error)}`);
+    process.exitCode = 1;
+  },
+  finish: () => {
+    recordLifecycle({ event: 'DAEMON_EXIT_REQUESTED', exitCode: process.exitCode ?? 0 });
+    process.exit();
+  }
+});
+
+startupWork = main().catch(async error => {
   await closeServer().catch(closeError => {
     console.error(`Failed to close daemon after startup failure: ${
       closeError instanceof Error ? closeError.message : String(closeError)
@@ -87,10 +127,13 @@ await main().catch(async error => {
   });
   emitBootstrapError({
     code: startupErrorCode(error),
-    message: error instanceof Error ? error.message : String(error)
+    message: error instanceof Error ? error.message : String(error),
+    ...(error instanceof RuntimeLockError ? { details: error.details } : {})
   });
   process.exitCode = 1;
 });
+await startupWork;
+if (parentPort !== undefined && process.exitCode === 1) process.exit(1);
 
 async function main(): Promise<void> {
   const serverMode = resolveServerModeArguments();
@@ -122,17 +165,21 @@ async function main(): Promise<void> {
   } else {
     prepareServerDirectories(dataDir, serverMode.defaultProjectRoot);
   }
-  releaseRuntimeLock = acquireRuntimeLock(dataDir);
-  process.once('exit', () => releaseRuntimeLock?.());
+  releaseRuntimeLock = await acquireRuntimeLock(dataDir);
+  lifecycleLogPath = join(dataDir, 'daemon-lifecycle.log');
+  process.once('exit', () => { void releaseRuntimeLock?.(); });
+  assertStartupActive();
   const runtimeState = createCodexRuntimeStateStore({
     dataDir,
     runtime
   });
   await runtimeState.reconcileStartup();
+  assertStartupActive();
   const versionProbe = await probeCodexVersionAsync({
     codexBin,
     timeoutMs: 3_000
   });
+  assertStartupActive();
   if (!versionProbe.ready) {
     if (serverMode === undefined) {
       emitBootstrapError({
@@ -156,6 +203,7 @@ async function main(): Promise<void> {
     dataDir,
     versionProbe.version
   );
+  assertStartupActive();
   const capabilities = capabilityResolution.state;
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   await runtimeState.markPrepared(null);
@@ -370,6 +418,7 @@ async function main(): Promise<void> {
     }
   });
   const { buildServer } = await import('./api/server.js');
+  assertStartupActive();
   let address: string;
   let readinessChecks: Awaited<ReturnType<typeof checkServerReadiness>> | undefined;
   if (serverMode !== undefined) {
@@ -378,6 +427,7 @@ async function main(): Promise<void> {
   try {
     server = await buildServer(createProductionServerInput({
       token,
+      autoInstallUpdateSkills: serverMode?.autoInstallUpdateSkills ?? false,
       capabilities,
       codexAppServerClient,
       codexEnv,
@@ -404,9 +454,11 @@ async function main(): Promise<void> {
       ...environment,
       ...enterprise
     }));
+    assertStartupActive();
     address = await server.listen(serverMode === undefined
       ? { host: '127.0.0.1', port: 0 }
       : { host: serverMode.host, port: serverMode.port });
+    assertStartupActive();
     if (serverMode !== undefined) {
       readinessChecks = await checkServerReadiness({ address, token });
     }
@@ -427,27 +479,6 @@ async function main(): Promise<void> {
   }
   capabilityResolution.startBackgroundRefresh();
 
-  installGracefulShutdown({
-    close: closeServer,
-    onError(error) {
-      console.error(`Failed to close daemon cleanly: ${error instanceof Error ? error.message : String(error)}`);
-      process.exitCode = 1;
-    }
-  });
-  installParentPortShutdown({
-    parentPort: (process as NodeJS.Process & {
-      parentPort?: {
-        on(event: 'message', listener: (event: unknown) => void): unknown;
-      };
-    }).parentPort,
-    close: closeServer,
-    onError(error) {
-      console.error(`Failed to close daemon after parent request: ${String(error)}`);
-      process.exitCode = 1;
-    },
-    // HTTP、任务日志及数据库清理完成后，不再等待 IPC 等残留句柄。
-    finish: () => process.exit()
-  });
   if (serverMode === undefined) {
     console.log(JSON.stringify({ address, token }));
     return;
@@ -479,8 +510,23 @@ async function closeServer(): Promise<void> {
   } catch (error) {
     firstError ??= error;
   }
-  releaseRuntimeLock?.();
   if (firstError !== undefined) throw firstError;
+  await releaseRuntimeLock?.();
+}
+
+function assertStartupActive(): void {
+  if (shutdownRequested) throw new Error('DAEMON_START_CANCELLED');
+}
+
+function recordLifecycle(details: Record<string, unknown>): void {
+  const line = JSON.stringify({ ...details, pid: process.pid, at: new Date().toISOString() });
+  console.error(line);
+  if (lifecycleLogPath === undefined) return;
+  try {
+    appendFileSync(lifecycleLogPath, `${line}\n`, { mode: 0o600 });
+  } catch (error) {
+    console.error(`Failed to record daemon lifecycle: ${String(error)}`);
+  }
 }
 
 async function resolveCapabilities(

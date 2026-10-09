@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installGracefulShutdown, installParentPortShutdown } from '../../src/shutdown.js';
 
 describe('graceful shutdown', () => {
@@ -48,6 +48,40 @@ describe('graceful shutdown', () => {
 });
 
 describe('parent port shutdown', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('self-exits after the desktop stops sending heartbeats, even if startup cleanup hangs', async () => {
+    vi.useFakeTimers();
+    const parentPort = new EventEmitter();
+    const close = vi.fn(() => new Promise<void>(() => undefined));
+    const finish = vi.fn();
+    const onError = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError });
+    parentPort.emit('message', { data: { type: 'parent-heartbeat' } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(close).toHaveBeenCalledOnce();
+    expect(finish).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'DAEMON_SHUTDOWN_TIMEOUT' }));
+    expect(finish).toHaveBeenCalledOnce();
+    dispose?.();
+  });
+
+  it('keeps running while the desktop heartbeats continue', async () => {
+    vi.useFakeTimers();
+    const parentPort = new EventEmitter();
+    const close = vi.fn(async () => undefined);
+    const finish = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError: vi.fn() });
+    for (let tick = 0; tick < 20; tick += 1) {
+      parentPort.emit('message', { type: 'parent-heartbeat' });
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(close).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
+    dispose?.();
+  });
+
   it('exits only after cleanup completes and ignores repeated requests', async () => {
     const parentPort = new EventEmitter();
     let releaseClose!: () => void;

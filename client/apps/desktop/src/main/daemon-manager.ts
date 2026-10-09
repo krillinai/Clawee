@@ -57,6 +57,8 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
   private startWork: Promise<DaemonConnection> | undefined;
   private stopWork: Promise<void> | undefined;
   private intentionalStop = false;
+  private stopGeneration = 0;
+  private heartbeatTimer: NodeJS.Timeout | undefined;
   private readonly codexPids = new Set<number>();
   private codexCleanupWork = Promise.resolve();
 
@@ -76,12 +78,22 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
     return this.child?.pid;
   }
 
+  get hasProcess(): boolean {
+    return this.child !== undefined;
+  }
+
   start(input: DaemonStartInput): Promise<DaemonConnection> {
     if (this.startWork !== undefined) return this.startWork;
+    if (this.child !== undefined) {
+      return Promise.reject(new DaemonStartError('DAEMON_ALREADY_RUNNING', '本地运行服务尚未确认退出'));
+    }
     this.intentionalStop = false;
     this.stopWork = undefined;
     this.startWork = this.codexCleanupWork
-      .then(() => this.startInternal(input))
+      .then(() => {
+        if (this.intentionalStop) throw new DaemonStartError('DAEMON_START_CANCELLED', '本地运行服务启动已取消');
+        return this.startInternal(input);
+      })
       .finally(() => {
         this.startWork = undefined;
       });
@@ -89,6 +101,7 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
   }
 
   async stop(timeoutMs = 5_000): Promise<void> {
+    this.stopGeneration += 1;
     if (this.stopWork !== undefined) return await this.stopWork;
     this.stopWork = this.stopInternal(timeoutMs).finally(() => {
       this.stopWork = undefined;
@@ -97,7 +110,12 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
   }
 
   async restart(input: DaemonStartInput): Promise<DaemonConnection> {
-    await this.stop();
+    const stopped = this.stop();
+    const generation = this.stopGeneration;
+    await stopped;
+    if (generation !== this.stopGeneration) {
+      throw new DaemonStartError('DAEMON_START_CANCELLED', '退出期间已取消 Runtime 重启');
+    }
     return await this.start(input);
   }
 
@@ -138,6 +156,19 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
         stdio: 'pipe'
       });
       this.child = child;
+      const heartbeat = () => {
+        if (this.child !== child) return;
+        try {
+          child.postMessage({ type: 'parent-heartbeat' });
+        } catch (error) {
+          this.logger.warnRateLimited('daemon-heartbeat', 'Daemon parent heartbeat failed', {
+            pid: child.pid, message: error instanceof Error ? error.message : String(error)
+          }, 1_000);
+        }
+      };
+      child.once('spawn', heartbeat);
+      this.heartbeatTimer = setInterval(heartbeat, 1_000);
+      this.heartbeatTimer.unref();
       this.logger.info('Daemon Utility Process starting', {
         entryPath: input.entryPath,
         runtimeId: input.runtime.candidate.runtimeId,
@@ -157,6 +188,10 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
       };
       const succeed = (connection: DaemonConnection) => {
         if (settled) return;
+        if (this.intentionalStop) {
+          fail(new DaemonStartError('DAEMON_START_CANCELLED', '退出期间忽略 Runtime 就绪事件'));
+          return;
+        }
         settled = true;
         clearTimeout(timeout);
         this.connection = connection;
@@ -229,6 +264,8 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
       });
       child.once('exit', code => {
         clearTimeout(timeout);
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = undefined;
         const wasIntentional = this.intentionalStop;
         this.child = undefined;
         if (this.connection !== undefined) {
@@ -271,33 +308,39 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs;
     const remaining = () => Math.max(0, deadline - Date.now());
+    this.intentionalStop = true;
     const child = this.child;
     if (child === undefined) {
       this.connection = undefined;
       await settlesWithin(this.codexCleanupWork, remaining());
       return;
     }
-    this.intentionalStop = true;
     this.logger.info('Daemon shutdown started', { timeoutMs, pid: child.pid });
     const exited = waitForExit(child);
     try {
       try {
         child.postMessage({ type: 'shutdown' });
-      } catch {
-        child.kill();
+      } catch (error) {
+        this.logger.warn('Daemon shutdown IPC request failed', {
+          pid: child.pid, message: error instanceof Error ? error.message : String(error)
+        });
+        this.requestTermination(child, false);
       }
       // 优先留时间给任务和日志收尾，总预算内为终止和强制清理各留半秒。
       if (await this.waitForExitAndCleanup(exited, Math.max(0, remaining() - 1_000))) return;
       this.logger.warn('Daemon graceful shutdown timed out', {
         durationMs: Date.now() - startedAt
       });
-      child.kill();
+      this.requestTermination(child, false);
       const softCleanup = this.terminateKnownCodexProcesses(false);
       if (await settlesWithin(
         Promise.all([exited, softCleanup]).then(() => this.codexCleanupWork),
         Math.max(0, remaining() - 500)
       )) return;
       this.logger.warn('Daemon forced shutdown', { durationMs: Date.now() - startedAt });
+      if (this.child === child && process.platform === 'win32') {
+        this.requestTermination(child, true);
+      }
       if (this.child === child && child.pid !== undefined && process.platform !== 'win32') {
         try {
           process.kill(child.pid, 'SIGKILL');
@@ -310,7 +353,13 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
         Promise.all([exited, forceCleanup]).then(() => this.codexCleanupWork), remaining()
       )) this.logger.warn('Daemon shutdown deadline reached');
     } finally {
-      this.logger.info('Daemon shutdown completed', { durationMs: Date.now() - startedAt });
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+      const processExited = this.child !== child;
+      this.logger.info('Daemon shutdown cleanup finished', {
+        durationMs: Date.now() - startedAt, pid: child.pid, processExited
+      });
+      if (!processExited) throw new Error(`DAEMON_STOP_TIMEOUT: pid=${String(child.pid)}`);
     }
   }
 
@@ -319,6 +368,17 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
     timeoutMs: number
   ): Promise<boolean> {
     return await settlesWithin(exited.then(() => this.codexCleanupWork), timeoutMs);
+  }
+
+  private requestTermination(child: UtilityProcess, force: boolean): void {
+    const message = force ? 'Daemon forced terminate requested' : 'Daemon terminate requested';
+    try {
+      this.logger.warn(message, { pid: child.pid, accepted: child.kill() });
+    } catch (error) {
+      this.logger.error(message, {
+        pid: child.pid, accepted: false, message: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private async terminateKnownCodexProcesses(force: boolean): Promise<void> {

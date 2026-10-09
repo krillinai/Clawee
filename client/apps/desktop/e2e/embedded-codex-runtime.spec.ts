@@ -186,6 +186,37 @@ test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进
   }
 });
 
+test('强制结束桌面主进程后 daemon 自退出且数据目录可以安全重开', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    const daemonPid = Number(readFileSync(join(fixture.dataDir, 'clawee-runtime.lock'), 'utf8').trim());
+    expect(daemonPid).toBeGreaterThan(0);
+    const previousApp = app;
+    const exited = waitForProcessExit(app.process, 5_000);
+    app.process.kill('SIGKILL');
+    expect(await exited).toBe(true);
+    await expect.poll(() => {
+      try {
+        process.kill(daemonPid, 0);
+        return false;
+      } catch (error) {
+        return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH';
+      }
+    }, { timeout: 20_000 }).toBe(true);
+    await app.browser.close().catch(() => undefined);
+    app = await fixture.relaunch(previousApp);
+    await waitForEmbeddedRuntimeReady(app.page);
+    expect(Number(readFileSync(join(fixture.dataDir, 'clawee-runtime.lock'), 'utf8').trim()))
+      .not.toBe(daemonPid);
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
+
 test('packaged App ignores a legacy Runtime Home without relocating it', async () => {
   test.setTimeout(240_000);
   const fixture = await createEmbeddedRuntimeFixture();

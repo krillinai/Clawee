@@ -434,7 +434,13 @@ async function launchDesktop(): Promise<void> {
         });
       })
       .finally(() => {
-        logger.info('Desktop shutdown cleanup completed', { durationMs: Date.now() - startedAt });
+        const daemonExited = !daemon.hasProcess;
+        logger.info('Desktop shutdown cleanup finished', {
+          durationMs: Date.now() - startedAt, daemonExited, daemonPid: daemon.pid
+        });
+        if (!daemonExited) logger.error('Desktop quitting before daemon exit was confirmed', {
+          daemonPid: daemon.pid, recovery: 'daemon-parent-heartbeat-watchdog'
+        });
         void settlesWithin(logger.flush(), Math.max(0, deadline - Date.now())).finally(() => {
           allowQuit = true;
           app.quit();

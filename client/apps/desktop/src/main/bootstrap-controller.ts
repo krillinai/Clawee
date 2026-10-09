@@ -34,6 +34,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   private stableTimer: NodeJS.Timeout | undefined;
   private runAbortController: AbortController | undefined;
   private updateStopped = false;
+  private stopped = false;
 
   constructor(private readonly input: {
     daemon: DaemonManager;
@@ -83,7 +84,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       this.emit('connection', connection === null ? null : this.rendererConnection());
     });
     input.daemon.on('exit', event => {
-      if (this.updateStopped) return;
+      if (this.updateStopped || this.stopped) return;
       if (event.reason !== 'unexpected' || this.state.phase === 'failed') return;
       void this.recoverUnexpectedExit();
     });
@@ -100,6 +101,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   start(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error('DAEMON_START_CANCELLED'));
     if (this.updateStopped) return Promise.reject(new Error('更新安装期间不能启动 Runtime'));
     if (this.runWork !== undefined) return this.runWork;
     const abortController = new AbortController();
@@ -114,6 +116,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   async restartRuntime(): Promise<void> {
+    if (this.stopped) throw new Error('DAEMON_START_CANCELLED');
     if (this.updateStopped) throw new Error('更新安装期间不能重启 Runtime');
     if (this.resolvedRuntime === undefined) {
       await this.start();
@@ -157,6 +160,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   async stop(timeoutMs = 5_000): Promise<void> {
+    this.stopped = true;
     const deadline = Date.now() + timeoutMs;
     const remaining = () => Math.max(0, deadline - Date.now());
     if (this.stableTimer !== undefined) clearTimeout(this.stableTimer);
