@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../runtime/types.js';
+import type { DesktopUpdateState } from '@clawee/protocol';
 
 export type HostBridgeResult = { ok: true } | { ok: false; code: 'UNSUPPORTED' | 'FAILED'; message: string };
 
@@ -50,4 +51,9 @@ export type HostBridge = {
     purpose?: ProjectDirectorySelectionPurpose
   ): Promise<string | null>;
   resolveDroppedFilePath?(file: File): string | null;
+  readUpdateState?(): Promise<DesktopUpdateState>;
+  subscribeUpdateState?(listener: (state: DesktopUpdateState) => void): () => void;
+  checkForUpdates?(): Promise<HostBridgeResult>;
+  downloadUpdate?(): Promise<HostBridgeResult>;
+  installUpdate?(): Promise<HostBridgeResult>;
 };

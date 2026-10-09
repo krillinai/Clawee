@@ -32,6 +32,11 @@ const api: DesktopApi = {
     return subscribe(desktopIpc.bootstrapChanged, listener);
   },
   retryBootstrap: () => ipcRenderer.invoke(desktopIpc.bootstrapRetry),
+  readUpdateState: () => ipcRenderer.invoke(desktopIpc.readUpdateState),
+  subscribeUpdateState: listener => subscribe(desktopIpc.updateStateChanged, listener),
+  checkForUpdates: () => ipcRenderer.invoke(desktopIpc.checkForUpdates),
+  downloadUpdate: () => ipcRenderer.invoke(desktopIpc.downloadUpdate),
+  installUpdate: () => ipcRenderer.invoke(desktopIpc.installUpdate),
   selectProjectDirectory: purpose =>
     ipcRenderer.invoke(desktopIpc.selectProjectDirectory, purpose),
   resolveDroppedFilePath: file => {

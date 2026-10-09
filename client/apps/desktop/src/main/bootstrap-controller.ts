@@ -33,6 +33,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   private automaticRestarts = 0;
   private stableTimer: NodeJS.Timeout | undefined;
   private runAbortController: AbortController | undefined;
+  private updateStopped = false;
 
   constructor(private readonly input: {
     daemon: DaemonManager;
@@ -82,6 +83,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       this.emit('connection', connection === null ? null : this.rendererConnection());
     });
     input.daemon.on('exit', event => {
+      if (this.updateStopped) return;
       if (event.reason !== 'unexpected' || this.state.phase === 'failed') return;
       void this.recoverUnexpectedExit();
     });
@@ -98,6 +100,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   start(): Promise<void> {
+    if (this.updateStopped) return Promise.reject(new Error('更新安装期间不能启动 Runtime'));
     if (this.runWork !== undefined) return this.runWork;
     const abortController = new AbortController();
     this.runAbortController = abortController;
@@ -111,6 +114,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   async restartRuntime(): Promise<void> {
+    if (this.updateStopped) throw new Error('更新安装期间不能重启 Runtime');
     if (this.resolvedRuntime === undefined) {
       await this.start();
       return;
@@ -163,6 +167,34 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       runWork?.catch(() => undefined) ?? Promise.resolve()
     ]).then(() => undefined), remaining());
     await this.input.daemon.stop(remaining());
+  }
+
+  async stopForUpdate(timeoutMs = 5_000): Promise<void> {
+    this.updateStopped = true;
+    const deadline = Date.now() + timeoutMs;
+    if (this.stableTimer !== undefined) clearTimeout(this.stableTimer);
+    this.runAbortController?.abort();
+    if (!await settlesWithin(this.runWork ?? Promise.resolve(), timeoutMs)) {
+      throw new Error('Bootstrap 停止超时，已取消安装');
+    }
+    await this.input.daemon.stopForUpdate(Math.max(0, deadline - Date.now()));
+  }
+
+  async resumeAfterUpdate(restart = false): Promise<void> {
+    try {
+      if (!restart && this.input.daemon.currentConnection !== undefined) {
+        this.armStableTimer();
+        return;
+      }
+      if (this.input.daemon.pid !== undefined) {
+        await this.input.daemon.stop();
+      }
+      await this.input.daemon.stopForUpdate();
+    } finally {
+      this.updateStopped = false;
+      this.input.daemon.resumeAfterUpdate();
+    }
+    await this.start();
   }
 
   private async startInternal(signal?: AbortSignal): Promise<void> {

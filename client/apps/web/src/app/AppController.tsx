@@ -145,6 +145,7 @@ import {
 } from '../features/shell/sidebar-task-model.js';
 import type { SidebarTaskSummary } from '../features/shell/sidebar-task-model.js';
 import { browserBridge } from '../host/browser-bridge.js';
+import { DesktopUpdateNotice, useDesktopUpdates } from '../features/settings/DesktopUpdates.js';
 import type {
   HostBridge,
   ProjectDirectorySelectionPurpose
@@ -359,6 +360,7 @@ export function AppController(props: AppControllerProps) {
   const defaultFileService = useMemo(() => createMockFileService(), []);
   const fileService = props.fileService ?? defaultFileService;
   const hostBridge = props.hostBridge ?? browserBridge;
+  const desktopUpdates = useDesktopUpdates(hostBridge);
   const integratedTitleBar = hostBridge.windowChrome;
   const appShellStyle = integratedTitleBar === undefined
     ? undefined
@@ -6545,6 +6547,7 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'settings' ? (
     <SettingsPage
+      desktopUpdates={desktopUpdates}
       runtimeStatus={runtimeStatus}
       agentId={enterpriseSession.agentId}
       onReadGateway={enterpriseService === null ? undefined : readEnterpriseGateway}
@@ -6709,6 +6712,7 @@ export function AppController(props: AppControllerProps) {
         }
         style={appShellStyle}
       >
+        <DesktopUpdateNotice updates={desktopUpdates} />
         {integratedTitleBar?.integratedTitleBar === true ? (
           <div className="desktop-titlebar-drag-region" aria-hidden="true" />
         ) : null}
@@ -6749,6 +6753,7 @@ export function AppController(props: AppControllerProps) {
     if (modelAccess.status === 'configuration_required') {
       return (
         <div className="app-drop-shell" style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
+        <DesktopUpdateNotice updates={desktopUpdates} />
         <ModelServiceSetupPage
           status={{
             status: 'configuration_required',
@@ -6778,6 +6783,7 @@ export function AppController(props: AppControllerProps) {
     if (modelAccess.status === 'resolving' || modelAccess.status === 'unavailable') {
       return (
         <div className="app-drop-shell" style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto' }}>
+        <DesktopUpdateNotice updates={desktopUpdates} />
         <ModelAccessStatusPage
           status={modelAccess.status}
           integratedTitleBar={integratedTitleBar}
@@ -6818,6 +6824,7 @@ export function AppController(props: AppControllerProps) {
       onDragLeave={handleProjectDragLeave}
       onDrop={(event) => void handleProjectDrop(event)}
     >
+      <DesktopUpdateNotice updates={desktopUpdates} />
       {integratedTitleBar?.integratedTitleBar === true ? (
         <div className="desktop-titlebar-drag-region" aria-hidden="true" />
       ) : null}

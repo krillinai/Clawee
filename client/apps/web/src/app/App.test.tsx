@@ -12,6 +12,7 @@ import type {
   CodexSkillResponse,
   CodexStatusResponse,
   CreateScheduleRequest,
+  DesktopUpdateState,
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
   EnterpriseActivityStatisticsResponse,
@@ -42,7 +43,7 @@ import {
 } from './AppController.js';
 import { PROJECTS_STORAGE_KEY } from '../features/projects/project-model.js';
 import type { ClaweeProject } from '../features/projects/project-model.js';
-import type { HostBridge } from '../host/bridge.js';
+import type { HostBridge, HostBridgeResult } from '../host/bridge.js';
 import type { SubscribeRunEventsInput } from '../runtime/sse.js';
 import type { FileTreeNode, WorkspaceFile } from '../services/file-service.js';
 import {
@@ -61,6 +62,22 @@ function App(props: AppProps = {}) {
 }
 
 describe('App', () => {
+  it('客户更新在登录前也会提示，不自动下载或安装', async () => {
+    const update: DesktopUpdateState = {
+      supported: true, status: 'available', currentVersion: '0.1.8', version: '0.1.9', notes: '客户管理员已批准'
+    };
+    const downloadUpdate = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    const installUpdate = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    render(<ProductionApp hostBridge={{ ...createHostBridge(), kind: 'desktop',
+      readUpdateState: async () => update, subscribeUpdateState: () => () => undefined,
+      checkForUpdates: async () => ({ ok: true }), downloadUpdate, installUpdate }} />);
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('客户管理员已批准');
+    expect(downloadUpdate).not.toHaveBeenCalled();
+    expect(installUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '下载更新' }));
+    await waitFor(() => expect(downloadUpdate).toHaveBeenCalledTimes(1));
+    expect(installUpdate).not.toHaveBeenCalled();
+  });
   it.each(['browser', 'desktop'] as const)('%s host uploads an enterprise skill to its space and refreshes the enterprise directory', async hostKind => {
     window.location.hash = '#/plugins?source=enterprise';
     const user = userEvent.setup();

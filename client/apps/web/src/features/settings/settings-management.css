@@ -2,6 +2,26 @@
   width: min(920px, 100%);
 }
 
+.desktop-update-settings {
+  display: grid;
+  gap: 10px;
+}
+
+.desktop-update-settings p {
+  margin: 0;
+}
+
+.desktop-update-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desktop-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .settings-management__header {
   min-width: 0;
   display: flex !important;

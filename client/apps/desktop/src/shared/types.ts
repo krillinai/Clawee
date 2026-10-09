@@ -109,6 +109,11 @@ export type DesktopApi = {
   ): () => void;
   readBootstrapState(): Promise<DesktopBootstrapState>;
   subscribeBootstrapState(listener: (state: DesktopBootstrapState) => void): () => void;
+  readUpdateState(): Promise<import('@clawee/protocol').DesktopUpdateState>;
+  subscribeUpdateState(listener: (state: import('@clawee/protocol').DesktopUpdateState) => void): () => void;
+  checkForUpdates(): Promise<DesktopHostResult>;
+  downloadUpdate(): Promise<DesktopHostResult>;
+  installUpdate(): Promise<DesktopHostResult>;
   retryBootstrap(): Promise<DesktopHostResult>;
   selectProjectDirectory(
     purpose?: ProjectDirectorySelectionPurpose

@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../runtime/types.js';
+import type { DesktopUpdateState } from '@clawee/protocol';
 import type {
   DesktopPlatform,
   HostBridge,
@@ -8,6 +9,11 @@ import type {
 } from './bridge.js';
 
 type DesktopApi = {
+  readUpdateState?(): Promise<DesktopUpdateState>;
+  subscribeUpdateState?(listener: (state: DesktopUpdateState) => void): () => void;
+  checkForUpdates?(): Promise<HostBridgeResult>;
+  downloadUpdate?(): Promise<HostBridgeResult>;
+  installUpdate?(): Promise<HostBridgeResult>;
   collectFeedback?(threadId: string): Promise<import('@clawee/protocol').DesktopFeedbackSnapshot>;
   exportEmergencyFeedback?(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<HostBridgeResult>;
   kind: 'desktop';
@@ -91,7 +97,16 @@ export function readDesktopHostBridge(): DesktopHostBridge | undefined {
     revealPath: path => api.revealPath(path),
     notify: message => api.notify(message),
     configureBackgroundNotifications: configuration =>
-      api.configureBackgroundNotifications(configuration)
+      api.configureBackgroundNotifications(configuration),
+    ...(api.readUpdateState && api.subscribeUpdateState && api.checkForUpdates && api.downloadUpdate && api.installUpdate
+      ? {
+          readUpdateState: () => api.readUpdateState!(),
+          subscribeUpdateState: (listener: (state: DesktopUpdateState) => void) => api.subscribeUpdateState!(listener),
+          checkForUpdates: () => api.checkForUpdates!(),
+          downloadUpdate: () => api.downloadUpdate!(),
+          installUpdate: () => api.installUpdate!()
+        }
+      : {})
   };
 }
 

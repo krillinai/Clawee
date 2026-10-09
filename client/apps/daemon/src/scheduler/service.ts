@@ -5,7 +5,7 @@ import type {
   ScheduleOperationListResponse,
   ScheduleResponse
 } from '@clawee/protocol';
-import type { RunManager } from '../runs/manager.js';
+import { DesktopUpdatePreparedError, type RunManager } from '../runs/manager.js';
 import { computeNextRunAt } from './cron.js';
 import type { ScheduleRepository } from './repository.js';
 import type {
@@ -48,6 +48,9 @@ export type SchedulerService = {
   listOperations(id: string, limit?: number): ScheduleOperationListResponse;
   start(): void;
   stop(): void;
+  close?(): void;
+  prepareDesktopUpdate?(): boolean;
+  cancelDesktopUpdate?(): void;
   refreshTimer(): void;
   processDueSchedulesForTest?(): void;
   processPendingTriggersForTest?(): void;
@@ -90,6 +93,15 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   let timer: TimerHandle | unknown;
   let queueTimer: TimerHandle | unknown;
   let started = false;
+  let closing = false;
+  let desktopUpdatePrepared = false;
+  let desktopUpdateWasStarted = false;
+  let workflowTriggersInFlight = 0;
+
+  function requireRunAcceptance(): void {
+    if (closing) throw new Error('Scheduler is closing');
+    if (desktopUpdatePrepared) throw new DesktopUpdatePreparedError();
+  }
 
   async function triggerWorkflow(
     schedule: ScheduleRecord,
@@ -97,8 +109,14 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
     scheduledAt: string | null,
     triggerId?: string
   ): Promise<RunScheduleNowResponse> {
+    requireRunAcceptance();
     if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
-    return await options.workflowSchedules.trigger(schedule, actor, scheduledAt, triggerId);
+    workflowTriggersInFlight++;
+    try {
+      return await options.workflowSchedules.trigger(schedule, actor, scheduledAt, triggerId);
+    } finally {
+      workflowTriggersInFlight--;
+    }
   }
 
   function handleTrigger(
@@ -107,6 +125,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
     ranAt: string,
     actor: ScheduleOperationActor
   ): RunScheduleNowResponse {
+    requireRunAcceptance();
     if (schedule.action === 'workflow_start') throw new SchedulerError('ENTERPRISE_FORBIDDEN', '工作流计划只能通过专用动作发起');
     if (options.canRunAgent?.() === false) throw new SchedulerError('INTERNAL_ERROR', 'Agent 暂不可用');
     const bound = requireBoundSchedule(schedule);
@@ -202,6 +221,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   }
 
   function processDueSchedules(): void {
+    if (desktopUpdatePrepared || closing) return;
     const now = clock.now().toISOString();
     try {
       for (const schedule of options.repository.listDue(now, options.canRunAgent?.() === false)) {
@@ -284,11 +304,13 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
 
     queueTimer = timers.setTimeout(() => {
       queueTimer = undefined;
+      if (!started) return;
       processPendingTriggers();
     }, QUEUE_CHECK_INTERVAL_MS);
   }
 
   function processPendingTriggers(): void {
+    if (desktopUpdatePrepared || closing) return;
     if (options.canRunAgent?.() === false) return;
     try {
       for (const schedule of options.repository.listPendingTriggers()) {
@@ -368,6 +390,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
     },
 
     async runWorkflowNow(id, triggerId) {
+      requireRunAcceptance();
       const schedule = requireSchedule(options.repository, id);
       requireWorkflowAccess(schedule);
       if (schedule.action !== 'workflow_start') throw new SchedulerError('VALIDATION_FAILED', '不是工作流计划');
@@ -383,6 +406,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
     },
 
     start() {
+      if (desktopUpdatePrepared || closing) return;
       started = true;
       refreshTimers();
     },
@@ -394,6 +418,27 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
         timer = undefined;
       }
       clearQueueTimer();
+    },
+
+    close() {
+      closing = true;
+      service.stop();
+    },
+
+    prepareDesktopUpdate() {
+      if (closing) throw new Error('Scheduler is closing');
+      if (!desktopUpdatePrepared) {
+        desktopUpdateWasStarted = started;
+        desktopUpdatePrepared = true;
+        service.stop();
+      }
+      return workflowTriggersInFlight === 0;
+    },
+
+    cancelDesktopUpdate() {
+      if (!desktopUpdatePrepared || closing) return;
+      desktopUpdatePrepared = false;
+      if (desktopUpdateWasStarted) service.start();
     },
 
     refreshTimer() {
@@ -412,6 +457,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
       );
       timer = timers.setTimeout(() => {
         timer = undefined;
+        if (!started) return;
         processDueSchedules();
       }, delayMs);
     },

@@ -38,6 +38,7 @@ import {
 } from './release-platform.mjs';
 import { runStage } from './script-utils.mjs';
 import { collectUpdateArtifacts, refreshUpdateMetadata } from './release-artifacts.mjs';
+import { assertUpdateRuntimeDependencies, emitCustomerUpdateManifest, stageCustomerUpdateMarker } from './customer-update-contract.mjs';
 import {
   readCodexRuntimeManifest,
   resolveCodexRuntimeTarget
@@ -168,6 +169,15 @@ env.CLAWEE_UPDATE_URL = officialRelease
 if (officialRelease) {
   writeFileSync(join(dirname(enterpriseGatewayConfigStage), 'official-release.json'), '{"channel":"stable"}\n');
 }
+const customerUpdateGateway = stageCustomerUpdateMarker({
+  directory: dirname(enterpriseGatewayConfigStage),
+  gateway: enterpriseRelease.gateway,
+  overridePath: process.env.CLAWEE_DESKTOP_GATEWAY_CONFIG_PATH,
+  officialRelease: officialRelease || process.env.CLAWEE_OFFICIAL_RELEASE === '1'
+});
+for (const filename of ['customer-update-manifest.json', 'customer-update-manifest.template.json']) {
+  rmSync(join(releaseDir, filename), { force: true });
+}
 console.log(
   `[desktop-package] 企业网关：`
   + `${enterpriseRelease.transportSecurity} ${enterpriseRelease.gateway}`
@@ -291,6 +301,21 @@ if (releaseContext.distributableWindows) {
   finalizeReleaseWindowsArtifacts(artifacts.filter(path => path.endsWith('.exe')));
 }
 if (mode !== 'dir') refreshUpdateMetadata(artifacts);
+const customerUpdateManifest = mode === 'dir' ? undefined : await emitCustomerUpdateManifest({
+  directory: releaseDir,
+  gateway: customerUpdateGateway,
+  version: desktopVersion,
+  notes: process.env.CLAWEE_CUSTOMER_UPDATE_NOTES ?? '',
+  platform,
+  arch,
+  artifacts,
+  downloadBase: process.env.CLAWEE_CUSTOMER_UPDATE_DOWNLOAD_BASE,
+  officialBase: process.env.COS_PUBLIC_BASE_URL,
+  officialPrefix: process.env.COS_PREFIX
+});
+if (customerUpdateManifest !== undefined) {
+  console.log(`[desktop-package] 客户更新${customerUpdateManifest.template ? '待补 URL 模板（不可发布）' : '清单'}：${customerUpdateManifest.path}`);
+}
 const webBuild = await inspectDirectory(resolve(rootDir, 'apps/web/dist'));
 const manifest = {
   version: 2,
@@ -305,6 +330,8 @@ const manifest = {
     ? 'stable'
     : 'prerelease',
   officialRelease,
+  ...(customerUpdateGateway === undefined ? {} : { customerUpdateGateway }),
+  ...(customerUpdateManifest === undefined ? {} : { customerUpdateManifest }),
   enterpriseOrigin: enterpriseRelease.gateway,
   enterpriseTransportSecurity: enterpriseRelease.transportSecurity,
   enterpriseGatewayConfigHash: createHash('sha256')
@@ -559,7 +586,9 @@ function assertNoSymbolicLinks(root) {
 function assertDesktopRuntimeDependencies() {
   for (const relativePath of [
     'node_modules/@clawee/protocol/dist/index.js',
-    'node_modules/@iarna/toml/package.json'
+    'node_modules/@iarna/toml/package.json',
+    'node_modules/electron-updater/out/main.js',
+    'node_modules/js-yaml/package.json'
   ]) {
     const path = resolve(desktopRuntimeStage, relativePath);
     if (!existsSync(path)) {
@@ -568,6 +597,7 @@ function assertDesktopRuntimeDependencies() {
       );
     }
   }
+  assertUpdateRuntimeDependencies(desktopRuntimeStage);
 }
 
 function prepareReleaseContext(input) {

@@ -36,6 +36,8 @@
   "dependencies": {
     "@clawee/protocol": "workspace:*",
     "@iarna/toml": "2.2.5",
+    "electron-updater": "6.8.10",
+    "js-yaml": "4.3.2",
     "sharp": "^0.35.4"
   },
   "devDependencies": {

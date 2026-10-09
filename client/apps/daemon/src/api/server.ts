@@ -83,7 +83,8 @@ import {
 } from '../codex/skills/source-installer.js';
 import { buildCodexStatusResponse } from '../codex/status.js';
 import { createCleanupService } from '../cleanup/service.js';
-import { createRunManager, type RunManager } from '../runs/manager.js';
+import { createRunManager, DesktopUpdatePreparedError, type RunManager } from '../runs/manager.js';
+import { registerDesktopUpdateRoutes } from './routes.desktop-update.js';
 import {
   createPersistentAppServerExecutor,
   DEFAULT_PERSISTENT_APP_SERVER_MAX_CONCURRENCY,
@@ -749,6 +750,9 @@ export async function buildServer(input: BuildServerInput) {
   let unsubscribeRuntimeReady: (() => void) | undefined;
 
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof DesktopUpdatePreparedError) {
+      return reply.code(409).send({ error: { code: error.code, message: error.message } });
+    }
     if ((error as { code?: string }).code === 'FST_ERR_CTP_INVALID_JSON_BODY') {
       return reply
         .code(400)
@@ -791,10 +795,12 @@ export async function buildServer(input: BuildServerInput) {
   let runCloseWork: Promise<void> | undefined;
   let shutdownStartedAt = 0;
   server.addHook('preClose', async () => {
+    desktopUpdate.close();
     shutdownStartedAt = Date.now();
     reportDaemonPerformance({ component: 'shutdown', event: 'started' });
     try {
-      scheduler.stop();
+      if (scheduler.close) scheduler.close();
+      else scheduler.stop();
     } catch (error) {
       shutdownError = error;
     }
@@ -883,6 +889,19 @@ export async function buildServer(input: BuildServerInput) {
     await auth(request, reply);
     if (reply.sent) return;
     if (
+      desktopUpdate.isPrepared()
+      && request.method === 'POST'
+      && [
+        '/runs',
+        '/schedules/:id/run-now',
+        '/enterprise/knowledge-conversations/:id/runs',
+        '/enterprise/workflow-tasks/:id/execute'
+      ].includes(request.routeOptions.url ?? '')
+    ) {
+      const error = new DesktopUpdatePreparedError();
+      return reply.code(409).send({ error: { code: error.code, message: error.message } });
+    }
+    if (
       input.modelServiceRuntime !== undefined
       && !input.modelServiceRuntime.ready()
       && isModelFreeWorkflowRequest(request.method, request.routeOptions.url)
@@ -905,6 +924,10 @@ export async function buildServer(input: BuildServerInput) {
         '请先配置并验证 Codex 模型服务'
       ));
     }
+  });
+
+  const desktopUpdate = registerDesktopUpdateRoutes(server, {
+    runManager, scheduler, serverDeployment: input.serverDeployment === true
   });
 
   if (input.modelServiceRuntime !== undefined) {
@@ -1189,7 +1212,9 @@ function isPreModelConfigurationRequest(
   route: string | undefined,
   taskMcpEnabled: boolean
 ): boolean {
-  return isModelAccessRequest(route)
+  return route === '/desktop-update/prepare'
+    || route === '/desktop-update/cancel'
+    || isModelAccessRequest(route)
     || isModelFreeWorkflowRequest(method, route)
     || (
       taskMcpEnabled

@@ -14,6 +14,17 @@ const runtimeStatus = {
 };
 
 describe('ClaweeSettingsView', () => {
+  it('客户更新显示原生版本和下载入口，不显示旧占位文案', () => {
+    const perform = vi.fn(async () => undefined);
+    render(<ClaweeSettingsView runtimeStatus={runtimeStatus} onBack={vi.fn()}
+      desktopUpdates={{ state: { supported: true, status: 'available', currentVersion: '0.1.7', version: '0.1.9' }, busy: false, perform }} />);
+    fireEvent.click(screen.getByRole('button', { name: '关于 Clawee' }));
+    expect(screen.getByText('0.1.7')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载更新' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '下载更新' }));
+    expect(perform).toHaveBeenCalledWith('downloadUpdate');
+    expect(screen.queryByText('手动检查稍后支持')).not.toBeInTheDocument();
+  });
   it('登录后提供服务器配置设置入口', async () => {
     const onSaveGateway = vi.fn(async () => undefined);
     render(<ClaweeSettingsView runtimeStatus={runtimeStatus} onBack={vi.fn()}
@@ -308,8 +319,8 @@ describe('ClaweeSettingsView', () => {
     expect(screen.getByText('Runtime 版本')).toBeInTheDocument();
     expect(screen.getByText('数据目录')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument();
-    expect(screen.getByText('检查更新')).toBeInTheDocument();
-    expect(screen.getByText('手动检查稍后支持')).toBeInTheDocument();
+    expect(screen.queryByText('手动检查稍后支持')).not.toBeInTheDocument();
+    expect(screen.queryByText('客户版本更新')).not.toBeInTheDocument();
 
     const advanced = screen.getByRole('region', { name: '高级信息' });
     expect(within(advanced).getByText('当前 Agent ID')).toBeInTheDocument();

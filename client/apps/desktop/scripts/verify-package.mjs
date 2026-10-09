@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readEnterpriseGatewayPackageConfig
 } from './enterprise-package-contract.mjs';
+import { assertCustomerUpdateMarker, assertUpdateRuntimeDependencies } from './customer-update-contract.mjs';
 import {
   assertCodexRuntimePackage
 } from './codex-runtime-package-contract.mjs';
@@ -146,6 +147,8 @@ assertAsarContents();
 assertBrandingContents();
 assertDaemonContents();
 assertEnterpriseGatewayConfig();
+assertCustomerUpdateMarker(resourcesDir, manifest);
+assertUpdateRuntimeDependencies(resourcesDir);
 await assertWebContents();
 const codexRuntime = await assertCodexRuntimeContents();
 assertNoLocalData();

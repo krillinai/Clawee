@@ -32,6 +32,7 @@ import {
 } from './MemorySettingsView.js';
 import './settings-management.css';
 import { GatewayConfiguration, type GatewayConfigurationProps } from '../account/GatewayConfiguration.js';
+import { DesktopUpdateSettings, type DesktopUpdates } from './DesktopUpdates.js';
 
 export type RuntimeStatus = {
   connected: boolean;
@@ -46,6 +47,7 @@ export type DefaultPermissionPreference = 'follow-project' | ProjectPermission;
 
 export type ClaweeSettingsViewProps = {
   initialTab?: 'general' | 'model';
+  desktopUpdates?: DesktopUpdates;
   runtimeStatus: RuntimeStatus;
   agentId?: string;
   defaultPermission?: DefaultPermissionPreference;
@@ -194,7 +196,7 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
           />
         ) : null}
         {activeTab === 'about' ? (
-          <AboutSettings runtimeStatus={props.runtimeStatus} agentId={props.agentId} />
+          <AboutSettings runtimeStatus={props.runtimeStatus} agentId={props.agentId} desktopUpdates={props.desktopUpdates} />
         ) : null}
       </main>
     </div>
@@ -647,7 +649,7 @@ function PluginSettings(props: { runtimeStatus: RuntimeStatus }) {
   );
 }
 
-function AboutSettings(props: { runtimeStatus: RuntimeStatus; agentId?: string }) {
+function AboutSettings(props: { runtimeStatus: RuntimeStatus; agentId?: string; desktopUpdates?: DesktopUpdates }) {
   const runtimeStatusText = props.runtimeStatus.connected ? '正常' : '未连接';
 
   return (
@@ -657,11 +659,11 @@ function AboutSettings(props: { runtimeStatus: RuntimeStatus; agentId?: string }
         <p>查看版本、数据目录和本地运行信息。</p>
       </header>
       <div className="settings-card">
-        <SettingsRow label="Clawee 版本" value={CLAWEE_APP_VERSION} />
+        <SettingsRow label="Clawee 版本" value={props.desktopUpdates?.state?.currentVersion ?? CLAWEE_APP_VERSION} />
         <SettingsRow label="Runtime 版本" value={props.runtimeStatus.runtimeVersion ?? '未知'} />
         <SettingsRow label="数据目录" value={props.runtimeStatus.codexHome ?? '未设置'} />
-        <SettingsRow label="检查更新" value="手动检查稍后支持" />
       </div>
+      <DesktopUpdateSettings updates={props.desktopUpdates} />
       <section className="settings-card settings-advanced" aria-label="高级信息">
         <h2>高级信息</h2>
         <SettingsRow label="当前 Agent ID" value={props.agentId ?? '未知'} />

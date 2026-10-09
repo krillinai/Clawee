@@ -149,6 +149,8 @@ export type RunEventSubscriber = (event: AgentEventEnvelope) => void;
 export type RunManager = {
   startRun(input: CreateRunInput): CreatedRun;
   createAndRun(input: CreateRunInput): Promise<CreatedRun>;
+  prepareDesktopUpdate?(): boolean;
+  cancelDesktopUpdate?(): void;
   cancelAll(): void;
   cancelRun(id: string): boolean;
   steerRun?(id: string): boolean;
@@ -162,6 +164,15 @@ export type RunManager = {
   subscribe(runId: string, subscriber: RunEventSubscriber): () => void;
   close(options?: { timeoutMs?: number }): Promise<void>;
 };
+
+export class DesktopUpdatePreparedError extends Error {
+  readonly code = 'DESKTOP_UPDATE_PREPARED';
+
+  constructor() {
+    super('客户端正在准备安装更新，暂不接受新任务');
+    this.name = 'DesktopUpdatePreparedError';
+  }
+}
 
 const INTERACTIVE_RUN_TIMEOUT_MS = MCP_TASK_MAX_EXECUTION_MS;
 const SCHEDULED_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -194,6 +205,12 @@ type CodexThreadRotation = {
 
 export function createRunManager(options: RunManagerOptions): RunManager {
   const runs = createRunRepository(options.db);
+  const findUnfinishedRun = options.db.prepare(`
+    SELECT 1 FROM runs
+    WHERE public_status NOT IN ('succeeded', 'failed', 'canceled', 'orphaned')
+       OR internal_status NOT IN ('succeeded', 'failed', 'canceled', 'orphaned')
+    LIMIT 1
+  `);
   const codexThreadRotationRunThreshold = normalizeRotationRunThreshold(
     options.codexThreadRotationRunThreshold
   );
@@ -240,6 +257,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   const skillTrackerInit = new Map<string, Promise<void>>();
   const activityWork = new Map<string, Promise<void>>();
   let closing = false;
+  let desktopUpdatePrepared = false;
   let closeWork: Promise<void> | undefined;
   const runningPersistentRunIds = new Set<string>();
   let persistentSubmissionSequence = 0;
@@ -335,8 +353,19 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   recoverOrphanedRuns();
 
   const manager: RunManager = {
+    prepareDesktopUpdate() {
+      if (closing) throw new Error('Run manager is closing');
+      desktopUpdatePrepared = true;
+      return activeRuns.size === 0 && findUnfinishedRun.get() === undefined;
+    },
+
+    cancelDesktopUpdate() {
+      desktopUpdatePrepared = false;
+    },
+
     startRun(input: CreateRunInput): CreatedRun {
       if (closing) throw new Error('Run manager is closing');
+      if (desktopUpdatePrepared) throw new DesktopUpdatePreparedError();
       const runInput = resolveCreateRunInput(input);
       const thread = runInput.threadId === undefined
         ? undefined

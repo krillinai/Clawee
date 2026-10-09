@@ -115,6 +115,41 @@ describe('DaemonManager', () => {
     await stop;
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('update shutdown rejects timeout instead of force killing or declaring success', async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    vi.spyOn(child, 'postMessage').mockImplementation(() => undefined);
+    const kill = vi.spyOn(child, 'kill');
+    electronMocks.fork.mockReturnValue(child as unknown as UtilityProcess);
+    const manager = new DaemonManager(fakeLogger());
+    const started = manager.start(startInput());
+    await Promise.resolve();
+    child.stdout.write('{"address":"127.0.0.1:43120","token":"secret"}\n');
+    await started;
+    const stopped = expect(manager.stopForUpdate(1_000)).rejects.toThrow('停止超时');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopped;
+    expect(kill).not.toHaveBeenCalled();
+    expect(manager.currentConnection).toBeDefined();
+    manager.resumeAfterUpdate();
+  });
+
+  it('update shutdown waits for exit and rejects unfinished Codex cleanup', async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    electronMocks.fork.mockReturnValue(child as unknown as UtilityProcess);
+    const manager = new DaemonManager(fakeLogger(), () => new Promise(() => undefined));
+    const started = manager.start(startInput());
+    await Promise.resolve();
+    child.stdout.write('{"address":"127.0.0.1:43120","token":"secret"}\n');
+    await started;
+    child.emit('message', { type: 'codex_child_started', pid: 43121 });
+    const stopped = expect(manager.stopForUpdate(1_000)).rejects.toThrow('停止超时');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await stopped;
+    expect(manager.pid).toBeUndefined();
+  });
 });
 
 class FakeUtilityProcess extends EventEmitter {

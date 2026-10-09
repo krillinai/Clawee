@@ -101,6 +101,28 @@ export class DaemonManager extends EventEmitter<DaemonManagerEvents> {
     return await this.start(input);
   }
 
+  async stopForUpdate(timeoutMs = 5_000): Promise<void> {
+    if (this.stopWork !== undefined) await this.stopWork;
+    this.stopWork = (async () => {
+      const child = this.child;
+      this.intentionalStop = true;
+      if (child === undefined) {
+        if (!await settlesWithin(this.codexCleanupWork, timeoutMs)) throw new Error('Runtime 清理超时，已取消安装');
+        return;
+      }
+      const exited = waitForExit(child);
+      child.postMessage({ type: 'shutdown' });
+      if (!await this.waitForExitAndCleanup(exited, timeoutMs) || this.child !== undefined) {
+        throw new Error('本地运行服务停止超时，已取消安装');
+      }
+    })().finally(() => { this.stopWork = undefined; });
+    await this.stopWork;
+  }
+
+  resumeAfterUpdate(): void {
+    this.intentionalStop = false;
+  }
+
   private startInternal(input: DaemonStartInput): Promise<DaemonConnection> {
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();

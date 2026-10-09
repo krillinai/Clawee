@@ -5,3 +5,4 @@ export * from './events.js';
 export * from './runtime.js';
 export * from './feedback.js';
 export * from './workflow.js';
+export * from './desktop-update.js';

@@ -10,6 +10,9 @@ import {
 } from 'electron';
 import { createWindowsApplicationMenuTemplate } from './application-menu.js';
 import { BootstrapController } from './bootstrap-controller.js';
+import { CustomerUpdateController, readCustomerUpdateGateway, readPublicCustomerRelease } from './customer-update.js';
+import { createCustomerNativeUpdater } from './customer-update-native.js';
+import { requestDaemonUpdate } from './customer-update-daemon.js';
 import { DaemonManager, settlesWithin } from './daemon-manager.js';
 import {
   startRuntimeDataImport,
@@ -243,6 +246,37 @@ async function launchDesktop(): Promise<void> {
     logger,
     navigate
   });
+  const updateGateway = readCustomerUpdateGateway(process.resourcesPath, app.isPackaged);
+  const updates = new CustomerUpdateController({
+    gateway: updateGateway,
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    native: updateGateway === undefined ? undefined : createCustomerNativeUpdater(process.platform),
+    readRelease: readPublicCustomerRelease,
+    prepare: async () => {
+      if (shutdownStarted || bootstrap?.currentState.phase !== 'ready') throw new Error('工作台尚未就绪，不能安装更新');
+      await requestDaemonUpdate(daemon.currentConnection, 'prepare');
+    },
+    stop: async () => {
+      notifications.stop();
+      await bootstrap!.stopForUpdate(DESKTOP_SHUTDOWN_TIMEOUT_MS - SHUTDOWN_LOG_FLUSH_RESERVE_MS);
+      if (daemon.pid !== undefined || daemon.currentConnection !== undefined) throw new Error('本地运行服务未确认关闭');
+    },
+    recover: async () => {
+      if (shutdownStarted) return;
+      let restart = false;
+      try {
+        if (daemon.currentConnection !== undefined) await requestDaemonUpdate(daemon.currentConnection, 'cancel');
+      } catch {
+        restart = true;
+      }
+      await bootstrap!.resumeAfterUpdate(restart);
+      await requestDaemonUpdate(daemon.currentConnection, 'cancel');
+      notifications.start();
+    }
+  });
+  updates.on('state', state => windowManager?.send(desktopIpc.updateStateChanged, state));
   const loadWorkspace = (): Promise<void> => {
     if (shutdownStarted) return Promise.resolve();
     if (workspaceLoadWork !== undefined) return workspaceLoadWork;
@@ -293,6 +327,7 @@ async function launchDesktop(): Promise<void> {
     dataDir,
     logDir,
     logger,
+    updates,
     quit: () => app.quit(),
     reloadWorkspace: loadWorkspace
   });
@@ -359,10 +394,22 @@ async function launchDesktop(): Promise<void> {
     // The tray and Runtime intentionally remain active.
   });
   app.on('before-quit', event => {
+    if (updates.canQuitForInstall) {
+      updates.dispose();
+      windowManager?.beginQuit();
+      notifications.stop();
+      tray.destroy();
+      return;
+    }
+    if (updates.installationPending) {
+      event.preventDefault();
+      return;
+    }
     if (allowQuit) return;
     event.preventDefault();
     if (shutdownStarted) return;
     shutdownStarted = true;
+    updates.dispose();
     const startedAt = Date.now();
     const deadline = startedAt + DESKTOP_SHUTDOWN_TIMEOUT_MS;
     const cleanupTimeoutMs = DESKTOP_SHUTDOWN_TIMEOUT_MS - SHUTDOWN_LOG_FLUSH_RESERVE_MS;
@@ -394,6 +441,7 @@ async function launchDesktop(): Promise<void> {
         });
       });
   });
+  updates.start();
 }
 
 function registerIpcHandlers(input: {
@@ -402,6 +450,7 @@ function registerIpcHandlers(input: {
   allowInsecureExternalUrls: boolean;
   externalUrlOpener?(url: string): Promise<void>;
   bootstrap: BootstrapController;
+  updates: CustomerUpdateController;
   daemon: DaemonManager;
   notifications: NotificationManager;
   windowManager: WindowManager;
@@ -411,11 +460,16 @@ function registerIpcHandlers(input: {
   quit(): void;
   reloadWorkspace(): Promise<void>;
 }): void {
+  handle(desktopIpc.readUpdateState, input.development, () => input.updates.currentState);
+  handle(desktopIpc.checkForUpdates, input.development, () => input.updates.checkForUpdates());
+  handle(desktopIpc.downloadUpdate, input.development, () => input.updates.downloadUpdate());
+  handle(desktopIpc.installUpdate, input.development, () => input.updates.installUpdate());
   handle(desktopIpc.readConnection, input.development, () =>
     input.bootstrap.rendererConnection());
   handle(desktopIpc.readBootstrap, input.development, () =>
     input.bootstrap.currentState);
   handle(desktopIpc.bootstrapRetry, input.development, async () => {
+    if (input.updates.installationPending) return failed('更新安装期间不能重新启动 Runtime');
     await input.daemon.stop();
     await input.bootstrap.start();
     return ok();
@@ -431,6 +485,7 @@ function registerIpcHandlers(input: {
     return result.filePaths[0] ?? null;
   });
   handle(desktopIpc.restartRuntime, input.development, async () => {
+    if (input.updates.installationPending) return failed('更新安装期间不能重新启动 Runtime');
     await input.bootstrap.restartRuntime();
     return ok();
   });
