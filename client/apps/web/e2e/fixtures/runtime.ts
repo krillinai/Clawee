@@ -37,7 +37,7 @@ export type FakeCodexInvocation = {
   approval?: boolean;
   command?: string;
   agentSchedule?: Record<string, unknown>;
-  files?: Record<string, string>;
+  files?: Record<string, string | { base64: string }>;
 };
 
 export type FakeCodexThread = {

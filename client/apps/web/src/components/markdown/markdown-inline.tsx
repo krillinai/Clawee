@@ -9,7 +9,7 @@ const WORKSPACE_FILE_EXTENSIONS = [
   'jsx', 'js', 'tsx', 'ts', 'css', 'scss', 'html', 'htm', 'xml', 'csv',
   'py', 'go', 'rs', 'java', 'kt', 'kts', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp',
   'sh', 'bash', 'zsh', 'sql', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp',
-  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'mp3', 'wav', 'mp4', 'mov', 'webm'
+  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'zip', 'mp3', 'wav', 'mp4', 'mov', 'webm'
 ].join('|');
 const WORKSPACE_FILE_PATH_SOURCE =
   `(?:~\\/|\\.{1,2}\\/|\\/)?(?:[^\\s\`<>"'()\\[\\]{}，。！？；：,;!?]+\\/)*`
@@ -244,8 +244,8 @@ export function renderInlineMarkdown(
   const allowRelative = Boolean(options.onLinkClick);
   const userVariant = options.variant === 'user';
   const regex = userVariant
-    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)/g
-    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
+    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)<>]+)/g
+    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;

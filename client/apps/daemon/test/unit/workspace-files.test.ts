@@ -14,6 +14,16 @@ afterEach(() => {
 });
 
 describe('workspace file service', () => {
+  unixIt('拒绝通过普通别名读取敏感目标文件', async () => {
+    const { service } = createFixture();
+    writeFile('.env', 'TOKEN=secret');
+    symlinkSync(join(tempDir, '.env'), join(tempDir, 'report.txt'));
+
+    await expect(service.readContent({ threadId: 'thread_1', path: 'report.txt' })).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED'
+    });
+  });
+
   it('lists one directory level and suggests README.md', async () => {
     const { service } = createFixture();
     writeFile('README.md', '# hello');
@@ -163,6 +173,50 @@ describe('workspace file service', () => {
     await expect(service.readContent({ threadId: 'thread_1', path: '../README.md' })).rejects.toMatchObject({
       code: 'PATH_INVALID'
     });
+  });
+
+  it.each([String.raw`\\server\share.txt`, String.raw`\server\share.txt`, String.raw`\share.txt`])(
+    '同名工作区文件存在时仍拒绝反斜杠绝对路径 %s',
+    async (path) => {
+      const { service } = createFixture({ sandbox: 'workspace-write' });
+      writeFile('server/share.txt', 'saved');
+      writeFile('share.txt', 'saved');
+      const request = { threadId: 'thread_1', path };
+
+      for (const method of ['getMeta', 'readContent', 'readBlob', 'download'] as const) {
+        await expect(service[method](request)).rejects.toMatchObject({ code: 'PATH_INVALID', statusCode: 400 });
+      }
+      await expect(service.saveContent({
+        ...request,
+        content: 'changed',
+        baseVersionToken: 'stale',
+        overwriteConflict: true
+      })).rejects.toMatchObject({ code: 'PATH_INVALID', statusCode: 400 });
+      expect(readFileSync(join(tempDir, 'server', 'share.txt'), 'utf8')).toBe('saved');
+      expect(readFileSync(join(tempDir, 'share.txt'), 'utf8')).toBe('saved');
+    }
+  );
+
+  it('正斜杠与反斜杠相对路径仍支持预览、保存和下载', async () => {
+    const { service } = createFixture({ sandbox: 'workspace-write' });
+    writeFile('docs/report.md', '# saved');
+    writeFile('docs/preview.png', 'image bytes');
+    for (const path of ['docs/report.md', String.raw`docs\report.md`]) {
+      const request = { threadId: 'thread_1', path };
+      const before = await service.readContent(request);
+      expect(before.meta.path).toBe('docs/report.md');
+      expect(before.content).toBe('# saved');
+      await service.saveContent({ ...request, content: '# saved', baseVersionToken: before.meta.versionToken });
+      const download = await service.download(request);
+      const chunks: Buffer[] = [];
+      for await (const chunk of download.stream) chunks.push(chunk as Buffer);
+      expect(Buffer.concat(chunks).toString()).toBe('# saved');
+    }
+    for (const path of ['docs/preview.png', String.raw`docs\preview.png`]) {
+      const blob = await service.readBlob({ threadId: 'thread_1', path });
+      expect(blob.meta.path).toBe('docs/preview.png');
+      expect(blob.buffer.toString()).toBe('image bytes');
+    }
   });
 
   it('rejects symlink escapes outside canonicalCwd', async () => {

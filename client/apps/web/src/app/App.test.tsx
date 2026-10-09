@@ -7819,14 +7819,23 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('点击聊天回复中的成果卡片会直接打开对应文件', async () => {
+  it.each(['browser', 'desktop'] as const)('%s host 的服务器中文空格绝对路径成果可预览和下载，越界路径不回退', async hostKind => {
     const user = userEvent.setup();
-    const hostBridge = createHostBridge();
-    const absoluteChangedPath = '/Users/test/develop/clawee/Default%20Project/xiaodoujia-apple-aso-audit.html';
-    const absoluteImagePath = '/Users/test/develop/clawee/Default%20Project/outputs/bridge.png';
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    const workspaceRoot = '/srv/任务 工作区';
+    const relativeChangedPath = '中文 报告.html';
+    const relativeImagePath = 'outputs/中文 图片.png';
+    const absoluteChangedPath = `${workspaceRoot}/${relativeChangedPath}`;
+    const absoluteImagePath = encodeURI(`${workspaceRoot}/${relativeImagePath}`);
+    const outsidePath = '/srv/任务 工作区外/中文 报告.html';
     const createObjectURL = vi.fn(() => 'blob:generated-bridge');
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.href).toBe('blob:generated-bridge');
+      expect(this.download).toBe(relativeChangedPath);
+    });
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -7843,8 +7852,8 @@ describe('App', () => {
               id: 'thread_files',
               title: '真实文件会话',
               codexThreadId: 'codex-thread-files',
-              cwd: '/Users/test/develop/clawee/Default Project',
-              canonicalCwd: '/Users/test/develop/clawee/Default Project'
+              cwd: workspaceRoot,
+              canonicalCwd: workspaceRoot
             })
           ]
         });
@@ -7857,7 +7866,7 @@ describe('App', () => {
             {
               id: 'history_assistant_1',
               type: 'assistant_message',
-              text: `已生成文件：\n\n\`\`\`text\n${absoluteChangedPath} (311 字节)\n\`\`\`\n\n![大桥](${absoluteImagePath})`,
+              text: `[中文报告](${absoluteChangedPath})\n\n![大桥](${absoluteImagePath})\n\n[工作区外报告](${outsidePath})`,
               format: 'plain_text',
               delivery: 'message',
               createdAt: new Date(0).toISOString()
@@ -7869,7 +7878,7 @@ describe('App', () => {
         return jsonResponse({
           threadId: 'thread_files',
           rootName: 'Default Project',
-          rootPathLabel: '/Users/test/develop/clawee/Default Project',
+          rootPathLabel: workspaceRoot,
           path: '',
           suggestedOpenPath: 'README.md',
           truncated: false,
@@ -7891,8 +7900,8 @@ describe('App', () => {
               }
             },
             {
-              path: 'xiaodoujia-apple-aso-audit.html',
-              name: 'xiaodoujia-apple-aso-audit.html',
+              path: relativeChangedPath,
+              name: relativeChangedPath,
               depth: 0,
               type: 'file',
               meta: {
@@ -7910,7 +7919,7 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/blob?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'outputs/bridge.png') throw new Error(`Expected image blob request, got ${path}`);
+        if (path !== relativeImagePath) throw new Error(`Expected image blob request, got ${path}`);
         return new Response(new Uint8Array([137, 80, 78, 71]), {
           status: 200,
           headers: { 'content-type': 'image/png' }
@@ -7918,10 +7927,11 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/meta?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'xiaodoujia-apple-aso-audit.html') throw new Error(`Expected HTML meta request, got ${path}`);
+        if (path === outsidePath) return jsonResponse({ error: { code: 'PERMISSION_DENIED', message: '路径越界' } }, { status: 403 });
+        if (path !== relativeChangedPath) throw new Error(`Expected HTML meta request, got ${path}`);
         return jsonResponse({
-          path: 'xiaodoujia-apple-aso-audit.html',
-          name: 'xiaodoujia-apple-aso-audit.html',
+          path: relativeChangedPath,
+          name: relativeChangedPath,
           type: 'file',
           kind: 'html',
           mime: 'text/html',
@@ -7935,11 +7945,11 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/content?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'xiaodoujia-apple-aso-audit.html') throw new Error(`Expected HTML content request, got ${path}`);
+        if (path !== relativeChangedPath) throw new Error(`Expected HTML content request, got ${path}`);
         return jsonResponse({
           meta: {
-            path: 'xiaodoujia-apple-aso-audit.html',
-            name: 'xiaodoujia-apple-aso-audit.html',
+            path: relativeChangedPath,
+            name: relativeChangedPath,
             type: 'file',
             kind: 'html',
             mime: 'text/html',
@@ -7954,10 +7964,14 @@ describe('App', () => {
           encoding: 'utf8'
         });
       }
+      if (url.includes('/workspace/files/download?')) {
+        expect(new URL(url).searchParams.get('path')).toBe(relativeChangedPath);
+        return new Response('<h1>Generated</h1>');
+      }
       throw new Error(`Unexpected request ${url}`);
     };
 
-    render(
+    const view = render(
       <App
         fileService={createFileService()}
         hostBridge={hostBridge}
@@ -7967,20 +7981,41 @@ describe('App', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: /真实文件会话/ }));
-    expect(await screen.findByRole('img', { name: 'bridge.png' }))
+    expect(await screen.findByRole('img', { name: encodeURI('中文 图片.png') }))
       .toHaveAttribute('src', 'blob:generated-bridge');
-    await user.click(await screen.findByRole('button', { name: `打开成果 ${absoluteChangedPath}` }));
+    await user.click(await screen.findByRole('link', { name: '中文报告' }));
 
     expect(await screen.findByLabelText('会话和文件工作区')).toBeInTheDocument();
-    expect(await screen.findByTitle('xiaodoujia-apple-aso-audit.html HTML 预览')).toBeInTheDocument();
+    expect(await screen.findByTitle(`${relativeChangedPath} HTML 预览`)).toBeInTheDocument();
+    if (hostKind === 'desktop') {
+      expect(screen.getByRole('button', { name: '打开文件' })).toBeEnabled();
+    } else {
+      expect(screen.queryByRole('button', { name: '打开文件' })).not.toBeInTheDocument();
+    }
     expect(screen.queryByText('选择一个文件')).not.toBeInTheDocument();
     expect(screen.queryByText('已编辑 docs/atoms.md')).not.toBeInTheDocument();
     expect(
       fetchCalls.some(call => (
         call.url.includes('/workspace/files/meta?')
-        && call.url.includes('path=xiaodoujia-apple-aso-audit.html')
+        && new URL(call.url).searchParams.get('path') === relativeChangedPath
       ))
     ).toBe(true);
+    vi.useFakeTimers();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '下载文件' })));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('a[download]')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(document.querySelector('a[download]')).not.toBeInTheDocument();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:generated-bridge');
+    vi.useRealTimers();
+    const downloadCall = fetchCalls.find(call => call.url.includes('/workspace/files/download?'));
+    expect(downloadCall?.init?.headers).toEqual({ Authorization: 'Bearer runtime-token' });
+    expect(downloadCall?.url).not.toContain('runtime-token');
+    await user.click(screen.getByRole('link', { name: '工作区外报告' }));
+    expect(await screen.findByText('路径越界')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载文件' })).toBeDisabled();
+    expect(fetchCalls.some(call => call.url.includes('/workspace/files/meta?') && new URL(call.url).searchParams.get('path') === outsidePath)).toBe(true);
+    view.unmount();
   });
 
   it('会话和文件工作区之间的分隔条可以拖动调整宽度', async () => {

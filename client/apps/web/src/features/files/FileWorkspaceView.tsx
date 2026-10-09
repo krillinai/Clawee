@@ -25,6 +25,7 @@ export type WorkspaceFileService = {
   openText(threadId: string, path: string): Promise<WorkspaceFileContentResponse>;
   saveText(input: WorkspaceFileSaveRequest): Promise<{ meta: WorkspaceFileMeta; saved: true }>;
   openBlob(threadId: string, path: string): Promise<{ objectUrl: string; mime: string; size: number }>;
+  download(threadId: string, path: string): Promise<{ objectUrl: string; fileName: string }>;
   revokeBlob(objectUrl: string): void;
   reveal(input: WorkspaceFileRevealRequest): Promise<unknown>;
 };
@@ -34,6 +35,7 @@ type FileWorkspaceViewProps = {
   selectedPath?: string;
   conversationPaths?: string[];
   workspaceFileService?: WorkspaceFileService | null;
+  canOpenFile?: boolean;
   onClose(): void;
   onSelectPath?(path: string): void;
   onOpenExternal?(url: string): void;
@@ -60,6 +62,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
   const [objectUrl, setObjectUrl] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string>();
   const [saveError, setSaveError] = useState<string>();
   const [conflictOpen, setConflictOpen] = useState(false);
@@ -71,6 +74,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
   const loadedPathsRef = useRef(new Set<string>());
   const openRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
+  const downloadInFlightRef = useRef(false);
   const selectedPathRef = useRef(props.selectedPath);
   selectedPathRef.current = props.selectedPath;
   const conversationPathsRef = useRef(props.conversationPaths ?? []);
@@ -476,6 +480,47 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     }
   }
 
+  async function handleDownload() {
+    if (!thread || !service || !activePath || downloadInFlightRef.current) {
+      return;
+    }
+
+    const requestId = openRequestIdRef.current;
+    downloadInFlightRef.current = true;
+    setDownloading(true);
+    setWorkspaceMessage(undefined);
+    try {
+      const download = await service.download(thread.id, activePath);
+      if (!mountedRef.current || requestId !== openRequestIdRef.current) {
+        service.revokeBlob(download.objectUrl);
+        return;
+      }
+
+      const anchor = document.createElement('a');
+      anchor.href = download.objectUrl;
+      anchor.download = download.fileName;
+      anchor.hidden = true;
+      try {
+        document.body.appendChild(anchor);
+        anchor.click();
+      } finally {
+        window.setTimeout(() => {
+          anchor.remove();
+          service.revokeBlob(download.objectUrl);
+        }, 60_000);
+      }
+    } catch (error) {
+      if (mountedRef.current && requestId === openRequestIdRef.current) {
+        setWorkspaceMessage(humanizeError(error, '无法下载文件'));
+      }
+    } finally {
+      downloadInFlightRef.current = false;
+      if (mountedRef.current) {
+        setDownloading(false);
+      }
+    }
+  }
+
   async function handleOpenFile() {
     if (!thread || !service || !activePath) {
       return;
@@ -561,9 +606,11 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
         canToggleMode={effectiveMeta !== undefined && effectiveMeta.editable && isPreviewable(effectiveMeta)}
         canSave={effectiveMeta !== undefined && effectiveMeta.editable}
         saveDisabled={saving || !dirty || effectiveMeta?.readonly}
+        downloading={downloading}
         onModeChange={setFileMode}
         onSave={() => void handleSave(false)}
-        onOpenFile={() => void handleOpenFile()}
+        onDownload={() => void handleDownload()}
+        onOpenFile={props.canOpenFile ? () => void handleOpenFile() : undefined}
         onToggleTree={() => setTreeCollapsed(previous => !previous)}
         onClose={handleBack}
       />
@@ -576,6 +623,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
       >
         <div className="file-workspace-editor">
           {threadReadonly ? <div className="file-workspace-notice">当前会话为只读模式，不能保存文件</div> : null}
+          {dirty ? <div className="file-workspace-notice">下载的是已保存的源文件，不包含未保存修改</div> : null}
           {workspaceMessage ? <div className="file-workspace-notice">{workspaceMessage}</div> : null}
           {conflictOpen ? (
             <div className="file-workspace-conflict" role="alert">
@@ -685,11 +733,12 @@ function resolveDirectoryFilePath(
   nodes: WorkspaceDirectoryResponse['nodes']
 ): string {
   const normalizedRequestedPath = requestedPath.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (normalizedRequestedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedRequestedPath)) {
+  if (normalizedRequestedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedRequestedPath) || normalizedRequestedPath.split('/').includes('..')) {
     return normalizedRequestedPath;
   }
   const exactMatch = nodes.find(node => node.type === 'file' && node.path === normalizedRequestedPath);
   if (exactMatch !== undefined) return exactMatch.path;
+  if (/[/\\]/.test(requestedPath)) return normalizedRequestedPath;
 
   const requestedName = normalizedRequestedPath.split('/').at(-1);
   if (requestedName === undefined || requestedName.length === 0) return normalizedRequestedPath;

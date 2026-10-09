@@ -34,6 +34,16 @@ export function createWorkspaceFileService(client: WorkspaceFileClient) {
         size: blob.size
       };
     },
+    async download(threadId: string, path: string): Promise<{ objectUrl: string; fileName: string }> {
+      const response = await client.rawGet(`/workspace/files/download?${buildThreadPathQuery(threadId, path)}`);
+      const blob = await response.blob();
+      const basename = path.replace(/\\/g, '/').split('/').at(-1) ?? '';
+      const fileName = basename.replace(/[\u0000-\u001f\u007f:*?"<>|]/g, '_');
+      return {
+        objectUrl: URL.createObjectURL(blob),
+        fileName: fileName && fileName !== '.' && fileName !== '..' ? fileName : 'download'
+      };
+    },
     revokeBlob(objectUrl: string): void {
       URL.revokeObjectURL(objectUrl);
     },

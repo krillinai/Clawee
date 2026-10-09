@@ -74,6 +74,27 @@ export async function registerWorkspaceFileRoutes(
     }
   });
 
+  server.get('/workspace/files/download', async (request, reply) => {
+    const parsed = parseThreadPathQuery(request.query);
+    if (!parsed.ok) return reply.code(400).send(apiError('VALIDATION_FAILED', parsed.message));
+
+    try {
+      const download = await service.download(parsed.value);
+      const destroyStream = () => download.stream.destroy();
+      reply.raw.once('close', destroyStream);
+      download.stream.once('close', () => reply.raw.off('close', destroyStream));
+      return reply
+        .header('Content-Type', 'application/octet-stream')
+        .header('Content-Disposition', attachmentDisposition(download.name))
+        .header('Content-Length', download.size)
+        .header('Cache-Control', 'no-store')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(download.stream);
+    } catch (error) {
+      return sendWorkspaceFileError(reply, error);
+    }
+  });
+
   server.post<{ Body: unknown }>('/workspace/files/reveal', async (request, reply) => {
     const parsed = parseRevealBody(request.body);
     if (!parsed.ok) return reply.code(400).send(apiError('VALIDATION_FAILED', parsed.message));
@@ -87,6 +108,15 @@ export async function registerWorkspaceFileRoutes(
 }
 
 type ParseResult<T> = { ok: true; value: T } | { ok: false; message: string };
+
+function attachmentDisposition(name: string): string {
+  const safeName = name.replace(/[\\/\x00-\x1f\x7f]/g, '_');
+  const fallback = safeName.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  const encoded = encodeURIComponent(safeName).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
 
 function parseThreadPathQuery(
   query: unknown

@@ -1,4 +1,6 @@
 import { constants as fsConstants, type Stats } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import {
   accessSync,
   closeSync,
@@ -13,7 +15,7 @@ import {
   unlinkSync,
   writeSync
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import type {
   WorkspaceDirectoryListRequest,
@@ -23,6 +25,7 @@ import type {
   WorkspaceFileContentResponse,
   WorkspaceFileMeta,
   WorkspaceFileMetaRequest,
+  WorkspaceFilePathRequest,
   WorkspaceFileRevealRequest,
   WorkspaceFileRevealResponse,
   WorkspaceFileSaveRequest,
@@ -34,7 +37,7 @@ import { isEditable, isPreviewable, isSensitivePath, isTextualKind, kindFor, mim
 import { assertInsideRoot, assertRegularFile, isIgnoredDir, resolveSafeExisting, resolveSafeParent, validateRelativePath } from './paths.js';
 import { defaultRevealExecutor, type RevealExecutor } from './reveal.js';
 import { buildDirectoryResponse } from './tree.js';
-import { MAX_IMAGE_BYTES, MAX_JSON_FORMAT_BYTES, MAX_PDF_BYTES, MAX_TEXT_BYTES } from './types.js';
+import { MAX_DOWNLOAD_BYTES, MAX_IMAGE_BYTES, MAX_JSON_FORMAT_BYTES, MAX_PDF_BYTES, MAX_TEXT_BYTES } from './types.js';
 
 export type WorkspaceFileService = {
   listDirectory(request: WorkspaceDirectoryListRequest): Promise<WorkspaceDirectoryResponse>;
@@ -42,6 +45,7 @@ export type WorkspaceFileService = {
   readContent(request: WorkspaceFileContentRequest): Promise<WorkspaceFileContentResponse>;
   saveContent(request: WorkspaceFileSaveRequest): Promise<WorkspaceFileSaveResponse>;
   readBlob(request: WorkspaceFileBlobRequest): Promise<{ meta: WorkspaceFileMeta; buffer: Buffer }>;
+  download(request: WorkspaceFilePathRequest): Promise<{ name: string; size: number; stream: Readable }>;
   reveal(request: WorkspaceFileRevealRequest): Promise<WorkspaceFileRevealResponse>;
 };
 
@@ -100,17 +104,11 @@ export function createWorkspaceFileService(input: {
 
     async getMeta(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       return buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
     },
 
     async readContent(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       const meta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
       if (!isTextualKind(meta.kind)) {
         throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only text-like files can be read as content.');
@@ -132,9 +130,6 @@ export function createWorkspaceFileService(input: {
       if (resolved.thread.sandbox === 'read-only') {
         throw new WorkspaceFileError('PERMISSION_DENIED', 'Thread sandbox is read-only.');
       }
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files cannot be modified.');
-      }
       const currentMeta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
       if (!currentMeta.editable) {
         throw new WorkspaceFileError('FILE_NOT_EDITABLE', 'File is not editable.');
@@ -153,9 +148,6 @@ export function createWorkspaceFileService(input: {
 
     async readBlob(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       const meta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
       if ((meta.kind !== 'image' && meta.kind !== 'pdf') || !meta.previewable) {
         throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only previewable images and PDFs can be read as blobs.');
@@ -164,6 +156,46 @@ export function createWorkspaceFileService(input: {
         meta,
         buffer: readFileSync(resolved.absolutePath)
       };
+    },
+
+    async download(request) {
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
+        handle = await open(resolved.absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+        const stats = await handle.stat();
+        if (!stats.isFile()) {
+          throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only regular files are supported.');
+        }
+        const currentPath = resolveSafeExisting(resolved.rootReal, resolved.relativePath);
+        const currentStats = lstatSync(currentPath);
+        if (currentPath !== resolved.absolutePath || currentStats.dev !== stats.dev || currentStats.ino !== stats.ino) {
+          throw new WorkspaceFileError('PATH_ESCAPE', 'Target changed during download.');
+        }
+        if (stats.size > MAX_DOWNLOAD_BYTES) {
+          throw new WorkspaceFileError('FILE_TOO_LARGE', 'File exceeds supported size limit.', {
+            details: { size: stats.size, limit: MAX_DOWNLOAD_BYTES }
+          });
+        }
+        if (stats.size === 0) await handle.close();
+        return {
+          name: basename(resolved.relativePath),
+          size: stats.size,
+          stream: stats.size === 0
+            ? Readable.from([])
+            : handle.createReadStream({ start: 0, end: stats.size - 1, autoClose: true })
+        };
+      } catch (error) {
+        await handle?.close();
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === 'ENAMETOOLONG') throw new WorkspaceFileError('PATH_INVALID', 'File path is too long.');
+        if (code === 'ENOENT' || code === 'ENOTDIR') throw new WorkspaceFileError('FILE_NOT_FOUND', 'File not found.');
+        if (code === 'EACCES' || code === 'EPERM') {
+          throw new WorkspaceFileError('PERMISSION_DENIED', 'File is not readable.');
+        }
+        if (code === 'ELOOP') throw new WorkspaceFileError('PATH_ESCAPE', 'Target changed during download.');
+        throw error;
+      }
     },
 
     async reveal(request) {
@@ -203,9 +235,16 @@ function resolveFileRequest(
 ): { thread: RuntimeThread; rootReal: string; relativePath: string; absolutePath: string } {
   const { thread, rootReal } = getWorkspaceRoot(getThread, threadId);
   const relativePath = validateRelativePath(rawPath, false);
+  if (isSensitivePath(relativePath)) {
+    throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
+  }
   let absolutePath: string;
   try {
     absolutePath = resolveSafeExisting(rootReal, relativePath);
+    const targetRelativePath = validateRelativePath(relative(rootReal, absolutePath), false);
+    if (isSensitivePath(targetRelativePath)) {
+      throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
+    }
     assertRegularFile(absolutePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {

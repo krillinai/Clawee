@@ -6300,6 +6300,7 @@ export function AppController(props: AppControllerProps) {
         selectedPath={state.workspaceTargetPath}
         conversationPaths={conversationFilePaths}
         workspaceFileService={workspaceFileService}
+        canOpenFile={hostBridge.kind === 'desktop'}
         onClose={closeFileWorkspace}
         onSelectPath={selectWorkspaceFile}
         onOpenExternal={(url) => void hostBridge.openExternal(url)}

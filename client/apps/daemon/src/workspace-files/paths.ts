@@ -18,7 +18,7 @@ const ignoredNames = new Set([
 ]);
 
 export function validateRelativePath(raw: string | undefined, allowEmpty: boolean): string {
-  const value = raw ?? '';
+  const value = (raw ?? '').replace(/\\/g, '/');
   if (value.length === 0) {
     if (allowEmpty) return '';
     throw new WorkspaceFileError('PATH_INVALID', 'Path is required.');
@@ -27,7 +27,7 @@ export function validateRelativePath(raw: string | undefined, allowEmpty: boolea
   if (/^[A-Za-z]:[\\/]/.test(value)) throw new WorkspaceFileError('PATH_INVALID', 'Absolute Windows paths are not allowed.');
   if (isAbsolute(value)) throw new WorkspaceFileError('PATH_INVALID', 'Absolute paths are not allowed.');
 
-  const rawSegments = value.replace(/\\/g, '/').split('/');
+  const rawSegments = value.split('/');
   for (const segment of rawSegments) {
     if (!segment || segment === '.') continue;
     if (segment === '..') throw new WorkspaceFileError('PATH_INVALID', 'Path traversal is not allowed.');

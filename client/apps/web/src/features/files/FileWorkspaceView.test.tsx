@@ -1,8 +1,8 @@
 import type { ThreadResponse, WorkspaceDirectoryResponse, WorkspaceFileMeta, WorkspaceFileNode } from '@clawee/protocol';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { useState } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '../../runtime/errors.js';
 import { FileWorkspaceView, type WorkspaceFileService } from './FileWorkspaceView.js';
 
@@ -17,7 +17,199 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe('FileWorkspaceView', () => {
+  it('没有文件时下载不可操作，浏览器不显示系统打开入口', async () => {
+    render(<FileWorkspaceView selectedThread={createThread()} workspaceFileService={createService()} onClose={vi.fn()} />);
+    expect(await screen.findByText('选择一个文件')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载文件' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '打开文件' })).not.toBeInTheDocument();
+  });
+
+  it('不可预览、只读及已归档的普通文件仍可下载，完成后延迟清理链接和 Blob', async () => {
+    const service = createService({ metas: {
+      '成果/中文 报告.zip': createMeta({ path: '成果/中文 报告.zip', name: '中文 报告.zip', kind: 'binary', previewable: false, editable: false, readonly: true })
+    } });
+    let resolveDownload: ((value: { objectUrl: string; fileName: string }) => void) | undefined;
+    service.download.mockImplementation(() => new Promise(resolve => { resolveDownload = resolve; }));
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.href).toBe('blob:download');
+      expect(this.download).toBe('中文 报告.zip');
+      expect(this.isConnected).toBe(true);
+      expect(service.revokeBlob).not.toHaveBeenCalled();
+    });
+    const view = render(<FileWorkspaceView selectedThread={createThread({ sandbox: 'read-only', status: 'archived' })}
+      selectedPath="成果/中文 报告.zip" workspaceFileService={service} onClose={vi.fn()} />);
+    const button = screen.getByRole('button', { name: '下载文件' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(service.download).toHaveBeenCalledTimes(1);
+    expect(service.download).toHaveBeenCalledWith('thread-1', '成果/中文 报告.zip');
+    expect(button).toBeDisabled();
+    expect(service.openText).not.toHaveBeenCalled();
+    expect(service.openBlob).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    await act(async () => resolveDownload?.({ objectUrl: 'blob:download', fileName: '中文 报告.zip' }));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(button).toBeEnabled();
+    const anchor = document.querySelector('a[download]');
+    expect(anchor).toBeInTheDocument();
+    view.unmount();
+    expect(service.revokeBlob).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(anchor).not.toBeInTheDocument();
+    expect(service.revokeBlob).toHaveBeenCalledWith('blob:download');
+  });
+
+  it('未保存草稿明确提示下载源文件，失败显示原状态且允许重试，不自动保存', async () => {
+    const user = userEvent.setup();
+    const service = createService({ contents: { 'notes.txt': '已保存源文件' } });
+    service.download.mockRejectedValue(new ApiClientError({ status: 404, code: 'FILE_NOT_FOUND', message: '源文件已删除' }));
+    render(<FileWorkspaceView selectedThread={createThread()} selectedPath="notes.txt" workspaceFileService={service} onClose={vi.fn()} />);
+    await screen.findByText('已保存源文件');
+    const editor = await openFileEditor(user, 'notes.txt');
+    await user.click(editor);
+    await user.keyboard('{End}草稿');
+    expect(screen.getByText('下载的是已保存的源文件，不包含未保存修改')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '下载文件' }));
+    expect(await screen.findByText('源文件已删除')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载文件' })).toBeEnabled();
+    expect(service.saveText).not.toHaveBeenCalled();
+    expect(service.revokeBlob).not.toHaveBeenCalled();
+  });
+
+  it('下载响应晚于卸载时不触发本机下载并清理 Blob', async () => {
+    const service = createService();
+    let resolveDownload: ((value: { objectUrl: string; fileName: string }) => void) | undefined;
+    service.download.mockImplementation(() => new Promise(resolve => { resolveDownload = resolve; }));
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const view = render(<FileWorkspaceView selectedThread={createThread()} selectedPath="notes.txt" workspaceFileService={service} onClose={vi.fn()} />);
+    const button = screen.getByRole('button', { name: '下载文件' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    view.unmount();
+    await act(async () => resolveDownload?.({ objectUrl: 'blob:late', fileName: 'notes.txt' }));
+    expect(anchorClick).not.toHaveBeenCalled();
+    expect(service.revokeBlob).toHaveBeenCalledWith('blob:late');
+  });
+
+  it('相对越界路径不能回退为工作区内同名成果', async () => {
+    const service = createService({ directories: { '': createDirectory({ nodes: [fileNode('报告.txt', 'text')] }) } });
+    service.getMeta.mockRejectedValue(new Error('路径越界'));
+    render(<FileWorkspaceView selectedThread={createThread()} selectedPath="../其他工作区/报告.txt" workspaceFileService={service} onClose={vi.fn()} />);
+    expect(await screen.findByText('路径越界')).toBeInTheDocument();
+    expect(service.getMeta).toHaveBeenCalledWith('thread-1', '../其他工作区/报告.txt');
+    expect(service.getMeta).not.toHaveBeenCalledWith('thread-1', '报告.txt');
+    expect(screen.getByRole('button', { name: '下载文件' })).toBeDisabled();
+  });
+
+  it.each(['初始化 selectedPath', '默认成果'])('%s 下载未加载子目录的指定文件，不回退到根目录同名文件', async (entry) => {
+    const user = userEvent.setup();
+    const thread = createThread();
+    const service = createService({
+      directories: {
+        '': createDirectory({ nodes: [directoryNode('outputs', 0), fileNode('report.txt', 'text')] })
+      },
+      metas: {
+        'outputs/report.txt': createMeta({ path: 'outputs/report.txt', name: 'report.txt', kind: 'text', mime: 'text/plain' })
+      },
+      contents: {
+        'outputs/report.txt': '指定子目录报告',
+        'report.txt': '根目录同名报告'
+      }
+    });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(
+      <FileWorkspaceView
+        selectedThread={thread}
+        selectedPath={entry === '初始化 selectedPath' ? './outputs/report.txt' : undefined}
+        conversationPaths={['outputs/report.txt']}
+        workspaceFileService={service}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('指定子目录报告')).toBeInTheDocument();
+    expect(service.listDirectory).toHaveBeenCalledTimes(1);
+    expect(service.listDirectory).toHaveBeenCalledWith(thread.id, '');
+    expect(service.getMeta).toHaveBeenCalledWith(thread.id, 'outputs/report.txt');
+    expect(service.getMeta).not.toHaveBeenCalledWith(thread.id, 'report.txt');
+    expect(service.openText).toHaveBeenCalledWith(thread.id, 'outputs/report.txt');
+    expect(service.openText).not.toHaveBeenCalledWith(thread.id, 'report.txt');
+
+    await user.click(screen.getByRole('button', { name: '下载文件' }));
+
+    expect(service.download).toHaveBeenCalledExactlyOnceWith(thread.id, 'outputs/report.txt');
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['初始化 selectedPath', 'selectedPath 更新'])('%s 指定子文件不存在时明确报错，不能读取或下载根目录同名文件', async (entry) => {
+    const user = userEvent.setup();
+    const thread = createThread();
+    const service = createService({
+      directories: {
+        '': createDirectory({ nodes: [directoryNode('outputs', 0), fileNode('report.txt', 'text')] })
+      },
+      contents: { 'report.txt': '根目录同名报告' }
+    });
+    service.getMeta.mockImplementation(async (_threadId: string, path: string) => {
+      if (path === 'outputs/report.txt') {
+        throw new ApiClientError({ status: 404, code: 'FILE_NOT_FOUND', message: '文件不存在' });
+      }
+      return createMeta({ path, name: 'report.txt', kind: 'text', mime: 'text/plain' });
+    });
+    const workspace = (selectedPath?: string) => (
+      <FileWorkspaceView
+        selectedThread={thread}
+        selectedPath={selectedPath}
+        workspaceFileService={service}
+        onClose={vi.fn()}
+      />
+    );
+    const view = render(workspace(entry === '初始化 selectedPath' ? 'outputs/report.txt' : undefined));
+    if (entry === 'selectedPath 更新') {
+      await screen.findByText('选择一个文件');
+      await waitFor(() => expect(service.listDirectory).toHaveBeenCalledWith(thread.id, ''));
+      view.rerender(workspace('outputs\\report.txt'));
+    }
+
+    expect(await screen.findByText('文件不存在')).toBeInTheDocument();
+    expect(service.getMeta).toHaveBeenCalledExactlyOnceWith(thread.id, 'outputs/report.txt');
+    expect(service.openText).not.toHaveBeenCalled();
+    expect(service.openBlob).not.toHaveBeenCalled();
+    expect(screen.queryByText('根目录同名报告')).not.toBeInTheDocument();
+    const downloadButton = screen.getByRole('button', { name: '下载文件' });
+    expect(downloadButton).toBeDisabled();
+    await user.click(downloadButton);
+    expect(service.download).not.toHaveBeenCalled();
+  });
+
+  it('纯文件名仍兼容回退到唯一同名文件并下载实际路径', async () => {
+    const user = userEvent.setup();
+    const thread = createThread();
+    const service = createService({
+      directories: {
+        '': createDirectory({ nodes: [fileNode('outputs/report.txt', 'text', 1)] })
+      },
+      contents: { 'outputs/report.txt': '唯一同名报告' }
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(<FileWorkspaceView selectedThread={thread} selectedPath="report.txt" workspaceFileService={service} onClose={vi.fn()} />);
+
+    expect(await screen.findByText('唯一同名报告')).toBeInTheDocument();
+    expect(service.getMeta).toHaveBeenCalledWith(thread.id, 'outputs/report.txt');
+    expect(service.openText).toHaveBeenCalledWith(thread.id, 'outputs/report.txt');
+    await user.click(screen.getByRole('button', { name: '下载文件' }));
+    expect(service.download).toHaveBeenCalledExactlyOnceWith(thread.id, 'outputs/report.txt');
+  });
+
   it('没有 selected thread 时显示空态', () => {
     render(<FileWorkspaceView workspaceFileService={createService()} onClose={vi.fn()} />);
 
@@ -776,7 +968,7 @@ describe('FileWorkspaceView', () => {
     });
 
     const { container } = render(
-      <FileWorkspaceView selectedThread={thread} conversationPaths={['scripts/notes.md']} workspaceFileService={service} onClose={vi.fn()} />
+      <FileWorkspaceView selectedThread={thread} conversationPaths={['scripts/notes.md']} canOpenFile workspaceFileService={service} onClose={vi.fn()} />
     );
 
     expect(await screen.findByRole('heading', { name: 'notes' })).toBeInTheDocument();
@@ -1223,7 +1415,7 @@ describe('FileWorkspaceView', () => {
       }
     });
 
-    render(<FileWorkspaceView selectedThread={thread} conversationPaths={['notes.txt']} workspaceFileService={service} onClose={vi.fn()} />);
+    render(<FileWorkspaceView selectedThread={thread} conversationPaths={['notes.txt']} canOpenFile workspaceFileService={service} onClose={vi.fn()} />);
 
     await screen.findByText('draft');
     await user.click(screen.getByRole('button', { name: '打开文件' }));
@@ -1268,6 +1460,7 @@ function createService(options: ServiceOptions = {}): WorkspaceFileService & {
   openText: ReturnType<typeof vi.fn>;
   saveText: ReturnType<typeof vi.fn>;
   openBlob: ReturnType<typeof vi.fn>;
+  download: ReturnType<typeof vi.fn>;
   revokeBlob: ReturnType<typeof vi.fn>;
   reveal: ReturnType<typeof vi.fn>;
 } {
@@ -1300,6 +1493,7 @@ function createService(options: ServiceOptions = {}): WorkspaceFileService & {
       }
       return blob;
     }),
+    download: vi.fn(async (_threadId: string, path: string) => ({ objectUrl: 'blob:download', fileName: path.split('/').at(-1) ?? path })),
     revokeBlob: vi.fn(),
     reveal: vi.fn(async () => ({ ok: true }))
   };

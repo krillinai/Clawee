@@ -6,6 +6,20 @@ import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { extractWorkspaceFilePaths } from './markdown-inline.js';
 
 describe('MarkdownRenderer', () => {
+  it('中文空格绝对路径与 ZIP 成果链接交给现有工作区回调，不打开外部页面', async () => {
+    const user = userEvent.setup();
+    const onLinkClick = vi.fn((_href: string, event: MouseEvent<HTMLAnchorElement>) => event.preventDefault());
+    render(<MarkdownRenderer variant="assistant" linkifyWorkspaceFiles onLinkClick={onLinkClick}
+      text={'[报告](/srv/任务 工作区/中文 报告.txt) [压缩包](outputs/成果.zip)'} />);
+
+    await user.click(screen.getByRole('link', { name: '报告' }));
+    await user.click(screen.getByRole('link', { name: '压缩包' }));
+
+    expect(onLinkClick.mock.calls.map(call => call[0])).toEqual(['/srv/任务 工作区/中文 报告.txt', 'outputs/成果.zip']);
+    expect(screen.getByRole('link', { name: '报告' })).not.toHaveAttribute('target');
+    expect(extractWorkspaceFilePaths('[压缩包](outputs/成果.zip)')).toEqual(['outputs/成果.zip']);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: undefined });

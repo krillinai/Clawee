@@ -1,11 +1,13 @@
 import {
   existsSync,
+  mkdirSync,
   realpathSync,
   readFileSync,
-  readdirSync
+  readdirSync,
+  writeFileSync
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import {
   expect,
   test,
@@ -45,6 +47,72 @@ import {
   waitForProcessExit,
   type PackagedApp
 } from './packaged-app.js';
+import {
+  createWorkspaceDownloadArtifacts,
+  expectWorkspaceDownload,
+  observeWorkspaceFileRequests
+} from '../../web/e2e/support/workspace-download.js';
+
+test('打包 Electron 从只读服务工作区真实下载文本和普通二进制原文件', async ({}, testInfo) => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  const artifacts = createWorkspaceDownloadArtifacts().filter(artifact => (
+    artifact.kind === 'text' || artifact.kind === 'binary'
+  ));
+  try {
+    for (const artifact of artifacts) {
+      const sourcePath = join(fixture.workspace, artifact.path);
+      mkdirSync(dirname(sourcePath), { recursive: true });
+      writeFileSync(sourcePath, artifact.bytes);
+    }
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    const requests = observeWorkspaceFileRequests(app.page);
+    const project = await runtimeRequest<{ project: { id: string } }>(
+      app.page, 'POST', '/projects', {
+        cwd: fixture.workspace,
+        name: '成果下载回归',
+        sandbox: 'read-only'
+      }
+    );
+    expect(project.status).toBe(201);
+    const thread = await runtimeRequest<{ thread: { id: string } }>(
+      app.page, 'POST', '/threads', {
+        projectId: project.body.project.id,
+        title: '成果下载回归',
+        sandbox: 'read-only'
+      }
+    );
+    expect(thread.status).toBe(201);
+
+    for (const artifact of artifacts) {
+      await app.page.evaluate(({ threadId, path }) => {
+        window.location.hash = `#/files?${new URLSearchParams({ threadId, path })}`;
+      }, { threadId: thread.body.thread.id, path: artifact.path });
+      await app.page.reload({ waitUntil: 'domcontentloaded' });
+      await ensureEmbeddedWorkspaceSignedIn(app.page);
+      await expect(app.page.getByRole('button', { name: '打开文件', exact: true })).toBeVisible();
+      if (artifact.kind === 'binary') {
+        await expect(app.page.getByText('暂不支持预览此文件', { exact: true })).toBeVisible();
+      }
+      await expectWorkspaceDownload({
+        page: app.page,
+        threadId: thread.body.thread.id,
+        workspace: fixture.workspace,
+        artifact,
+        saveDirectory: testInfo.outputPath('Electron 下载副本'),
+        requireBearer: false
+      });
+    }
+
+    expect(requests.filter(request => request.pathname.endsWith('/download'))).toHaveLength(artifacts.length);
+    expect(requests.filter(request => request.pathname.endsWith('/reveal'))).toEqual([]);
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
 
 test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进程', async () => {
   const fixture = await createEmbeddedRuntimeFixture();

@@ -515,7 +515,9 @@ function writeWorkspaceFiles(files) {
       throw new Error(`Refusing to write outside workspace: ${relativePath}`);
     }
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, String(content));
+    writeFileSync(target, typeof content === 'object' && content !== null
+      ? Buffer.from(content.base64, 'base64')
+      : String(content));
   }
 }
 

@@ -7,6 +7,7 @@ const DELIVERABLE_EXTENSIONS = new Set([
   'docx',
   'htm',
   'html',
+  'json',
   'md',
   'markdown',
   'png',
@@ -17,8 +18,10 @@ const DELIVERABLE_EXTENSIONS = new Set([
   'pdf',
   'ppt',
   'pptx',
+  'txt',
   'xls',
-  'xlsx'
+  'xlsx',
+  'zip'
 ]);
 
 export function collectConversationFilePaths(items: TimelineItem[]): string[] {

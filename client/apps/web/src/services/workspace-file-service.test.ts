@@ -6,7 +6,7 @@ import type {
   WorkspaceFileRevealResponse,
   WorkspaceFileSaveResponse
 } from '@clawee/protocol';
-import type { RuntimeClient } from '../runtime/client.js';
+import { RuntimeClient } from '../runtime/client.js';
 import { createWorkspaceFileService } from './workspace-file-service.js';
 
 const meta: WorkspaceFileMeta = {
@@ -25,9 +25,60 @@ const meta: WorkspaceFileMeta = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('WorkspaceFileService', () => {
+  it('下载普通文件时沿用 Bearer 鉴权，URL 不含 Token，返回原字节和安全文件名', async () => {
+    const bytes = new Uint8Array([0, 255, 128, 42]);
+    const fetchImpl = vi.fn(async () => new Response(bytes));
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:download');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    const service = createWorkspaceFileService(new RuntimeClient({
+      baseUrl: 'http://runtime.test', token: 'runtime-secret', fetchImpl
+    }));
+
+    const result = await service.download('thread-1', '成果/中文 报告.zip');
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://runtime.test/workspace/files/download?threadId=thread-1&path=%E6%88%90%E6%9E%9C%2F%E4%B8%AD%E6%96%87+%E6%8A%A5%E5%91%8A.zip',
+      expect.objectContaining({ method: 'GET', headers: { Authorization: 'Bearer runtime-secret' } })
+    );
+    expect(result).toEqual({ objectUrl: 'blob:download', fileName: '中文 报告.zip' });
+    const downloadedBytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(createObjectURL.mock.calls[0]![0]);
+    });
+    expect(new Uint8Array(downloadedBytes)).toEqual(bytes);
+  });
+
+  it('下载文件名不带目录和控制字符，也不采用响应头中的路径', async () => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:download') });
+    const service = createWorkspaceFileService(createClient({
+      rawGet: vi.fn(async () => new Response('source', {
+        headers: { 'content-disposition': 'attachment; filename="../../outside.txt"' }
+      }))
+    }));
+
+    expect(await service.download('thread-1', '成果/报告\u0000:".txt')).toEqual({
+      objectUrl: 'blob:download', fileName: '报告___.txt'
+    });
+  });
+
+  it.each([401, 403, 404, 413])('下载 HTTP %s 时不创建 Blob URL', async (status) => {
+    const createObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    const service = createWorkspaceFileService(new RuntimeClient({
+      baseUrl: 'http://runtime.test', token: 'runtime-secret',
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ error: { code: 'DOWNLOAD_FAILED', message: '无法下载文件' } }), { status }))
+    }));
+
+    await expect(service.download('thread-1', '报告.txt')).rejects.toMatchObject({ status, message: '无法下载文件' });
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
   it('listDirectory calls GET /workspace/files/directory', async () => {
     const getMock = vi.fn(async (_path: string) => ({
       threadId: 'thread-1',
