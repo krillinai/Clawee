@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../helpers/build-server.js';
+import { createUnknownCapabilityMatrix } from '../../src/codex/capabilities.js';
 import type {
   EnterpriseCredential,
   EnterpriseCredentialStore
@@ -42,6 +43,109 @@ afterEach(async () => {
 });
 
 describe('enterprise runtime API', () => {
+  it.each([
+    { name: '默认配置', serverDeployment: undefined, autoInstallUpdateSkills: undefined, calls: 0 },
+    { name: 'Server 模式未配置自动同步', serverDeployment: true, autoInstallUpdateSkills: undefined, calls: 0 },
+    { name: 'Server 模式关闭自动同步', serverDeployment: true, autoInstallUpdateSkills: false, calls: 0 },
+    { name: '非 Server 模式开启自动同步', serverDeployment: false, autoInstallUpdateSkills: true, calls: 0 },
+    { name: '默认部署模式开启自动同步', serverDeployment: undefined, autoInstallUpdateSkills: true, calls: 0 },
+    { name: 'Server 模式开启自动同步', serverDeployment: true, autoInstallUpdateSkills: true, calls: 1 }
+  ])('$name：仅显式开启的 Server 在恢复和登录成功后同步 Skill', async ({
+    serverDeployment, autoInstallUpdateSkills, calls
+  }) => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment, autoInstallUpdateSkills,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore({
+        accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z'
+      }),
+      enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    });
+    expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledTimes(calls);
+    expect((await authRequest('POST', '/enterprise/logout')).statusCode).toBe(200);
+    expect((await authRequest('POST', '/enterprise/login', {
+      email: 'user@example.com', password: 'password-123'
+    })).statusCode).toBe(200);
+
+    await server.close();
+    server = undefined;
+    expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledTimes(calls * 2);
+  });
+
+  it('开启自动同步但未登录或登录校验失败时不调用 Skill 同步', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore(), enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_out');
+    });
+    expect((await authRequest('POST', '/enterprise/login', {
+      email: 'not-an-email', password: 'short'
+    })).statusCode).toBe(400);
+    await server.close();
+    server = undefined;
+    expect(enterpriseSkillManager.syncSkills).not.toHaveBeenCalled();
+  });
+
+  it('登录响应不等待 Skill 同步，但关闭服务等待未完成的同步', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const sync = deferred<boolean>();
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    vi.mocked(enterpriseSkillManager.syncSkills).mockImplementation(() => sync.promise);
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore(), enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+    let closed = false;
+    let closeWork: Promise<void> | undefined;
+    const syncTimeout = setTimeout(() => sync.resolve(false), 5_000);
+    try {
+      expect((await authRequest('POST', '/enterprise/login', {
+        email: 'user@example.com', password: 'password-123'
+      })).statusCode).toBe(200);
+      expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledOnce();
+      closeWork = server.close().then(() => { closed = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(closed).toBe(false);
+    } finally {
+      clearTimeout(syncTimeout);
+      sync.resolve(false);
+      await closeWork;
+    }
+    expect(closed).toBe(true);
+    server = undefined;
+  });
+
   it('登录后保存服务器列表保留认证，切换当前服务器仍需退出登录', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-gateway-session-'));
     const configPath = join(tempDir, 'config.toml');
@@ -903,7 +1007,7 @@ function createClient(
       agentId,
       accessToken: 'enterprise-token',
       tokenType: 'Bearer' as const,
-      expiresAt: '2026-07-31T10:00:00Z'
+      expiresAt: '2099-01-01T00:00:00Z'
     })),
     getMe: vi.fn(async () => activeMeResult()),
     logout: vi.fn(async () => undefined),
@@ -1048,6 +1152,7 @@ function createEnterpriseSkillManager(): EnterpriseSkillManager {
     createdAt: '2026-07-30T10:00:00.000Z'
   };
   return {
+    syncSkills: vi.fn(async () => false),
     listSpaces: vi.fn(async () => ({ spaces: [{ spaceId: 'skillspace_1', name: '团队技能', description: '', actions: ['read', 'write'] as Array<'read' | 'write'> }] })),
     uploadSkill: vi.fn(async () => ({ skillId: 'skill_1', spaceId: 'skillspace_1', name: 'review', version: '1.0.0' })),
     listSkills: vi.fn(async () => ({

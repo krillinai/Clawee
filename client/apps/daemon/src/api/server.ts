@@ -268,6 +268,7 @@ export type BuildServerInput = {
   enterpriseBusinessDashboardManager?: EnterpriseBusinessDashboardManager;
   taskMcpEnabled?: boolean;
   serverDeployment?: boolean;
+  autoInstallUpdateSkills?: boolean;
   webDistDir?: string;
 };
 
@@ -343,6 +344,7 @@ export async function buildServer(input: BuildServerInput) {
     ? undefined
     : await enterpriseAgentIdentityStore.getOrCreate();
   let handleEnterpriseSessionSignedOut: (() => void) | undefined;
+  let handleEnterpriseSessionSignedIn: (() => void) | undefined;
   let handleModelServiceSignedOut: (() => void) | undefined;
   let enterpriseSessionManager!: ReturnType<
     typeof createEnterpriseSessionManager
@@ -355,6 +357,7 @@ export async function buildServer(input: BuildServerInput) {
     httpClient: enterpriseHttpClient,
     get transportSecurity() { return enterpriseOrigin.transportSecurity; },
     onSignedIn(identity) {
+      handleEnterpriseSessionSignedIn?.();
       if (identity.activityReportingEnabled) {
         activityReporter?.resume();
       } else {
@@ -489,6 +492,35 @@ export async function buildServer(input: BuildServerInput) {
       publicRecords: skillMarketRecords,
       records: enterpriseInstallRecords
     });
+  const autoInstallUpdateSkills = input.serverDeployment === true && input.autoInstallUpdateSkills === true;
+  let enterpriseSkillRevision = 0;
+  let enterpriseSkillSyncWork: Promise<void> | undefined;
+  let enterpriseSkillSyncSubjectId: string | undefined;
+  let enterpriseSkillSyncClosing = false;
+  function syncEnterpriseSkills(): Promise<void> {
+    const current = enterpriseSessionManager.getSnapshot();
+    if (enterpriseSkillSyncClosing || current.status !== 'signed_in') return Promise.resolve();
+    if (enterpriseSkillSyncWork !== undefined && enterpriseSkillSyncSubjectId !== current.account?.subjectId) {
+      return enterpriseSkillSyncWork.then(() => syncEnterpriseSkills());
+    }
+    enterpriseSkillSyncSubjectId = current.account?.subjectId;
+    enterpriseSkillSyncWork ??= enterpriseSkillManager.syncSkills()
+      .then(changed => { if (changed) enterpriseSkillRevision += 1; })
+      .catch(() => { console.warn('Enterprise skill auto-sync failed [ENTERPRISE_SKILL_INSTALL_FAILED]'); })
+      .finally(() => { enterpriseSkillSyncWork = undefined; });
+    return enterpriseSkillSyncWork;
+  }
+  const enterpriseSkillRunInjector: RunMcpInjector | undefined = autoInstallUpdateSkills
+    ? {
+        async prepare() {
+          await syncEnterpriseSkills();
+          return { mcpServers: [], env: {}, configurationFingerprint: `enterprise_skills:${enterpriseSkillRevision}` };
+        }
+      }
+    : undefined;
+  if (autoInstallUpdateSkills) {
+    handleEnterpriseSessionSignedIn = () => { void syncEnterpriseSkills(); };
+  }
   const enterpriseKnowledgeManager =
     input.enterpriseKnowledgeManager ??
     createEnterpriseKnowledgeManager({
@@ -602,7 +634,8 @@ export async function buildServer(input: BuildServerInput) {
   const agentToolInjector = combineRunInjectors(
     scheduleRunInjector,
     codexMcpRuntimeInjector,
-    enterpriseMcpRunInjector
+    enterpriseMcpRunInjector,
+    enterpriseSkillRunInjector
   );
   persistentAppServerExecutor =
     input.runManager === undefined
@@ -615,7 +648,8 @@ export async function buildServer(input: BuildServerInput) {
           processInjector: agentToolProcessInjector,
           runtimeInjector: combineRunInjectors(
             codexMcpRuntimeInjector,
-            enterpriseMcpRunInjector
+            enterpriseMcpRunInjector,
+            enterpriseSkillRunInjector
           ),
           maxConcurrency:
             input.persistentAppServerMaxConcurrency
@@ -815,6 +849,7 @@ export async function buildServer(input: BuildServerInput) {
   });
 
   server.addHook('onClose', async () => {
+    enterpriseSkillSyncClosing = true;
     let firstError: unknown = shutdownError;
     const capture = async (stage: string, operation: () => void | Promise<void>) => {
       const startedAt = Date.now();
@@ -836,6 +871,7 @@ export async function buildServer(input: BuildServerInput) {
     await capture('approval_subscription', () => unsubscribeApprovalNotifications());
     await capture('run_logs', () => runCloseWork ?? runManager.close());
     await capture('activity', () => activityReporter?.close());
+    await capture('enterprise_skill_sync', async () => { await enterpriseSkillSyncWork; });
     await Promise.all([
       capture('model_runtime', () => input.modelServiceRuntime?.signOut()),
       capture('enterprise_session', () => enterpriseSessionManager.close()),

@@ -34,6 +34,7 @@ import { computeEnterpriseSkillContentDigest } from './skill-content-digest-2026
 import { ENTERPRISE_PACKAGE_MAX_BYTES } from './config-2026-07-30.js';
 
 export type EnterpriseSkillManager = {
+  syncSkills(): Promise<boolean>;
   listSkills(): Promise<EnterpriseSkillListResponse>;
   listSpaces(): Promise<EnterpriseSkillSpaceListResponse>;
   uploadSkill(input: { skillId?: string; spaceId: string; version: string; changelog: string; package: Uint8Array }): Promise<EnterpriseSkillUploadResponse>;
@@ -174,6 +175,64 @@ export function createEnterpriseSkillManager(input: {
   const cleanupWorkDir =
     input.cleanupWorkDir ??
     (path => rm(path, { force: true, recursive: true }));
+  let syncWork: Promise<boolean> | undefined;
+  let syncSubjectId: string | undefined;
+
+  function syncSkills(): Promise<boolean> {
+    const current = input.sessionManager.getSnapshot();
+    if (current.status !== 'signed_in') return Promise.resolve(false);
+    if (syncWork !== undefined && syncSubjectId !== current.account?.subjectId) {
+      return syncWork.then(() => syncSkills());
+    }
+    syncSubjectId = current.account?.subjectId;
+    syncWork ??= syncAuthorizedSkills().finally(() => { syncWork = undefined; });
+    return syncWork;
+  }
+
+  async function syncAuthorizedSkills(): Promise<boolean> {
+    const identity = input.sessionManager.getSnapshot();
+    if (identity.status !== 'signed_in') return false;
+    let changed = false;
+    try {
+      const accessToken = await requireToken();
+      const skills = await retryRead(() => input.httpClient.listSkills(accessToken));
+      for (const skill of skills) {
+        const current = input.sessionManager.getSnapshot();
+        if (current.status !== 'signed_in' || current.account?.subjectId !== identity.account?.subjectId) break;
+        try {
+          const local = input.skillManager.getSkill(skill.name);
+          const record = input.records.getBySkillId(skill.skillId);
+          const byName = input.records.getByName(skill.name);
+          if (
+            input.publicRecords.getRecord(skill.name) !== undefined
+            || (byName !== undefined && byName.skillId !== skill.skillId)
+            || (record !== undefined && record.name !== skill.name)
+            || (local !== undefined && record === undefined)
+          ) {
+            throw new EnterpriseSkillManagerError('ENTERPRISE_SKILL_SOURCE_CONFLICT', 409);
+          }
+          if (local !== undefined && record?.versionId === skill.versionId) continue;
+          await mutateSkill(skill.skillId, local !== undefined, {
+            accessToken,
+            subjectId: identity.account?.subjectId
+          });
+          changed = true;
+        } catch (error) {
+          logSyncFailure(error);
+        }
+      }
+    } catch (error) {
+      logSyncFailure(error);
+    }
+    return changed;
+  }
+
+  function logSyncFailure(error: unknown): void {
+    const code = error instanceof EnterpriseSkillManagerError
+      ? error.code
+      : 'ENTERPRISE_SKILL_INSTALL_FAILED';
+    console.warn(`Enterprise skill auto-sync failed [${code}]`);
+  }
 
   async function requireToken(): Promise<string> {
     try {
@@ -312,9 +371,10 @@ export function createEnterpriseSkillManager(input: {
 
   async function mutateSkill(
     skillId: string,
-    overwrite: boolean
+    overwrite: boolean,
+    automatic?: { accessToken: string; subjectId?: string }
   ): Promise<EnterpriseSkillMutationResponse> {
-    const accessToken = await requireToken();
+    const accessToken = automatic?.accessToken ?? await requireToken();
     let detail: EnterpriseRemoteSkillDetail;
     try {
       detail = await input.httpClient.getSkillDetail(accessToken, skillId);
@@ -385,9 +445,16 @@ export function createEnterpriseSkillManager(input: {
 
       return await input.skillManager.withWriteTransaction(
         async transaction => {
+          if (automatic !== undefined) {
+            const current = input.sessionManager.getSnapshot();
+            if (current.status !== 'signed_in' || current.account?.subjectId !== automatic.subjectId) {
+              throw new EnterpriseSkillManagerError('ENTERPRISE_SESSION_EXPIRED', 401);
+            }
+          }
           const record = assertMutationAllowed({
             detail,
             overwrite,
+            automatic: automatic !== undefined,
             transaction
           });
           const result = await transaction.installSkill({
@@ -472,6 +539,7 @@ export function createEnterpriseSkillManager(input: {
   function assertMutationAllowed(request: {
     detail: EnterpriseRemoteSkillDetail;
     overwrite: boolean;
+    automatic?: boolean;
     transaction: SkillWriteTransaction;
   }): EnterpriseSkillInstallRecord | undefined {
     const local = request.transaction.getSkill(request.detail.name);
@@ -508,6 +576,9 @@ export function createEnterpriseSkillManager(input: {
         409
       );
     }
+    if (request.automatic === true && (publicRecord !== undefined || correctRecord === undefined)) {
+      throw new EnterpriseSkillManagerError('ENTERPRISE_SKILL_SOURCE_CONFLICT', 409);
+    }
     return correctRecord;
   }
 
@@ -516,6 +587,7 @@ export function createEnterpriseSkillManager(input: {
   }
 
   return {
+    syncSkills,
     listSkills,
     async listSpaces() {
       const accessToken = await requireToken();
