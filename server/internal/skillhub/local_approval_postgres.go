@@ -149,6 +149,10 @@ ORDER BY created_at DESC,id DESC LIMIT 1`, versionID, spaceID, digest).Scan(&id,
 	if err != nil {
 		return nil, err
 	}
+	return readLocalRequestProgress(ctx, reader, id, status, standard, digest)
+}
+
+func readLocalRequestProgress(ctx context.Context, reader approvalReader, id, status, standard, digest string) (*LocalApproval, error) {
 	rows, err := reader.Query(ctx, `SELECT a.user_id,COALESCE(u.name,''),a.status,a.comment,a.decided_at,a.scenario_value,a.result_effectiveness,a.ease_of_use,a.reuse_value FROM approval_request_approvers a JOIN accounts u ON u.user_id=a.user_id WHERE a.request_id=$1 ORDER BY u.name,a.user_id`, id)
 	if err != nil {
 		return nil, err

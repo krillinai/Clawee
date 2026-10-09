@@ -194,24 +194,42 @@ func (s *Service) GetApprovalDetailForUser(ctx context.Context, userID, skillID 
 }
 
 func (s *Service) ListApprovalVersionFilesForUser(ctx context.Context, userID, skillID, versionID string) ([]PackageFile, error) {
-	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+	if err := s.checkApprovalVersionBinding(ctx, userID, skillID, versionID); err != nil {
 		return nil, err
 	}
 	return s.ListVersionFiles(ctx, skillID, versionID)
 }
 
 func (s *Service) ReadApprovalVersionFileForUser(ctx context.Context, userID, skillID, versionID, path string) (PackageFileContent, error) {
-	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+	if err := s.checkApprovalVersionBinding(ctx, userID, skillID, versionID); err != nil {
 		return PackageFileContent{}, err
 	}
 	return s.ReadVersionFile(ctx, skillID, versionID, path)
 }
 
 func (s *Service) OpenApprovalVersionPackageForUser(ctx context.Context, userID, skillID, versionID string) (PackageDownload, error) {
-	if _, err := s.GetApprovalDetailForUser(ctx, userID, skillID); err != nil {
+	if err := s.checkApprovalVersionBinding(ctx, userID, skillID, versionID); err != nil {
 		return PackageDownload{}, err
 	}
 	return s.OpenVersionPackage(ctx, skillID, versionID)
+}
+
+func (s *Service) checkApprovalVersionBinding(ctx context.Context, userID, skillID, versionID string) error {
+	store, ok := s.store.(PersonalApprovalStore)
+	if !ok || s.spaces == nil {
+		return ErrNotFound
+	}
+	if err := s.spaces.CheckSkillAccess(ctx, userID, skillID, SpaceActionRead); err != nil {
+		return ErrNotFound
+	}
+	if err := store.CheckApprovalVersionBinding(ctx, userID, skillID, versionID); err != nil {
+		return err
+	}
+	_, version, err := s.adminVersion(ctx, skillID, versionID)
+	if err != nil {
+		return err
+	}
+	return s.verifyApprovalVersionDigest(version)
 }
 
 func sortedSpaceActions(actions map[string]bool) []string {

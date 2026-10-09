@@ -19,8 +19,11 @@ import { permissions } from "@/lib/rbac-api";
 import { APIError } from "@/lib/api";
 import { getSharedSpace, listSharedFiles } from "@/lib/shared-files-api";
 import { workflowAdmin } from "@/lib/workflow-api";
+import { approvalsApp } from "@/lib/approvals-api";
 
 import { App } from "./app";
+
+vi.mock("@/lib/approvals-api", async () => ({ ...await vi.importActual<typeof import("@/lib/approvals-api")>("@/lib/approvals-api"), approvalsApp: { list: vi.fn(), detail: vi.fn() } }));
 
 vi.mock("@/lib/accounts-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/accounts-api")>("@/lib/accounts-api");
@@ -468,5 +471,26 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Hermes C03" })).toBeInTheDocument();
     expect(screen.queryByText("智能体活动详情")).not.toBeInTheDocument();
     expect(screen.getByText(/采集器 ID:/)).toBeInTheDocument();
+  });
+
+  it("用户直接访问审批中心无需管理员权限", async () => {
+    currentAccountMock.mockResolvedValue({ user: { userId: "ordinary", email: "ordinary@test.invalid", name: "普通用户", status: "active", adminPermissions: [] }, redirectTo: "/app" });
+    vi.mocked(approvalsApp.list).mockResolvedValue({ items: [], meta: { next_cursor: "", has_next: false } });
+    window.history.pushState({}, "", "/app/approvals");
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "审批中心" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "审批中心" })).toHaveAttribute("href", "/app/approvals");
+    expect(screen.queryByRole("link", { name: "进入管理后台" })).not.toBeInTheDocument();
+  });
+
+  it.each(["skill", "workflow", "workflow_instance"] as const)("直接刷新个人详情路径 %s，不转为 query 弹窗或管理接口", async kind => {
+    currentAccountMock.mockResolvedValue({ user: { userId: "ordinary", email: "ordinary@test.invalid", name: "普通用户", status: "active", adminPermissions: [] }, redirectTo: "/app" });
+    vi.mocked(approvalsApp.detail).mockResolvedValue({ item: { kind, id: "original-id", type: kind === "skill" ? "skill" : "workflow", title: "原记录详情", business_status: "pending", my_status: "", created_at: "2026-10-09T09:00:00Z", can_process: false } });
+    window.history.pushState({}, "", `/app/approvals/${kind}/original-id`);
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "原记录详情" })).toBeInTheDocument();
+    expect(approvalsApp.detail).toHaveBeenCalledWith(kind, "original-id", expect.anything());
+    expect(window.location.pathname).toBe(`/app/approvals/${kind}/original-id`);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

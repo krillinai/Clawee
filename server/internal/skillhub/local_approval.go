@@ -7,6 +7,7 @@ import (
 )
 
 type localRequest struct {
+	CreatedAt                   time.Time
 	ScoringStandardVersion      string
 	ID, SpaceID, Digest, Status string
 	UserIDs, RoleIDs            []string
@@ -102,7 +103,7 @@ func (s *MemoryStore) createLocalResolvedLocked(version Version, space Space, ap
 	if space.ApprovalProvider != "local" || !localApprovalConfigured(space) {
 		return
 	}
-	item := localRequest{ID: newID("approval"), SpaceID: space.SpaceID, Digest: version.PackageSHA256, Status: "pending", ScoringStandardVersion: manualScoringStandard, Decisions: map[string]ApprovalDecision{}}
+	item := localRequest{CreatedAt: now.UTC(), ID: newID("approval"), SpaceID: space.SpaceID, Digest: version.PackageSHA256, Status: "pending", ScoringStandardVersion: manualScoringStandard, Decisions: map[string]ApprovalDecision{}}
 	for _, approver := range space.Approvers {
 		item.UserIDs = append(item.UserIDs, approver.UserID)
 	}

@@ -84,7 +84,7 @@ function WorkflowStep({ instance, node, task, index, current, last }: { instance
   </li>;
 }
 
-function WorkflowSteps({ instance }: { instance: WorkflowInstance }) {
+export function WorkflowSteps({ instance }: { instance: WorkflowInstance }) {
   return <ol className="space-y-0">{instance.nodes.map((node, index) => <WorkflowStep current={instance.current_node_id === node.node_id} index={index} instance={instance} key={node.node_id} last={index === instance.nodes.length - 1} node={node} task={instance.tasks?.find((item) => item.node_id === node.node_id)} />)}</ol>;
 }
 

@@ -374,7 +374,7 @@ type GitHubSourceInput = {
   schedule: string;
 };
 
-type AdminSkillDetailResponse = {
+export type AdminSkillDetailResponse = {
   can_review?: boolean;
   skill: AdminSkillResponse;
   versions: SkillVersionResponse[];
@@ -471,6 +471,10 @@ export function getPublishedSkillVersionFile(skillId: string, versionId: string,
 
 export async function getSkill(skillId: string) {
   const response = await adminApi.get<AdminSkillDetailResponse>(`/skills/detail?skill_id=${encodeURIComponent(skillId)}`);
+  return mapSkillDetail(response);
+}
+
+export function mapSkillDetail(response: AdminSkillDetailResponse) {
   return { ...(response.can_review === undefined ? {} : { canReview: response.can_review }), skill: mapSkill(response.skill), versions: response.versions.map(mapVersion) };
 }
 

@@ -112,7 +112,7 @@ export function SkillReviewForm({ decision, pending, error, confirmLabel, onCanc
   </FieldGroup></form>;
 }
 
-function SkillApprovalProgress({ approval }: { approval: LocalApproval }) {
+export function SkillApprovalProgress({ approval }: { approval: LocalApproval }) {
   const incomplete = (approval.status === "approved" && !approval.scoreSummary)
     || approval.approvers.some((person) => person.status === "approved" && !completeReviewScores(person.scores))
     || (!approval.scoringStandardVersion && approval.status !== "pending" && approval.approvers.some((person) => person.status !== "pending" && !completeReviewScores(person.scores)));

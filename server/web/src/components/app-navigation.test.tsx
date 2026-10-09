@@ -27,6 +27,7 @@ describe("AppNavigation", () => {
     renderNavigation();
 
     expect(await screen.findByRole("link", { name: "技能" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "审批中心" })).toHaveAttribute("href", "/app/approvals");
     expect(screen.getByRole("link", { name: "MCP" }).querySelector("img")).toHaveAttribute(
       "src",
       "/assets/app-icons/mcp-f654f2a2.png"

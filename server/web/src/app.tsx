@@ -104,6 +104,8 @@ const WorkflowTemplatesPage = lazy(() => import("./pages/workflow").then((module
 const WorkflowTemplateEditorPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowTemplateEditorPage })));
 const WorkflowInstancesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstancesPage })));
 const WorkflowInstanceDetailPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstanceDetailPage })));
+const AppApprovalsPage = lazy(() => import("./pages/app-approvals").then((module) => ({ default: module.AppApprovalsPage })));
+const AppApprovalDetailPage = lazy(() => import("./pages/app-approvals").then((module) => ({ default: module.AppApprovalDetailPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
@@ -148,6 +150,8 @@ export function App() {
               }
             >
               <Route path="/app/agents" element={<AgentAccessPage />} />
+              <Route path="/app/approvals" element={<AppApprovalsPage />} />
+              <Route path="/app/approvals/:kind/:id" element={<AppApprovalDetailPage />} />
               <Route path="/app/agents/detail" element={<AgentAccessPage />} />
               <Route path="/app/mcp-capabilities" element={<AppMCPCapabilitiesPage />} />
               <Route path="/app/activity" element={<AppActivityPage />} />

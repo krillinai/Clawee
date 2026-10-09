@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Bot, Boxes, ChartNoAxesCombined, PackageOpen, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Boxes, ChartNoAxesCombined, ClipboardCheck, PackageOpen, type LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { appIconPaths } from "@/lib/app-icons";
@@ -16,7 +16,8 @@ type AppNavItem = {
 const baseItems: AppNavItem[] = [
   { href: "/app/agents", label: "Agent", icon: Bot },
   { href: "/app/mcp-capabilities", label: "MCP", icon: Boxes, iconSrc: appIconPaths.mcp },
-  { href: "/app/skills", label: "技能", icon: PackageOpen }
+  { href: "/app/skills", label: "技能", icon: PackageOpen },
+  { href: "/app/approvals", label: "审批中心", icon: ClipboardCheck }
 ];
 
 export function AppNavigation() {

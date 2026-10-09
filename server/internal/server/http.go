@@ -238,6 +238,7 @@ func NewRouter(opts Options) http.Handler {
 	mountClientDownloadsRoutes(api, adminAPI, opts)
 	mountSkillHubRoutes(appAPI, adminAPI, opts)
 	mountWorkflowRoutes(appAPI, adminAPI, opts)
+	mountApprovalRoutes(appAPI, opts)
 	status := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service":              "clawee-gateway",
