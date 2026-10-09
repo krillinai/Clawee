@@ -14,8 +14,11 @@ describe('服务器配置', () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => undefined);
     render(<GatewayConfiguration connected onRead={async () => configuration} onSave={onSave} />);
-    await screen.findByLabelText('服务器');
-    await user.click(screen.getByRole('button', { name: '编辑当前服务器' }));
+    const select = await screen.findByLabelText('服务器');
+    expect(screen.queryByRole('button', { name: '编辑当前服务器' })).not.toBeInTheDocument();
+    await user.selectOptions(select, screen.getByRole('option', { name: '编辑当前服务器' }));
+    expect(select).toHaveValue(configuration.gateway);
+    expect(onSave).not.toHaveBeenCalled();
     const address = screen.getByLabelText('服务端地址');
     expect(address).toHaveValue(configuration.gateway);
     await user.clear(address);
@@ -29,8 +32,11 @@ describe('服务器配置', () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => undefined);
     render(<GatewayConfiguration connected onRead={async () => configuration} onSave={onSave} />);
-    await screen.findByLabelText('服务器');
-    await user.click(screen.getByRole('button', { name: '添加服务器' }));
+    const select = await screen.findByLabelText('服务器');
+    expect(screen.queryByRole('button', { name: '添加服务器' })).not.toBeInTheDocument();
+    await user.selectOptions(select, screen.getByRole('option', { name: '添加服务器' }));
+    expect(select).toHaveValue(configuration.gateway);
+    expect(onSave).not.toHaveBeenCalled();
     await user.type(screen.getByLabelText('服务端地址'), 'https://new.example/');
     await user.click(screen.getByRole('button', { name: '保存地址' }));
     expect(onSave).toHaveBeenCalledWith(configuration.gateway, [...configuration.gateways, 'https://new.example']);
@@ -89,5 +95,22 @@ describe('服务器配置', () => {
     render(<GatewayConfiguration connected onRead={async () => ({ ...configuration, configurable: false })} onSave={vi.fn()} />);
     expect(await screen.findByLabelText('服务器')).toBeDisabled();
     expect(screen.queryByRole('button', { name: '添加服务器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '添加服务器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '编辑当前服务器' })).not.toBeInTheDocument();
+  });
+
+  it('下拉列表中的管理操作可切换编辑模式，取消后保留当前选择', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    render(<GatewayConfiguration connected onRead={async () => configuration} onSave={onSave} />);
+    const select = await screen.findByLabelText('服务器');
+    await user.selectOptions(select, screen.getByRole('option', { name: '编辑当前服务器' }));
+    expect(screen.getByLabelText('服务端地址')).toHaveValue(configuration.gateway);
+    await user.selectOptions(select, screen.getByRole('option', { name: '添加服务器' }));
+    expect(screen.getByLabelText('服务端地址')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByLabelText('服务端地址')).not.toBeInTheDocument();
+    expect(select).toHaveValue(configuration.gateway);
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import type { EnterpriseGatewayConfiguration } from '@clawee/protocol';
-import { LoaderCircle, Pencil, Plus, Save, Trash2 } from 'lucide-react';
+import { LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import './gateway-configuration.css';
 
@@ -102,22 +102,29 @@ export function GatewayConfiguration(props: GatewayConfigurationProps) {
           <div className="gateway-configuration-control">
             <select id={`${inputId}-select`} value={configuration.gateway}
               disabled={disabled || settings || !configuration.configurable}
-              onChange={event => { void save(event.target.value, configuration.gateways ?? []); }}>
-              {(configuration.gateways ?? []).map(address => <option key={address} value={address}>{address}</option>)}
+              onChange={event => {
+                const selected = event.target.value;
+                if (selected === 'add-server' || selected === 'edit-server') {
+                  const editing = selected === 'edit-server';
+                  setDraft(editing ? configuration.gateway : '');
+                  setEditingCurrent(editing);
+                  setAdding(true);
+                  setNotice(undefined);
+                  setError(undefined);
+                  return;
+                }
+                void save(selected, configuration.gateways ?? []);
+              }}>
+              <optgroup label="已保存服务器">
+                {(configuration.gateways ?? []).map(address => <option key={address} value={address}>{address}</option>)}
+              </optgroup>
+              {!settings && configuration.configurable ? (
+                <optgroup label="管理服务器">
+                  <option value="add-server">添加服务器</option>
+                  <option value="edit-server">编辑当前服务器</option>
+                </optgroup>
+              ) : null}
             </select>
-            {!settings && configuration.configurable && !adding ? (
-              <>
-              <button type="button" className="gateway-configuration-button" disabled={disabled}
-                onClick={() => { setAdding(true); setNotice(undefined); setError(undefined); }}>
-                <Plus size={16} aria-hidden="true" />添加服务器
-              </button>
-              <button type="button" className="gateway-configuration-button" disabled={disabled}
-                aria-label="编辑当前服务器" title="编辑当前服务器"
-                onClick={() => { setDraft(configuration.gateway); setEditingCurrent(true); setAdding(true); setNotice(undefined); setError(undefined); }}>
-                <Pencil size={16} aria-hidden="true" />
-              </button>
-              </>
-            ) : null}
           </div>
         </div>
       ) : <p className="gateway-configuration-message">添加服务器地址，保存后即可登录。</p>}
