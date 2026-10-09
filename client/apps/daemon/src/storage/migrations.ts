@@ -498,6 +498,30 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, 'codex_session_sources', 'head_size', 'head_size INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'codex_session_sources', 'head_hash', "head_hash TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'schedules', 'thread_id', 'thread_id TEXT');
+  ensureColumn(db, 'schedules', 'action', "action TEXT NOT NULL DEFAULT 'agent_run'");
+  ensureColumn(db, 'schedules', 'workflow_json', 'workflow_json TEXT');
+  ensureColumn(db, 'schedules', 'owner_origin', 'owner_origin TEXT');
+  ensureColumn(db, 'schedules', 'owner_subject_id', 'owner_subject_id TEXT');
+  ensureColumn(db, 'schedules', 'owner_agent_id', 'owner_agent_id TEXT');
+  ensureColumn(db, 'schedules', 'last_workflow_instance_id', 'last_workflow_instance_id TEXT');
+  ensureColumn(db, 'schedules', 'create_fingerprint', 'create_fingerprint TEXT');
+  ensureColumn(db, 'schedule_operations', 'trigger_id', 'trigger_id TEXT');
+  ensureColumn(db, 'schedule_operations', 'workflow_instance_id', 'workflow_instance_id TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workflow_schedule_triggers (
+      id TEXT PRIMARY KEY,
+      schedule_id TEXT NOT NULL REFERENCES schedules(id),
+      scheduled_at TEXT,
+      workflow_json TEXT NOT NULL,
+      owner_origin TEXT NOT NULL,
+      owner_subject_id TEXT NOT NULL,
+      owner_agent_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      workflow_instance_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(schedule_id, scheduled_at)
+    );
+  `);
   ensureColumn(db, 'schedule_operations', 'actor_type', 'actor_type TEXT');
   ensureColumn(db, 'schedule_operations', 'actor_run_id', 'actor_run_id TEXT');
   db.prepare(`

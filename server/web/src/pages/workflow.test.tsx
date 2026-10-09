@@ -3,26 +3,150 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AdminPermissionsProvider } from "@/components/admin-permissions";
+import { APIError } from "@/lib/api";
+import type { Account } from "@/lib/auth-api";
+import { permissions } from "@/lib/rbac-api";
 import { workflowAdmin, type WorkflowTemplate } from "@/lib/workflow-api";
 import { WorkflowInstanceDetailPage, WorkflowInstancesPage, WorkflowTemplateEditorPage, WorkflowTemplatesPage } from "./workflow";
 
 vi.mock("@/lib/workflow-api", () => ({
   workflowAdmin: {
-    templates: vi.fn(), template: vi.fn(), assignees: vi.fn(), roles: vi.fn(async () => ({ items: [], meta: { next_cursor: "" } })), save: vi.fn(), status: vi.fn(), instances: vi.fn(), instance: vi.fn(), terminate: vi.fn()
+    templates: vi.fn(), template: vi.fn(), assignees: vi.fn(), roles: vi.fn(async () => ({ items: [], meta: { next_cursor: "" } })), save: vi.fn(), status: vi.fn(), start: vi.fn(), instances: vi.fn(), instance: vi.fn(), terminate: vi.fn()
   }
 }));
 
 beforeEach(() => vi.clearAllMocks());
 
-function renderTemplates(path = "/admin/workflow-templates") {
+function renderTemplates(path = "/admin/workflow-templates", account?: Account) {
+  const routes = <MemoryRouter initialEntries={[path]}><Routes>
+    <Route element={<WorkflowTemplatesPage />} path="/admin/workflow-templates" />
+    <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/new" />
+    <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/:id" />
+    <Route element={<WorkflowInstanceDetailPage />} path="/admin/workflow-instances/:id" />
+  </Routes></MemoryRouter>;
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <MemoryRouter initialEntries={[path]}><Routes>
-      <Route element={<WorkflowTemplatesPage />} path="/admin/workflow-templates" />
-      <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/new" />
-      <Route element={<WorkflowTemplateEditorPage />} path="/admin/workflow-templates/:id" />
-    </Routes></MemoryRouter>
+    {account ? <AdminPermissionsProvider account={account}>{routes}</AdminPermissionsProvider> : routes}
   </QueryClientProvider>);
 }
+
+describe("后台手动发起工作流", () => {
+  const template: WorkflowTemplate = { id: "start-template", name: "发布流程", description: "", status: "enabled", revision: 1, nodes: [], created_at: "" };
+  beforeEach(() => {
+    vi.mocked(workflowAdmin.templates).mockResolvedValue({ items: [template, { ...template, id: "draft", name: "草稿流程", status: "draft" }, { ...template, id: "disabled", name: "停用流程", status: "disabled" }], meta: { next_cursor: "" } });
+    vi.mocked(workflowAdmin.start).mockReset();
+  });
+
+  it("仅已启用模板提供发起入口，并说明首节点资格与不自动执行", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    expect(screen.queryByRole("button", { name: "发起草稿流程" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发起停用流程" })).not.toBeInTheDocument();
+    expect(screen.getByText(/当前账号必须是首节点的有效负责人/)).toBeInTheDocument();
+    expect(screen.getByText(/不自动执行节点/)).toBeInTheDocument();
+  });
+
+  it.each(["[]", "null", "1", '"输入"', "{broken"])("拒绝非JSON对象：%s", async input => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.change(screen.getByLabelText("初始输入（JSON 对象）"), { target: { value: input } });
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("初始输入必须是 JSON 对象");
+    expect(workflowAdmin.start).not.toHaveBeenCalled();
+  });
+
+  it("按UTF-8字节拒绝超过1MiB的对象", async () => {
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.change(screen.getByLabelText("初始输入（JSON 对象）"), { target: { value: JSON.stringify({ text: "中".repeat(350000) }) } });
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("初始输入不能超过 1 MiB");
+    expect(workflowAdmin.start).not.toHaveBeenCalled();
+  });
+
+  it("发起成功返回关联实例并复用现有详情", async () => {
+    vi.mocked(workflowAdmin.start).mockResolvedValue({ instance_id: "new-instance", task_id: "first-task", status: "running" });
+    vi.mocked(workflowAdmin.instance).mockResolvedValue({ id: "new-instance", template_id: template.id, template_revision: 1, nodes: [], status: "running", started_by: "a", started_at: "2026-10-09T00:00:00Z" });
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.change(screen.getByLabelText("初始输入（JSON 对象）"), { target: { value: '{"text":"内容"}' } });
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    const link = await screen.findByRole("link", { name: "查看实例详情" });
+    expect(workflowAdmin.start).toHaveBeenCalledWith(template.id, { text: "内容" }, expect.any(String));
+    expect(link).toHaveAttribute("href", "/admin/workflow-instances/new-instance");
+    fireEvent.click(link);
+    expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
+    expect(workflowAdmin.instance).toHaveBeenCalledWith("new-instance");
+  });
+
+  it.each([new TypeError("网络中断"), new APIError("服务暂不可用", 500, "internal_error")])("未知结果锁定输入、阻止关闭，并使用同一输入同key重试", async error => {
+    vi.mocked(workflowAdmin.start).mockRejectedValueOnce(error).mockResolvedValueOnce({ instance_id: "retry-instance", task_id: "task", status: "running" });
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.change(screen.getByLabelText("初始输入（JSON 对象）"), { target: { value: '{"text":"原始输入"}' } });
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    const retry = await screen.findByRole("button", { name: "使用原输入重试" });
+    expect(screen.getByLabelText("初始输入（JSON 对象）")).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(retry);
+    await screen.findByRole("link", { name: "查看实例详情" });
+    expect(workflowAdmin.start).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(workflowAdmin.start).mock.calls[1]).toEqual(vi.mocked(workflowAdmin.start).mock.calls[0]);
+    expect(vi.mocked(workflowAdmin.start).mock.calls[0][2].length).toBeLessThanOrEqual(200);
+  });
+
+  it.each([400, 403, 404, 409, 413])("明确拒绝（%s）后允许修正输入且展示错误", async status => {
+    vi.mocked(workflowAdmin.start).mockRejectedValueOnce(new APIError("发起被拒绝", status, "invalid_request"));
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByLabelText("初始输入（JSON 对象）")).not.toBeDisabled());
+    expect(screen.queryByRole("button", { name: "使用原输入重试" })).not.toBeInTheDocument();
+  });
+
+  it("提交中阻止重复请求", async () => {
+    vi.mocked(workflowAdmin.start).mockReturnValue(new Promise(() => {}));
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    expect(screen.getByRole("button", { name: "正在发起..." })).toBeDisabled();
+    expect(workflowAdmin.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("未知结果之后权限拒绝仍保留原请求，恢复后继续同key", async () => {
+    vi.mocked(workflowAdmin.start).mockRejectedValueOnce(new TypeError("网络中断")).mockRejectedValueOnce(new APIError("权限不足", 403, "forbidden")).mockResolvedValueOnce({ instance_id: "recovered-instance", task_id: "first-task", status: "running" });
+    renderTemplates();
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.change(screen.getByLabelText("初始输入（JSON 对象）"), { target: { value: '{"text":"原输入"}' } });
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    fireEvent.click(await screen.findByRole("button", { name: "使用原输入重试" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("暂无访问权限"));
+    expect(screen.getByLabelText("初始输入（JSON 对象）")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "使用原输入重试" }));
+    await screen.findByRole("link", { name: "查看实例详情" });
+    const calls = vi.mocked(workflowAdmin.start).mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(calls[2]).toEqual(calls[0]);
+  });
+
+  it("缺少模板管理权限时不提供发起入口", async () => {
+    renderTemplates(undefined, { userId: "reader", email: "reader@example.com", name: "查看员", status: "active", adminPermissions: [permissions.workflowInstanceRead] });
+    await screen.findByText("发布流程");
+    expect(screen.queryByRole("button", { name: "发起发布流程" })).not.toBeInTheDocument();
+  });
+
+  it("只有模板管理权限时显示成功实例ID，不提供无权访问的详情入口", async () => {
+    vi.mocked(workflowAdmin.start).mockResolvedValue({ instance_id: "limited-instance", task_id: "first-task", status: "running" });
+    renderTemplates(undefined, { userId: "manager", email: "manager@example.com", name: "模板管理员", status: "active", adminPermissions: [permissions.workflowTemplateManage] });
+    fireEvent.click(await screen.findByRole("button", { name: "发起发布流程" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认发起" }));
+    expect(await screen.findByText(/limited-instance/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "查看实例详情" })).not.toBeInTheDocument();
+  });
+});
 
 function renderInstances(path = "/admin/workflow-instances") {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

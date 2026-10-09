@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 import { scheduleOperationActors } from './types.js';
 import type { ScheduleValidationErrorCode } from './validator.js';
+import type { WorkflowSchedules } from './workflow.js';
 
 export type SchedulerErrorCode =
   | ScheduleValidationErrorCode
@@ -24,12 +25,15 @@ export type SchedulerErrorCode =
   | 'SCHEDULE_HAS_ACTIVE_RUN'
   | 'SCHEDULE_THREAD_MISSING'
   | 'SCHEDULE_THREAD_ARCHIVED'
+  | 'ENTERPRISE_UNAUTHORIZED'
+  | 'ENTERPRISE_FORBIDDEN'
+  | 'ENTERPRISE_SERVICE_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
 export class SchedulerError extends Error {
   readonly code: SchedulerErrorCode;
 
-  constructor(code: SchedulerErrorCode, message: string) {
+  constructor(code: SchedulerErrorCode, message: string, readonly details?: Record<string, unknown>) {
     super(message);
     this.name = 'SchedulerError';
     this.code = code;
@@ -37,9 +41,10 @@ export class SchedulerError extends Error {
 }
 
 export type SchedulerService = {
-  listSchedules(): ScheduleListResponse;
+  listSchedules(workflowOnly?: boolean): ScheduleListResponse;
   getSchedule(id: string): ScheduleDetailResponse | undefined;
   runNow(id: string, actor?: ScheduleOperationActor): RunScheduleNowResponse;
+  runWorkflowNow?(id: string, triggerId?: string): Promise<RunScheduleNowResponse>;
   listOperations(id: string, limit?: number): ScheduleOperationListResponse;
   start(): void;
   stop(): void;
@@ -62,6 +67,8 @@ export type SchedulerServiceOptions = {
   triggerGraceMs?: number;
   autostart?: boolean;
   warn?(message: string): void;
+  workflowSchedules?: WorkflowSchedules;
+  canRunAgent?(): boolean;
 };
 
 const DEFAULT_TRIGGER_GRACE_MS = 30_000;
@@ -84,12 +91,24 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   let queueTimer: TimerHandle | unknown;
   let started = false;
 
+  async function triggerWorkflow(
+    schedule: ScheduleRecord,
+    actor: ScheduleOperationActor,
+    scheduledAt: string | null,
+    triggerId?: string
+  ): Promise<RunScheduleNowResponse> {
+    if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+    return await options.workflowSchedules.trigger(schedule, actor, scheduledAt, triggerId);
+  }
+
   function handleTrigger(
     schedule: ScheduleRecord,
     operation: 'run_now' | 'timer_trigger' | 'run_queued',
     ranAt: string,
     actor: ScheduleOperationActor
   ): RunScheduleNowResponse {
+    if (schedule.action === 'workflow_start') throw new SchedulerError('ENTERPRISE_FORBIDDEN', '工作流计划只能通过专用动作发起');
+    if (options.canRunAgent?.() === false) throw new SchedulerError('INTERNAL_ERROR', 'Agent 暂不可用');
     const bound = requireBoundSchedule(schedule);
     const concurrencyPolicy = resolveConcurrencyPolicy(bound);
     if (operation !== 'run_queued') {
@@ -185,7 +204,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   function processDueSchedules(): void {
     const now = clock.now().toISOString();
     try {
-      for (const schedule of options.repository.listDue(now)) {
+      for (const schedule of options.repository.listDue(now, options.canRunAgent?.() === false)) {
         try {
           processDueSchedule(schedule, now);
         } catch (error) {
@@ -217,6 +236,11 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
 
     const updated = options.repository.update(schedule.id, { nextRunAt });
     if (updated === null) throw notFound();
+    if (updated.action === 'workflow_start') {
+      void triggerWorkflow(updated, scheduleOperationActors.timer, schedule.nextRunAt)
+        .catch(() => undefined);
+      return;
+    }
     handleTrigger(updated, 'timer_trigger', now, scheduleOperationActors.timer);
   }
 
@@ -255,6 +279,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   function refreshQueueTimer(): void {
     clearQueueTimer();
     if (!started) return;
+    if (options.canRunAgent?.() === false) return;
     if (options.repository.listPendingTriggers().length === 0) return;
 
     queueTimer = timers.setTimeout(() => {
@@ -264,6 +289,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   }
 
   function processPendingTriggers(): void {
+    if (options.canRunAgent?.() === false) return;
     try {
       for (const schedule of options.repository.listPendingTriggers()) {
         try {
@@ -309,21 +335,24 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
   }
 
   const service: SchedulerService = {
-    listSchedules() {
+    listSchedules(workflowOnly = false) {
       options.repository.reconcileLastRunStatuses();
       return {
         schedules: options.repository
           .list()
-          .map(schedule => toScheduleResponse(requireBoundSchedule(schedule)))
+          .filter(schedule => !workflowOnly || schedule.action === 'workflow_start')
+          .filter(schedule => schedule.action !== 'workflow_start' || options.workflowSchedules?.canRead(schedule))
+          .map(schedule => toScheduleResponse(schedule.action === 'workflow_start' ? schedule : requireBoundSchedule(schedule)))
       };
     },
 
     getSchedule(id) {
       options.repository.reconcileLastRunStatuses();
       const schedule = options.repository.getById(id);
+      if (schedule?.action === 'workflow_start') requireWorkflowAccess(schedule);
       return schedule === null
         ? undefined
-        : toScheduleDetailResponse(requireBoundSchedule(schedule));
+        : toScheduleDetailResponse(schedule.action === 'workflow_start' ? schedule : requireBoundSchedule(schedule));
     },
 
     runNow(id, actor = scheduleOperationActors.user) {
@@ -338,8 +367,16 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
       return response;
     },
 
+    async runWorkflowNow(id, triggerId) {
+      const schedule = requireSchedule(options.repository, id);
+      requireWorkflowAccess(schedule);
+      if (schedule.action !== 'workflow_start') throw new SchedulerError('VALIDATION_FAILED', '不是工作流计划');
+      return triggerWorkflow(schedule, scheduleOperationActors.user, null, triggerId);
+    },
+
     listOperations(id, limit) {
-      requireSchedule(options.repository, id);
+      const schedule = requireSchedule(options.repository, id);
+      if (schedule.action === 'workflow_start') requireWorkflowAccess(schedule);
       return {
         operations: options.repository.listOperations(id, limit).map(toScheduleOperationResponse)
       };
@@ -366,7 +403,7 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
       }
       if (!started) return;
 
-      const next = options.repository.getNextEnabled();
+      const next = options.repository.getNextEnabled(options.canRunAgent?.() === false);
       if (next?.nextRunAt === null || next?.nextRunAt === undefined) return;
 
       const delayMs = Math.max(
@@ -390,12 +427,21 @@ export function createSchedulerService(options: SchedulerServiceOptions): Schedu
 
   if (options.autostart === true) service.start();
   return service;
+
+  function requireWorkflowAccess(schedule: ScheduleRecord): void {
+    if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+    options.workflowSchedules.assertSchedule(schedule);
+  }
 }
 
-export function toScheduleResponse(schedule: BoundScheduleRecord): ScheduleResponse {
+export function toScheduleResponse(schedule: BoundScheduleRecord): ScheduleResponse & { threadId: string };
+export function toScheduleResponse(schedule: ScheduleRecord): ScheduleResponse;
+export function toScheduleResponse(schedule: ScheduleRecord): ScheduleResponse {
   return {
     id: schedule.id,
     threadId: schedule.threadId,
+    action: schedule.action ?? 'agent_run',
+    ...(schedule.workflow ? { workflow: schedule.workflow, lastWorkflowInstanceId: schedule.lastWorkflowInstanceId ?? null } : {}),
     name: schedule.name,
     cron: schedule.cron,
     timezone: schedule.timezone,
@@ -420,7 +466,7 @@ export function toScheduleResponse(schedule: BoundScheduleRecord): ScheduleRespo
   };
 }
 
-function toScheduleDetailResponse(schedule: BoundScheduleRecord): ScheduleDetailResponse {
+function toScheduleDetailResponse(schedule: ScheduleRecord): ScheduleDetailResponse {
   return {
     ...toScheduleResponse(schedule),
     prompt: schedule.prompt

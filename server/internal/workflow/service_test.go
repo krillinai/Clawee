@@ -33,6 +33,68 @@ func TestObjectAndCursorValidation(t *testing.T) {
 	}
 }
 
+func TestWorkflowStartRejectsInvalidRequestBeforeDatabase(t *testing.T) {
+	service := &Service{}
+	for _, test := range []struct {
+		name  string
+		key   string
+		input string
+		want  error
+	}{
+		{"空幂等键", "", `{}`, ErrInvalid},
+		{"超长幂等键", strings.Repeat("k", 201), `{}`, ErrInvalid},
+		{"数组", "start", `[]`, ErrInvalid},
+		{"空值", "start", `null`, ErrInvalid},
+		{"字符串", "start", `"input"`, ErrInvalid},
+		{"数字", "start", `1`, ErrInvalid},
+		{"非法JSON", "start", `{broken`, ErrInvalid},
+		{"超过1MiB", "start", `{"value":"` + strings.Repeat("x", 1<<20) + `"}`, ErrLarge},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := service.Start(context.Background(), "template", "user", test.key, json.RawMessage(test.input)); !errors.Is(err, test.want) {
+				t.Fatalf("Start error=%v, want=%v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestWorkflowStartConcurrentReplay(t *testing.T) {
+	service := &Service{DB: workflowTestDB(t)}
+	ctx := context.Background()
+	template, err := service.Save(ctx, "a", "", "并发发起", "", 0, []Node{{ID: "first", Type: "agent", Title: "首节点", Instruction: "执行", Assignee: "a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetStatus(ctx, template.ID, "a", true); err != nil {
+		t.Fatal(err)
+	}
+	type started struct {
+		result Result
+		err    error
+	}
+	ready := make(chan struct{})
+	results := make(chan started, 2)
+	for range 2 {
+		go func() {
+			<-ready
+			result, err := service.Start(ctx, template.ID, "a", "same-trigger", json.RawMessage(`{"text":"原输入"}`))
+			results <- started{result, err}
+		}()
+	}
+	close(ready)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || first.result.InstanceID == "" || first.result != second.result {
+		t.Fatalf("concurrent start results: %+v %+v", first, second)
+	}
+	var instances, tasks, events int
+	if err := service.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM workflow_instances WHERE template_id=$1),(SELECT count(*) FROM workflow_node_tasks WHERE instance_id=$2),(SELECT count(*) FROM workflow_events WHERE instance_id=$2 AND event_type='instance_started')`, template.ID, first.result.InstanceID).Scan(&instances, &tasks, &events); err != nil {
+		t.Fatal(err)
+	}
+	if instances != 1 || tasks != 1 || events != 1 {
+		t.Fatalf("concurrent duplicate creation: instances=%d tasks=%d events=%d", instances, tasks, events)
+	}
+}
+
 func workflowTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := testpostgres.New(t)

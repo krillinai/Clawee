@@ -65,6 +65,9 @@ export function parseCreateScheduleRequest(
   options: ParseScheduleOptions
 ): ScheduleValidationResult<NormalizedCreateScheduleInput> {
   if (!isPlainObject(body)) return { ok: false, code: 'VALIDATION_FAILED', message: 'body must be an object' };
+  if ((body.action !== undefined && body.action !== 'agent_run') || body.workflow !== undefined || body.owner !== undefined) {
+    return { ok: false, code: 'VALIDATION_FAILED', message: 'Agent schedule action is invalid' };
+  }
   const base = parseCommonFields(body, options, true);
   if (!base.ok) return base;
   const cron = requireString(body.cron, 'cron');
@@ -97,6 +100,9 @@ export function parseUpdateScheduleRequest(
   options: ParseScheduleOptions
 ): ScheduleValidationResult<NormalizedUpdateScheduleInput> {
   if (!isPlainObject(body)) return { ok: false, code: 'VALIDATION_FAILED', message: 'body must be an object' };
+  if ((body.action !== undefined && body.action !== 'agent_run') || body.workflow !== undefined || body.owner !== undefined) {
+    return { ok: false, code: 'VALIDATION_FAILED', message: 'Schedule action cannot be changed' };
+  }
   const base = parseCommonFields(body, options, false);
   if (!base.ok) return base;
   const value: NormalizedUpdateScheduleInput = { ...base.value };

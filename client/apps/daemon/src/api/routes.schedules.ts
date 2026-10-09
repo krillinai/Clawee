@@ -1,4 +1,4 @@
-import type { CreateScheduleRequest, UpdateScheduleRequest } from '@clawee/protocol';
+import type { CreateScheduleRequest, CreateWorkflowScheduleRequest, UpdateScheduleRequest, UpdateWorkflowScheduleRequest } from '@clawee/protocol';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { ScheduleCoordinator } from '../scheduler/coordinator.js';
 import { SchedulerError, type SchedulerService } from '../scheduler/service.js';
@@ -7,11 +7,14 @@ import { apiError } from './errors.js';
 export async function registerScheduleRoutes(
   server: FastifyInstance,
   coordinator: ScheduleCoordinator,
-  scheduler: SchedulerService
+  scheduler: SchedulerService,
+  canRunAgent: () => boolean = () => true
 ): Promise<void> {
-  server.get('/schedules', async (_request, reply) => {
+  server.get<{ Querystring: { action?: unknown } }>('/schedules', async (request, reply) => {
     try {
-      return scheduler.listSchedules();
+      const action = request.query.action;
+      if (action !== undefined && action !== 'workflow_start') return reply.code(400).send(apiError('VALIDATION_FAILED', '计划动作筛选无效'));
+      return scheduler.listSchedules(!canRunAgent() || action === 'workflow_start');
     } catch (error) {
       return sendSchedulerError(error, reply);
     }
@@ -22,7 +25,11 @@ export async function registerScheduleRoutes(
     if (!body.ok) return reply.code(400).send(apiError('VALIDATION_FAILED', body.message));
 
     try {
-      const schedule = coordinator.createManual(body.value as CreateScheduleRequest);
+      if (blockAgentAction(body.value.action, reply)) return reply;
+      if (body.value.action === 'workflow_start' && !coordinator.createWorkflow) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+      const schedule = body.value.action === 'workflow_start'
+        ? await coordinator.createWorkflow!(body.value as CreateWorkflowScheduleRequest)
+        : coordinator.createManual(body.value as CreateScheduleRequest);
       return reply.code(201).send(schedule);
     } catch (error) {
       return sendSchedulerError(error, reply);
@@ -35,6 +42,7 @@ export async function registerScheduleRoutes(
       if (schedule === undefined) {
         return reply.code(404).send(apiError('SCHEDULE_NOT_FOUND', 'Schedule not found'));
       }
+      if (blockAgentAction(schedule.action, reply)) return reply;
       return schedule;
     } catch (error) {
       return sendSchedulerError(error, reply);
@@ -48,6 +56,13 @@ export async function registerScheduleRoutes(
       if (!body.ok) return reply.code(400).send(apiError('VALIDATION_FAILED', body.message));
 
       try {
+        const schedule = scheduler.getSchedule(request.params.id);
+        if (!canRunAgent() && schedule === undefined) return reply.code(404).send(apiError('SCHEDULE_NOT_FOUND', 'Schedule not found'));
+        if (blockAgentAction(schedule?.action, reply)) return reply;
+        if (schedule?.action === 'workflow_start') {
+          if (!coordinator.updateWorkflow) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+          return await coordinator.updateWorkflow(request.params.id, body.value as UpdateWorkflowScheduleRequest);
+        }
         return coordinator.update(request.params.id, body.value as UpdateScheduleRequest);
       } catch (error) {
         return sendSchedulerError(error, reply);
@@ -57,6 +72,11 @@ export async function registerScheduleRoutes(
 
   server.delete<{ Params: { id: string } }>('/schedules/:id', async (request, reply) => {
     try {
+      if (!canRunAgent()) {
+        const schedule = scheduler.getSchedule(request.params.id);
+        if (schedule === undefined) return reply.code(404).send(apiError('SCHEDULE_NOT_FOUND', 'Schedule not found'));
+        if (blockAgentAction(schedule.action, reply)) return reply;
+      }
       coordinator.delete(request.params.id);
       return { deleted: true };
     } catch (error) {
@@ -64,9 +84,23 @@ export async function registerScheduleRoutes(
     }
   });
 
-  server.post<{ Params: { id: string } }>('/schedules/:id/run-now', async (request, reply) => {
+  server.post<{ Params: { id: string }; Body: unknown }>('/schedules/:id/run-now', async (request, reply) => {
     try {
-      const result = scheduler.runNow(request.params.id);
+      const schedule = scheduler.getSchedule(request.params.id);
+      if (!canRunAgent() && schedule === undefined) return reply.code(404).send(apiError('SCHEDULE_NOT_FOUND', 'Schedule not found'));
+      if (blockAgentAction(schedule?.action, reply)) return reply;
+      let triggerId: string | undefined;
+      if (request.body !== undefined) {
+        if (!isPlainObject(request.body) || Object.keys(request.body).some(key => key !== 'triggerId') || (request.body.triggerId !== undefined && (typeof request.body.triggerId !== 'string' || !request.body.triggerId.trim()))) {
+          return reply.code(400).send(apiError('VALIDATION_FAILED', '触发记录无效'));
+        }
+        triggerId = request.body.triggerId as string | undefined;
+      }
+      if (triggerId && schedule?.action !== 'workflow_start') return reply.code(400).send(apiError('VALIDATION_FAILED', '普通任务不支持工作流触发重试'));
+      if (schedule?.action === 'workflow_start' && !scheduler.runWorkflowNow) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+      const result = schedule?.action === 'workflow_start'
+        ? await scheduler.runWorkflowNow!(request.params.id, triggerId)
+        : scheduler.runNow(request.params.id);
       return reply.code(202).send(result);
     } catch (error) {
       return sendSchedulerError(error, reply);
@@ -79,12 +113,23 @@ export async function registerScheduleRoutes(
       const limit = parseLimitQuery(request.query);
 
       try {
+        if (!canRunAgent()) {
+          const schedule = scheduler.getSchedule(request.params.id);
+          if (schedule === undefined) return reply.code(404).send(apiError('SCHEDULE_NOT_FOUND', 'Schedule not found'));
+          if (blockAgentAction(schedule.action, reply)) return reply;
+        }
         return scheduler.listOperations(request.params.id, limit);
       } catch (error) {
         return sendSchedulerError(error, reply);
       }
     }
   );
+
+  function blockAgentAction(action: unknown, reply: FastifyReply): boolean {
+    if (canRunAgent() || action === 'workflow_start') return false;
+    reply.code(428).send(apiError('MODEL_SERVICE_CONFIGURATION_REQUIRED', '请先配置并验证 Codex 模型服务'));
+    return true;
+  }
 }
 
 type ParseResult<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -108,6 +153,11 @@ function parseLimitQuery(query: unknown): number | undefined {
 function sendSchedulerError(error: unknown, reply: FastifyReply) {
   if (!(error instanceof SchedulerError)) {
     return reply.code(500).send(apiError('INTERNAL_ERROR', 'Internal error'));
+  }
+
+  if (error.code === 'ENTERPRISE_UNAUTHORIZED' || error.code === 'ENTERPRISE_FORBIDDEN' || error.code === 'ENTERPRISE_SERVICE_UNAVAILABLE') {
+    const status = error.code === 'ENTERPRISE_UNAUTHORIZED' ? 401 : error.code === 'ENTERPRISE_FORBIDDEN' ? 403 : 503;
+    return reply.code(status).send(apiError(error.code, error.message, error.details));
   }
 
   if (error.code === 'VALIDATION_FAILED') {

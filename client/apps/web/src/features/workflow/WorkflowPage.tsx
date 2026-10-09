@@ -1,24 +1,41 @@
 import { workflowNodeCandidates, workflowTaskCandidates } from '@clawee/protocol';
 import { ArrowRight, Play, RefreshCw } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { createScheduleService } from '../../services/schedule-service.js';
 import type { Instance, Node, Task, Template, WorkflowService } from '../../services/workflow-service.js';
+import { WorkflowSchedules } from './WorkflowSchedules.js';
 import './workflow.css';
 
 const labels: Record<string, string> = { running: '运行中', succeeded: '已完成', rejected: '已驳回', terminated: '已终止', pending: '待处理', completed: '已完成', cancelled: '已取消' };
-const executionLabels: Record<string, string> = { idle: 'Agent 任务尚未启动', pending: '已提交，等待状态更新', queued: '等待执行', running: 'Agent 正在执行', succeeded: '执行完成，正在同步结果', completed: '执行已完成', failed: '执行失败，可重试', canceled: '执行已取消', conflict: '任务状态已变化，请刷新' };
+const executionLabels: Record<string, string> = { idle: 'Agent 任务尚未启动', pending: '已提交，等待状态更新', queued: '等待执行', running: 'Agent 正在执行', succeeded: '执行完成，正在同步结果', completed: '执行已完成', failed: '执行失败，当前节点未流转，可重试', canceled: '执行已取消，当前节点未流转，可重试', conflict: '任务状态已变化，请刷新' };
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败';
 const textValue = (value?: Record<string, unknown>) => typeof value?.text === 'string' ? value.text : '';
 type View = 'templates' | 'instances' | 'tasks';
 
-export function WorkflowPage({ service, signedIn, online, userId, projectId, onTaskPrepared }: {
+export function WorkflowPage(props: Parameters<typeof WorkflowPageContent>[0]) {
+  if (props.service && props.signedIn && props.identityStatus && props.identityStatus !== 'ready') {
+    return <main className="workflow-page"><header className="workflow-header"><h1>工作流</h1>{props.onOpenModelSettings && <button type="button" onClick={props.onOpenModelSettings}>返回模型设置</button>}</header><p className="workflow-muted" role="status">{!props.online ? '本地 Runtime 未连接，工作流身份不可用' : props.identityStatus === 'confirming' ? '正在确认工作流身份，请稍候' : '工作流身份不可用，请检查企业连接或重新登录'}</p></main>;
+  }
+  return <WorkflowPageContent key={JSON.stringify([props.signedIn, props.userId, props.identityKey])} {...props} />;
+}
+
+function WorkflowPageContent({ service, scheduleService, identityKey, signedIn, online, modelReady = true, onOpenModelSettings, userId, projectId, onTaskPrepared }: {
   service: WorkflowService | null;
+  scheduleService?: ReturnType<typeof createScheduleService> | null;
+  identityKey?: string;
+  identityStatus?: 'ready' | 'confirming' | 'unavailable';
   signedIn: boolean;
   online: boolean;
+  modelReady?: boolean;
+  onOpenModelSettings?(): void;
   userId?: string;
   projectId?: string;
   onTaskPrepared?(taskId: string, draft: { threadId: string; instruction: string; input: string; firstNode: boolean; customInput: string }): void;
 }) {
-  const [tab, setTab] = useState<View>('tasks');
+  const [tab, setTab] = useState<View | 'schedules'>('tasks');
+  const [scheduleTemplate, setScheduleTemplate] = useState<Template | null>(null);
+  const active = useRef(true);
+  const ownerKey = identityKey ? `${identityKey}:${userId}` : userId;
   const [status, setStatus] = useState('running');
   const [templates, setTemplates] = useState<Template[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -37,6 +54,11 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
   const [nextCursors, setNextCursors] = useState<Record<View, string>>({ templates: '', instances: '', tasks: '' });
   const [history, setHistory] = useState<Record<View, string[]>>({ templates: [], instances: [], tasks: [] });
 
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
   function changePage(view: View, next: string) {
     setHistory(previous => ({ ...previous, [view]: [...previous[view], cursors[view]] }));
     setCursors(previous => ({ ...previous, [view]: next }));
@@ -49,11 +71,12 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
   }
 
   async function refresh() {
-    if (!service || !online || !signedIn) return;
+    if (!service || !online || !signedIn || !active.current) return;
     try {
       const [templateList, instanceList, taskList, capability] = await Promise.all([
         service.templates(cursors.templates), service.instances(status, cursors.instances), service.tasks(cursors.tasks), service.capability()
       ]);
+      if (!active.current) return;
       setTemplates(templateList.data);
       setInstances(instanceList.data);
       setTasks(taskList.data);
@@ -61,6 +84,7 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
       setCanExecute(capability.canExecute);
       if (selected) {
         const detail = await service.instance(selected.id);
+        if (!active.current) return;
         setSelected(detail.data);
       }
       setError('');
@@ -89,7 +113,7 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
 
   useEffect(() => {
     if (!template || !userId) return;
-    const saved = sessionStorage.getItem(`workflow:start:${userId}:${template.id}:input`);
+    const saved = sessionStorage.getItem(`workflow:start:${ownerKey}:${template.id}:input`);
     setInput(saved === null ? '' : textValue(JSON.parse(saved) as Record<string, unknown>));
   }, [template?.id, userId]);
 
@@ -98,32 +122,32 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
   useEffect(() => {
     if (!selected || !userId) { setRetryDecision(null); return; }
     const task = selected.tasks?.find(item => item.status === 'pending' && item.type === 'approval' && Boolean(userId && workflowTaskCandidates(item).includes(userId)));
-    const saved = task && sessionStorage.getItem(`workflow:decision:${userId}:${task.task_id}:decision`);
+    const saved = task && sessionStorage.getItem(`workflow:decision:${ownerKey}:${task.task_id}:decision`);
     if (!saved) { setRetryDecision(null); return; }
     const value = JSON.parse(saved) as { decision: 'approve' | 'reject'; comment: string };
     setRetryDecision(value.decision); setComment(value.comment);
   }, [selected?.id, selected?.current_node_id, selected?.tasks, userId]);
 
   async function openTemplate(id: string) {
-    if (!service) return;
+    if (!service || !active.current) return;
     if (!online) {
       setTemplate(templates.find(item => item.id === id) ?? null);
       setSelected(null);
       return;
     }
-    try { setTemplate((await service.template(id)).data); setSelected(null); setError(''); }
+    try { const result = await service.template(id); if (!active.current) return; setTemplate(result.data); setSelected(null); setError(''); }
     catch (err) { setError(errorText(err)); }
   }
   async function openInstance(id: string) {
-    if (!service || !online) return;
-    try { setSelected((await service.instance(id)).data); setTemplate(null); setError(''); }
+    if (!service || !online || !active.current) return;
+    try { const result = await service.instance(id); if (!active.current) return; setSelected(result.data); setTemplate(null); setError(''); }
     catch (err) { setError(errorText(err)); }
   }
   async function start() {
-    if (!service || !online || !template || busy) return;
+    if (!service || !online || !template || busy || !active.current) return;
     const initialInput = { text: input };
     setBusy(true); setError('');
-    const keyName = `workflow:start:${userId}:${template.id}`;
+    const keyName = `workflow:start:${ownerKey}:${template.id}`;
     const key = sessionStorage.getItem(keyName) ?? crypto.randomUUID();
     const payloadName = `${keyName}:input`;
     const savedInput = sessionStorage.getItem(payloadName);
@@ -131,16 +155,17 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
     if (savedInput === null) sessionStorage.setItem(payloadName, JSON.stringify(initialInput));
     try {
       const result = await service.start(template.id, savedInput ? JSON.parse(savedInput) as Record<string, unknown> : initialInput, key);
+      if (!active.current) return;
       sessionStorage.removeItem(keyName); sessionStorage.removeItem(payloadName);
       await refresh(); await openInstance(result.data.instance_id); setTab('instances');
-      if (result.data.task_id && template.nodes[0]?.type === 'agent' && canExecute && projectId) await prepare(result.data.task_id);
+      if (result.data.task_id && template.nodes[0]?.type === 'agent' && modelReady && canExecute && projectId) await prepare(result.data.task_id);
     }
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   async function decide(task: Task, decision: 'approve' | 'reject') {
-    if (!service || !online || busy) return;
+    if (!service || !online || busy || !active.current) return;
     setBusy(true); setError('');
-    const keyName = `workflow:decision:${userId}:${task.task_id}`;
+    const keyName = `workflow:decision:${ownerKey}:${task.task_id}`;
     const key = sessionStorage.getItem(keyName) ?? crypto.randomUUID();
     const payloadName = `${keyName}:decision`;
     const saved = sessionStorage.getItem(payloadName);
@@ -150,33 +175,34 @@ export function WorkflowPage({ service, signedIn, online, userId, projectId, onT
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   async function prepare(taskId: string, personalized = '') {
-    if (!service || !online || !projectId || busy) return;
+    if (!service || !online || !modelReady || !canExecute || !projectId || busy || !active.current) return;
     setBusy(true); setError('');
-    try { const result = await service.prepare(taskId, projectId); onTaskPrepared?.(taskId, { ...result, customInput: result.firstNode ? result.input : personalized }); }
+    try { const result = await service.prepare(taskId, projectId); if (!active.current) return; onTaskPrepared?.(taskId, { ...result, customInput: result.firstNode ? result.input : personalized }); }
     catch (err) { setError(errorText(err)); await refresh(); } finally { setBusy(false); }
   }
 
   if (!service || !signedIn) return <main className="workflow-page"><h1>工作流</h1><p>{!service ? '本地 Runtime 未连接' : '登录企业账户后查看工作流'}</p></main>;
-  const currentTask = selected?.tasks?.find(task => task.status === 'pending' && Boolean(userId && workflowTaskCandidates(task).includes(userId)));
-  const retryStart = template && userId && sessionStorage.getItem(`workflow:start:${userId}:${template.id}`) !== null;
+  const currentTask = selected?.status === 'running' ? selected.tasks?.find(task => task.status === 'pending' && Boolean(userId && workflowTaskCandidates(task).includes(userId))) : undefined;
+  const retryStart = template && userId && sessionStorage.getItem(`workflow:start:${ownerKey}:${template.id}`) !== null;
   return <main className="workflow-page">
-    <header className="workflow-header"><h1>工作流</h1><button aria-label="刷新工作流" disabled={!online} onClick={() => void refresh()} title="刷新工作流" type="button"><RefreshCw size={16} /></button></header>
+    <header className="workflow-header"><h1>工作流</h1>{onOpenModelSettings && <button type="button" style={{ width: 'auto', padding: '0 12px' }} onClick={onOpenModelSettings}>返回模型设置</button>}<button aria-label="刷新工作流" disabled={!online} onClick={() => void refresh()} title="刷新工作流" type="button"><RefreshCw size={16} /></button></header>
     {!online && <p className="workflow-muted" role="status">当前离线，仅可查看已加载的工作流</p>}
-    <nav aria-label="工作流视图" className="workflow-tabs">{([['tasks', '待办'], ['instances', '实例'], ['templates', '模板']] as const).map(([view, label]) => <button aria-current={tab === view ? 'page' : undefined} key={view} onClick={() => { setTab(view); setSelected(null); setTemplate(null); }} type="button">{label}{view === 'tasks' && tasks.length > 0 ? ` ${tasks.length}` : ''}</button>)}</nav>
+    <nav aria-label="工作流视图" className="workflow-tabs">{([['tasks', '待办'], ['instances', '实例'], ['templates', '模板']] as const).map(([view, label]) => <button aria-current={tab === view ? 'page' : undefined} key={view} onClick={() => { setTab(view); setSelected(null); setTemplate(null); }} type="button">{label}{view === 'tasks' && tasks.length > 0 ? ` ${tasks.length}` : ''}</button>)}{scheduleService && <button aria-current={tab === "schedules" ? "page" : undefined} type="button" onClick={() => { setTab("schedules"); setScheduleTemplate(null); setSelected(null); setTemplate(null); }}>定时计划</button>}</nav>
     {error && <p className="workflow-error" role="alert">{error}</p>}
-    <div className="workflow-layout"><section aria-label="工作流列表" className="workflow-list">
+    {online && template?.status === 'enabled' && template.nodes.length > 0 && userId && scheduleService && <div className="workflow-actions"><button type="button" disabled={busy} onClick={() => { setScheduleTemplate(template); setTemplate(null); setSelected(null); setTab('schedules'); }}>创建定时计划</button></div>}
+    {tab === 'schedules' && scheduleService ? <WorkflowSchedules identityKey={ownerKey} service={scheduleService} online={online} createTemplate={scheduleTemplate} onOpenInstance={id => { setTab('instances'); setScheduleTemplate(null); void openInstance(id); }} /> : <div className="workflow-layout"><section aria-label="工作流列表" className="workflow-list">
       {tab === 'instances' && <select aria-label="实例状态" onChange={event => { setStatus(event.target.value); setCursors(previous => ({ ...previous, instances: '' })); setHistory(previous => ({ ...previous, instances: [] })); }} value={status}><option value="running">运行中</option><option value="all">全部</option><option value="succeeded">已完成</option><option value="rejected">已驳回</option><option value="terminated">已终止</option></select>}
       {tab === 'templates' && templates.map(item => <button className={template?.id === item.id ? 'selected' : ''} key={item.id} onClick={() => void openTemplate(item.id)} type="button"><strong>{item.name}</strong><small>版本 {item.revision} · {item.nodes.length} 个节点</small></button>)}
       {tab === 'instances' && instances.map(item => <button className={selected?.id === item.id ? 'selected' : ''} disabled={!online && selected?.id !== item.id} key={item.id} onClick={() => void openInstance(item.id)} type="button"><strong>{item.nodes[0]?.title || item.id}</strong><small>{labels[item.status]} · {new Date(item.started_at).toLocaleString()}</small></button>)}
       {tab === 'tasks' && tasks.map(item => <button className={selected?.id === item.instance_id ? 'selected' : ''} disabled={!online && selected?.id !== item.instance_id} key={item.task_id} onClick={() => void openInstance(item.instance_id)} type="button"><strong>{item.type === 'agent' ? 'Agent' : '审批'} · {item.instruction}</strong><small>{item.instance_id}</small></button>)}
-      {online && history[tab].length > 0 && <button onClick={() => previousPage(tab)} type="button">上一页</button>}
-      {online && nextCursors[tab] && <button onClick={() => changePage(tab, nextCursors[tab])} type="button">下一页 <ArrowRight size={14} /></button>}
+      {online && tab !== 'schedules' && history[tab].length > 0 && <button onClick={() => previousPage(tab)} type="button">上一页</button>}
+      {online && tab !== 'schedules' && nextCursors[tab] && <button onClick={() => changePage(tab, nextCursors[tab])} type="button">下一页 <ArrowRight size={14} /></button>}
       {tab === 'tasks' && tasks.length === 0 && <p className="workflow-muted">暂无待办</p>}
     </section><section aria-label="工作流详情" className="workflow-detail">
-      {template && <><h2>{template.name}</h2><p className="workflow-muted">{template.description}</p><WorkflowSteps nodes={template.nodes} action={online && Boolean(userId) && template.nodes.length > 0 ? <div className="workflow-actions"><label>任务要求<textarea disabled={Boolean(retryStart)} onChange={event => setInput(event.target.value)} rows={5} value={input} /></label>{retryStart && <p className="workflow-muted">上次发起尚未确认，仅可用原输入重试。</p>}<button disabled={busy || template.nodes[0]?.type === 'agent' && (!canExecute || !projectId)} onClick={() => void start()} type="button">{retryStart ? '重试发起' : '发起任务'}</button></div> : null} /></>}
-      {selected && <><h2>实例 {selected.id}</h2><p className="workflow-muted">{labels[selected.status]}</p><WorkflowSteps nodes={selected.nodes} tasks={selected.tasks} current={selected.current_node_id} execution={execution} userNames={selected.user_names} action={online && currentTask?.type === 'approval' ? <div className="workflow-actions"><label>审批意见<textarea disabled={retryDecision !== null} onChange={event => setComment(event.target.value)} rows={3} value={comment} /></label>{retryDecision && <p className="workflow-muted">上次提交尚未确认，仅可用原决定重试。</p>}<div><button disabled={busy || retryDecision === 'reject'} onClick={() => void decide(currentTask, 'approve')} type="button">{retryDecision === 'approve' ? '重试批准' : '批准'}</button><button disabled={busy || retryDecision === 'approve'} onClick={() => void decide(currentTask, 'reject')} type="button">{retryDecision === 'reject' ? '重试驳回' : '驳回'}</button></div></div> : online && currentTask?.type === 'agent' && canExecute && projectId ? <div className="workflow-actions">{selected.nodes[0]?.node_id !== currentTask.node_id && <label>任务要求<textarea onChange={event => setCustomInput(event.target.value)} rows={3} value={customInput} /></label>}<button disabled={busy || execution[currentTask.task_id] === 'running' || execution[currentTask.task_id] === 'queued'} onClick={() => void prepare(currentTask.task_id, customInput)} type="button"><Play size={15} />发起 Agent 执行</button>{execution[currentTask.task_id] && <span>{executionLabels[execution[currentTask.task_id] ?? ''] ?? '执行状态待更新'}</span>}</div> : null} /></>}
+      {template && <><h2>{template.name}</h2><p className="workflow-muted">{template.description}</p><WorkflowSteps nodes={template.nodes} action={online && Boolean(userId) && template.nodes.length > 0 ? <div className="workflow-actions"><label>任务要求<textarea disabled={Boolean(retryStart)} onChange={event => setInput(event.target.value)} rows={5} value={input} /></label>{retryStart && <p className="workflow-muted">上次发起尚未确认，仅可用原输入重试。</p>}<button disabled={busy || modelReady && template.nodes[0]?.type === 'agent' && (!canExecute || !projectId)} onClick={() => void start()} type="button">{retryStart ? '重试发起' : '发起任务'}</button></div> : null} /></>}
+      {selected && <><h2>实例 {selected.id}</h2><p className="workflow-muted">{labels[selected.status]}</p><WorkflowSteps nodes={selected.nodes} tasks={selected.tasks} current={selected.current_node_id} execution={execution} userNames={selected.user_names} action={online && currentTask?.type === 'approval' ? <div className="workflow-actions"><label>审批意见<textarea disabled={retryDecision !== null} onChange={event => setComment(event.target.value)} rows={3} value={comment} /></label>{retryDecision && <p className="workflow-muted">上次提交尚未确认，仅可用原决定重试。</p>}<div><button disabled={busy || retryDecision === 'reject'} onClick={() => void decide(currentTask, 'approve')} type="button">{retryDecision === 'approve' ? '重试批准' : '批准'}</button><button disabled={busy || retryDecision === 'approve'} onClick={() => void decide(currentTask, 'reject')} type="button">{retryDecision === 'reject' ? '重试驳回' : '驳回'}</button></div></div> : online && currentTask?.type === 'agent' && modelReady && canExecute && projectId ? <div className="workflow-actions">{selected.nodes[0]?.node_id !== currentTask.node_id && <label>任务要求<textarea onChange={event => setCustomInput(event.target.value)} rows={3} value={customInput} /></label>}<button disabled={busy || execution[currentTask.task_id] === 'running' || execution[currentTask.task_id] === 'queued'} onClick={() => void prepare(currentTask.task_id, customInput)} type="button"><Play size={15} />{execution[currentTask.task_id] === 'failed' || execution[currentTask.task_id] === 'canceled' ? '重试 Agent 执行' : '发起 Agent 执行'}</button>{execution[currentTask.task_id] && <span>{executionLabels[execution[currentTask.task_id] ?? ''] ?? '执行状态待更新'}</span>}</div> : online && currentTask?.type === 'agent' && !modelReady ? <p className="workflow-muted">模型尚未就绪，当前节点不会自动执行；请先返回模型设置，再执行 Agent。</p> : null} /></>}
       {!template && !selected && <p className="workflow-muted">选择一项查看详情</p>}
-    </section></div>
+    </section></div>}
   </main>;
 }
 

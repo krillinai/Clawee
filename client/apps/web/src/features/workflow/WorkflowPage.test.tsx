@@ -29,6 +29,163 @@ function serviceFor(userId: string): WorkflowService {
 describe('WorkflowPage', () => {
   beforeEach(() => sessionStorage.clear());
 
+  it.each(['confirming', 'unavailable'] as const)('R2 身份 %s 时不挂载变更界面或迁移临时 Origin 缓存', async identityStatus => {
+    const service = serviceFor('a');
+    sessionStorage.setItem('workflow:start:unknown:a:template-a:input', '{"text":"未知身份输入"}');
+    render(<WorkflowPage service={service} identityStatus={identityStatus} signedIn online userId="a" />);
+    expect(screen.getByText(identityStatus === 'confirming' ? /正在确认工作流身份/ : /工作流身份不可用/)).toBeInTheDocument();
+    expect(service.templates).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '发起任务' })).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('workflow:start:unknown:a:template-a:input')).toBe('{"text":"未知身份输入"}');
+  });
+
+  it('换账号无需父组件 key 也立即清除原账户详情', async () => {
+    const view = render(<WorkflowPage service={serviceFor('a')} signedIn online userId="a" />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    expect(await screen.findByText(/私密文本/)).toBeInTheDocument();
+    await act(async () => view.rerender(<WorkflowPage service={serviceFor('b')} signedIn online userId="b" />));
+    expect(screen.queryByText(/私密文本/)).not.toBeInTheDocument();
+  });
+
+  it('同账号切换 Origin 或 Agent 时不保留原详情', async () => {
+    const service = serviceFor('a');
+    const view = render(<WorkflowPage service={service} identityKey="https://one.example:agent-a" signedIn online userId="a" />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    expect(await screen.findByText(/私密文本/)).toBeInTheDocument();
+    await act(async () => view.rerender(<WorkflowPage service={serviceFor('b')} identityKey="https://two.example:agent-b" signedIn online userId="a" />));
+    expect(screen.queryByText(/私密文本/)).not.toBeInTheDocument();
+  });
+
+  it.each(['failed', 'canceled'])('Agent %s 保留当前节点并提供重试入口', async runStatus => {
+    const agentTask: Task = { ...task, type: 'agent' };
+    const service = serviceFor('a');
+    service.tasks = vi.fn(async () => ({ data: [agentTask], meta }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, tasks: [agentTask], nodes: [{ ...instance.nodes[0]!, type: 'agent' as const }] } }));
+    service.capability = vi.fn(async () => ({ canExecute: true }));
+    service.execution = vi.fn(async () => ({ status: 'pending', runStatus }));
+    service.prepare = vi.fn(async () => ({ threadId: 'retry-thread', instruction: '审核', input: '原要求', firstNode: true }));
+    const onTaskPrepared = vi.fn();
+    render(<WorkflowPage service={service} signedIn online userId="a" projectId="project-1" onTaskPrepared={onTaskPrepared} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Agent · 审核/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '重试 Agent 执行' }));
+    await waitFor(() => expect(service.prepare).toHaveBeenCalledWith('task-a', 'project-1'));
+    expect(onTaskPrepared).toHaveBeenCalledWith('task-a', expect.objectContaining({ threadId: 'retry-thread' }));
+    expect(service.decide).not.toHaveBeenCalled();
+  });
+
+  it('rejected 实例不显示执行或审批入口，即使残留待办', async () => {
+    const service = serviceFor('a');
+    service.instance = vi.fn(async () => ({ data: { ...instance, status: 'rejected' } }));
+    render(<WorkflowPage service={service} signedIn online userId="a" />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    expect(await screen.findByRole('heading', { name: '实例 instance-a' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '批准' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '驳回' })).not.toBeInTheDocument();
+  });
+
+  it('只在合法模板且在线时提供定时创建，不要求模型或项目', async () => {
+    const template: Template = { id: 'template-a', name: '审批模板', description: '', status: 'enabled', revision: 1, nodes: instance.nodes };
+    const service = serviceFor('a');
+    service.templates = vi.fn(async () => ({ data: [template], meta }));
+    service.template = vi.fn(async () => ({ data: template }));
+    const scheduleService = { listSchedules: vi.fn(async () => ({ schedules: [] })) } as unknown as NonNullable<Parameters<typeof WorkflowPage>[0]['scheduleService']>;
+    const view = render(<WorkflowPage service={service} scheduleService={scheduleService} signedIn online userId="a" />);
+    fireEvent.click(screen.getByRole('button', { name: '模板' }));
+    fireEvent.click(await screen.findByRole('button', { name: /审批模板/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '创建定时计划' }));
+    expect(await screen.findByRole('form', { name: '创建工作流定时计划' })).toBeInTheDocument();
+    view.rerender(<WorkflowPage service={service} scheduleService={scheduleService} signedIn online={false} userId="a" />);
+    expect(screen.queryByRole('button', { name: '保存计划' })).not.toBeInTheDocument();
+  });
+
+  it('模型未 ready 时即使服务称可执行且项目存在，也禁止 Agent 准备', async () => {
+    const service = serviceFor('a');
+    const agentTask: Task = { ...task, type: 'agent' };
+    service.tasks = vi.fn(async () => ({ data: [agentTask], meta }));
+    service.instance = vi.fn(async () => ({ data: { ...instance, tasks: [agentTask], nodes: [{ ...instance.nodes[0]!, type: 'agent' as const }] } }));
+    service.capability = vi.fn(async () => ({ canExecute: true }));
+    service.execution = vi.fn(async () => ({ status: 'idle' }));
+    service.prepare = vi.fn();
+    render(<WorkflowPage service={service} signedIn online modelReady={false} userId="a" projectId="project-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Agent · 审核/ }));
+    expect(await screen.findByText(/模型尚未就绪/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起 Agent 执行' })).not.toBeInTheDocument();
+    expect(service.prepare).not.toHaveBeenCalled();
+  });
+
+  it('模型未 ready 仍可发起首节点为 Agent 的实例，但不自动 prepare', async () => {
+    const template: Template = { id: 'template-a', name: '无需模型发起', description: '', status: 'enabled', revision: 1,
+      nodes: [{ ...instance.nodes[0]!, type: 'agent' }] };
+    const service = serviceFor('a');
+    service.templates = vi.fn(async () => ({ data: [template], meta }));
+    service.template = vi.fn(async () => ({ data: template }));
+    service.capability = vi.fn(async () => ({ canExecute: true }));
+    service.start = vi.fn(async () => ({ data: { instance_id: instance.id, task_id: 'agent-task', status: 'running' } }));
+    service.prepare = vi.fn();
+    render(<WorkflowPage service={service} signedIn online modelReady={false} userId="a" projectId="project-1" />);
+    fireEvent.click(screen.getByRole('button', { name: '模板' }));
+    fireEvent.click(await screen.findByRole('button', { name: /无需模型发起/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '发起任务' }));
+    await waitFor(() => expect(service.start).toHaveBeenCalled());
+    await screen.findByRole('heading', { name: '实例 instance-a' });
+    expect(service.prepare).not.toHaveBeenCalled();
+  });
+
+  it('账号切换立即清除计划和初始输入，即使旧计划请求随后返回', async () => {
+    let resolveOld!: (value: { schedules: [] }) => void;
+    const scheduleService = { listSchedules: vi.fn(() => new Promise<{ schedules: [] }>(resolve => { resolveOld = resolve; })) } as unknown as NonNullable<Parameters<typeof WorkflowPage>[0]['scheduleService']>;
+    const view = render(<WorkflowPage service={serviceFor('a')} scheduleService={scheduleService} signedIn online userId="a" />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '定时计划' })));
+    await act(async () => view.rerender(<WorkflowPage service={serviceFor('b')} scheduleService={scheduleService} signedIn online userId="b" />));
+    await act(async () => resolveOld({ schedules: [] }));
+    expect(screen.queryByRole('region', { name: '本机工作流计划' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '初始输入（JSON 对象）' })).not.toBeInTheDocument();
+    expect(screen.getByText('暂无待办')).toBeInTheDocument();
+  });
+
+  it('登录退出再登录不保留前一次计划页面', async () => {
+    const service = serviceFor('a');
+    const scheduleService = { listSchedules: vi.fn(async () => ({ schedules: [] })) } as unknown as NonNullable<Parameters<typeof WorkflowPage>[0]['scheduleService']>;
+    const view = render(<WorkflowPage service={service} scheduleService={scheduleService} signedIn online userId="a" />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '定时计划' })));
+    await act(async () => view.rerender(<WorkflowPage service={service} scheduleService={scheduleService} signedIn={false} online userId="a" />));
+    expect(screen.queryByText(/由当前客户端发起/)).not.toBeInTheDocument();
+    await act(async () => view.rerender(<WorkflowPage service={service} scheduleService={scheduleService} signedIn online userId="a" />));
+    expect(screen.queryByText(/由当前客户端发起/)).not.toBeInTheDocument();
+  });
+
+  it('Origin 之间不复用手动发起的幂等键和私密输入', async () => {
+    const template: Template = { id: 'template-a', name: '审批模板', description: '', status: 'enabled', revision: 1, nodes: instance.nodes };
+    const service = serviceFor('a');
+    service.templates = vi.fn(async () => ({ data: [template], meta }));
+    service.template = vi.fn(async () => ({ data: template }));
+    service.start = vi.fn(async () => { throw new Error('网络中断'); });
+    sessionStorage.setItem('workflow:start:origin-one:a:template-a', 'old-key');
+    sessionStorage.setItem('workflow:start:origin-one:a:template-a:input', '{"text":"前服务私密输入"}');
+    render(<WorkflowPage service={service} identityKey="origin-two" signedIn online userId="a" />);
+    fireEvent.click(screen.getByRole('button', { name: '模板' }));
+    fireEvent.click(await screen.findByRole('button', { name: /审批模板/ }));
+    expect(await screen.findByRole('textbox', { name: '任务要求' })).toHaveValue('');
+    expect(screen.queryByRole('button', { name: '重试发起' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '发起任务' }));
+    await waitFor(() => expect(service.start).toHaveBeenCalledWith('template-a', { text: '' }, expect.not.stringMatching('old-key')));
+  });
+
+  it('审批未知结果仅用原决定、意见和 key 重试，不能改为驳回', async () => {
+    const service = serviceFor('a');
+    service.decide = vi.fn(async () => { throw new Error('网络中断'); });
+    sessionStorage.setItem('workflow:decision:a:task-a', 'decision-key');
+    sessionStorage.setItem('workflow:decision:a:task-a:decision', '{"decision":"approve","comment":"原审批意见"}');
+    render(<WorkflowPage service={service} signedIn online userId="a" />);
+    fireEvent.click(await screen.findByRole('button', { name: /审批 · 审核/ }));
+    const retry = await screen.findByRole('button', { name: '重试批准' });
+    expect(screen.getByRole('textbox', { name: '审批意见' })).toHaveValue('原审批意见');
+    expect(screen.getByRole('textbox', { name: '审批意见' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '驳回' })).toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(service.decide).toHaveBeenCalledWith('task-a', 'approve', '原审批意见', 'decision-key'));
+  });
+
   it('第二个候选也能审批，并展示全体候选姓名', async () => {
     const shared = { ...task, assignee_user_ids: ['a', 'b', 'a'] };
     const service = serviceFor('a');

@@ -7,7 +7,9 @@ import type {
   ScheduleLastStatus,
   ScheduleMisfirePolicy,
   ScheduleOperationStatus,
-  ScheduleOperationType
+  ScheduleOperationType,
+  ScheduleAction,
+  WorkflowScheduleConfiguration
 } from '@clawee/protocol';
 
 export type LegacyMisfirePolicy = ScheduleMisfirePolicy | 'run_once';
@@ -18,6 +20,11 @@ export type SchedulerClock = {
 
 export type ScheduleRecord = {
   id: string;
+  action?: ScheduleAction;
+  workflow?: WorkflowScheduleConfiguration;
+  owner?: WorkflowScheduleOwner;
+  createFingerprint?: string | null;
+  lastWorkflowInstanceId?: string | null;
   threadId: string | null;
   name: string;
   cron: string;
@@ -89,6 +96,8 @@ export type UpdateScheduleInput = Partial<
     | 'lastRunId'
     | 'lastStatus'
     | 'pendingTrigger'
+    | 'workflow'
+    | 'lastWorkflowInstanceId'
   >
 >;
 
@@ -98,6 +107,8 @@ export type ScheduleOperationRecord = {
   scheduleId: string;
   status: ScheduleOperationStatus;
   runId?: string | null;
+  triggerId?: string | null;
+  workflowInstanceId?: string | null;
   actorType?: ScheduleActorType | null;
   actorRunId?: string | null;
   diagnosticEvent?: ScheduleDiagnosticEventType;
@@ -111,6 +122,8 @@ export type InsertScheduleOperationInput = {
   scheduleId: string;
   status: ScheduleOperationStatus;
   runId?: string | null;
+  triggerId?: string | null;
+  workflowInstanceId?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
 };
@@ -130,4 +143,16 @@ export const scheduleOperationActors = {
 
 export type ProfileValidator = {
   validateProfileForRun(name: string): { ok: true } | { ok: false; code: string; message: string };
+};
+
+export type WorkflowScheduleOwner = { origin: string; subjectId: string; agentId: string };
+export type WorkflowScheduleTrigger = {
+  id: string;
+  scheduleId: string;
+  scheduledAt: string | null;
+  workflow: WorkflowScheduleConfiguration;
+  owner: WorkflowScheduleOwner;
+  status: 'pending' | 'failed' | 'succeeded';
+  workflowInstanceId: string | null;
+  createdAt: string;
 };

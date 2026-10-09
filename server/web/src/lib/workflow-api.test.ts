@@ -4,6 +4,31 @@ import { workflowAdmin } from "./workflow-api";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("工作流 API", () => {
+  it("管理端发起复用JSON接口并传递初始对象及幂等键", async () => {
+    const data = { instance_id: "instance-1", task_id: "task-1", status: "running" };
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ data }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(workflowAdmin.start("template/1", { text: "输入", nested: { value: 1 } }, "fixed-key")).resolves.toMatchObject(data);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/admin/workflow-templates/template%2F1/instances");
+    expect(init).toMatchObject({ method: "POST", credentials: "include" });
+    expect(JSON.parse(init?.body as string)).toEqual({ initial_input: { text: "输入", nested: { value: 1 } }, idempotency_key: "fixed-key" });
+  });
+
+  it.each([400, 403, 404, 409, 413, 500])("发起错误（%s）原样交给调用方，不自动创建重试请求", async status => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ error: { code: "start_rejected", message: "发起被拒绝" } }, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(workflowAdmin.start("template-1", {}, "same-key")).rejects.toMatchObject({ status, code: "start_rejected" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("网络结果未知时调用方可使用同输入同key重试", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce(new TypeError("网络中断")).mockResolvedValueOnce(Response.json({ data: { instance_id: "instance-1", task_id: "task-1", status: "running" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(workflowAdmin.start("template-1", { value: "原输入" }, "same-key")).rejects.toThrow("网络中断");
+    await workflowAdmin.start("template-1", { value: "原输入" }, "same-key");
+    expect(fetchMock.mock.calls[1]).toEqual(fetchMock.mock.calls[0]);
+  });
   it("账户和角色搜索沿用工作流接口，编码搜索条件", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ data: [{ role_id: "role_1", name: "审核组" }], meta: { next_cursor: "" } }));
     vi.stubGlobal("fetch", fetchMock);

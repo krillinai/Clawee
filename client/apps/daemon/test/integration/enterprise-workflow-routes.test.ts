@@ -14,10 +14,11 @@ import { registerEnterpriseWorkflowRoutes } from '../../src/api/routes.enterpris
 import { registerThreadRoutes } from '../../src/api/routes.threads.js';
 import { createWorkflowRunHistory } from '../../src/enterprise/workflow-run-history.js';
 
+const workflowTools = vi.hoisted(() => ({ call: vi.fn() }));
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
     async connect() {}
-    async callTool() { return { structuredContent: { instance_id: 'instance-1', node_id: 'node-1', node_order: 0, instruction: '整理内容', input: { text: '测试主题' }, assignee_user_id: 'other-user', assignee_user_ids: ['other-user', 'user-1'] } }; }
+    async callTool() { return await workflowTools.call() ?? { structuredContent: { instance_id: 'instance-1', node_id: 'node-1', node_order: 0, instruction: '整理内容', input: { text: '测试主题' }, assignee_user_id: 'other-user', assignee_user_ids: ['other-user', 'user-1'] } }; }
     async close() {}
   }
 }));
@@ -25,10 +26,57 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ Streamabl
 
 const directories: string[] = [];
 afterEach(() => {
+  workflowTools.call.mockReset();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 describe('enterprise workflow execution', () => {
+  it.each([
+    ['failed', true], ['canceled', true], ['failed', false], ['running', false]
+  ] as const)('retries a %s pending run only with current permission %s', async (status, allowed) => {
+    const directory = mkdtempSync(join(tmpdir(), 'clawee-workflow-retry-'));
+    directories.push(directory);
+    const db = openRuntimeDatabase(join(directory, 'app.sqlite'));
+    const projects = createProjectManager({ db, homeDir: directory });
+    const project = projects.createProject({ cwd: directory, profile: 'default', sandbox: 'workspace-write' });
+    const threads = createThreadManager({ db, dataDir: directory, projectManager: projects });
+    const thread = threads.createConversationThread({ projectId: project.id, title: '重试', profile: 'default', sandbox: 'workspace-write' });
+    const insertRun = (id: string, state: string, threadId = thread.id) => db.prepare(`
+      INSERT INTO runs (id,thread_id,public_status,internal_status,created_by,profile,cwd,canonical_cwd,workspace_mode,sandbox,codex_version,codex_bin,codex_home,normalizer_version)
+      VALUES (?,? ,?,?,'api','default',?,?,'external','workspace-write','test','codex',?,1)
+    `).run(id, threadId, state, state, directory, directory, directory);
+    insertRun('old-run', status);
+    db.prepare('INSERT INTO enterprise_workflow_runs (task_id,user_id,run_id,complete_key,state) VALUES (?,?,?,?,?)').run('retry-task', 'user-1', 'old-run', 'old-key', 'pending');
+    const startRun = vi.fn((input: { threadId: string }) => { insertRun('new-run', 'running', input.threadId); return { id: 'new-run', threadId: input.threadId, status: 'running' }; });
+    if (!allowed) workflowTools.call.mockResolvedValueOnce({ isError: true, content: [{ text: '权限不足' }] });
+    const server = Fastify();
+    try {
+      await registerEnterpriseWorkflowRoutes(server, {
+        db, threads, runs: { startRun, getRun: () => ({ id: 'old-run', status }), listRunsByThread: () => [], listEvents: () => [] } as unknown as RunManager,
+        session: { getSnapshot: () => ({ status: 'signed_in', account: { subjectId: 'user-1' }, agentId: 'agent-1' }), requireAccessToken: async () => 'access-token' } as unknown as EnterpriseSessionManager,
+        http: { revealAccountMcpToken: async () => ({ token: 'mcp-token' }) } as unknown as EnterpriseHttpClient,
+        origin: () => 'http://127.0.0.1:1904', canExecute: () => true
+      });
+      let threadId = thread.id;
+      if (allowed) {
+        const preparation = await server.inject({ method: 'POST', url: '/enterprise/workflow-tasks/retry-task/prepare', payload: { projectId: project.id } });
+        expect(preparation.statusCode, preparation.body).toBe(200);
+        threadId = preparation.json().threadId;
+        expect(threadId).not.toBe(thread.id);
+      }
+      const response = await server.inject({ method: 'POST', url: '/enterprise/workflow-tasks/retry-task/execute', payload: { projectId: project.id, threadId, customInput: '重试' } });
+      expect(workflowTools.call).toHaveBeenCalled();
+      if (allowed) {
+        expect(response.statusCode, response.body).toBe(202);
+        expect(response.json().runId).toBe('new-run');
+        expect(startRun).toHaveBeenCalledTimes(1);
+        expect(db.prepare('SELECT state,run_id FROM enterprise_workflow_runs WHERE task_id=?').get('retry-task')).toMatchObject({ state: 'pending', run_id: 'new-run' });
+      } else {
+        expect(response.statusCode).toBe(409);
+        expect(startRun).not.toHaveBeenCalled();
+      }
+    } finally { await server.close(); db.close(); }
+  });
   it('真实多节点 approve 与历史 null 摘要返回成功，协议失败返回502且保留401/403', async () => {
     const server = Fastify();
     const origin = 'https://enterprise.example';

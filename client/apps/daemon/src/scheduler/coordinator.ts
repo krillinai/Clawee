@@ -1,5 +1,7 @@
 import type {
   CreateScheduleRequest,
+  CreateWorkflowScheduleRequest,
+  UpdateWorkflowScheduleRequest,
   ScheduleResponse,
   UpdateScheduleRequest
 } from '@clawee/protocol';
@@ -22,22 +24,27 @@ import {
   parseUpdateScheduleRequest,
   type NormalizedUpdateScheduleInput
 } from './validator.js';
+import type { WorkflowSchedules } from './workflow.js';
 
 export type ScheduleCoordinator = {
-  createManual(input: CreateScheduleRequest): ScheduleResponse;
+  createManual(input: CreateScheduleRequest): AgentScheduleResponse;
+  createWorkflow?(input: CreateWorkflowScheduleRequest): Promise<ScheduleResponse>;
+  updateWorkflow?(id: string, input: UpdateWorkflowScheduleRequest): Promise<ScheduleResponse>;
   createFromAgent(
     input: CreateScheduleRequest | Record<string, unknown>,
     actor: ScheduleAgentActor
-  ): ScheduleResponse;
-  update(id: string, input: UpdateScheduleRequest): ScheduleResponse;
+  ): AgentScheduleResponse;
+  update(id: string, input: UpdateScheduleRequest): AgentScheduleResponse;
   updateFromAgent(
     id: string,
     input: UpdateScheduleRequest,
     actor: ScheduleAgentActor
-  ): ScheduleResponse;
+  ): AgentScheduleResponse;
   delete(id: string): void;
   ensureBindings(): ScheduleBindingRepairResult;
 };
+
+type AgentScheduleResponse = ScheduleResponse & { threadId: string };
 
 export type ScheduleAgentActor = {
   runId: string;
@@ -68,6 +75,7 @@ export type ScheduleCoordinatorOptions = {
   profileValidator: ProfileValidator;
   clock?: SchedulerClock;
   onSchedulesChanged?(): void;
+  workflowSchedules?: WorkflowSchedules;
 };
 
 const systemClock: SchedulerClock = {
@@ -79,7 +87,7 @@ export function createScheduleCoordinator(
 ): ScheduleCoordinator {
   const clock = options.clock ?? systemClock;
   const createManualTransaction = options.db.transaction(
-    (input: CreateScheduleRequest): ScheduleResponse => {
+    (input: CreateScheduleRequest): AgentScheduleResponse => {
       const parsed = parseCreateScheduleRequest(input, {
         now: clock.now().toISOString(),
         defaultCwd: options.defaultCwd,
@@ -113,7 +121,10 @@ export function createScheduleCoordinator(
     (
       input: CreateScheduleRequest | Record<string, unknown>,
       actor: ScheduleAgentActor
-    ): ScheduleResponse => {
+    ): AgentScheduleResponse => {
+      if (isPlainObject(input) && ((input.action !== undefined && input.action !== 'agent_run') || 'workflow' in input || 'owner' in input)) {
+        throw new SchedulerError('VALIDATION_FAILED', 'Agent 定时工具不能创建工作流或指定归属');
+      }
       const actorThread = requireAgentCreationThread(actor, options.threadManager);
       const parsed = parseCreateScheduleRequest(
         agentCreateRequest(input, actorThread),
@@ -174,7 +185,7 @@ export function createScheduleCoordinator(
       id: string,
       input: UpdateScheduleRequest,
       actor: ScheduleOperationActor
-    ): ScheduleResponse => {
+    ): AgentScheduleResponse => {
       const existing = requireSchedule(options.repository, id);
       const thread = requireScheduleThread(existing, options.threadManager);
       const parsed = parseUpdateScheduleRequest(input, {
@@ -288,8 +299,22 @@ export function createScheduleCoordinator(
   );
 
   return {
-    createManual(input: CreateScheduleRequest): ScheduleResponse {
+    createManual(input: CreateScheduleRequest): AgentScheduleResponse {
       const schedule = createManualTransaction(input);
+      options.onSchedulesChanged?.();
+      return schedule;
+    },
+
+    async createWorkflow(input) {
+      if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+      const schedule = await options.workflowSchedules.create(input);
+      options.onSchedulesChanged?.();
+      return schedule;
+    },
+
+    async updateWorkflow(id, input) {
+      if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+      const schedule = await options.workflowSchedules.update(id, input);
       options.onSchedulesChanged?.();
       return schedule;
     },
@@ -297,13 +322,13 @@ export function createScheduleCoordinator(
     createFromAgent(
       input: CreateScheduleRequest | Record<string, unknown>,
       actor: ScheduleAgentActor
-    ): ScheduleResponse {
+    ): AgentScheduleResponse {
       const schedule = createFromAgentTransaction(input, actor);
       options.onSchedulesChanged?.();
       return schedule;
     },
 
-    update(id: string, input: UpdateScheduleRequest): ScheduleResponse {
+    update(id: string, input: UpdateScheduleRequest): AgentScheduleResponse {
       const schedule = updateTransaction(id, input, scheduleOperationActors.user);
       options.onSchedulesChanged?.();
       return schedule;
@@ -313,7 +338,10 @@ export function createScheduleCoordinator(
       id: string,
       input: UpdateScheduleRequest,
       actor: ScheduleAgentActor
-    ): ScheduleResponse {
+    ): AgentScheduleResponse {
+      if (requireSchedule(options.repository, id).action === 'workflow_start') {
+        throw new SchedulerError('ENTERPRISE_FORBIDDEN', 'Agent 定时工具不能修改工作流计划');
+      }
       const schedule = updateTransaction(
         id,
         input,
@@ -324,7 +352,12 @@ export function createScheduleCoordinator(
     },
 
     delete(id: string): void {
-      deleteTransaction(id);
+      if (requireSchedule(options.repository, id).action === 'workflow_start') {
+        if (!options.workflowSchedules) throw new SchedulerError('ENTERPRISE_SERVICE_UNAVAILABLE', '工作流服务不可用');
+        options.workflowSchedules.delete(id);
+      } else {
+        deleteTransaction(id);
+      }
       options.onSchedulesChanged?.();
     },
 
@@ -338,6 +371,10 @@ export function createScheduleCoordinator(
       };
 
       for (const schedule of schedules) {
+        if (schedule.action === 'workflow_start') {
+          result.unchanged += 1;
+          continue;
+        }
         if (hasValidScheduleThread(schedule, options.threadManager)) {
           result.unchanged += 1;
           continue;

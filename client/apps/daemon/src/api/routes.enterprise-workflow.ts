@@ -45,18 +45,43 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
     workflowHistory.save(runId, taskId, userId, context);
   });
 
+  function currentIdentity() {
+    const snapshot = session.getSnapshot();
+    if (snapshot.status !== 'signed_in' || !snapshot.account?.subjectId || !snapshot.agentId) throw new Error('企业会话不可用');
+    return { userId: snapshot.account.subjectId, agentId: snapshot.agentId, origin: options.origin() };
+  }
+
+  function assertIdentity(identity: ReturnType<typeof currentIdentity>) {
+    const current = currentIdentity();
+    if (current.userId !== identity.userId || current.agentId !== identity.agentId || current.origin !== identity.origin) throw new Error('企业会话已变化，请重试');
+  }
+
+  function activePending(taskId: string, userId: string): Association | undefined {
+    const row = read.get(taskId);
+    if (!row || row.user_id !== userId || row.state !== 'pending') return undefined;
+    const run = runs.getRun(row.run_id);
+    if (!run || run.status === 'failed' || run.status === 'canceled') {
+      updateState('failed', row);
+      return undefined;
+    }
+    return row;
+  }
+
   async function callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const identity = currentIdentity();
     const accessToken = await session.requireAccessToken();
+    assertIdentity(identity);
     const credential = await http.revealAccountMcpToken(accessToken);
-    const agentId = session.getSnapshot().agentId;
-    if (!agentId) throw new Error('当前 Agent 不可用');
+    assertIdentity(identity);
     const client = new Client({ name: 'clawee-workflow', version: '1.0.0' });
-    const transport = new StreamableHTTPClientTransport(new URL('/mcp', options.origin()), {
-      requestInit: { headers: { Authorization: `Bearer ${credential.token}`, 'X-Claw-Agent-ID': agentId } }
+    const transport = new StreamableHTTPClientTransport(new URL('/mcp', identity.origin), {
+      requestInit: { headers: { Authorization: `Bearer ${credential.token}`, 'X-Claw-Agent-ID': identity.agentId } }
     });
     try {
       await client.connect(transport);
+      assertIdentity(identity);
       const result = await client.callTool({ name, arguments: args });
+      assertIdentity(identity);
       if (result.isError || !result.structuredContent || typeof result.structuredContent !== 'object') {
         const content = Array.isArray(result.content) ? result.content[0] : undefined;
         throw new Error(content && 'text' in content ? String(content.text) : '工作流任务状态已变化');
@@ -144,9 +169,10 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
     const parsed = prepareSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(apiError('VALIDATION_FAILED', '工作目录无效'));
     try {
+      const identity = currentIdentity();
       const task = await callTool('workflow_get_task', { task_id: request.params.id });
-      const existing = read.get(request.params.id);
-      if (existing?.state === 'pending') return reply.code(409).send(apiError('VALIDATION_FAILED', '任务已经执行'));
+      assertIdentity(identity);
+      if (activePending(request.params.id, identity.userId)) return reply.code(409).send(apiError('VALIDATION_FAILED', '任务已经执行'));
       let nodeTitle = String(task.instruction).trim().slice(0, 60);
       if (typeof task.instance_id === 'string' && http.workflowRequest) {
         try {
@@ -155,6 +181,7 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
           nodeTitle = instance.nodes?.find(node => node.node_id === task.node_id)?.title || nodeTitle;
         } catch { /* The instruction remains a usable title if metadata is unavailable. */ }
       }
+      assertIdentity(identity);
       const thread = options.threads.createConversationThread({
         projectId: parsed.data.projectId,
         title: `工作流 · ${nodeTitle}`,
@@ -169,22 +196,19 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
     if (!options.canExecute()) return reply.code(503).send(apiError('ENTERPRISE_SERVICE_UNAVAILABLE', '本地 Agent 不可用'));
     const parsed = executeSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(apiError('VALIDATION_FAILED', '任务内容无效'));
-    const existing = read.get(request.params.id);
     const userId = session.getSnapshot().account?.subjectId;
     if (!userId) return reply.code(401).send(apiError('ENTERPRISE_UNAUTHORIZED', '企业会话不可用'));
-    if (existing && existing.user_id === userId && existing.state === 'pending') return { runId: existing.run_id, threadId: runs.getRun(existing.run_id)?.threadId, status: 'pending' };
     try {
+      const identity = currentIdentity();
       const task = await callTool('workflow_get_task', { task_id: request.params.id });
+      assertIdentity(identity);
+      const existing = activePending(request.params.id, userId);
+      if (existing) return { runId: existing.run_id, threadId: runs.getRun(existing.run_id)?.threadId, status: 'pending' };
       const thread = options.threads.getThread(parsed.data.threadId);
       if (!thread || thread.purpose !== 'conversation' || thread.projectId !== parsed.data.projectId || thread.status !== 'active') {
         return reply.code(409).send(apiError('VALIDATION_FAILED', '会话不可用'));
       }
       if (runs.listRunsByThread(thread.id).length > 0) return reply.code(409).send(apiError('VALIDATION_FAILED', '会话已存在任务'));
-      // The read and start below are synchronous on the daemon event loop.
-      const concurrent = read.get(request.params.id);
-      if (concurrent && concurrent.user_id === userId && concurrent.state === 'pending') {
-        return { runId: concurrent.run_id, threadId: runs.getRun(concurrent.run_id)?.threadId, status: 'pending' };
-      }
       const input = task.input as { text?: unknown } | undefined;
       const instanceId = typeof task.instance_id === 'string' ? task.instance_id : '';
       const nodeOrder = typeof task.node_order === 'number' ? task.node_order : 0;
@@ -207,6 +231,10 @@ export async function registerEnterpriseWorkflowRoutes(server: FastifyInstance, 
           }
         } catch { /* Task execution does not depend on optional display metadata. */ }
       }
+      assertIdentity(identity);
+      const concurrent = activePending(request.params.id, userId);
+      if (concurrent) return { runId: concurrent.run_id, threadId: runs.getRun(concurrent.run_id)?.threadId, status: 'pending' };
+      if (runs.listRunsByThread(thread.id).length > 0) return reply.code(409).send(apiError('VALIDATION_FAILED', '会话已存在任务'));
       let run;
       try {
         run = runs.startRun({

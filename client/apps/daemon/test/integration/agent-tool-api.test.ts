@@ -260,7 +260,7 @@ describe('agent tool internal api', () => {
 
     const taskToken = fixture.tokens.issue({
       runId: 'run-task-current',
-      threadId: first.threadId,
+      threadId: first.threadId!,
       createdBy: 'api',
       scopes: ['schedule:update']
     }).token;

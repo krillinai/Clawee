@@ -13,11 +13,19 @@ import type {
   ScheduleOperationActor,
   ScheduleOperationRecord,
   ScheduleRecord,
-  UpdateScheduleInput
+  UpdateScheduleInput,
+  WorkflowScheduleTrigger
 } from './types.js';
 
 type ScheduleRow = {
   id: string;
+  action: ScheduleRecord['action'];
+  workflow_json: string | null;
+  owner_origin: string | null;
+  owner_subject_id: string | null;
+  owner_agent_id: string | null;
+  last_workflow_instance_id: string | null;
+  create_fingerprint: string | null;
   thread_id: string | null;
   name: string;
   cron: string;
@@ -51,6 +59,8 @@ type ScheduleOperationRow = {
   operation: ScheduleOperationRecord['operation'];
   status: ScheduleOperationRecord['status'];
   run_id: string | null;
+  trigger_id: string | null;
+  workflow_instance_id: string | null;
   actor_type: string | null;
   actor_run_id: string | null;
   error_code: string | null;
@@ -94,7 +104,8 @@ const scheduleColumns = `
   id, thread_id, name, cron, timezone, enabled, prompt, prompt_hash, prompt_preview_redacted,
   profile, cwd, canonical_cwd, model, reasoning, sandbox, timeout_ms, concurrency_policy,
   misfire_policy, next_run_at, last_run_at, last_run_id, last_status, pending_trigger,
-  created_at, updated_at, deleted_at
+  created_at, updated_at, deleted_at, action, workflow_json,
+  owner_origin, owner_subject_id, owner_agent_id, last_workflow_instance_id, create_fingerprint
 `;
 
 export class ScheduleRepository {
@@ -108,8 +119,7 @@ export class ScheduleRepository {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  create(input: InsertScheduleInput): ScheduleRecord {
-    const id = this.idFactory();
+  create(input: InsertScheduleInput, id = this.idFactory()): ScheduleRecord {
     const now = this.now();
     this.db
       .prepare(
@@ -117,16 +127,24 @@ export class ScheduleRepository {
         INSERT INTO schedules (
           id, thread_id, name, cron, timezone, enabled, prompt, prompt_hash, prompt_preview_redacted,
           profile, cwd, canonical_cwd, model, reasoning, sandbox, timeout_ms, concurrency_policy,
-          misfire_policy, next_run_at, pending_trigger, created_at, updated_at
+          misfire_policy, next_run_at, pending_trigger, created_at, updated_at,
+          action, workflow_json, owner_origin, owner_subject_id, owner_agent_id, create_fingerprint
         ) VALUES (
           @id, @threadId, @name, @cron, @timezone, @enabled, @prompt, @promptHash, @promptPreviewRedacted,
           @profile, @cwd, @canonicalCwd, @model, @reasoning, @sandbox, @timeoutMs, @concurrencyPolicy,
-          @misfirePolicy, @nextRunAt, 0, @createdAt, @updatedAt
+          @misfirePolicy, @nextRunAt, 0, @createdAt, @updatedAt,
+          @action, @workflowJson, @ownerOrigin, @ownerSubjectId, @ownerAgentId, @createFingerprint
         )
       `
       )
       .run({
         id,
+        action: input.action ?? 'agent_run',
+        workflowJson: input.workflow === undefined ? null : JSON.stringify(input.workflow),
+        ownerOrigin: input.owner?.origin ?? null,
+        ownerSubjectId: input.owner?.subjectId ?? null,
+        ownerAgentId: input.owner?.agentId ?? null,
+        createFingerprint: input.createFingerprint ?? null,
         threadId: input.threadId ?? null,
         name: input.name,
         cron: input.cron,
@@ -154,9 +172,9 @@ export class ScheduleRepository {
     return created;
   }
 
-  getById(id: string): ScheduleRecord | null {
+  getById(id: string, includeDeleted = false): ScheduleRecord | null {
     const row = this.db
-      .prepare<string>(`SELECT ${scheduleColumns} FROM schedules WHERE id = ? AND deleted_at IS NULL`)
+      .prepare<string>(`SELECT ${scheduleColumns} FROM schedules WHERE id = ?${includeDeleted ? '' : ' AND deleted_at IS NULL'}`)
       .get(id) as ScheduleRow | undefined;
     return row === undefined ? null : mapSchedule(row);
   }
@@ -229,9 +247,9 @@ export class ScheduleRepository {
     return result.changes > 0;
   }
 
-  listDue(now: string): ScheduleRecord[] {
+  listDue(now: string, onlyWorkflow = false): ScheduleRecord[] {
     const rows = this.db
-      .prepare<string>(
+      .prepare<[string, number]>(
         `
         SELECT ${scheduleColumns}
         FROM schedules
@@ -239,14 +257,15 @@ export class ScheduleRepository {
           AND deleted_at IS NULL
           AND next_run_at IS NOT NULL
           AND next_run_at <= ?
+          AND (? = 0 OR action = 'workflow_start')
         ORDER BY next_run_at ASC, id ASC
       `
       )
-      .all(now) as ScheduleRow[];
+      .all(now, booleanToInteger(onlyWorkflow)) as ScheduleRow[];
     return rows.map(mapSchedule);
   }
 
-  getNextEnabled(): ScheduleRecord | null {
+  getNextEnabled(onlyWorkflow = false): ScheduleRecord | null {
     const row = this.db
       .prepare(
         `
@@ -255,11 +274,12 @@ export class ScheduleRepository {
         WHERE enabled = 1
           AND deleted_at IS NULL
           AND next_run_at IS NOT NULL
+          AND (? = 0 OR action = 'workflow_start')
         ORDER BY next_run_at ASC, id ASC
         LIMIT 1
       `
       )
-      .get() as ScheduleRow | undefined;
+      .get(booleanToInteger(onlyWorkflow)) as ScheduleRow | undefined;
     return row === undefined ? null : mapSchedule(row);
   }
 
@@ -344,10 +364,10 @@ export class ScheduleRepository {
         `
         INSERT INTO schedule_operations (
           id, schedule_id, operation, status, run_id, actor_type, actor_run_id,
-          error_code, error_message, created_at
+          error_code, error_message, created_at, trigger_id, workflow_instance_id
         ) VALUES (
           @id, @scheduleId, @operation, @status, @runId, @actorType, @actorRunId,
-          @errorCode, @errorMessage, @createdAt
+          @errorCode, @errorMessage, @createdAt, @triggerId, @workflowInstanceId
         )
       `
       )
@@ -357,6 +377,8 @@ export class ScheduleRepository {
         operation: input.operation,
         status: input.status,
         runId: input.runId ?? null,
+        triggerId: input.triggerId ?? null,
+        workflowInstanceId: input.workflowInstanceId ?? null,
         actorType: actor.type,
         actorRunId,
         errorCode: input.errorCode ?? null,
@@ -370,6 +392,7 @@ export class ScheduleRepository {
       operation: input.operation,
       status: input.status,
       runId: input.runId ?? null,
+      ...(input.triggerId ? { triggerId: input.triggerId, workflowInstanceId: input.workflowInstanceId ?? null } : {}),
       actorType: actor.type,
       actorRunId,
       diagnosticEvent: diagnosticEventForOperation(input.operation),
@@ -384,7 +407,7 @@ export class ScheduleRepository {
       .prepare<{ scheduleId: string; limit: number }>(
         `
         SELECT id, schedule_id, operation, status, run_id, actor_type, actor_run_id,
-               error_code, error_message, created_at
+               error_code, error_message, created_at, trigger_id, workflow_instance_id
         FROM schedule_operations
         WHERE schedule_id = @scheduleId
         ORDER BY created_at DESC, rowid DESC
@@ -441,11 +464,57 @@ export class ScheduleRepository {
     return mapRunTrace(row, threadId);
   }
 
+  createWorkflowTrigger(schedule: ScheduleRecord, scheduledAt: string | null, actor: ScheduleOperationActor): WorkflowScheduleTrigger {
+    if (!schedule.workflow || !schedule.owner) throw new Error('Workflow schedule configuration is missing');
+    const id = `wtr_${nanoid()}`;
+    const inserted = this.db.prepare(`
+      INSERT OR IGNORE INTO workflow_schedule_triggers
+        (id,schedule_id,scheduled_at,workflow_json,owner_origin,owner_subject_id,owner_agent_id,created_at)
+      VALUES (@id,@scheduleId,@scheduledAt,@workflowJson,@origin,@subjectId,@agentId,@createdAt)
+    `).run({ id, scheduleId: schedule.id, scheduledAt, workflowJson: JSON.stringify(schedule.workflow), ...schedule.owner, createdAt: this.now() });
+    if (inserted.changes > 0) {
+      this.insertOperation({ scheduleId: schedule.id, operation: actor.type === 'timer' ? 'timer_trigger' : 'run_now', status: 'queued', triggerId: id }, actor);
+    }
+    const row = scheduledAt === null
+      ? this.db.prepare('SELECT * FROM workflow_schedule_triggers WHERE id=?').get(id)
+      : this.db.prepare('SELECT * FROM workflow_schedule_triggers WHERE schedule_id=? AND scheduled_at=?').get(schedule.id, scheduledAt);
+    return mapWorkflowTrigger(row as WorkflowTriggerRow);
+  }
+
+  getWorkflowTrigger(id: string): WorkflowScheduleTrigger | undefined {
+    const row = this.db.prepare('SELECT * FROM workflow_schedule_triggers WHERE id=?').get(id) as WorkflowTriggerRow | undefined;
+    return row === undefined ? undefined : mapWorkflowTrigger(row);
+  }
+
+  completeWorkflowTrigger(id: string, status: WorkflowScheduleTrigger['status'], workflowInstanceId: string | null): void {
+    this.db.prepare('UPDATE workflow_schedule_triggers SET status=?,workflow_instance_id=? WHERE id=?').run(status, workflowInstanceId, id);
+  }
+}
+
+type WorkflowTriggerRow = {
+  id: string; schedule_id: string; scheduled_at: string | null; workflow_json: string;
+  owner_origin: string; owner_subject_id: string; owner_agent_id: string;
+  status: WorkflowScheduleTrigger['status']; workflow_instance_id: string | null; created_at: string;
+};
+
+function mapWorkflowTrigger(row: WorkflowTriggerRow): WorkflowScheduleTrigger {
+  return {
+    id: row.id, scheduleId: row.schedule_id, scheduledAt: row.scheduled_at,
+    workflow: JSON.parse(row.workflow_json),
+    owner: { origin: row.owner_origin, subjectId: row.owner_subject_id, agentId: row.owner_agent_id },
+    status: row.status, workflowInstanceId: row.workflow_instance_id, createdAt: row.created_at
+  };
 }
 
 function mapSchedule(row: ScheduleRow): ScheduleRecord {
   return {
     id: row.id,
+    action: row.action ?? 'agent_run',
+    ...(row.workflow_json == null ? {} : { workflow: JSON.parse(row.workflow_json) }),
+    ...(row.owner_origin && row.owner_subject_id && row.owner_agent_id
+      ? { owner: { origin: row.owner_origin, subjectId: row.owner_subject_id, agentId: row.owner_agent_id } } : {}),
+    lastWorkflowInstanceId: row.last_workflow_instance_id,
+    createFingerprint: row.create_fingerprint,
     threadId: row.thread_id,
     name: row.name,
     cron: row.cron,
@@ -481,6 +550,7 @@ function mapOperation(row: ScheduleOperationRow): ScheduleOperationRecord {
     operation: row.operation,
     status: row.status,
     runId: row.run_id,
+    ...(row.trigger_id ? { triggerId: row.trigger_id, workflowInstanceId: row.workflow_instance_id } : {}),
     actorType: parseActorType(row.actor_type),
     actorRunId: row.actor_run_id,
     diagnosticEvent: diagnosticEventForOperation(row.operation),
@@ -598,6 +668,10 @@ function updateEntries(input: UpdateScheduleInput): Array<[string, string | numb
   addIfOwn(entries, input, 'lastRunId', 'last_run_id');
   addIfOwn(entries, input, 'lastStatus', 'last_status');
   addBooleanIfOwn(entries, input, 'pendingTrigger', 'pending_trigger');
+  addIfOwn(entries, input, 'lastWorkflowInstanceId', 'last_workflow_instance_id');
+  if (Object.prototype.hasOwnProperty.call(input, 'workflow')) {
+    entries.push(['workflow_json', JSON.stringify(input.workflow)]);
+  }
   return entries;
 }
 

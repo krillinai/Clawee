@@ -13,7 +13,7 @@
 .workflow-list button:disabled, .workflow-header button:disabled { cursor: default; opacity: .55; }
 .workflow-list strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-list small, .workflow-steps small { color: var(--muted); font-size: 11px; }
-.workflow-list select, .workflow-actions textarea { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); }
+.workflow-list select, .workflow-actions textarea, .workflow-actions input:not([type='checkbox']) { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); }
 .workflow-list select { margin-bottom: 14px; }
 .workflow-detail { min-width: 0; padding: 22px 0 30px 24px; }
 .workflow-detail h2 { margin: 0 0 6px; font-size: 18px; overflow-wrap: anywhere; }

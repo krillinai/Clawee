@@ -236,6 +236,21 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 		}
 		c.JSON(200, gin.H{"data": item})
 	})
+	admin.POST("/workflow-templates/:id/instances", requirePermission(opts.RBACService, rbac.PermissionWorkflowTemplateManage), func(c *gin.Context) {
+		var body struct {
+			Input json.RawMessage `json:"initial_input"`
+			Key   string          `json:"idempotency_key"`
+		}
+		if !workflowBody(c, &body) {
+			return
+		}
+		result, err := s.Start(c.Request.Context(), c.Param("id"), currentUserID(c), body.Key, body.Input)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"data": result})
+	})
 	type saveRequest struct {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`

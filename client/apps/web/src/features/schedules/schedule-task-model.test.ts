@@ -7,6 +7,12 @@ import {
 import { createScheduleTaskSummaries } from './schedule-task-model.js';
 
 describe('schedule task model', () => {
+  it('excludes workflow plans without treating their null thread as a broken Agent task', () => {
+    const workflow = { ...createSchedule(), action: 'workflow_start', threadId: null } as unknown as ScheduleResponse;
+    expect(createScheduleTaskSummaries([workflow, createSchedule()], [], initialRunRegistryState))
+      .toEqual([expect.objectContaining({ scheduleId: 'schedule-1', bindingStatus: 'repair_required' })]);
+  });
+
   it('merges schedule, bound task thread, and current run state without history data', () => {
     const schedule = createSchedule();
     const thread = createThread();

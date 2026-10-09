@@ -117,7 +117,7 @@ export function SchedulesView(props: SchedulesViewProps) {
     try {
       const response = await props.service.listSchedules();
       if (generation !== requestGenerationRef.current) return;
-      setSchedules(response.schedules);
+      setSchedules(response.schedules.filter(schedule => schedule.action !== 'workflow_start'));
     } catch {
       if (generation !== requestGenerationRef.current) return;
       setLoadError('无法加载定时任务');
@@ -434,7 +434,7 @@ export function SchedulesView(props: SchedulesViewProps) {
                               className="schedule-row__title-button"
                               type="button"
                               aria-label={`打开任务会话 ${schedule.name}`}
-                              onClick={() => props.onOpenTask(schedule.threadId)}
+                              onClick={() => { if (schedule.threadId) props.onOpenTask(schedule.threadId); }}
                             >
                               {schedule.name}
                             </button>
@@ -457,7 +457,7 @@ export function SchedulesView(props: SchedulesViewProps) {
                           <button
                             className="schedule-row__run-link"
                             type="button"
-                            onClick={() => props.onOpenTask(
+                            onClick={() => schedule.threadId && props.onOpenTask(
                               schedule.threadId,
                               schedule.lastRunId!
                             )}

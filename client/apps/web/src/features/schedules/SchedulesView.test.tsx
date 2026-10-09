@@ -14,6 +14,18 @@ import {
 } from './SchedulesView.js';
 
 describe('SchedulesView', () => {
+  it('does not expose workflow plans as Agent tasks or external edit targets', async () => {
+    const workflow = { ...schedule(), id: 'workflow-plan', action: 'workflow_start', threadId: null, name: '工作流计划' } as unknown as ScheduleResponse;
+    const getSchedule = vi.fn(async () => scheduleDetail());
+    renderView({ editScheduleId: workflow.id, service: createService({
+      listSchedules: async () => ({ schedules: [workflow, schedule()] }), getSchedule
+    }) });
+    expect(await screen.findByRole('button', { name: '打开任务会话 每日总结' })).toBeInTheDocument();
+    expect(screen.queryByText('工作流计划')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(getSchedule).not.toHaveBeenCalled();
+  });
+
   it('opens the manual editor directly without a Clawee creation menu', async () => {
     const user = userEvent.setup();
     renderView();

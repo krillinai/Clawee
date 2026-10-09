@@ -157,6 +157,143 @@ func TestWorkflowHTTPAndMCPTaskAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkflowAdminStartHTTP(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testpostgres.New(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	accountsService, rbacService := newJWTAccountAndRBAC(t)
+	service := &workflow.Service{DB: pool}
+	router := newTestRouter(t, server.Options{AccountService: accountsService, RBACService: rbacService, WorkflowService: service})
+	var cookies [][]*http.Cookie
+	var ids []string
+	for index := 0; index < 3; index++ {
+		email := fmt.Sprintf("manual-start-%d@example.com", index)
+		cookies = append(cookies, register(t, router, `{"email":"`+email+`","name":"手动发起","password":"passw0rd!"}`))
+		account, err := accountsService.AuthenticateCredentials(ctx, accounts.LoginRequest{Email: email, Password: "passw0rd!"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, account.UserID)
+		if _, err := pool.Exec(ctx, `INSERT INTO accounts(user_id,email,name,password_hash,status,created_at,updated_at) VALUES ($1,$2,'手动发起','test','active',now(),now())`, account.UserID, email); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manager := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"manual_start_manager","name":"模板管理员","permission_codes":["console:workflow:template_manage"]}`, cookies[0], http.StatusCreated)
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+ids[1]+`","role_id":"`+nestedString(t, manager, "data", "role_id")+`"}`, cookies[0], http.StatusCreated)
+	cookies[1] = loginCookies(t, router, `{"email":"manual-start-1@example.com","password":"passw0rd!"}`)
+	reader := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"manual_start_reader","name":"实例查看员","permission_codes":["console:workflow:instance_read"]}`, cookies[0], http.StatusCreated)
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+ids[2]+`","role_id":"`+nestedString(t, reader, "data", "role_id")+`"}`, cookies[0], http.StatusCreated)
+	cookies[2] = loginCookies(t, router, `{"email":"manual-start-2@example.com","password":"passw0rd!"}`)
+	if _, err := pool.Exec(ctx, `INSERT INTO rbac_roles(role_id,code,name,created_at,updated_at) VALUES ('manual-team','manual_team','发起候选',now(),now())`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO account_roles(user_id,role_id,created_at) VALUES ($1,'manual-team',now()),($2,'manual-team',now())`, ids[1], ids[2]); err != nil {
+		t.Fatal(err)
+	}
+	template, err := service.Save(ctx, ids[0], "", "手动发起测试", "", 0, []workflow.Node{{ID: "first", Type: "agent", Title: "首节点", Instruction: "执行", AssigneeUsers: []string{ids[1]}, AssigneeRoles: []string{"manual-team"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/admin/workflow-templates/" + template.ID + "/instances"
+	body := `{"initial_input":{"text":"原始输入"},"idempotency_key":"manual-start"}`
+	for _, test := range []struct {
+		name    string
+		cookies []*http.Cookie
+		status  int
+	}{
+		{"未登录", nil, http.StatusUnauthorized},
+		{"候选但无管理权限", cookies[2], http.StatusForbidden},
+		{"管理员但非首节点候选", cookies[0], http.StatusNotFound},
+		{"草稿模板拒绝", cookies[1], http.StatusConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doJSON(t, router, http.MethodPost, path, body, test.cookies, test.status)
+		})
+	}
+	if _, err := service.SetStatus(ctx, template.ID, ids[0], true); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("已启用模板仍拒绝非候选管理员及代人发起", func(t *testing.T) {
+		doJSON(t, router, http.MethodPost, path, body, cookies[0], http.StatusNotFound)
+		doJSON(t, router, http.MethodPost, path, `{"initial_input":{},"idempotency_key":"forged","started_by":"`+ids[1]+`"}`, cookies[0], http.StatusNotFound)
+	})
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+		code   string
+	}{
+		{"数组", `{"initial_input":[],"idempotency_key":"array"}`, 400, "invalid_request"},
+		{"空值", `{"initial_input":null,"idempotency_key":"null"}`, 400, "invalid_request"},
+		{"数字", `{"initial_input":1,"idempotency_key":"number"}`, 400, "invalid_request"},
+		{"字符串", `{"initial_input":"input","idempotency_key":"string"}`, 400, "invalid_request"},
+		{"非法JSON", `{broken`, 400, "invalid_request"},
+		{"空幂等键", `{"initial_input":{},"idempotency_key":""}`, 400, "invalid_request"},
+		{"超长幂等键", `{"initial_input":{},"idempotency_key":"` + strings.Repeat("k", 201) + `"}`, 400, "invalid_request"},
+		{"超过1MiB", `{"initial_input":{"text":"` + strings.Repeat("x", 1<<20) + `"},"idempotency_key":"large"}`, 413, "payload_too_large"},
+		{"超过HTTP限制", `{"initial_input":{"text":"` + strings.Repeat("x", 2<<20) + `"},"idempotency_key":"body-large"}`, 413, "payload_too_large"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := doJSON(t, router, http.MethodPost, path, test.body, cookies[1], test.status)
+			if code := nestedString(t, response, "error", "code"); code != test.code {
+				t.Fatalf("code=%s, want=%s", code, test.code)
+			}
+		})
+	}
+
+	t.Run("候选发起及同输入同key复用", func(t *testing.T) {
+		started := doJSON(t, router, http.MethodPost, path, body, cookies[1], http.StatusOK)
+		replay := doJSON(t, router, http.MethodPost, path, body, cookies[1], http.StatusOK)
+		if !reflect.DeepEqual(started["data"], replay["data"]) {
+			t.Fatalf("retry result changed: %v %v", started["data"], replay["data"])
+		}
+		result, err := service.Start(ctx, template.ID, ids[1], "manual-start", json.RawMessage(`{"text":"原始输入"}`))
+		if err != nil || result.InstanceID != nestedString(t, started, "data", "instance_id") || result.TaskID != nestedString(t, started, "data", "task_id") {
+			t.Fatalf("Start did not reuse HTTP result: %+v %v", result, err)
+		}
+		instance, err := service.Instance(ctx, result.InstanceID, ids[1], false)
+		if err != nil || instance.StartedBy != ids[1] || len(instance.Tasks) != 1 || instance.Tasks[0].Status != "pending" || len(instance.Tasks[0].AssigneeUsers) != 2 {
+			t.Fatalf("initial instance/task/candidates: %+v %v", instance, err)
+		}
+		detail := doJSON(t, router, http.MethodGet, "/api/v1/admin/workflow-instances/"+result.InstanceID, "", cookies[0], http.StatusOK)
+		if nestedString(t, detail, "data", "id") != result.InstanceID {
+			t.Fatal("实例详情未关联")
+		}
+		doJSON(t, router, http.MethodGet, "/api/v1/admin/workflow-instances/"+result.InstanceID, "", cookies[1], http.StatusForbidden)
+		doJSON(t, router, http.MethodPost, path, `{"initial_input":{"text":"修改输入"},"idempotency_key":"manual-start"}`, cookies[1], http.StatusConflict)
+		var instances, tasks, events int
+		if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM workflow_instances WHERE template_id=$1),(SELECT count(*) FROM workflow_node_tasks WHERE instance_id=$2),(SELECT count(*) FROM workflow_events WHERE instance_id=$2 AND event_type='instance_started')`, template.ID, result.InstanceID).Scan(&instances, &tasks, &events); err != nil {
+			t.Fatal(err)
+		}
+		if instances != 1 || tasks != 1 || events != 1 {
+			t.Fatalf("duplicate creation: instances=%d tasks=%d events=%d", instances, tasks, events)
+		}
+	})
+	t.Run("恰好1MiB和200字符key可发起", func(t *testing.T) {
+		input := `{"text":"` + strings.Repeat("x", (1<<20)-len(`{"text":""}`)) + `"}`
+		doJSON(t, router, http.MethodPost, path, `{"initial_input":`+input+`,"idempotency_key":"`+strings.Repeat("k", 200)+`"}`, cookies[1], http.StatusOK)
+	})
+	if _, err := service.SetStatus(ctx, template.ID, ids[0], false); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("停用后新key拒绝，旧key仅返回原实例", func(t *testing.T) {
+		doJSON(t, router, http.MethodPost, path, `{"initial_input":{},"idempotency_key":"disabled-new"}`, cookies[1], http.StatusConflict)
+		doJSON(t, router, http.MethodPost, path, body, cookies[1], http.StatusOK)
+	})
+	if _, err := pool.Exec(ctx, `UPDATE accounts SET status='disabled' WHERE user_id=$1`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetStatus(ctx, template.ID, ids[0], true); err == nil {
+		t.Fatal("含失效直接候选不应启用")
+	}
+	t.Run("候选失效拒绝新实例", func(t *testing.T) {
+		doJSON(t, router, http.MethodPost, path, `{"initial_input":{},"idempotency_key":"inactive"}`, cookies[1], http.StatusBadRequest)
+	})
+}
+
 func TestWorkflowSharedCandidatesHTTPAndMCP(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, testpostgres.New(t))

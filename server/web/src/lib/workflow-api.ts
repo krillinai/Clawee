@@ -16,6 +16,7 @@ export const workflowAdmin = {
   save: (item: Pick<WorkflowTemplate, "name" | "description" | "nodes"> & { id?: string; expected_revision: number }) =>
     item.id ? adminApi.put<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(item.id)}`, templateInput(item)) : adminApi.post<WorkflowTemplate>("/workflow-templates", templateInput(item)),
   status: (id: string, enabled: boolean) => adminApi.post<WorkflowTemplate>(`/workflow-templates/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`),
+  start: (id: string, input: Record<string, unknown>, key: string) => adminApi.post<{ instance_id: string; task_id: string; status: string }>(`/workflow-templates/${encodeURIComponent(id)}/instances`, { initial_input: input, idempotency_key: key }),
   instances: (status: string, cursor = "") => adminApi.get<Page<WorkflowInstance>>(`/workflow-instances?status=${encodeURIComponent(status)}&limit=20&cursor=${encodeURIComponent(cursor)}`),
   instance: (id: string) => adminApi.get<WorkflowInstance>(`/workflow-instances/${encodeURIComponent(id)}`),
   terminate: (id: string, reason: string) => adminApi.post<WorkflowInstance>(`/workflow-instances/${encodeURIComponent(id)}/terminate`, { reason })

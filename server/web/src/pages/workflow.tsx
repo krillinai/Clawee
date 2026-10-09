@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
 import { useAdminPermission } from "@/components/admin-permissions";
-import { ConfirmDialog, DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSelect, LoadingState, PageHeader, PageShell, TableStateRow } from "@/components/governance-ui";
+import { ConfirmDialog, DataTableShell, EmptyState, ErrorAlert, FilterRow, FilterSelect, LoadingState, ModalShell, PageHeader, PageShell, TableStateRow } from "@/components/governance-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -16,6 +16,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { APIError } from "@/lib/api";
 import { permissions } from "@/lib/rbac-api";
 import { workflowAdmin, type WorkflowAssignee, type WorkflowInstance, type WorkflowNode, type WorkflowTask, type WorkflowTemplate } from "@/lib/workflow-api";
 
@@ -127,7 +128,52 @@ function AssigneePicker({ values, onChange, role = false, disabled = false }: { 
   </Popover>;
 }
 
+function WorkflowStartDialog({ template, onClose }: { template: WorkflowTemplate; onClose: () => void }) {
+  const cache = useQueryClient();
+  const canReadInstance = useAdminPermission(permissions.workflowInstanceRead);
+  const [input, setInput] = useState("{}");
+  const [pendingRequest, setPendingRequest] = useState<{ input: Record<string, unknown>; key: string } | null>(null);
+  const [instanceID, setInstanceID] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function start(event: FormEvent) {
+    event.preventDefault();
+    if (busy || instanceID) return;
+    let request = pendingRequest;
+    if (!request) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(input); } catch { setError("初始输入必须是 JSON 对象"); return; }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) { setError("初始输入必须是 JSON 对象"); return; }
+      if (new TextEncoder().encode(JSON.stringify(parsed)).byteLength > 1 << 20) { setError("初始输入不能超过 1 MiB"); return; }
+      request = { input: parsed as Record<string, unknown>, key: nodeID() };
+      setPendingRequest(request);
+    }
+    setBusy(true); setError("");
+    try {
+      const result = await workflowAdmin.start(template.id, request.input, request.key);
+      setInstanceID(result.instance_id); setPendingRequest(null);
+      void cache.invalidateQueries({ queryKey: ["workflow-instances"] });
+    } catch (failure) {
+      const rejected = failure instanceof APIError && [400, 401, 403, 404, 409, 413].includes(failure.status);
+      if (rejected && !pendingRequest) setPendingRequest(null);
+      const detail = failure instanceof APIError && failure.status === 404 ? "模板不存在或当前账号不是首节点的有效负责人。" : failure instanceof APIError && failure.status === 409 ? "模板未启用或幂等键与输入冲突。" : message(failure);
+      setError(rejected && !pendingRequest ? detail : `${detail} 发起结果尚未确认，请使用原输入重试，勿重复新发起。`);
+    } finally { setBusy(false); }
+  }
+  return <ModalShell open title="发起工作流" subtitle={template.name} onClose={() => { if (!busy && !pendingRequest) onClose(); }}>
+    <p className="text-sm text-muted-foreground">当前账号必须是首节点的有效负责人，模板管理权限不会自动授予负责人资格。发起只创建实例和首节点待办，不自动执行节点。</p>
+    <form className="space-y-4" onSubmit={start}>
+      <label className="block space-y-2"><span className="text-sm font-medium">初始输入（JSON 对象）</span><Textarea disabled={busy || Boolean(pendingRequest) || Boolean(instanceID)} onChange={(event) => setInput(event.target.value)} rows={8} value={input} /></label>
+      <p className="text-xs text-muted-foreground">初始输入最多 1 MiB；没有输入时保留 {"{}"}。</p>
+      {error && <ErrorAlert>{error}</ErrorAlert>}
+      {instanceID ? <div className="space-y-2"><p role="status" className="break-all text-sm">已发起实例：{instanceID}</p>{canReadInstance ? <Button asChild variant="outline"><Link to={`/admin/workflow-instances/${encodeURIComponent(instanceID)}`}>查看实例详情</Link></Button> : <p className="text-sm text-muted-foreground">查看实例详情需要工作流实例查看权限。</p>}</div> : <Button disabled={busy} type="submit">{busy ? "正在发起..." : pendingRequest ? "使用原输入重试" : "确认发起"}</Button>}
+    </form>
+  </ModalShell>;
+}
+
 export function WorkflowTemplatesPage() {
+  const canManage = useAdminPermission(permissions.workflowTemplateManage);
+  const [startTemplate, setStartTemplate] = useState<WorkflowTemplate | null>(null);
   const [cursor, setCursor] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const templates = useQuery({ queryKey: ["workflow-templates", cursor], queryFn: () => workflowAdmin.templates(cursor) });
@@ -153,11 +199,12 @@ export function WorkflowTemplatesPage() {
           <TableCell className="max-w-64 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell>
           <TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.revision}</TableCell><TableCell>{item.nodes.length}</TableCell>
           <TableCell className="max-w-48 text-muted-foreground">{[...directUsers(item.nodes[0]).map((id) => names.get(id)), ...(item.nodes[0]?.assignee_role_ids ?? []).map((id) => `角色：${roleNames.get(id)}`)].join("、") || "未配置"}</TableCell>
-          <TableCell className="text-right"><Button asChild size="sm" variant="secondary"><Link aria-label={`编辑${item.name}，版本 ${item.revision}`} to={`/admin/workflow-templates/${encodeURIComponent(item.id)}`}>编辑</Link></Button></TableCell>
+          <TableCell className="text-right"><div className="flex justify-end gap-2">{canManage && item.status === "enabled" && <Button aria-label={`发起${item.name}`} onClick={() => setStartTemplate(item)} size="sm" variant="outline">发起流程</Button>}<Button asChild size="sm" variant="secondary"><Link aria-label={`编辑${item.name}，版本 ${item.revision}`} to={`/admin/workflow-templates/${encodeURIComponent(item.id)}`}>编辑</Link></Button></div></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
     {(templates.data?.meta.next_cursor || history.length > 0) && <div className="flex gap-2"><Button disabled={!history.length} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }} size="sm" variant="outline">上一页</Button><Button disabled={!templates.data?.meta.next_cursor} onClick={() => { setHistory([...history, cursor]); setCursor(templates.data!.meta.next_cursor); }} size="sm" variant="outline">下一页</Button></div>}
+    {startTemplate && <WorkflowStartDialog key={startTemplate.id} template={startTemplate} onClose={() => setStartTemplate(null)} />}
   </PageShell>;
 }
 
