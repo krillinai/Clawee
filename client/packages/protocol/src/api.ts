@@ -900,6 +900,17 @@ export type EnterpriseAccountSummary = {
   avatarUrl?: string;
 };
 
+export type EnterpriseGatewayConfiguration = {
+  gateway: string;
+  gateways?: string[];
+  configurable: boolean;
+};
+
+export type EnterpriseGatewayUpdateRequest = {
+  gateway: string;
+  gateways?: string[];
+};
+
 export type EnterpriseSessionResponse = {
 	adminAllowed?: boolean;
 	 externalFeedbackAllowed?: boolean;

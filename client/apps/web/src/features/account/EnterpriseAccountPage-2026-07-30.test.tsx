@@ -15,20 +15,37 @@ describe('EnterpriseAccountPage', () => {
     const user = userEvent.setup();
     let finish!: () => void;
     const onSaveGateway = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    renderAccount({ onReadGateway: async () => ({ gateway: 'https://old.example', configurable: true }), onSaveGateway });
-    const address = await screen.findByLabelText('服务端地址');
-    await user.clear(address);
-    await user.type(address, 'https://new.example');
+    renderAccount({ onReadGateway: async () => ({ gateway: 'https://old.example', gateways: ['https://old.example', 'https://new.example'], configurable: true }), onSaveGateway });
+    const address = await screen.findByLabelText('服务器');
     await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
     await user.type(screen.getByLabelText('密码'), 'password123');
-    await user.click(screen.getByRole('button', { name: '保存地址' }));
-    expect(onSaveGateway).toHaveBeenCalledWith('https://new.example');
+    await user.selectOptions(address, 'https://new.example');
+    expect(onSaveGateway).toHaveBeenCalledWith('https://new.example', ['https://old.example', 'https://new.example']);
     expect(address).toBeDisabled();
     expect(screen.getByLabelText('密码')).toHaveValue('');
     expect(document.querySelector('.enterprise-email-submit')).toBeDisabled();
     finish();
     await screen.findByText('服务端地址已保存');
     expect(address).toBeEnabled();
+  });
+
+  it('没有服务器时显示填写表单，保存后显示下拉选择且允许登录', async () => {
+    const user = userEvent.setup();
+    const onSaveGateway = vi.fn(async () => undefined);
+    renderAccount({ onReadGateway: async () => ({ gateway: '', gateways: [], configurable: true }), onSaveGateway });
+    const address = await screen.findByLabelText('服务端地址');
+    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    await user.click(screen.getByRole('checkbox'));
+    expect(document.querySelector('.enterprise-email-submit')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '钉钉登录' })).toBeDisabled();
+    await user.type(address, 'https://first.example/');
+    await user.click(screen.getByRole('button', { name: '保存地址' }));
+    expect(onSaveGateway).toHaveBeenCalledWith('https://first.example', ['https://first.example']);
+    expect(await screen.findByLabelText('服务器')).toHaveValue('https://first.example');
+    expect(screen.queryByLabelText('服务端地址')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    expect(document.querySelector('.enterprise-email-submit')).toBeEnabled();
   });
 
   it('supports the existing email login and registration flows', async () => {

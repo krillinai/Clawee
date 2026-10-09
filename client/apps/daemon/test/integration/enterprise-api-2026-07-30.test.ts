@@ -42,6 +42,32 @@ afterEach(async () => {
 });
 
 describe('enterprise runtime API', () => {
+  it('登录后保存服务器列表保留认证，切换当前服务器仍需退出登录', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-gateway-session-'));
+    const configPath = join(tempDir, 'config.toml');
+    writeFileSync(configPath, 'gateway = "https://enterprise.example"\n');
+    const credential = { accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z', origin: 'https://enterprise.example' };
+    const store = createStore(credential);
+    const client = createClient();
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseOrigin: credential.origin, enterpriseConfigPath: configPath,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: store, enterpriseHttpClient: client
+    });
+    await vi.waitFor(async () => expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in'));
+    const response = await authRequest('POST', '/enterprise/gateway', {
+      gateway: credential.origin, gateways: [credential.origin, 'https://other.example']
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().gateways).toEqual([credential.origin, 'https://other.example']);
+    expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    expect(await store.read()).toEqual(credential);
+    expect(client.logout).not.toHaveBeenCalled();
+    expect((await authRequest('POST', '/enterprise/gateway', { gateway: 'https://other.example' })).statusCode).toBe(409);
+    expect(await store.read()).toEqual(credential);
+  });
+
   it('propagates a disconnected preview request to the manager', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-preview-cancel-'));
     const manager = createSharedDriveManager();

@@ -8,6 +8,7 @@ export const ENTERPRISE_AGENT_ID_PATTERN =
 
 export type EnterpriseClientConfig = {
   gateway: string;
+  gateways?: string[];
   agentId?: string;
 };
 
@@ -24,8 +25,12 @@ export function readEnterpriseClientConfig(
   }
   if (
     !isRecord(parsed)
-    || Object.keys(parsed).some(key => key !== 'gateway' && key !== 'agent_id')
+    || Object.keys(parsed).some(key => key !== 'gateway' && key !== 'gateways' && key !== 'agent_id')
     || typeof parsed.gateway !== 'string'
+    || (parsed.gateways !== undefined && (
+      !Array.isArray(parsed.gateways)
+      || parsed.gateways.some(gateway => typeof gateway !== 'string')
+    ))
     || (
       parsed.agent_id !== undefined
       && (
@@ -39,6 +44,9 @@ export function readEnterpriseClientConfig(
   try {
     return {
       gateway: resolveEnterpriseOrigin(parsed.gateway.trim()).origin,
+      ...(Array.isArray(parsed.gateways)
+        ? { gateways: [...new Set(parsed.gateways.map(gateway => resolveEnterpriseOrigin(gateway.trim()).origin))] }
+        : {}),
       ...(typeof parsed.agent_id === 'string'
         ? { agentId: parsed.agent_id }
         : {})
@@ -53,6 +61,7 @@ export function serializeEnterpriseClientConfig(
 ): string {
   return stringify({
     gateway: config.gateway,
+    ...(config.gateways === undefined ? {} : { gateways: config.gateways }),
     ...(config.agentId === undefined ? {} : { agent_id: config.agentId })
   });
 }

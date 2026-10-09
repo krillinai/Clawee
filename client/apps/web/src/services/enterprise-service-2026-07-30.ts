@@ -11,6 +11,7 @@ import type {
   EnterpriseKnowledgeDocumentUploadResponse,
   EnterpriseDingTalkLoginPrepareResponse,
   EnterpriseLoginRequest,
+  EnterpriseGatewayConfiguration,
   EnterprisePlatformBrandingResponse,
   EnterpriseMcpCatalogResponse,
   EnterpriseMcpPreferenceUpdateRequest,
@@ -58,11 +59,11 @@ export function createEnterpriseService(client: ClientLike) {
       body.append('package', input.file);
       return client.postBinary('/enterprise/skills/versions', body);
     },
-    getGateway(): Promise<{ gateway: string; configurable: boolean }> {
+    getGateway(): Promise<EnterpriseGatewayConfiguration> {
       return client.get('/enterprise/gateway');
     },
-    setGateway(gateway: string): Promise<{ gateway: string; configurable: boolean }> {
-      return client.post('/enterprise/gateway', { gateway });
+    setGateway(gateway: string, gateways?: string[]): Promise<EnterpriseGatewayConfiguration> {
+      return client.post('/enterprise/gateway', { gateway, ...(gateways === undefined ? {} : { gateways }) });
     },
     getSession(): Promise<EnterpriseSessionResponse> {
       return client.get('/enterprise/session');

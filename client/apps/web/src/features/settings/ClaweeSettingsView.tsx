@@ -29,6 +29,7 @@ import {
   type MemorySettingsService
 } from './MemorySettingsView.js';
 import './settings-management.css';
+import { GatewayConfiguration, type GatewayConfigurationProps } from '../account/GatewayConfiguration.js';
 
 export type RuntimeStatus = {
   connected: boolean;
@@ -65,13 +66,16 @@ export type ClaweeSettingsViewProps = {
   codexStatus?: CodexStatusResponse;
   modelServiceConfiguration?: ModelServiceConfiguration | null;
   onModelServiceConfigure?(input: ConfigureModelServiceRequest): Promise<void>;
+  onReadGateway?: GatewayConfigurationProps['onRead'];
+  onSaveGateway?: GatewayConfigurationProps['onSave'];
   onBack(): void;
 };
 
-type SettingsTab = 'general' | 'model' | 'plugins' | 'memory' | 'profiles' | 'cleanup' | 'diagnostics' | 'about';
+type SettingsTab = 'general' | 'server' | 'model' | 'plugins' | 'memory' | 'profiles' | 'cleanup' | 'diagnostics' | 'about';
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'general', label: '常规' },
+  { id: 'server', label: '服务器配置' },
   { id: 'model', label: 'AI模型配置' },
   { id: 'plugins', label: '插件' },
   { id: 'memory', label: '记忆' },
@@ -105,7 +109,7 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
           <span id="settings-search-disabled">搜索暂不可用</span>
         </label>
         <nav className="settings-nav" aria-label="设置分类">
-          {tabs.map(tab => (
+          {tabs.filter(tab => tab.id !== 'server' || (props.onReadGateway && props.onSaveGateway)).map(tab => (
             <button
               key={tab.id}
               type="button"
@@ -118,6 +122,13 @@ export function ClaweeSettingsView(props: ClaweeSettingsViewProps) {
         </nav>
       </aside>
       <main className="settings-content">
+        {activeTab === 'server' && props.onReadGateway && props.onSaveGateway ? (
+          <section className="settings-section" aria-labelledby="settings-server-title">
+            <header><h1 id="settings-server-title">服务器配置</h1><p>管理保存在本机的服务器地址，登录时可从列表中选择。</p></header>
+            <GatewayConfiguration mode="settings" connected={props.runtimeStatus.connected}
+              onRead={props.onReadGateway} onSave={props.onSaveGateway} />
+          </section>
+        ) : null}
         {activeTab === 'general' ? (
           <GeneralSettings
             defaultPermission={props.defaultPermission ?? 'danger-full-access'}

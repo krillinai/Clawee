@@ -3,6 +3,20 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createEnterpriseService } from './enterprise-service-2026-07-30.js';
 
 describe('enterprise service', () => {
+  it('通过本地服务读取和保存多个服务器地址，兼容单地址保存', async () => {
+    const get = vi.fn(async (_path: string) => ({}));
+    const post = vi.fn(async (_path: string, _body?: unknown) => ({}));
+    const service = createEnterpriseService(createClient({ get, post }));
+    await service.getGateway();
+    await service.setGateway('https://current.example', ['https://current.example', 'https://other.example']);
+    expect(get).toHaveBeenCalledWith('/enterprise/gateway');
+    expect(post).toHaveBeenLastCalledWith('/enterprise/gateway', {
+      gateway: 'https://current.example', gateways: ['https://current.example', 'https://other.example']
+    });
+    await service.setGateway('https://current.example');
+    expect(post).toHaveBeenLastCalledWith('/enterprise/gateway', { gateway: 'https://current.example' });
+  });
+
   it('requests authenticated preview bytes with cancellation', async () => {
     const rawGet = vi.fn(async () => new Response('content'));
     const service = createEnterpriseService(createClient({ rawGet }));

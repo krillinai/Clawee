@@ -1,5 +1,6 @@
 import type {
   EnterpriseDingTalkLoginPrepareResponse,
+  EnterpriseGatewayConfiguration,
   EnterpriseLoginRequest,
   EnterpriseRegisterRequest,
   EnterpriseSessionReason,
@@ -9,7 +10,6 @@ import {
   LoaderCircle,
   LogOut,
   RefreshCw,
-  Save,
   ShieldCheck,
   WifiOff
 } from 'lucide-react';
@@ -23,6 +23,7 @@ import {
 } from 'react';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { ApiClientError } from '../../runtime/errors.js';
+import { GatewayConfiguration } from './GatewayConfiguration.js';
 
 type AccountMode = 'login' | 'register';
 type AccountOperation = AccountMode | 'refresh' | 'logout';
@@ -42,8 +43,8 @@ export type EnterpriseAccountPageProps = {
   onCheckSession?(): Promise<EnterpriseSessionResponse>;
   onLogout(): Promise<EnterpriseSessionResponse>;
   onRefresh(): Promise<EnterpriseSessionResponse>;
-  onReadGateway?(): Promise<{ gateway: string; configurable: boolean }>;
-  onSaveGateway?(gateway: string): Promise<void>;
+  onReadGateway?(): Promise<EnterpriseGatewayConfiguration>;
+  onSaveGateway?(gateway: string, gateways?: string[]): Promise<void>;
 };
 
 export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
@@ -57,19 +58,8 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   const [operation, setOperation] = useState<AccountOperation>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  const [gateway, setGateway] = useState('');
-  const [gatewayConfigurable, setGatewayConfigurable] = useState(false);
   const [savingGateway, setSavingGateway] = useState(false);
-  const readGatewayRef = useRef(props.onReadGateway);
-  readGatewayRef.current = props.onReadGateway;
-  useEffect(() => {
-    if (!props.connected) return;
-    let canceled = false;
-    void readGatewayRef.current?.().then(value => {
-      if (!canceled) { setGateway(value.gateway); setGatewayConfigurable(value.configurable); }
-    }).catch(() => { if (!canceled) setGatewayConfigurable(false); });
-    return () => { canceled = true; };
-  }, [props.connected]);
+  const [gatewayReady, setGatewayReady] = useState(props.onReadGateway === undefined);
   const [dingTalkAuthorization, setDingTalkAuthorization] =
     useState<EnterpriseDingTalkLoginPrepareResponse>();
   const [dingTalkPreparing, setDingTalkPreparing] = useState(false);
@@ -82,7 +72,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   const checkSessionRef = useRef(props.onCheckSession);
   const agreementActionRef = useRef<'account' | 'dingtalk'>('account');
   const normalizedEmail = email.trim();
-  const accountFieldsValid = !savingGateway && enterpriseEmailPattern.test(normalizedEmail)
+  const accountFieldsValid = gatewayReady && !savingGateway && enterpriseEmailPattern.test(normalizedEmail)
     && password.length >= 8
     && (
       accountMode === 'login'
@@ -162,7 +152,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   }
 
   async function runAccountOperation() {
-    if (savingGateway || operation !== undefined || dingTalkWaiting || !props.connected) return;
+    if (!gatewayReady || savingGateway || operation !== undefined || dingTalkWaiting || !props.connected) return;
     if (!accountFieldsValid) {
       setError('请输入有效邮箱和至少 8 位密码。');
       return;
@@ -243,7 +233,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
 
   function requestDingTalkLogin() {
     if (
-      savingGateway || dingTalkPreparing
+      !gatewayReady || savingGateway || dingTalkPreparing
       || dingTalkWaiting
       || !props.connected
       || props.sessionInitialized === false
@@ -265,7 +255,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
     if (
       prepare === undefined
       || open === undefined
-      || savingGateway
+      || !gatewayReady || savingGateway
       || dingTalkPreparing
       || dingTalkWaiting
       || !props.connected
@@ -424,25 +414,20 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
 
           <div className="enterprise-auth-content">
             <div className="enterprise-email-auth">
-              {gatewayConfigurable && props.onSaveGateway ? (
-                <form className="enterprise-email-form" onSubmit={event => {
-                  event.preventDefault();
-                  setSavingGateway(true);
-                  setError(undefined);
-                  clearSecretValues();
-                  void props.onSaveGateway!(gateway).then(() => setNotice('服务端地址已保存'))
-                    .catch(reason => setError(reason instanceof Error ? reason.message : '服务端地址保存失败'))
-                    .finally(() => setSavingGateway(false));
-                }}>
-                  <label htmlFor="clawee-gateway">服务端地址</label>
-                  <input id="clawee-gateway" type="url" value={gateway} required
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}
-                    onChange={event => setGateway(event.target.value)} />
-                  <button type="submit" className="enterprise-account-secondary-action"
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}>
-                    <Save size={16} aria-hidden="true" /><span>{savingGateway ? '保存中' : '保存地址'}</span>
-                  </button>
-                </form>
+              {props.onReadGateway && props.onSaveGateway ? (
+                <GatewayConfiguration connected={props.connected}
+                  disabled={operation !== undefined || dingTalkWaiting || dingTalkPreparing}
+                  onRead={props.onReadGateway} onSave={props.onSaveGateway}
+                  onReadyChange={setGatewayReady}
+                  onBusyChange={busy => {
+                    setSavingGateway(busy);
+                    if (busy) {
+                      clearSecretValues();
+                      setError(undefined);
+                      setNotice(undefined);
+                      setDingTalkAuthorization(undefined);
+                    }
+                  }} />
               ) : null}
               <div className="enterprise-email-mode" role="group" aria-label="账户操作">
                   <button
@@ -553,7 +538,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
                         className="enterprise-dingtalk-action"
                         type="button"
                         disabled={
-                          savingGateway || operation !== undefined
+                          !gatewayReady || savingGateway || operation !== undefined
                           || dingTalkPreparing
                           || dingTalkWaiting
                           || !props.connected

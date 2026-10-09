@@ -3158,10 +3158,12 @@ export function AppController(props: AppControllerProps) {
     return service.getGateway();
   }
 
-  async function saveEnterpriseGateway(gateway: string) {
+  async function saveEnterpriseGateway(gateway: string, gateways?: string[]) {
     const service = enterpriseServiceRef.current;
     if (service === null) throw new Error('本地服务未连接');
-    await service.setGateway(gateway);
+    const previous = await service.getGateway();
+    const saved = await service.setGateway(gateway, gateways);
+    if (previous.gateway === saved.gateway) return;
     setSidebarMenuLabels({});
     setEnterpriseSessionProbeKey(current => current + 1);
     setEnterpriseSession(await service.getSession());
@@ -6514,6 +6516,8 @@ export function AppController(props: AppControllerProps) {
     <SettingsPage
       runtimeStatus={runtimeStatus}
       agentId={enterpriseSession.agentId}
+      onReadGateway={enterpriseService === null ? undefined : readEnterpriseGateway}
+      onSaveGateway={enterpriseService === null ? undefined : saveEnterpriseGateway}
       defaultPermission={defaultPermission}
       defaultPermissionError={defaultPermissionSyncError}
       onDefaultPermissionChange={handleDefaultPermissionChange}

@@ -14,6 +14,20 @@ const runtimeStatus = {
 };
 
 describe('ClaweeSettingsView', () => {
+  it('登录后提供服务器配置设置入口', async () => {
+    const onSaveGateway = vi.fn(async () => undefined);
+    render(<ClaweeSettingsView runtimeStatus={runtimeStatus} onBack={vi.fn()}
+      onReadGateway={async () => ({ gateway: 'https://current.example', gateways: ['https://current.example'], configurable: true })}
+      onSaveGateway={onSaveGateway} />);
+    fireEvent.click(screen.getByRole('button', { name: '服务器配置' }));
+    expect(await screen.findByLabelText('当前服务器')).toHaveValue('https://current.example');
+    fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
+    fireEvent.change(screen.getByLabelText('服务器地址 2'), { target: { value: 'https://new.example' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存服务器配置' }));
+    await screen.findByText('服务器配置已保存');
+    expect(onSaveGateway).toHaveBeenCalledWith('https://current.example', ['https://current.example', 'https://new.example']);
+  });
+
   it('renders default navigation and general settings without old work mode copy', () => {
     render(<ClaweeSettingsView runtimeStatus={runtimeStatus} onBack={vi.fn()} />);
 
