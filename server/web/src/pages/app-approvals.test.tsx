@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,9 @@ import { APIError } from "@/lib/api";
 import { currentAccount } from "@/lib/auth-api";
 import { approvalsApp, type ApprovalDetail, type ApprovalItem } from "@/lib/approvals-api";
 import { AppApprovalDetailPage, AppApprovalsPage } from "./app-approvals";
+import { skillAIReviewApi, type SkillAIReview, type SkillAIReviewStatus } from "@/lib/skill-ai-review-api";
+
+vi.mock("@/lib/skill-ai-review-api", async () => ({ ...await vi.importActual<typeof import("@/lib/skill-ai-review-api")>("@/lib/skill-ai-review-api"), skillAIReviewApi: { retry: vi.fn(), manual: vi.fn() } }));
 
 vi.mock("@/lib/auth-api", async () => ({ ...await vi.importActual<typeof import("@/lib/auth-api")>("@/lib/auth-api"), currentAccount: vi.fn() }));
 vi.mock("@/lib/approvals-api", () => ({ approvalsApp: { list: vi.fn(), detail: vi.fn(), files: vi.fn(), file: vi.fn(), packageURL: vi.fn((id: string) => `/api/v1/app/approvals/skill/${id}/package`), skillDecision: vi.fn(), workflowDecision: vi.fn() } }));
@@ -56,6 +59,8 @@ beforeEach(() => {
   vi.mocked(approvalsApp.files).mockResolvedValue({ items: [] });
   vi.mocked(approvalsApp.workflowDecision).mockResolvedValue({});
   vi.mocked(approvalsApp.skillDecision).mockResolvedValue({});
+  vi.mocked(skillAIReviewApi.retry).mockResolvedValue({});
+  vi.mocked(skillAIReviewApi.manual).mockResolvedValue({});
 });
 
 describe("个人审批列表", () => {
@@ -213,6 +218,152 @@ async function chooseOption(label: string, value: string) {
 async function fillScores() {
   for (const label of ["场景价值", "结果有效", "使用友好", "复用价值"]) await chooseOption(label, "4 分");
 }
+
+const aiReview: SkillAIReview = { status: "pending", attemptId: "attempt-a", agentId: "agent", updatedAt: "2026-10-09T09:00:00Z", report: { conclusion: "recommend_reject", summary: "本轮 AI 摘要", findings: [{ severity: "warning", message: "请核对", path: "SKILL.md" }], suggestedScores: { scenario_value: 1, result_effectiveness: 1, ease_of_use: 1, reuse_value: 1 } } };
+
+function aiSkillDetail(id: string, status: SkillAIReviewStatus, canProcess = true): ApprovalDetail {
+  const target = skillDetail(id, { can_process: canProcess });
+  target.skill!.versions[0].localApproval!.aiReview = { ...aiReview, status, attemptId: `attempt-${id}`, report: { ...aiReview.report! } };
+  return target;
+}
+
+describe("Skill AI 阶段与 fallback", () => {
+  it("未启用 nil 保持原审批及文件请求，不增加 AI 网络请求", async () => {
+    const network = vi.spyOn(globalThis, "fetch");
+    vi.mocked(approvalsApp.detail).mockResolvedValue(skillDetail("a"));
+    mount("/app/approvals/skill/a");
+    expect(await screen.findByRole("button", { name: "通过" })).toBeEnabled();
+    expect(screen.queryByRole("region", { name: "AI 审核报告" })).not.toBeInTheDocument();
+    expect(skillAIReviewApi.retry).not.toHaveBeenCalled();
+    expect(skillAIReviewApi.manual).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+    network.mockRestore();
+  });
+  it.each(["pending", "running", "failed"] as const)("%s 阶段保留处理能力但锁评分，不打开表单", async status => {
+    vi.mocked(approvalsApp.detail).mockResolvedValue(aiSkillDetail("a", status));
+    mount("/app/approvals/skill/a");
+    const approve = await screen.findByRole("button", { name: "通过" });
+    expect(approve).toBeDisabled();
+    expect(screen.getByRole("button", { name: "驳回" })).toBeDisabled();
+    fireEvent.click(approve);
+    expect(screen.queryByRole("combobox", { name: "场景价值" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试 AI 审核" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "转人工审核" })).toBeEnabled();
+    expect(approvalsApp.skillDecision).not.toHaveBeenCalled();
+  });
+
+  it.each(["completed", "manual"] as const)("%s 不受 AI 驳回建议影响，人工四维为空且原全员逻辑保留", async status => {
+    vi.mocked(approvalsApp.detail).mockResolvedValue(aiSkillDetail("a", status));
+    mount("/app/approvals/skill/a");
+    fireEvent.click(await screen.findByRole("button", { name: "通过" }));
+    expect(screen.getByRole("button", { name: "确认通过" })).toBeDisabled();
+    for (const label of ["场景价值", "结果有效", "使用友好", "复用价值"]) expect(screen.getByRole("combobox", { name: label })).not.toHaveTextContent("1 分");
+    expect(screen.getByRole("group", { name: "AI 建议分" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "转人工审核" })).not.toBeInTheDocument();
+    await fillScores();
+    fireEvent.click(screen.getByRole("button", { name: "确认通过" }));
+    await waitFor(() => expect(approvalsApp.skillDecision).toHaveBeenCalledWith("a", { decision: "approved", comment: "", scores: { scenario_value: 4, result_effectiveness: 4, ease_of_use: 4, reuse_value: 4 } }));
+  });
+
+  it("非合法评审人与不匹配 request 只读，无 fallback", async () => {
+    vi.mocked(approvalsApp.detail).mockImplementation(async (_kind, id) => {
+      const target = aiSkillDetail(id, "failed", false);
+      if (id === "b") { target.item.can_process = true; target.skill!.versions[0].localApproval!.requestId = "old-round"; }
+      return target;
+    });
+    mount("/app/approvals/skill/a");
+    await screen.findByText("本记录仅供查看，当前不可处理。");
+    expect(screen.queryByRole("button", { name: "重试 AI 审核" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "切到 Skill b" }));
+    await screen.findByText("审核内容不可用");
+    expect(screen.queryByText("本轮 AI 摘要")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "转人工审核" })).not.toBeInTheDocument();
+  });
+
+  it.each(["retry", "manual"] as const)("%s 需确认，manual 原因必填，pending 防重并刷新新尝试", async action => {
+    const late = deferred<unknown>();
+    vi.mocked(skillAIReviewApi[action]).mockReturnValueOnce(late.promise);
+    vi.mocked(approvalsApp.detail).mockResolvedValueOnce(aiSkillDetail("a", "failed")).mockResolvedValue(aiSkillDetail("a", action === "retry" ? "pending" : "manual"));
+    mount("/app/approvals/skill/a");
+    fireEvent.click(await screen.findByRole("button", { name: action === "retry" ? "重试 AI 审核" : "转人工审核" }));
+    const dialog = screen.getByRole("dialog", { name: action === "retry" ? "确认重试 AI 审核" : "明确转人工审核" });
+    const confirm = within(dialog).getByRole("button", { name: action === "retry" ? "确认重试" : "确认转人工" });
+    expect(skillAIReviewApi[action]).not.toHaveBeenCalled();
+    if (action === "manual") {
+      expect(confirm).toBeDisabled();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "转人工原因（必填）" }), { target: { value: "   " } });
+      fireEvent.submit(confirm.closest("form")!);
+      expect(skillAIReviewApi.manual).not.toHaveBeenCalled();
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "转人工原因（必填）" }), { target: { value: "执行端离线" } });
+    }
+    fireEvent.submit(confirm.closest("form")!);
+    fireEvent.submit(confirm.closest("form")!);
+    await waitFor(() => expect(skillAIReviewApi[action]).toHaveBeenCalledTimes(1));
+    if (action === "manual") expect(skillAIReviewApi.manual).toHaveBeenCalledWith("a", "attempt-a", "执行端离线");
+    else expect(skillAIReviewApi.retry).toHaveBeenCalledWith("a", "attempt-a");
+    expect(within(dialog).getByRole("button", { name: "取消" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新", hidden: true })).toBeDisabled();
+    await act(async () => late.resolve({}));
+    await waitFor(() => expect(approvalsApp.detail).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "通过" }))[action === "manual" ? "toBeEnabled" : "toBeDisabled"]();
+  });
+
+  it.each([403, 404, 409])("fallback %s 拒绝旧尝试并刷新，脱敏错误", async status => {
+    vi.mocked(approvalsApp.detail).mockResolvedValueOnce(aiSkillDetail("a", "running")).mockResolvedValue(aiSkillDetail("a", "failed", false));
+    vi.mocked(skillAIReviewApi.retry).mockRejectedValueOnce(new APIError("内部地址", status, "changed"));
+    mount("/app/approvals/skill/a");
+    fireEvent.click(await screen.findByRole("button", { name: "重试 AI 审核" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认重试" }));
+    await screen.findByText("本记录仅供查看，当前不可处理。");
+    expect(screen.queryByRole("button", { name: "重试 AI 审核" })).not.toBeInTheDocument();
+    expect(screen.queryByText("内部地址")).not.toBeInTheDocument();
+  });
+
+  it("fallback 网络失败不解锁评分，可明确再次重试", async () => {
+    vi.mocked(approvalsApp.detail).mockResolvedValue(aiSkillDetail("a", "failed"));
+    vi.mocked(skillAIReviewApi.retry).mockRejectedValueOnce(new Error("内部栈"));
+    mount("/app/approvals/skill/a");
+    fireEvent.click(await screen.findByRole("button", { name: "重试 AI 审核" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认重试" }));
+    await screen.findByText("请求失败，请稍后重试。");
+    expect(screen.getByRole("button", { name: "确认重试" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "通过", hidden: true })).toBeDisabled();
+    expect(screen.queryByText("内部栈")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["retry", "identity", 200], ["retry", "identity", 403], ["retry", "identity", 500],
+    ["manual", "identity", 200], ["manual", "identity", 403], ["manual", "identity", 500],
+    ["retry", "unmount", 200], ["retry", "unmount", 409], ["retry", "unmount", 500],
+    ["manual", "unmount", 200], ["manual", "unmount", 409], ["manual", "unmount", 500]
+  ] as const)("%s 在 %s 后迟到 %s 丢弃旧反馈", async (action, change, status) => {
+    const late = deferred<unknown>();
+    vi.mocked(skillAIReviewApi[action]).mockReturnValueOnce(late.promise);
+    vi.mocked(approvalsApp.detail).mockResolvedValue(aiSkillDetail("a", "pending"));
+    const client = mount("/app/approvals/skill/a");
+    fireEvent.click(await screen.findByRole("button", { name: action === "retry" ? "重试 AI 审核" : "转人工审核" }));
+    if (action === "manual") fireEvent.change(screen.getByRole("textbox", { name: "转人工原因（必填）" }), { target: { value: "旧身份原因" } });
+    fireEvent.click(screen.getByRole("button", { name: action === "retry" ? "确认重试" : "确认转人工" }));
+    await waitFor(() => expect(skillAIReviewApi[action]).toHaveBeenCalledTimes(1));
+    if (change === "identity") await act(async () => { client.setQueryData(["auth", "me"], account("new-user")); });
+    else fireEvent.click(screen.getByRole("button", { name: "返回列表", hidden: true }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /确认重试|确认转人工/ })).not.toBeInTheDocument());
+    const calls = vi.mocked(approvalsApp.detail).mock.calls.length;
+    await act(async () => { if (status === 200) late.resolve({}); else late.reject(new APIError("旧身份失败", status, "failed")); });
+    expect(approvalsApp.detail).toHaveBeenCalledTimes(calls);
+    expect(screen.queryByText(/AI 审核已重新排队|已明确转为人工审核|旧身份失败|旧身份原因|请求失败，请稍后重试/)).not.toBeInTheDocument();
+  });
+
+  it("历史详情只展示自身轮次报告，不读取最新版报告", async () => {
+    const old = aiSkillDetail("old", "manual", false);
+    old.skill!.versions[0].localApproval!.aiReview!.report!.summary = "历史轮次专属摘要";
+    old.skill!.versions.push({ ...old.skill!.versions[0], versionId: "latest", localApproval: { ...old.skill!.versions[0].localApproval!, requestId: "latest-round", aiReview: { ...aiReview, report: { ...aiReview.report!, summary: "最新版不可混用" } } } });
+    vi.mocked(approvalsApp.detail).mockResolvedValue(old);
+    mount("/app/approvals/skill/old");
+    expect(await screen.findByText("历史轮次专属摘要")).toBeInTheDocument();
+    expect(screen.queryByText("最新版不可混用")).not.toBeInTheDocument();
+  });
+});
 
 describe("Skill 原轮详情和评分", () => {
   it("同一 Skill 版本切换审核轮次不保留前一轮评分，文件仍绑定各自请求", async () => {

@@ -72,6 +72,25 @@ const approvalConfigurations: Array<{ name: string; config: Partial<SkillSpace> 
 ];
 
 describe("SkillDetailPage", () => {
+  it.each(["pending", "running", "failed"] as const)("旧管理入口 %s 展示本轮 AI 报告与审批中心链接，不开放评分", async status => {
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), aiReview: { status, attemptId: "attempt", agentId: "agent", updatedAt: "2026-10-09T09:00:00Z", report: { conclusion: "needs_attention", summary: "管理入口本轮摘要", findings: [] } } } }));
+    renderPage();
+    expect(await screen.findByText("管理入口本轮摘要")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "前往审批中心处理 AI 审核" })).toHaveAttribute("href", "/app/approvals/skill/request-1");
+    expect(screen.queryByRole("button", { name: "审批通过" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "驳回" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试 AI 审核" })).not.toBeInTheDocument();
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it.each(["completed", "manual"] as const)("旧管理入口 %s 仍按原人工四维评分，不预填 AI 建议", async status => {
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), aiReview: { status, attemptId: "attempt", agentId: "agent", updatedAt: "2026-10-09T09:00:00Z", report: { conclusion: "recommend_approve", summary: "建议通过", findings: [], suggestedScores: { scenario_value: 5, result_effectiveness: 5, ease_of_use: 5, reuse_value: 5 } } } } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeDisabled();
+    expect(within(dialog).getByRole("combobox", { name: "场景价值" })).not.toHaveTextContent("5 分");
+  });
   it.each(approvalConfigurations)("$name 审批全员通过后，非上传者管理员使用正常发布接口", async ({ config }) => {
     const [space] = await listSkillSpaces();
     vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);

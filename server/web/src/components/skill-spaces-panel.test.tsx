@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { APIError } from "@/lib/api";
+import { skillAIReviewApi } from "@/lib/skill-ai-review-api";
 
 import {
   addSkillSpaceMember,
@@ -62,6 +63,21 @@ const member = {
 };
 
 describe("SkillSpacesPanel", () => {
+  it.each([false, true])("AI 配置入口遵循原 canUpdate=%s，不提前请求独立配置", async canUpdate => {
+    const readConfig = vi.spyOn(skillAIReviewApi, "getConfig").mockResolvedValue({ enabled: false, agent_id: "" });
+    vi.mocked(listSkillSpaces).mockResolvedValue([space]);
+    renderPanel({ canCreate: false, canCreateMembers: false, canDeleteMembers: false, canUpdate, canUpdateMembers: false });
+    await screen.findByText(space.name);
+    const button = screen.queryByRole("button", { name: `配置 ${space.name} AI 审核` });
+    expect(readConfig).not.toHaveBeenCalled();
+    if (canUpdate) {
+      expect(button).toBeInTheDocument();
+      fireEvent.click(button!);
+      await waitFor(() => expect(readConfig).toHaveBeenCalledWith(space.spaceId));
+      expect(await screen.findByRole("checkbox", { name: "启用 AI 前置审核" })).toBeInTheDocument();
+    } else expect(button).not.toBeInTheDocument();
+    readConfig.mockRestore();
+  });
   it.each<{ name: string; config: Partial<SkillSpace>; summary: string }>([
     { name: "无审批", config: {}, summary: "无需审批" },
     { name: "仅账户", config: { approvers: [{ userId: "usr_2", name: "李四" }] }, summary: "李四" },

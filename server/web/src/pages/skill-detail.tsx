@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useSearchParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
+import { SkillAIReviewReport } from "@/components/skill-ai-review-report";
+import { skillAIAllowsScoring } from "@/lib/skill-ai-review-api";
 
 import {
   ConfirmDialog,
@@ -118,6 +120,7 @@ export function SkillApprovalProgress({ approval }: { approval: LocalApproval })
     || (!approval.scoringStandardVersion && approval.status !== "pending" && approval.approvers.some((person) => person.status !== "pending" && !completeReviewScores(person.scores)));
   const unscored = approval.status !== "pending" && approval.approvers.every((person) => !reviewDimensions.some(({ key }) => person.scores?.[key] != null));
   return <div className="grid gap-2 text-sm">
+    {approval.aiReview ? <SkillAIReviewReport review={approval.aiReview} /> : null}
     <span>已通过 {approval.approved}/{approval.total}</span>
     {approval.scoringStandardVersion ? <span className="text-xs text-muted-foreground">评分标准：{approval.scoringStandardVersion}</span> : null}
     {approval.approvers.map((person) => <div className="space-y-1" key={person.userId}>
@@ -287,7 +290,7 @@ export function SkillDetailPage() {
   useEffect(() => {
     if (reviewTarget && !reviewMutation.isPending && detailQuery.data) {
       const current = detailQuery.data.versions.find((version) => version.versionId === reviewTarget.version.versionId);
-      if (skillId !== reviewTarget.version.skillId || current?.localApproval?.requestId !== reviewTarget.requestId) setReviewTarget(null);
+      if (skillId !== reviewTarget.version.skillId || current?.localApproval?.requestId !== reviewTarget.requestId || !skillAIAllowsScoring(current?.localApproval?.aiReview)) setReviewTarget(null);
     }
   }, [skillId, detailQuery.data, reviewTarget, reviewMutation.isPending]);
 
@@ -321,7 +324,7 @@ export function SkillDetailPage() {
           onSubmitApproval: (version) => approvalMutation.mutate({ version, action: "submit" }),
           onSyncApproval: (version) => approvalMutation.mutate({ version, action: "sync" }),
           onBeginResolveApproval: (version) => { approvalMutation.reset(); setProviderInstanceId(""); setResolveTarget(version); },
-          canReviewVersion: (version) => Boolean(version.localApproval?.requestId && version.localApproval.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending")),
+          canReviewVersion: (version) => Boolean(skillAIAllowsScoring(version.localApproval?.aiReview) && version.localApproval?.requestId && version.localApproval.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending")),
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
           onReview: (version, decision) => { setReviewTarget({ version, requestId: version.localApproval!.requestId!, decision }); setReviewConflict(""); reviewMutation.reset(); },
@@ -531,9 +534,10 @@ export function SkillDetailView({
                   </div> : null}
                   {viewedVersion.skillName && viewedVersion.skillName !== detail.skill.name ? <p className="break-all text-xs text-muted-foreground">待发布名称：{viewedVersion.skillName}</p> : null}
                   {viewedVersion.localApproval ? <SkillApprovalProgress approval={viewedVersion.localApproval} /> : null}
+                  {viewedVersion.localApproval?.aiReview && !skillAIAllowsScoring(viewedVersion.localApproval.aiReview) && viewedVersion.localApproval.requestId ? <Button asChild size="sm" variant="outline"><Link to={`/app/approvals/skill/${encodeURIComponent(viewedVersion.localApproval.requestId)}`}>前往审批中心处理 AI 审核</Link></Button> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
-                  {management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
+                  {skillAIAllowsScoring(viewedVersion.localApproval?.aiReview) && management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "approved"); }} size="sm" variant="primary"><Check data-icon="inline-start" aria-hidden="true" />审批通过</Button>
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "rejected"); }} size="sm" variant="destructive"><X data-icon="inline-start" aria-hidden="true" />驳回</Button>
                   </div> : null}

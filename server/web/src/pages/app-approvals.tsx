@@ -17,6 +17,8 @@ import { formatDateTime } from "@/lib/mcp-admin-ui";
 import type { SkillReviewScores } from "@/lib/skillhub-api";
 import { SkillApprovalProgress, SkillDetailView, SkillReviewForm } from "./skill-detail";
 import { WorkflowSteps } from "./workflow";
+import { ModalShell } from "@/components/governance-ui";
+import { skillAIAllowsScoring, skillAIReviewApi } from "@/lib/skill-ai-review-api";
 
 const statusLabels: Record<string, string> = { pending: "待审核", approved: "已通过", rejected: "已驳回", invalidated: "已失效", running: "运行中", succeeded: "已完成", terminated: "已终止" };
 const personalLabels = { pending: "本人待处理", approved: "本人已通过", rejected: "本人已驳回", "": "未处理" };
@@ -131,6 +133,8 @@ function ApprovalContent({ detail, backHref, userId, reportPending, refresh, not
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<Error | undefined>();
   const [workflowInput, setWorkflowInput] = useState<WorkflowDecisionInput | null>(null);
+  const [aiAction, setAIAction] = useState<"retry" | "manual" | null>(null);
+  const [manualComment, setManualComment] = useState("");
   const busy = useRef(false);
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -140,9 +144,38 @@ function ApprovalContent({ detail, backHref, userId, reportPending, refresh, not
   const skill = detail.skill && versions.length === 1 ? { ...detail.skill, versions } : undefined;
   const approvalTask = task?.type === "approval" || (!task?.type && workflow?.nodes.some(node => node.node_id === task?.node_id && node.type === "approval"));
   const canProcess = item.can_process && !blocked && (item.kind === "skill" ? Boolean(skill) : item.kind === "workflow" && approvalTask && task?.task_id === item.id);
+  const aiReview = skill?.versions[0].localApproval?.aiReview;
+  const canScore = canProcess && skillAIAllowsScoring(aiReview);
+  const canFallback = canProcess && Boolean(aiReview?.attemptId) && !skillAIAllowsScoring(aiReview);
+
+  async function submitAIAction() {
+    if (busy.current || !aiAction || !canFallback || !aiReview || !isCurrent() || (aiAction === "manual" && !manualComment.trim())) return;
+    busy.current = true;
+    setPending(true);
+    setError(undefined);
+    try {
+      if (aiAction === "retry") await skillAIReviewApi.retry(item.id, aiReview.attemptId);
+      else await skillAIReviewApi.manual(item.id, aiReview.attemptId, manualComment);
+      if (!isCurrent()) return;
+      setBlocked(true);
+      setAIAction(null);
+      notify(aiAction === "retry" ? "AI 审核已重新排队。" : "已明确转为人工审核。", false);
+      await refresh();
+    } catch (failure) {
+      if (!isCurrent()) return;
+      if (failure instanceof APIError && [403, 404, 409].includes(failure.status)) {
+        setBlocked(true);
+        setAIAction(null);
+        notify(failureText(failure), true);
+        await refresh();
+      } else setError(new Error(failureText(failure)));
+    } finally {
+      if (isCurrent()) { busy.current = false; setPending(false); }
+    }
+  }
 
   async function submit(scores?: SkillReviewScores, skillComment = "") {
-    if (busy.current || !decision || !canProcess || !isCurrent()) return;
+    if (busy.current || !decision || !canScore || !isCurrent()) return;
     busy.current = true;
     setPending(true);
     setError(undefined);
@@ -181,8 +214,17 @@ function ApprovalContent({ detail, backHref, userId, reportPending, refresh, not
     <PageHeader title={item.title}>{item.type === "skill" ? "Skill 本地人工审核" : "工作流人工审批"}</PageHeader>
     <div className="flex flex-wrap gap-4 text-sm"><span>个人状态：{personalLabels[item.my_status]}</span><span>整单状态：{statusLabels[item.business_status] ?? item.business_status}</span><span>创建时间：{formatDateTime(item.created_at)}</span>{item.acted_at ? <span>处理时间：{formatDateTime(item.acted_at)}</span> : null}</div>
     {item.my_status === "approved" && item.business_status === "pending" ? <p className="text-sm text-muted-foreground">本人已通过，整单仍待其他评审人处理，尚无正式评分汇总。</p> : null}
-    {!canProcess ? <p className="text-sm text-muted-foreground">本记录仅供查看，当前不可处理。</p> : !decision ? <div className="flex gap-2"><Button onClick={() => setDecision("approved")}>通过</Button><Button onClick={() => setDecision("rejected")} variant="destructive">驳回</Button></div> : null}
-    {decision && canProcess ? item.kind === "skill" ? <SkillReviewForm key={decision} decision={decision} pending={pending} error={error} confirmLabel={decision === "approved" ? "确认通过" : "确认驳回"} onCancel={cancel} onSubmit={(scores, value) => void submit(scores, value)} /> : <form className="grid max-w-2xl gap-4" onSubmit={event => { event.preventDefault(); void submit(); }}>
+    {!canProcess ? <p className="text-sm text-muted-foreground">本记录仅供查看，当前不可处理。</p> : !decision ? <div className="flex gap-2"><Button disabled={pending || !canScore} onClick={() => setDecision("approved")}>通过</Button><Button disabled={pending || !canScore} onClick={() => setDecision("rejected")} variant="destructive">驳回</Button></div> : null}
+    {canFallback ? <div className="flex flex-wrap gap-2"><Button disabled={pending} variant="outline" onClick={() => { setError(undefined); setAIAction("retry"); }}>重试 AI 审核</Button><Button disabled={pending} variant="outline" onClick={() => { setError(undefined); setManualComment(""); setAIAction("manual"); }}>转人工审核</Button></div> : null}
+    <ModalShell open={Boolean(aiAction)} onClose={() => { if (!busy.current) { setAIAction(null); setError(undefined); } }} title={aiAction === "retry" ? "确认重试 AI 审核" : "明确转人工审核"} contextLabel={item.title}>
+      <form className="grid gap-4" onSubmit={event => { event.preventDefault(); void submitAIAction(); }}>
+        <p className="text-sm">{aiAction === "retry" ? "将为本轮创建新的 AI 尝试，保留原记录，执行 Agent 不变。" : "将结束当前 AI 前置阶段，保留原记录和操作原因；仍需原评审名单全员通过，不会自动发布。"}</p>
+        {aiAction === "manual" ? <Field><FieldLabel htmlFor="ai-manual-comment">转人工原因（必填）</FieldLabel><Textarea id="ai-manual-comment" required maxLength={2000} disabled={pending} value={manualComment} onChange={event => setManualComment(event.target.value)} /></Field> : null}
+        {error ? <ErrorAlert>{error.message}</ErrorAlert> : null}
+        <div className="flex gap-2"><Button type="button" variant="outline" disabled={pending} onClick={() => setAIAction(null)}>取消</Button><Button type="submit" disabled={pending || !canFallback || (aiAction === "manual" && !manualComment.trim())}>{pending ? "提交中..." : aiAction === "retry" ? "确认重试" : "确认转人工"}</Button></div>
+      </form>
+    </ModalShell>
+    {decision && canScore ? item.kind === "skill" ? <SkillReviewForm key={decision} decision={decision} pending={pending} error={error} confirmLabel={decision === "approved" ? "确认通过" : "确认驳回"} onCancel={cancel} onSubmit={(scores, value) => void submit(scores, value)} /> : <form className="grid max-w-2xl gap-4" onSubmit={event => { event.preventDefault(); void submit(); }}>
       <Field><FieldLabel htmlFor="workflow-approval-comment">审批意见</FieldLabel><Textarea id="workflow-approval-comment" value={comment} disabled={pending || Boolean(workflowInput)} onChange={event => setComment(event.target.value)} /><FieldDescription>{workflowInput ? "本次失败保留原输入，重试沿用同一幂等键。" : "意见可选，确认后提交人工审批决定。"}</FieldDescription></Field>
       {error ? <ErrorAlert>{error.message}</ErrorAlert> : null}<div className="flex gap-2"><Button disabled={pending} onClick={cancel} type="button" variant="outline">取消</Button><Button disabled={pending} type="submit" variant={decision === "rejected" ? "destructive" : "primary"}>{pending ? "提交中..." : workflowInput ? "重试原提交" : decision === "approved" ? "确认通过" : "确认驳回"}</Button></div>
     </form> : null}

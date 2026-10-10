@@ -30,6 +30,7 @@ import {
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { trimInput } from "@/lib/text";
+import { SkillSpaceAIReviewSettings } from "@/components/skill-space-ai-review-settings";
 
 export function SkillSpacesPanel({
   canCreate,
@@ -55,6 +56,7 @@ export function SkillSpacesPanel({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [approverTarget, setApproverTarget] = useState<SkillSpace | null>(null);
+  const [aiTarget, setAITarget] = useState<SkillSpace | null>(null);
   const [approverUserIds, setApproverUserIds] = useState<string[]>([]);
   const [approverRoleIds, setApproverRoleIds] = useState<string[]>([]);
   const [candidateSearch, setCandidateSearch] = useState("");
@@ -136,10 +138,11 @@ export function SkillSpacesPanel({
           <TableCell>{approvalSummary(space)}</TableCell>
           <TableCell className="text-right font-mono text-sm">{space.memberCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.skillCount}</TableCell><TableCell className="text-right font-mono text-sm">{space.publishedCount}</TableCell>
           <TableCell className="font-mono text-[13px] text-muted-foreground">{formatDateTime(space.updatedAt)}</TableCell>
-          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`查看 ${space.name} Skill`} onClick={() => onOpenSpace(space.spaceId)} size="sm" variant="secondary">查看 Skill</Button><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <><Button aria-label={`设置 ${space.name}`} onClick={() => { setApproverTarget(space); setApprovalEnabled(Boolean(space.approvers.length || space.approverRoleIds?.length || space.approverRoles?.length)); setApproverRoleIds(space.approverRoleIds ?? space.approverRoles?.map((role) => role.roleId) ?? []); setRoleSearch(""); setApproverUserIds(space.approvers.map((person) => person.userId)); setCandidateSearch(""); setResetCount(0); setApprovalProvider(space.approvalProvider ?? "local"); setTemplateId(space.externalApprovalTemplateId ?? ""); approverMutation.reset(); }} size="sm" variant="secondary"><Settings2 data-icon="inline-start" aria-hidden="true" />设置</Button><Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button></> : null}</div></TableCell>
+          <TableCell className="text-right"><div className="flex justify-end gap-2"><Button aria-label={`查看 ${space.name} Skill`} onClick={() => onOpenSpace(space.spaceId)} size="sm" variant="secondary">查看 Skill</Button><Button aria-label={`管理${space.name}成员授权`} onClick={() => setAuthorizationId(space.spaceId)} size="sm" variant="secondary">成员授权</Button>{canUpdate ? <><Button aria-label={`配置 ${space.name} AI 审核`} onClick={() => setAITarget(space)} size="sm" variant="secondary">AI 审核设置</Button><Button aria-label={`设置 ${space.name}`} onClick={() => { setApproverTarget(space); setApprovalEnabled(Boolean(space.approvers.length || space.approverRoleIds?.length || space.approverRoles?.length)); setApproverRoleIds(space.approverRoleIds ?? space.approverRoles?.map((role) => role.roleId) ?? []); setRoleSearch(""); setApproverUserIds(space.approvers.map((person) => person.userId)); setCandidateSearch(""); setResetCount(0); setApprovalProvider(space.approvalProvider ?? "local"); setTemplateId(space.externalApprovalTemplateId ?? ""); approverMutation.reset(); }} size="sm" variant="secondary"><Settings2 data-icon="inline-start" aria-hidden="true" />设置</Button><Button aria-label={`编辑 ${space.name}`} onClick={() => openEditor(space)} size="sm" variant="secondary"><Edit3 data-icon="inline-start" aria-hidden="true" />编辑</Button></> : null}</div></TableCell>
         </TableRow>)}
       </TableBody>
     </DataTableShell>
+    {aiTarget ? <SkillSpaceAIReviewSettings key={aiTarget.spaceId} space={spaces.find(space => space.spaceId === aiTarget.spaceId) ?? aiTarget} onClose={() => setAITarget(null)} /> : null}
 
     <ModalShell open={editing !== undefined} onClose={() => setEditing(undefined)} title={editing ? "编辑技能空间" : "新建技能空间"} contextLabel="技能中心">
       <form onSubmit={submitSpace}><FieldGroup><Field><FieldLabel htmlFor="skill-space-name">空间名称</FieldLabel><Input id="skill-space-name" maxLength={100} required value={name} onChange={(event) => setName(event.target.value)} /></Field><Field><FieldLabel htmlFor="skill-space-description">说明</FieldLabel><Textarea id="skill-space-description" maxLength={500} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>{saveMutation.isError ? <ErrorAlert>保存失败：{errorText(saveMutation.error)}</ErrorAlert> : null}<Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button disabled={saveMutation.isPending || !trimInput(name)} type="submit" variant="primary">保存</Button></Field></FieldGroup></form>

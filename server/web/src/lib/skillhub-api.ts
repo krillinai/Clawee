@@ -1,5 +1,6 @@
 import { adminApi, appApi, unwrapAPIResponse } from "./api";
 import { trimInput } from "./text";
+import { mapSkillAIReview, type RawSkillAIReview, type SkillAIReview } from "./skill-ai-review-api";
 
 type ListResponse<T> = { items: T[] };
 
@@ -20,6 +21,7 @@ export type SkillReviewScores = Partial<Record<"scenario_value" | "result_effect
 export type SkillScoreSummary = Required<SkillReviewScores> & { total: number };
 export type SkillReviewInput = { skillId: string; versionId: string; requestId: string; decision: "approved" | "rejected"; comment: string; scores: SkillReviewScores };
 export type LocalApproval = {
+  aiReview?: SkillAIReview;
   requestId?: string;
   contentDigest?: string;
   scoringStandardVersion?: string;
@@ -257,7 +259,7 @@ const mapApprovalInstance = (item: ApprovalInstanceResponse | null | undefined):
 type OwnPendingVersionResponse = { skill_id: string; space_id: string; name: string; version_id: string; version: string; created_at: string; approval_provider?: string; approval_instance?: ApprovalInstanceResponse | null };
 
 type SkillVersionResponse = {
-	local_approval?: { request_id?: string; content_digest?: string; scoring_standard_version?: string; status: string; total: number; approved: number; approvers: Array<{ user_id: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decided_at: string | null; scores?: SkillReviewScores | null }>; score_summary?: SkillScoreSummary | null };
+	local_approval?: { ai_review?: RawSkillAIReview | null; request_id?: string; content_digest?: string; scoring_standard_version?: string; status: string; total: number; approved: number; approvers: Array<{ user_id: string; name: string; status: "pending" | "approved" | "rejected"; comment: string; decided_at: string | null; scores?: SkillReviewScores | null }>; score_summary?: SkillScoreSummary | null };
   approval_instance?: ApprovalInstanceResponse | null;
   approval_status?: "pending" | "approved" | "rejected";
   skill_name?: string;
@@ -937,6 +939,7 @@ function mapSkillSpace(item: SkillSpaceResponse): SkillSpace {
 
 function mapLocalApproval(item: NonNullable<SkillVersionResponse["local_approval"]>): LocalApproval {
   return {
+    ...(item.ai_review == null ? {} : { aiReview: mapSkillAIReview(item.ai_review) }),
     ...(item.request_id === undefined ? {} : { requestId: item.request_id }),
     ...(item.content_digest === undefined ? {} : { contentDigest: item.content_digest }),
     ...(item.scoring_standard_version ? { scoringStandardVersion: item.scoring_standard_version } : {}),
