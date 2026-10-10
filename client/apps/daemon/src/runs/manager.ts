@@ -6,8 +6,8 @@ import type {
   TerminationReason
 } from '@clawee/protocol';
 import type Database from 'better-sqlite3';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { ApprovalManager } from '../approvals/manager.js';
@@ -68,6 +68,8 @@ import type {
 } from '../enterprise/activity-reporter-2026-08-28.js';
 import { createSkillUsageTracker } from '../enterprise/skill-usage-tracker.js';
 import { MCP_TASK_MAX_EXECUTION_MS } from '../task-mcp/constants.js';
+import { prepareSkillAIReviewRuntime, SKILL_AI_REVIEW_TOOLS } from './skill-ai-review-policy.js';
+import { SKILL_AI_REVIEW_TIMEOUT_MS } from '../enterprise/skill-ai-review-schema.js';
 
 export type ThreadAccess = {
   getThread(id: string): RuntimeThread | undefined;
@@ -255,6 +257,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     seen: Set<string>;
   }>();
   const skillTrackerInit = new Map<string, Promise<void>>();
+  const skillAIReviewRunIds = new Set<string>();
   const activityWork = new Map<string, Promise<void>>();
   let closing = false;
   let desktopUpdatePrepared = false;
@@ -276,7 +279,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         // Subscriber failures must not affect durable Run processing.
       }
     }
-    if (options.activityReporter !== undefined) {
+    if (options.activityReporter !== undefined && !skillAIReviewRunIds.has(event.runId)) {
       const previous = activityWork.get(event.runId) ?? Promise.resolve();
       const next = previous.then(() => logWrite).then(async () => {
         const trackerReady = skillTrackerInit.get(event.runId);
@@ -839,11 +842,17 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     activeRuns.delete(input.id);
     if (input.runInput.threadId !== undefined) runs.setRunQueueState(input.id, 'none');
     completeThreadRun(input.runInput.threadId, input.id);
+    if (input.runInput.executionPolicy === 'skill-ai-review') {
+      rmSync(input.runInput.cwd!, { recursive: true, force: true });
+      skillAIReviewRunIds.delete(input.id);
+    }
   }
 
   function startExistingRun(input: QueuedRun): CreatedRun {
     const { id, runDir } = input;
     const runInput = input.input;
+    const isSkillAIReview = runInput.executionPolicy === 'skill-ai-review';
+    let reviewRuntime: ReturnType<typeof prepareSkillAIReviewRuntime> | undefined;
     const usePersistentAppServer = input.usePersistentAppServer === true;
     const executionStartedAt = new Date().toISOString();
     const submittedAt = normalizeDatabaseTimestamp(
@@ -925,6 +934,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       resolveRunCompletion(id, run);
       if (runInput.threadId !== undefined) runs.setRunQueueState(id, 'none');
       completeThreadRun(runInput.threadId, id);
+      if (isSkillAIReview) {
+        rmSync(runInput.cwd, { recursive: true, force: true });
+        skillAIReviewRunIds.delete(id);
+      }
       return run;
     };
 
@@ -1087,7 +1100,22 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     }
 
     async function prepareRunInjection(): Promise<void> {
-      agentToolInjection = usePersistentAppServer || thread === undefined
+      if (isSkillAIReview) {
+        await withTimeout(
+          options.onBeforeCodexWritableRequest?.() ?? Promise.resolve(),
+          30_000,
+          'Skill AI 审核模型准备超时'
+        );
+        reviewRuntime = prepareSkillAIReviewRuntime({
+          codexBin: options.codexBin,
+          codexHome: options.codexHome,
+          cwd: runInput.cwd,
+          env: options.env
+        });
+      }
+      agentToolInjection = isSkillAIReview
+        ? { mcpServers: [], env: reviewRuntime!.env, builtInTools: SKILL_AI_REVIEW_TOOLS }
+        : usePersistentAppServer || thread === undefined
         ? undefined
         : await options.agentToolInjector?.prepare({
             runId: id,
@@ -1107,6 +1135,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           'CODEX_THREAD_ID_MISSING: unable to build Codex runtime arguments'
         );
       }
+      if (reviewRuntime !== undefined) codexArgs.push(...reviewRuntime.configArgs);
       writeCurrentRunMeta();
     }
 
@@ -1175,9 +1204,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           timeoutMs: runTimeouts.timeoutMs,
           spawnTimeoutMs: runTimeouts.spawnTimeoutMs,
           inactivityTimeoutMs: runTimeouts.inactivityTimeoutMs,
-          serverDeployment: options.serverDeployment,
+          serverDeployment: isSkillAIReview ? false : options.serverDeployment,
           onBeforeWritableRequest:
-            options.onBeforeCodexWritableRequest,
+            isSkillAIReview ? undefined : options.onBeforeCodexWritableRequest,
           beforeSpawn: thread === undefined || options.beforeRunSpawn === undefined
             ? undefined
             : () => options.beforeRunSpawn!({ runId: id, thread }),
@@ -1224,6 +1253,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             }));
           },
           async onApprovalRequest(request) {
+            if (isSkillAIReview) return 'rejected';
             if (options.approvalManager === undefined) return 'rejected';
             const pending = options.approvalManager.request(
               buildApprovalRequest({
@@ -1271,11 +1301,13 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         return startCodexAppServer({
           ...commonInput,
           codexBin: options.codexBin,
-          codexHome: options.codexHome,
+          codexHome: reviewRuntime?.path ?? options.codexHome,
           profile: executionRunInput.profile,
           mcpServers: agentToolInjection?.mcpServers,
-          env: mergeCodexEnvironment(options.env, agentToolInjection?.env),
-          builtInTools: agentToolInjection?.builtInTools
+          env: isSkillAIReview ? reviewRuntime!.env : mergeCodexEnvironment(options.env, agentToolInjection?.env),
+          builtInTools: agentToolInjection?.builtInTools,
+          configOverrides: reviewRuntime?.configArgs,
+          isolatedEnvironment: isSkillAIReview
         });
       }
 
@@ -1469,11 +1501,13 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       updateStatus(id, 'running', 'running', { startedAt: new Date().toISOString() });
       const done = prepareRunInjection()
         .then(() => {
+          if (isSkillAIReview && cancelRequested) throw new Error('Skill AI review canceled before spawn');
           currentProcess = startAppServerAttempt();
           if (cancelRequested) currentProcess.cancel();
           return currentProcess.result;
         })
-        .then(handleAppServerResult, handleAppServerError);
+        .then(handleAppServerResult, handleAppServerError)
+        .finally(() => reviewRuntime?.cleanup());
 
       activeRuns.set(id, {
         cancel() {
@@ -1527,10 +1561,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
 
     function startExecAttempt() {
       const beforeSpawn =
-        options.onBeforeCodexWritableRequest === undefined
-        && (
-          thread === undefined
-          || options.beforeRunSpawn === undefined
+        isSkillAIReview || (
+          options.onBeforeCodexWritableRequest === undefined
+          && (
+            thread === undefined
+            || options.beforeRunSpawn === undefined
+          )
         )
           ? undefined
           : async () => {
@@ -1541,11 +1577,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             };
       return startCodexExec({
         codexBin: options.codexBin,
-        codexHome: options.codexHome,
+        codexHome: reviewRuntime?.path ?? options.codexHome,
         cwd: executionRunInput.cwd,
         args: codexArgs!,
         prompt: resolveCodexExecutionPrompt(executionRunInput),
-        env: mergeCodexEnvironment(options.env, agentToolInjection?.env),
+        env: isSkillAIReview ? reviewRuntime!.env : mergeCodexEnvironment(options.env, agentToolInjection?.env),
+        isolatedEnvironment: isSkillAIReview,
         timeoutMs: runTimeouts.timeoutMs,
         spawnTimeoutMs: runTimeouts.spawnTimeoutMs,
         inactivityTimeoutMs: runTimeouts.inactivityTimeoutMs,
@@ -1820,11 +1857,13 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     updateStatus(id, 'running', 'running', { startedAt: new Date().toISOString() });
     const done = prepareRunInjection()
       .then(() => {
+        if (isSkillAIReview && cancelRequested) throw new Error('Skill AI review canceled before spawn');
         currentProcess = startExecAttempt();
         if (cancelRequested) currentProcess.cancel();
         return currentProcess.result;
       })
-      .then(handleExecResult, handleExecError);
+      .then(handleExecResult, handleExecError)
+      .finally(() => reviewRuntime?.cleanup());
 
     activeRuns.set(id, {
       cancel() {
@@ -1886,6 +1925,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     codexThreadId?: string
   ): string {
     const id = `run_${nanoid(10)}`;
+    if (input.executionPolicy === 'skill-ai-review') skillAIReviewRunIds.add(id);
     const runDir = join(options.dataDir, 'runs', id);
     const canonicalCwd = resolve(input.cwd);
     const args = buildRuntimeArgv(
@@ -1926,7 +1966,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       normalizerVersion
     });
     try {
-      options.activityReporter?.registerRun({
+      if (input.executionPolicy !== 'skill-ai-review') options.activityReporter?.registerRun({
         runId: id,
         ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
         prompt: input.createdBy === 'schedule'
@@ -1936,7 +1976,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         workspaceName: basename(canonicalCwd),
         createdAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at)
       });
-      if (options.activityReporter?.isActive()) {
+      if (input.executionPolicy !== 'skill-ai-review' && options.activityReporter?.isActive()) {
         const ready = (async () => {
           try {
             const tracker = await withTimeout(
@@ -1985,6 +2025,21 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   }
 
   function resolveCreateRunInput(input: CreateRunInput): ResolvedCreateRunInput {
+    if (input.executionPolicy === 'skill-ai-review') {
+      if (input.threadId !== undefined || input.codexThreadId !== undefined || input.resumeMode !== undefined
+        || input.executionPrompt !== undefined || (input.contextItems?.length ?? 0) > 0
+        || (input.imagePaths?.length ?? 0) > 0 || (input.attachmentIds?.length ?? 0) > 0) {
+        throw new Error('Skill AI 审核必须为独立材料运行');
+      }
+      return {
+        executionPolicy: 'skill-ai-review',
+        prompt: input.prompt,
+        cwd: mkdtempSync(join(tmpdir(), 'clawee-skill-ai-review-')),
+        profile: '',
+        sandbox: 'read-only',
+        timeoutMs: Math.min(input.timeoutMs ?? SKILL_AI_REVIEW_TIMEOUT_MS, SKILL_AI_REVIEW_TIMEOUT_MS)
+      };
+    }
     const normalizedInput: CreateRunInput = input.createdBy === 'schedule'
       ? {
           ...input,
@@ -2681,6 +2736,7 @@ function resolveResumeMode(
 function resolveCodexExecutionPrompt(
   input: ResolvedCreateRunInput
 ): string {
+  if (input.executionPolicy === 'skill-ai-review') return input.prompt;
   return buildEnterpriseKnowledgeExecutionPrompt({
     publicPrompt: input.publicPrompt ?? input.prompt,
     executionPrompt: input.executionPrompt ?? input.prompt

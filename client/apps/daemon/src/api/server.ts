@@ -124,6 +124,7 @@ import {
 } from '../enterprise/legacy-collector-cleanup-2026-08-28.js';
 import { resolveEnterpriseOrigin } from '../enterprise/config-2026-07-30.js';
 import { createEnterpriseSessionManager } from '../enterprise/session-manager-2026-07-30.js';
+import { createSkillAIReviewWorker } from '../enterprise/skill-ai-review-worker.js';
 import { createKnowledgeConversationManager } from '../enterprise/knowledge-conversation-2026-08-05.js';
 import { createEnterpriseInstallRecordRepository } from '../enterprise/install-records-2026-07-30.js';
 import {
@@ -346,6 +347,7 @@ export async function buildServer(input: BuildServerInput) {
   let handleEnterpriseSessionSignedOut: (() => void) | undefined;
   let handleEnterpriseSessionSignedIn: (() => void) | undefined;
   let handleModelServiceSignedOut: (() => void) | undefined;
+  let skillAIReviewWorker: ReturnType<typeof createSkillAIReviewWorker> | undefined;
   let enterpriseSessionManager!: ReturnType<
     typeof createEnterpriseSessionManager
   >;
@@ -357,6 +359,7 @@ export async function buildServer(input: BuildServerInput) {
     httpClient: enterpriseHttpClient,
     get transportSecurity() { return enterpriseOrigin.transportSecurity; },
     onSignedIn(identity) {
+      skillAIReviewWorker?.identityChanged();
       handleEnterpriseSessionSignedIn?.();
       if (identity.activityReportingEnabled) {
         activityReporter?.resume();
@@ -385,6 +388,7 @@ export async function buildServer(input: BuildServerInput) {
       });
     },
     onSignedOut() {
+      skillAIReviewWorker?.identityChanged();
       activityReporter?.clear('signed_out');
       handleModelServiceSignedOut?.();
       void input.modelServiceRuntime?.signOut().catch(error => {
@@ -701,6 +705,12 @@ export async function buildServer(input: BuildServerInput) {
       }
     });
   let scheduler = input.scheduler;
+  skillAIReviewWorker = createSkillAIReviewWorker({
+    sessionManager: enterpriseSessionManager,
+    httpClient: enterpriseHttpClient,
+    runManager
+  });
+  skillAIReviewWorker.start();
   const workflowSchedules = createWorkflowSchedules({
     db, repository: scheduleRepository, session: enterpriseSessionManager,
     http: enterpriseHttpClient, origin: () => enterpriseOrigin.origin
@@ -832,6 +842,7 @@ export async function buildServer(input: BuildServerInput) {
     desktopUpdate.close();
     shutdownStartedAt = Date.now();
     reportDaemonPerformance({ component: 'shutdown', event: 'started' });
+    void skillAIReviewWorker?.close();
     try {
       if (scheduler.close) scheduler.close();
       else scheduler.stop();
@@ -869,6 +880,7 @@ export async function buildServer(input: BuildServerInput) {
     await capture('runtime_subscription', () => unsubscribeRuntimeReady?.());
     await capture('catalog_subscription', () => unsubscribeModelCatalogChanges?.());
     await capture('approval_subscription', () => unsubscribeApprovalNotifications());
+    await capture('skill_ai_review', () => skillAIReviewWorker?.close());
     await capture('run_logs', () => runCloseWork ?? runManager.close());
     await capture('activity', () => activityReporter?.close());
     await capture('enterprise_skill_sync', async () => { await enterpriseSkillSyncWork; });

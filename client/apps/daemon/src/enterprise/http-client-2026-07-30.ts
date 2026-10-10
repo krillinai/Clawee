@@ -23,6 +23,13 @@ import { createHash } from 'node:crypto';
 import { openAsBlob } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { z } from 'zod';
+import {
+  skillAIReviewTaskSchema,
+  skillAIReviewClaimSchema,
+  type SkillAIReviewTask,
+  type SkillAIReviewClaim,
+  type SkillAIReviewResult
+} from './skill-ai-review-schema.js';
 import { workflowResponseSchema } from './workflow-schema.js';
 import {
   ENTERPRISE_DOCUMENT_UPLOAD_TIMEOUT_MS,
@@ -892,6 +899,9 @@ export type EnterpriseSharedFileUploadInput = {
 };
 
 export type EnterpriseHttpClient = {
+  listSkillAIReviewTasks?(accessToken: string): Promise<{ tasks: SkillAIReviewTask[] }>;
+  claimSkillAIReviewTask?(accessToken: string, requestId: string, attemptId: string): Promise<SkillAIReviewClaim>;
+  submitSkillAIReviewResult?(accessToken: string, requestId: string, result: SkillAIReviewResult): Promise<void>;
   workflowRequest?(accessToken: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ data: unknown; meta?: unknown }>;
   register(input: EnterpriseRegisterRequest, agentId: string): Promise<void>;
   login(input: EnterpriseLoginRequest, agentId: string): Promise<EnterpriseLoginResult>;
@@ -1218,6 +1228,27 @@ export function createEnterpriseHttpClient(input: {
   }
 
   return {
+    listSkillAIReviewTasks(accessToken) {
+      return requestJson({
+        accessToken, method: 'GET', path: '/api/v1/app/skill-ai-review-tasks',
+        schema: z.object({ data: z.object({ tasks: z.array(skillAIReviewTaskSchema) }).strict() })
+      }).then(response => response.data);
+    },
+    claimSkillAIReviewTask(accessToken, requestId, attemptId) {
+      return requestJson({
+        accessToken, method: 'POST',
+        path: `/api/v1/app/skill-ai-review-tasks/${encodeURIComponent(requestId)}/claim`,
+        body: { attempt_id: attemptId },
+        schema: z.object({ data: skillAIReviewClaimSchema })
+      }).then(response => response.data);
+    },
+    async submitSkillAIReviewResult(accessToken, requestId, result) {
+      await requestJson({
+        accessToken, method: 'POST',
+        path: `/api/v1/app/skill-ai-review-tasks/${encodeURIComponent(requestId)}/result`,
+        body: result, schema: z.object({ data: z.unknown() }).refine(response => Object.hasOwn(response, 'data'))
+      });
+    },
     workflowRequest(accessToken, method, path, body) {
       if (!path.startsWith('/api/v1/app/workflow-')) {
         throw new Error('Invalid workflow path');

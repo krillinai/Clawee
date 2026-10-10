@@ -19,6 +19,8 @@ export type {
 export { buildCodexAppServerArgs };
 
 export type StartCodexAppServerInput = {
+  configOverrides?: string[];
+  isolatedEnvironment?: boolean;
   codexBin: string;
   codexHome: string;
   cwd: string;
@@ -67,7 +69,7 @@ export function startCodexAppServer(
       })
     };
   }
-  const isolatedHome = input.builtInTools !== undefined
+  const isolatedHome = input.builtInTools !== undefined && input.isolatedEnvironment !== true
     ? input.isolatedHomePath === undefined
       ? createCodexProbeHome(input.codexHome)
       : createCodexIsolatedHome(input.codexHome, input.isolatedHomePath)
@@ -79,6 +81,8 @@ export function startCodexAppServer(
     profile: input.profile,
     mcpServers: input.mcpServers,
     builtInTools: input.builtInTools,
+    configOverrides: input.configOverrides,
+    isolatedEnvironment: input.isolatedEnvironment,
     env: input.env,
     spawnTimeoutMs: input.spawnTimeoutMs,
     forceKillGraceMs: input.forceKillGraceMs

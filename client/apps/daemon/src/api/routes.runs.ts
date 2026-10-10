@@ -201,6 +201,9 @@ function parseRunRequest(body: unknown): ParseResult<RunRequest> {
   if (!isPlainObject(body)) return { ok: false, message: 'body must be an object' };
 
   const input = body as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(input, 'executionPolicy')) {
+    return { ok: false, message: 'executionPolicy is internal only' };
+  }
   const prompt = input.prompt;
   if (typeof prompt !== 'string' || prompt.length === 0) {
     return { ok: false, message: 'prompt is required' };

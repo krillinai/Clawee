@@ -7,6 +7,7 @@ import type {
 } from '@clawee/protocol';
 
 type CreateRunBase = {
+  executionPolicy?: 'skill-ai-review';
   prompt: string;
   executionPrompt?: string;
   publicPrompt?: string;

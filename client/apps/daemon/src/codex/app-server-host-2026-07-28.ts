@@ -90,6 +90,8 @@ export type CodexAppServerHostLifecycleEvent = {
 };
 
 export type CodexAppServerHostInput = {
+  configOverrides?: string[];
+  isolatedEnvironment?: boolean;
   codexBin: string;
   codexHome: string;
   cwd: string;
@@ -167,7 +169,7 @@ export function createCodexAppServerHost(
     buildCodexAppServerArgs(input),
     {
       cwd: input.cwd,
-      env: { ...process.env, ...input.env, CODEX_HOME: input.codexHome },
+      env: { ...(input.isolatedEnvironment ? {} : process.env), ...input.env, CODEX_HOME: input.codexHome },
       stdio: ['pipe', 'pipe', 'pipe']
     }
   );
@@ -372,7 +374,7 @@ export function createCodexAppServerHost(
         job.input.codexThreadId === undefined
           ? {
               cwd: job.input.cwd,
-              developerInstructions: claweeDeveloperInstructions(
+              developerInstructions: input.isolatedEnvironment ? '' : claweeDeveloperInstructions(
                 input.codexHome,
                 job.input.serverDeployment
               ),
@@ -385,7 +387,7 @@ export function createCodexAppServerHost(
           : {
               threadId: job.input.codexThreadId,
               cwd: job.input.cwd,
-              developerInstructions: claweeDeveloperInstructions(
+              developerInstructions: input.isolatedEnvironment ? '' : claweeDeveloperInstructions(
                 input.codexHome,
                 job.input.serverDeployment
               ),
@@ -1002,6 +1004,7 @@ export function createCodexAppServerHost(
 }
 
 export function buildCodexAppServerArgs(input: {
+  configOverrides?: string[];
   profile: string;
   mcpServers?: CodexMcpServerConfig[];
   builtInTools?: BuiltInToolPolicy;
@@ -1014,6 +1017,7 @@ export function buildCodexAppServerArgs(input: {
       ? []
       : ['--profile', normalizeProfile(input.profile)]),
     ...buildCodexMcpConfigArgs(input.mcpServers),
+    ...(input.configOverrides ?? []),
     'app-server',
     '--stdio'
   ];

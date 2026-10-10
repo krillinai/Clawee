@@ -15,6 +15,7 @@ const MAX_STDERR_BYTES = 1024 * 1024;
 const MAX_STDOUT_FRAME_BYTES = 1024 * 1024;
 
 export type RunCodexExecInput = {
+  isolatedEnvironment?: boolean;
   codexBin: string;
   codexHome: string;
   cwd: string;
@@ -113,7 +114,7 @@ export function startCodexExec(input: RunCodexExecInput): CodexExecProcess {
   const result = new Promise<RunCodexExecResult>((resolve, reject) => {
     const child = spawnCodexProcess(input.codexBin, input.args, {
       cwd: input.cwd,
-      env: { ...process.env, ...input.env, CODEX_HOME: input.codexHome },
+      env: { ...(input.isolatedEnvironment ? {} : process.env), ...input.env, CODEX_HOME: input.codexHome },
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
