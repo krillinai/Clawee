@@ -7,6 +7,7 @@ import (
 )
 
 type localRequest struct {
+	AIAttempts                  []AIReviewAttempt
 	CreatedAt                   time.Time
 	ScoringStandardVersion      string
 	ID, SpaceID, Digest, Status string
@@ -67,6 +68,7 @@ func localProgress(item *localRequest) *LocalApproval {
 		return nil
 	}
 	result := &LocalApproval{RequestID: item.ID, ContentDigest: item.Digest, ScoringStandardVersion: item.ScoringStandardVersion, Status: item.Status, Total: len(item.Decisions), Approvers: make([]ApprovalDecision, 0, len(item.Decisions))}
+	result.AIReview = aiProgress(item.AIAttempts, time.Now().UTC())
 	for _, decision := range item.Decisions {
 		decision.Scores = cloneScores(decision.Scores)
 		if decision.DecidedAt != nil {
@@ -104,6 +106,9 @@ func (s *MemoryStore) createLocalResolvedLocked(version Version, space Space, ap
 		return
 	}
 	item := localRequest{CreatedAt: now.UTC(), ID: newID("approval"), SpaceID: space.SpaceID, Digest: version.PackageSHA256, Status: "pending", ScoringStandardVersion: manualScoringStandard, Decisions: map[string]ApprovalDecision{}}
+	if config := s.aiConfigs[space.SpaceID]; config.Enabled && version.Source == nil {
+		item.AIAttempts = []AIReviewAttempt{newAIAttempt(config.AgentID, now)}
+	}
 	for _, approver := range space.Approvers {
 		item.UserIDs = append(item.UserIDs, approver.UserID)
 	}

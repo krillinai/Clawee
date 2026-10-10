@@ -134,6 +134,7 @@ type ApprovalDecision struct {
 }
 
 type LocalApproval struct {
+	AIReview               *AIReview          `json:"ai_review,omitempty"`
 	RequestID              string             `json:"request_id"`
 	ContentDigest          string             `json:"content_digest"`
 	ScoringStandardVersion string             `json:"scoring_standard_version,omitempty"`

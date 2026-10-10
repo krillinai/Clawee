@@ -61,6 +61,9 @@ func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewe
 	if err := validateReview(approve, comment, inputs[0]); err != nil {
 		return Version{}, err
 	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return Version{}, err
+	}
 	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, inputs[0], s.clock().UTC())
 }
 
@@ -162,7 +165,7 @@ func (s *MemoryStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, pro
 	return affected, nil
 }
 
-func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, reviewer string, approve bool, comment string, input ReviewInput, now time.Time) (Version, error) {
+func (s *MemoryStore) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, input ReviewInput, now time.Time) (Version, error) {
 	if err := validateReview(approve, comment, input); err != nil {
 		return Version{}, err
 	}
@@ -199,6 +202,12 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 		}
 		if request.Decisions[reviewer].Status != "pending" {
 			return Version{}, ErrConflict
+		}
+		if len(request.AIAttempts) > 0 && (s.aiIdentityLookup == nil || s.aiIdentityLookup(ctx, reviewer, "") != nil) {
+			return Version{}, ErrReviewForbidden
+		}
+		if !aiAllowsHuman(request.AIAttempts, now) {
+			return Version{}, ErrAIReviewRequired
 		}
 		decision := request.Decisions[reviewer]
 		decision.Scores = cloneScores(input.Scores)

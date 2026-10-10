@@ -64,6 +64,8 @@ type CreateVersionOptions struct {
 }
 
 type MemoryStore struct {
+	aiConfigs          map[string]AIReviewConfig
+	aiIdentityLookup   AIReviewIdentityLookup
 	approvalRoleLookup ApprovalRoleLookup
 	mu                 sync.Mutex
 	skills             map[string]Skill
@@ -78,7 +80,8 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	now := time.Now().UTC()
 	return &MemoryStore{
-		skills: map[string]Skill{}, byName: map[string]string{}, versions: map[string][]Version{},
+		aiConfigs: map[string]AIReviewConfig{},
+		skills:    map[string]Skill{}, byName: map[string]string{}, versions: map[string][]Version{},
 		spaces: map[string]Space{DefaultSpaceID: {SpaceID: DefaultSpaceID, Name: "默认技能空间", ApprovalProvider: "local", CreatedBy: "system", UpdatedBy: "system", CreatedAt: now, UpdatedAt: now}},
 		grants: map[string]map[string]map[string]bool{}, approvals: map[string][]ApprovalInstance{}, localApprovals: map[string][]localRequest{},
 	}
@@ -355,7 +358,7 @@ func (s *MemoryStore) setCurrentVersion(ctx context.Context, skillID, versionID,
 		target.ApprovalStatus, target.ApprovedSpaceID, target.ReviewedBy, target.ReviewedAt = "approved", skill.SpaceID, userID, &now
 	} else if userID != "" {
 		return Skill{}, Version{}, ErrApprovalRequired
-	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || !localApprovalConfigured(space) || s.currentLocalLocked(target, skill.SpaceID) == nil || s.currentLocalLocked(target, skill.SpaceID).Status != "approved" {
+	} else if target.ApprovalStatus != "approved" || target.ApprovedSpaceID != skill.SpaceID || !localApprovalConfigured(space) || s.currentLocalLocked(target, skill.SpaceID) == nil || s.currentLocalLocked(target, skill.SpaceID).Status != "approved" || !aiAllowsHuman(s.currentLocalLocked(target, skill.SpaceID).AIAttempts, now) {
 		return Skill{}, Version{}, ErrApprovalRequired
 	}
 	if target.SkillName != "" && target.SkillName != skill.Name {

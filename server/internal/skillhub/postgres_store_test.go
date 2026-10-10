@@ -413,6 +413,7 @@ func TestPostgresStoreListsAdminAndPublishedSkills(t *testing.T) {
 			AddRow("old-request", "version-2", "other-space", "sha", "approved", "old-reviewer", "旧审批人", "approved", "", nil, "", nil, nil, nil, nil).
 			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "reviewer", "审核员", "approved", "同意", nil, "manual-v1", &score, &score, &score, &score).
 			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "second", "另一审批人", "pending", "", nil, "manual-v1", nil, nil, nil, nil))
+	expectEmptyAIAttempts(mock, "request-1")
 	adminItems, err := store.ListAdmin(context.Background())
 	if err != nil || len(adminItems) != 2 || adminItems[0].CurrentVersionID == nil {
 		t.Fatalf("ListAdmin() = %#v, %v", adminItems, err)
@@ -568,6 +569,7 @@ func TestPostgresStoreClearCurrentResubmitsAfterApproverChange(t *testing.T) {
 	mock.ExpectExec(`UPDATE skill_versions SET approval_status='pending'`).WithArgs("version-1").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(`INSERT INTO approval_requests`).WithArgs(pgxmock.AnyArg(), "version-1", DefaultSpaceID, "sha", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectExec(`INSERT INTO approval_request_approvers`).WithArgs(pgxmock.AnyArg(), DefaultSpaceID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO skill_ai_review_attempts`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), "version-1", DefaultSpaceID, now).WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	mock.ExpectCommit()
 	if _, err := store.ClearCurrentVersion(context.Background(), "skill-1", now); err != nil {
 		t.Fatal(err)
@@ -631,6 +633,11 @@ func expectSpaceLock(mock pgxmock.PgxPoolIface, spaceID string) {
 func expectLocalInsert(mock pgxmock.PgxPoolIface, versionID, spaceID, digest string, now time.Time) {
 	mock.ExpectExec(`INSERT INTO approval_requests`).WithArgs(pgxmock.AnyArg(), versionID, spaceID, digest, now).WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	mock.ExpectExec(`INSERT INTO approval_request_approvers`).WithArgs(pgxmock.AnyArg(), spaceID).WillReturnResult(pgxmock.NewResult("INSERT", 0))
+}
+
+func expectEmptyAIAttempts(mock pgxmock.PgxPoolIface, request string) {
+	mock.ExpectExec(`UPDATE skill_ai_review_attempts`).WithArgs(request, pgxmock.AnyArg(), AIReviewTimeout).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	mock.ExpectQuery(`SELECT attempt_id,agent_id,status`).WithArgs(request).WillReturnRows(pgxmock.NewRows([]string{"attempt_id", "agent_id", "status", "created_at", "updated_at", "started_at", "report", "error", "manual_by", "manual_at", "manual_comment"}))
 }
 
 func skillRows() *pgxmock.Rows {

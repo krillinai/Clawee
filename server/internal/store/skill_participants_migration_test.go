@@ -94,7 +94,7 @@ func TestSkillParticipantsMigrationAndAggregationOnPostgres(t *testing.T) {
 	if _, err := provider.UpTo(ctx, 56); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 69); err != nil {
+	if _, err := provider.UpTo(ctx, 70); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetSpaceMember(ctx, "market", "viewer", []string{skillhub.SpaceActionRead}, "system", false); err != nil {

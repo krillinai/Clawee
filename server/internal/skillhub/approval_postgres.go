@@ -225,6 +225,13 @@ FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id W
 	if !member {
 		return Version{}, ErrReviewForbidden
 	}
+	attempts, err := readAIAttempts(ctx, tx, requestID, now)
+	if err != nil {
+		return Version{}, err
+	}
+	if !aiAllowsHuman(attempts, now) {
+		return Version{}, ErrAIReviewRequired
+	}
 	decision := "rejected"
 	if approve {
 		decision = "approved"

@@ -35,7 +35,7 @@ func reviewVersionForTest(service *skillhub.Service, ctx context.Context, skillI
 func manualPostgresFixture(t *testing.T) (*pgxpool.Pool, *skillhub.Service, skillhub.MutationResult, skillhub.ReviewInput) {
 	t.Helper()
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 69)
+	pool, _ := skillRoleTestDatabase(t, 70)
 	seedSkillRoleAccounts(t, pool)
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
 	space, err := service.CreateSpace(ctx, "人工评分", "", "writer")

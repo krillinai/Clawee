@@ -126,7 +126,7 @@ INSERT INTO approval_request_approvers(request_id,user_id,status) VALUES('legacy
 
 func TestSkillApprovalRolesLifecycleOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 69)
+	pool, _ := skillRoleTestDatabase(t, 70)
 	seedSkillRoleAccounts(t, pool)
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
 	space, err := service.CreateSpace(ctx, "角色审核", "", "writer")
@@ -277,7 +277,7 @@ INSERT INTO account_roles(user_id,role_id,created_at) VALUES('carol','review-one
 
 func TestSkillEmptyRoleBlocksSubmissionOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 69)
+	pool, _ := skillRoleTestDatabase(t, 70)
 	seedSkillRoleAccounts(t, pool)
 	store := skillhub.NewPostgresStore(pool)
 	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
@@ -305,7 +305,7 @@ func TestSkillEmptyRoleBlocksSubmissionOnPostgres(t *testing.T) {
 
 func TestSkillEffectiveRolePermissionsReadWriteUploadDownloadOnPostgres(t *testing.T) {
 	ctx := context.Background()
-	pool, _ := skillRoleTestDatabase(t, 69)
+	pool, _ := skillRoleTestDatabase(t, 70)
 	seedSkillRoleAccounts(t, pool)
 	store := skillhub.NewPostgresStore(pool)
 	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})

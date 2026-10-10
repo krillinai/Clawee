@@ -52,6 +52,7 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 	if opts.SkillHubService == nil || opts.AccountService == nil {
 		return
 	}
+	mountSkillAIReviewRoutes(app, admin, opts)
 	list := handleSkillList(opts.SkillHubService)
 	detail := handleSkillDetail(opts.SkillHubService)
 	download := handleSkillDownload(opts.SkillHubService)
@@ -1135,6 +1136,10 @@ func skillError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "技能中心操作失败"
 	var pgErr *pgconn.PgError
 	switch {
+	case errors.Is(err, skillhub.ErrAIReviewRequired):
+		status, code, message = http.StatusConflict, "skill_ai_review_required", "AI 前置审核尚未完成，请重试或明确转人工审核"
+	case errors.Is(err, skillhub.ErrAIReviewFailed):
+		status, code, message = http.StatusConflict, "skill_ai_review_failed", skillhub.AIReviewMaterialsFailure
 	case errors.As(err, &pgErr) && pgErr.Code == "42501":
 		status, code, message = http.StatusInternalServerError, "skill_database_permission_denied", "技能中心数据库权限不足，请联系管理员检查服务账号授权"
 	case errors.Is(err, skillhub.ErrExternalApprovalConflict):

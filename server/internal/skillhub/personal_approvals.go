@@ -50,6 +50,16 @@ func (s *Service) GetPersonalApproval(ctx context.Context, user, id string) (Per
 	if s.spaces == nil || s.spaces.CheckSpaceAccess(ctx, user, item.SpaceID, SpaceActionRead) != nil || s.spaces.CheckSpaceAccess(ctx, user, detail.Skill.SpaceID, SpaceActionRead) != nil {
 		return PersonalApproval{}, AdminDetail{}, ErrNotFound
 	}
+	for _, version := range detail.Versions {
+		if version.LocalApproval != nil && version.LocalApproval.AIReview != nil {
+			if version.LocalApproval.ContentDigest != version.PackageSHA256 {
+				return PersonalApproval{}, AdminDetail{}, ErrConflict
+			}
+			if err := s.checkAIPackageDigest(version); err != nil {
+				return PersonalApproval{}, AdminDetail{}, err
+			}
+		}
+	}
 	detail.Skill.CurrentVersionID = nil
 	detail.Skill.LatestVersion = nil
 	version := &detail.Versions[0]

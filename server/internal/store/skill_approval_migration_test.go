@@ -42,7 +42,7 @@ INSERT INTO skill_versions(version_id,skill_id,version,description,package_path,
 VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),now(),'legacy','approved','skillspace_default','writer',now());`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.UpTo(ctx, 69); err != nil {
+	if _, err = provider.UpTo(ctx, 70); err != nil {
 		t.Fatal(err)
 	}
 	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})

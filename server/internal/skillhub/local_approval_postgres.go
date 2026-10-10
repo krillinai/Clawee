@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func createLocalRequest(ctx context.Context, tx pgx.Tx, versionID, spaceID, digest string, now time.Time) error {
@@ -31,7 +32,10 @@ AND EXISTS (SELECT 1 FROM approval_requests WHERE id=$1)`, id, spaceID)
 	if err == nil && requestTag.RowsAffected() > 0 && tag.RowsAffected() == 0 {
 		return ErrMemberNotFound
 	}
-	return err
+	if err != nil || requestTag.RowsAffected() == 0 {
+		return err
+	}
+	return createAIRequest(ctx, tx, id, versionID, spaceID, now)
 }
 
 func invalidateLocalRequests(ctx context.Context, tx pgx.Tx, versionIDs []string, now time.Time) error {
@@ -128,10 +132,22 @@ ORDER BY r.business_id,r.created_at DESC,r.id DESC,u.name,a.user_id`, ids)
 	for _, progress := range result {
 		summarizeScores(progress)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for _, progress := range result {
+		attempts, err := readAIAttempts(ctx, s.pool, progress.RequestID, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		progress.AIReview = aiProgress(attempts, time.Now().UTC())
+	}
+	return result, nil
 }
 
 type approvalReader interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
@@ -175,5 +191,14 @@ func readLocalRequestProgress(ctx context.Context, reader approvalReader, id, st
 	}
 	result.Total = len(result.Approvers)
 	summarizeScores(result)
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	attempts, err := readAIAttempts(ctx, reader, id, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	result.AIReview = aiProgress(attempts, time.Now().UTC())
+	return result, nil
 }

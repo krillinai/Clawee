@@ -283,7 +283,18 @@ func (s *Service) GetAdmin(ctx context.Context, skillID string) (AdminDetail, er
 	if strings.TrimSpace(skillID) == "" {
 		return AdminDetail{}, ErrNotFound
 	}
-	return s.store.GetAdmin(ctx, skillID)
+	detail, err := s.store.GetAdmin(ctx, skillID)
+	if err != nil {
+		return detail, err
+	}
+	for _, version := range detail.Versions {
+		if version.LocalApproval != nil && version.LocalApproval.AIReview != nil {
+			if err := s.checkAIPackageDigest(version); err != nil {
+				return AdminDetail{}, err
+			}
+		}
+	}
+	return detail, nil
 }
 
 func (s *Service) ListPublished(ctx context.Context) ([]PublishedItem, error) {
@@ -324,6 +335,9 @@ func (s *Service) SetCurrentVersion(ctx context.Context, skillID, versionID stri
 	if strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" {
 		return MutationResult{}, ErrInvalidRequest
 	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return MutationResult{}, err
+	}
 	skill, version, err := s.store.SetCurrentVersion(ctx, skillID, versionID, s.clock().UTC())
 	if err != nil {
 		return MutationResult{}, err
@@ -337,6 +351,9 @@ func (s *Service) PublishOwnVersion(ctx context.Context, skillID, versionID, use
 	})
 	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(userID) == "" {
 		return MutationResult{}, ErrInvalidRequest
+	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return MutationResult{}, err
 	}
 	skill, version, err := store.PublishOwnVersion(ctx, skillID, versionID, userID, s.clock().UTC())
 	if err != nil {

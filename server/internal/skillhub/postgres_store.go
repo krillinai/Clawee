@@ -482,7 +482,10 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 	}
 	if provider == "local" && hasApprovers {
 		var valid bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='approved')`, versionID, skill.SpaceID, version.PackageSHA256).Scan(&valid); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests r WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='approved'
+AND r.id=(SELECT id FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1)
+AND NOT EXISTS(SELECT 1 FROM skill_ai_review_attempts ai WHERE ai.request_id=r.id AND ai.attempt_id=(SELECT attempt_id FROM skill_ai_review_attempts WHERE request_id=r.id ORDER BY created_at DESC,attempt_id DESC LIMIT 1) AND ai.status NOT IN ('completed','manual'))
+AND NOT EXISTS(SELECT 1 FROM approval_request_approvers a WHERE a.request_id=r.id AND a.status<>'approved'))`, versionID, skill.SpaceID, version.PackageSHA256).Scan(&valid); err != nil {
 			return Skill{}, Version{}, err
 		}
 		if !valid {
