@@ -21,6 +21,17 @@
   margin-bottom: 16px;
 }
 
+.activity-header__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.activity-header__heading > button {
+  flex: none;
+}
+
 .activity-header h1,
 .activity-header p,
 .activity-detail-header h1,

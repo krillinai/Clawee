@@ -140,6 +140,7 @@ export function Composer(props: {
   running?: boolean;
   canceling?: boolean;
   permissionChangeDisabled?: boolean;
+  readOnly?: boolean;
   modelChangeDisabled?: boolean;
   projectId: string;
   projectName: string;
@@ -1464,11 +1465,13 @@ export function Composer(props: {
             <button
               className={`composer-select composer-select-${selectedPermission}`}
               type="button"
-              aria-label={`选择访问权限 ${selectedPermissionOption.label}`}
+              aria-label={props.readOnly ? '只读分析权限' : `选择访问权限 ${selectedPermissionOption.label}`}
               aria-expanded={openMenu === 'permission'}
-              disabled={props.permissionChangeDisabled === true || permissionUpdating}
+              disabled={props.readOnly === true || props.permissionChangeDisabled === true || permissionUpdating}
               title={
-                props.permissionChangeDisabled === true
+                props.readOnly === true
+                  ? '当前模块使用只读沙箱'
+                  : props.permissionChangeDisabled === true
                   ? '当前任务结束后可修改访问权限'
                   : '更改项目权限'
               }
@@ -1478,8 +1481,8 @@ export function Composer(props: {
               }}
             >
               <ShieldCheck aria-hidden="true" size={15} />
-              <span>{selectedPermissionOption.label}</span>
-              <ChevronDown aria-hidden="true" size={13} />
+              <span>{props.readOnly ? '只读分析' : selectedPermissionOption.label}</span>
+              {props.readOnly ? null : <ChevronDown aria-hidden="true" size={13} />}
             </button>
             {openMenu === 'permission' ? (
               <div className="composer-popover composer-permission-menu" role="menu" aria-label="访问权限">

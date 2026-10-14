@@ -45,6 +45,7 @@ export function ActivityPage(props: {
   detailError?: string;
   onRetryStatistics(): void;
   onRetryDetail(): void;
+  onBack(): void;
   onNavigate(route: AppRoute): void;
   billingEnabled?: boolean;
   billingOverview?: EnterpriseBillingOverviewResponse;
@@ -67,6 +68,7 @@ function ActivityOverview(props: {
   statisticsLoading: boolean;
   statisticsError?: string;
   onRetryStatistics(): void;
+  onBack(): void;
   onNavigate(route: AppRoute): void;
   billingEnabled?: boolean;
   billingOverview?: EnterpriseBillingOverviewResponse;
@@ -89,13 +91,24 @@ function ActivityOverview(props: {
     <main className="activity-page">
       <div className="activity-page__inner">
         <header className="activity-header">
-          <div>
-            <h1>Agent动态</h1>
-            <p>
-              {statistics === undefined
-                ? '团队 Agent 用量与执行概览'
-                : `${statistics.startDate} 至 ${statistics.endDate} · ${statistics.timezone}`}
-            </p>
+          <div className="activity-header__heading">
+            <button
+              className="activity-icon-button"
+              type="button"
+              aria-label="返回工作台"
+              title="返回工作台"
+              onClick={props.onBack}
+            >
+              <ArrowLeft size={18} aria-hidden="true" />
+            </button>
+            <div>
+              <h1>Agent动态</h1>
+              <p>
+                {statistics === undefined
+                  ? '团队 Agent 用量与执行概览'
+                  : `${statistics.startDate} 至 ${statistics.endDate} · ${statistics.timezone}`}
+              </p>
+            </div>
           </div>
           <RangeControl
             range={props.route.range}

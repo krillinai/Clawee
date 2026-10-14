@@ -4,7 +4,6 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Archive,
-  Activity,
   Blocks,
   ChevronDown,
   ChevronRight,
@@ -69,7 +68,6 @@ export function ClaweeSidebar(props: {
   sidebarCompactLogoUrl?: string;
   sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
   adminUrl?: string;
-  activityAllowed?: boolean;
   onNewConversation(projectId?: string): void;
   onSelectProject(projectId: string): void;
   onSelectConversation(conversationId: string): void;
@@ -153,11 +151,8 @@ export function ClaweeSidebar(props: {
     onClick(): void;
   }> = [
     { label: '新建会话', icon: SquarePen, onClick: () => props.onNewConversation() },
-    { label: props.sidebarMenuLabels?.dashboard ?? '数据看板', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
+    { label: props.sidebarMenuLabels?.dashboard ?? '工作台', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
     { label: '工作流', icon: Workflow, view: 'workflow', onClick: () => props.onOpenView('workflow') },
-    ...(props.activityAllowed === true
-      ? [{ label: 'Agent动态', icon: Activity, view: 'activity' as const, onClick: () => props.onOpenView('activity') }]
-      : []),
     { label: props.sidebarMenuLabels?.skills ?? '企业Skill', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
     { label: props.sidebarMenuLabels?.knowledge ?? '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },

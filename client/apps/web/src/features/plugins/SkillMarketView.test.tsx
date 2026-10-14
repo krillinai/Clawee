@@ -47,15 +47,15 @@ describe('SkillMarketView', () => {
     renderSkillMarket();
 
     expect(screen.queryByRole('heading', { level: 1, name: '插件' })).not.toBeInTheDocument();
-    expect(screen.queryByText('31 个 Skill')).not.toBeInTheDocument();
+    expect(screen.queryByText('33 个 Skill')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('skill-market-card')).toHaveLength(12);
-    expect(screen.getByText('已显示 12 / 31')).toBeInTheDocument();
+    expect(screen.getByText('已显示 12 / 33')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '加载更多 Skill' })).not.toBeInTheDocument();
 
     await intersectSkillMarketSentinel();
 
     expect(screen.getAllByTestId('skill-market-card')).toHaveLength(24);
-    expect(screen.getByText('已显示 24 / 31')).toBeInTheDocument();
+    expect(screen.getByText('已显示 24 / 33')).toBeInTheDocument();
 
     const videoCategory = skillMarketCatalog.filter(
       (entry) => entry.category === 'content-creation'
@@ -117,9 +117,9 @@ describe('SkillMarketView', () => {
     renderSkillMarket();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('skill-market-card')).toHaveLength(31);
+      expect(screen.getAllByTestId('skill-market-card')).toHaveLength(33);
     });
-    expect(screen.getByText('已显示 31 / 31')).toBeInTheDocument();
+    expect(screen.getByText('已显示 33 / 33')).toBeInTheDocument();
     expect(screen.queryByTestId('skill-market-scroll-sentinel')).not.toBeInTheDocument();
   });
 
@@ -141,8 +141,8 @@ describe('SkillMarketView', () => {
     );
     expect(screen.queryByRole('group', { name: '场景' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '全部 31' }));
-    expect(screen.getByRole('button', { name: '全部 31' })).toHaveAttribute(
+    await user.click(screen.getByRole('button', { name: '全部 33' }));
+    expect(screen.getByRole('button', { name: '全部 33' })).toHaveAttribute(
       'aria-pressed',
       'true'
     );

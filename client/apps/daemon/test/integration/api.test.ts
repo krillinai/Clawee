@@ -62,6 +62,34 @@ afterEach(async () => {
 });
 
 describe('runtime api', () => {
+  it.each([42, null, {}, '', 'x'.repeat(128001)])('rejects invalid workbench context before starting a run', async workbenchContext => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-workbench-context-'));
+    server = await buildServer({ token: 'secret', dataDir: tempDir });
+    const response = await authPost('/runs', { threadId: 'missing-thread', prompt: '分析数据', workbenchContext });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('adds workbench data to execution without changing the visible user message', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-workbench-run-'));
+    const fake = createFakeCodex(tempDir, { stdoutLines: [
+      { type: 'thread.started', thread_id: 'codex-workbench' },
+      { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }
+    ] });
+    server = await buildServer({ token: 'secret', dataDir: tempDir, codexBin: fake.bin,
+      codexSessionProvider: createNoopCodexSessionProvider(), capabilities: makeResumeCapableMatrix() });
+    const thread = (await createConversationResponseViaApi({ profile: 'default', sandbox: 'read-only' })).json().thread;
+    const response = await authPost('/runs', {
+      threadId: thread.id, prompt: '分析增长趋势', workbenchContext: '{"account":"品牌账号","followerCount":128600}'
+    });
+    expect(response.statusCode).toBe(202);
+    await waitForRunStatus(response.json().id, 'succeeded');
+    expect(fake.readPrompt()).toContain('128600');
+    expect(fake.readPrompt()).toContain('分析增长趋势');
+    const history = await authGet(`/threads/${thread.id}/history`);
+    expect(history.json().items.find((item: { type: string }) => item.type === 'user_message').text).toBe('分析增长趋势');
+    expect(fake.readArgv()).toContain('read-only');
+  });
   it('starts and stops an injected scheduler when autostart is enabled', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-'));
     const steps: string[] = [];

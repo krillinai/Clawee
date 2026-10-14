@@ -160,11 +160,21 @@ function overviewProps() {
     detailLoading: false,
     onRetryStatistics: vi.fn(),
     onRetryDetail: vi.fn(),
+    onBack: vi.fn(),
     onNavigate: vi.fn()
   };
 }
 
 describe('ActivityPage', () => {
+  it('returns from the overview to the workbench', async () => {
+    const onBack = vi.fn();
+    const user = userEvent.setup();
+    render(<ActivityPage {...overviewProps()} onBack={onBack} />);
+
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it('renders only fields supplied by the activity statistics contract', () => {
     render(<ActivityPage {...overviewProps()} />);
 

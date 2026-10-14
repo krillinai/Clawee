@@ -72,7 +72,7 @@ export function BilibiliDashboardDetail(props: {
 
   return <main className="dashboard-page dashboard-detail-page"><div className="dashboard-page__inner dashboard-detail-inner">
     <header className="dashboard-detail-header dashboard-detail-header--complete">
-      <button aria-label="返回数据看板" onClick={props.onBack} type="button"><ArrowLeft size={18} aria-hidden="true" /></button>
+      <button aria-label="返回工作台" onClick={props.onBack} type="button"><ArrowLeft size={18} aria-hidden="true" /></button>
       <div className="dashboard-detail-heading">
         <span>内容运营</span>
         <div><h1>哔哩哔哩数据洞察</h1>{dashboard?.status === 'partial' ? <em>部分数据</em> : null}</div>

@@ -330,8 +330,11 @@ export type AttachmentDeleteResponse = {
   deleted: true;
 };
 
+export const WORKBENCH_CONTEXT_MAX_CHARS = 128_000;
+
 export type RunRequest = {
   prompt: string;
+  workbenchContext?: string;
   threadId?: string;
   draftId?: string;
   attachmentIds?: string[];

@@ -132,7 +132,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '企业知识库' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Member' }));
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
-    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '工作台']) {
       expect(await screen.findByRole('button', { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: '技能' })).not.toBeInTheDocument();
@@ -169,7 +169,7 @@ describe('App', () => {
     });
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
     await screen.findByRole('button', { name: 'Member' });
-    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '工作台']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
   });
@@ -675,11 +675,14 @@ describe('App', () => {
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
 
     expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).toHaveClass('sidebar-hidden');
     expect(await screen.findByText('¥100.00')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '充值记录' }));
     expect(await screen.findByRole('heading', { name: '充值记录' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
     expect(screen.getByText('已支付，到账异常')).toBeInTheDocument();
     expect(window.location.hash).toBe('#/activity/recharge-records?range=7d');
     await user.click(screen.getByRole('button', { name: '返回 Agent动态' }));
@@ -693,15 +696,27 @@ describe('App', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/activity?range=today'));
     expect(screen.getByTestId('total-tokens')).toHaveTextContent('184,200');
 
-    window.history.replaceState(null, '', '#/dashboard');
-    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/dashboard');
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '打开Agent动态模块' }));
+    expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/activity?range=7d');
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
 
     window.history.replaceState(null, '', '#/activity/agent/collector-beijing/agent-customer?range=30d');
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
     expect(await screen.findByRole('heading', { name: '客户洞察' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '近 30 天' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '返回 Agent动态' }));
+    expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
     }
   );
 
@@ -754,8 +769,59 @@ describe('App', () => {
     window.location.hash = '#/dashboard';
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '数据看板' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('recovers an unavailable workbench project through the existing default project API without starting a run', async () => {
+    const user = userEvent.setup();
+    window.location.hash = '#/dashboard';
+    testRuntimeProjects = [createTestProject('/Users/test/missing-project', { directoryState: 'missing' })];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()} />);
+    await screen.findByRole('heading', { name: '工作台' });
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    const recoveryButton = await screen.findByRole('button', { name: '使用默认项目' });
+    expect(within(screen.getByLabelText('模块对话')).getByRole('alert')).toHaveTextContent('/Users/test/missing-project');
+    await user.click(recoveryButton);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '使用默认项目' })).not.toBeInTheDocument());
+    expect(findPostCalls(fetchCalls, '/projects/default')).toHaveLength(1);
+    expect(findPostCalls(fetchCalls, '/runs')).toHaveLength(0);
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+  });
+
+  it('hides navigation inside a workbench module and restores it on return or external navigation', async () => {
+    const user = userEvent.setup();
+    window.location.hash = '#/dashboard';
+    render(<App />);
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(await screen.findByRole('heading', { name: '哔哩哔哩数据洞察' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开导航' })).not.toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).toHaveClass('sidebar-hidden');
+
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).not.toHaveClass('sidebar-hidden');
+
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    act(() => { window.location.hash = '#/'; });
+    await waitFor(() => expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
   });
 
   it('opens the dashboard from the homepage data analysis shortcut', async () => {
@@ -764,7 +830,7 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: '数据分析' }));
 
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
     expect(window.location.hash).toBe('#/dashboard');
   });
 

@@ -2495,5 +2495,164 @@
       "invokeai",
       "frontend-slides"
     ]
+  },
+  {
+    "id": "pbakaus-impeccable",
+    "name": "impeccable",
+    "titleZh": "Impeccable 前端设计指导",
+    "tagline": "给 AI 编码代理的设计语言：1 个 skill、24 条命令、浏览器实时迭代和 61 条确定性检测规则，避免生成千篇一律的 AI 风格界面。",
+    "summary": "Impeccable 面向 AI 编码代理提供系统化前端设计指导。它包含 init/craft/audit/critique/polish 等 24 条命令，通过 PRODUCT.md 沉淀产品事实、DESIGN.md 记录设计系统，并内置 61 条无需 LLM 的确定性检测规则，帮助识别套壳卡片、渐变滥用、字体扎堆等 AI 模板特征，适合落地页、后台、作品集和产品界面的设计打磨与验收。",
+    "category": "product-design",
+    "subcategory": "前端设计指导",
+    "platforms": [
+      "Web",
+      "小红书",
+      "B站",
+      "公众号"
+    ],
+    "tasks": [
+      "前端设计指导",
+      "UI/UX",
+      "设计系统",
+      "视觉验收",
+      "响应式",
+      "可访问性"
+    ],
+    "businessGoals": [
+      "marketing-growth",
+      "lead-generation",
+      "conversion"
+    ],
+    "creator": {
+      "name": "pbakaus",
+      "avatarUrl": "https://github.com/pbakaus.png"
+    },
+    "github": {
+      "repo": "pbakaus/impeccable",
+      "url": "https://github.com/pbakaus/impeccable",
+      "stars": 68630,
+      "forks": 4201,
+      "license": "Apache-2.0",
+      "lastPushedAt": "2026-09-16T20:57:20Z",
+      "defaultBranch": "main",
+      "skillPath": "skill",
+      "readmeText": "Impeccable 是给 AI 编码代理用的设计指导框架：1 个 skill、24 条命令、浏览器实时迭代和 61 条确定性检测规则。\n\n适合场景：\n- 需要系统化 UI/UX 评审、视觉打磨和设计系统沉淀时。\n- 希望避免 AI 生成的套壳模板界面（Inter 字体、紫蓝渐变、卡片套卡片等）。\n- 落地页、后台、作品集和产品界面的上线前验收。\n\n输入：页面目标、现有界面、设计约束。\n输出：设计评审、打磨建议、可上线的界面。",
+      "readmeLanguage": "zh"
+    },
+    "examples": [],
+    "inputs": [
+      "页面目标",
+      "现有界面",
+      "设计约束"
+    ],
+    "outputs": [
+      "设计评审",
+      "打磨建议",
+      "可上线界面"
+    ],
+    "install": {
+      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 pbakaus/impeccable 的 README，确认安装方式和依赖，再执行对应任务。",
+      "humanSteps": [
+        "什么时候用：需要系统化前端设计评审、视觉打磨或避免 AI 模板风界面时",
+        "常见触发说法：帮我把这个页面设计得更专业 / 做一次 UI 设计评审",
+        "安装/收录状态：verified"
+      ],
+      "command": "git clone https://github.com/pbakaus/impeccable.git",
+      "officialDocsUrl": "https://impeccable.style"
+    },
+    "risks": {
+      "requiresLogin": false,
+      "requiresApiKey": false,
+      "externalWrite": false,
+      "readsLocalFiles": true,
+      "commercialLicenseReview": false,
+      "privateDataRisk": false,
+      "notes": [
+        "live 模式会向本地开发页面注入 HTTP 辅助脚本，只应在可信的本地项目中使用。",
+        "61 条确定性规则可在无 LLM 的情况下运行，适合 CI 验收。"
+      ]
+    },
+    "listingStatus": "verified",
+    "relatedSkillIds": []
+  },
+  {
+    "id": "leonxlnx-taste-skill",
+    "name": "taste-skill",
+    "titleZh": "Taste Skill 审美提升框架",
+    "tagline": "Anti-slop 前端技能框架：给 AI Agent 更好的审美，避免生成无聊、千篇一律的界面，覆盖布局、排版、动效和间距。",
+    "summary": "taste-skill 是面向 AI Agent 的 anti-slop 前端框架，帮助 AI 构建的界面摆脱模板化观感。它提供多套可调技能，覆盖布局、排版、动效、间距等设计维度，并包含用于参考板（web、移动端、品牌套件）的图像生成技能，可与 ChatGPT Images 等生成器配合，再把产出交给 Codex、Cursor 或 Claude Code 实现。",
+    "category": "product-design",
+    "subcategory": "AI 前端审美框架",
+    "platforms": [
+      "Web",
+      "小红书",
+      "B站",
+      "公众号"
+    ],
+    "tasks": [
+      "前端审美",
+      "UI/UX",
+      "布局",
+      "排版",
+      "动效",
+      "间距"
+    ],
+    "businessGoals": [
+      "marketing-growth",
+      "lead-generation",
+      "conversion",
+      "creator-operations"
+    ],
+    "creator": {
+      "name": "Leonxlnx",
+      "avatarUrl": "https://github.com/Leonxlnx.png"
+    },
+    "github": {
+      "repo": "Leonxlnx/taste-skill",
+      "url": "https://github.com/Leonxlnx/taste-skill",
+      "stars": 87822,
+      "forks": 5977,
+      "license": "MIT",
+      "lastPushedAt": "2026-09-16T15:01:43Z",
+      "defaultBranch": "main",
+      "skillPath": "skills/taste-skill",
+      "readmeText": "Taste Skill 是 Anti-Slop 前端技能框架，可移植的 Agent Skills 集合，用于升级 AI 构建的界面：更强的布局、排版、动效和间距，而不是模板化界面。仓库还包含图像生成技能（web、移动端、品牌套件参考板）。\n\n适合场景：\n- 需要让 AI 生成的界面更有设计质感时。\n- 避免套壳、boring、generic 的 AI 前端。\n- 与 ChatGPT Images 等生成参考板后交给编码代理实现。\n\n支持 Codex、Cursor、Claude Code 等主流编码代理。",
+      "readmeLanguage": "zh"
+    },
+    "examples": [],
+    "inputs": [
+      "设计目标",
+      "参考板",
+      "界面约束"
+    ],
+    "outputs": [
+      "设计方向",
+      "界面实现建议",
+      "参考板"
+    ],
+    "install": {
+      "agentInstruction": "在 Codex、Claude Code 或 Cursor 中使用时，先打开 Leonxlnx/taste-skill 的 README，确认主 skill 路径和安装方式，再执行对应任务。",
+      "humanSteps": [
+        "什么时候用：需要提升 AI 前端的设计质感、避免模板化界面时",
+        "常见触发说法：让这个界面更有设计感 / 用 taste 的风格重做页面",
+        "安装/收录状态：verified"
+      ],
+      "command": "git clone https://github.com/Leonxlnx/taste-skill.git",
+      "officialDocsUrl": "https://tasteskill.dev"
+    },
+    "risks": {
+      "requiresLogin": false,
+      "requiresApiKey": false,
+      "externalWrite": false,
+      "readsLocalFiles": false,
+      "commercialLicenseReview": false,
+      "privateDataRisk": false,
+      "notes": [
+        "仓库包含多个子技能，目录收录其主 skill（skills/taste-skill）。",
+        "图像生成技能建议与外部图像生成服务配合使用。"
+      ]
+    },
+    "listingStatus": "verified",
+    "relatedSkillIds": []
   }
 ]

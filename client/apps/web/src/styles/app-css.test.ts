@@ -414,6 +414,11 @@ describe('app CSS visual contracts', () => {
     expect(shell).not.toContain('min-height: 640px;');
   });
 
+  it('uses the full content area when a workbench module hides navigation', () => {
+    expect(cssBlock('.clawee-shell.sidebar-hidden')).toContain('grid-template-columns: minmax(0, 1fr);');
+    expect(cssBlock('.clawee-shell.sidebar-hidden .clawee-main-pane')).toContain('grid-template-rows: minmax(0, 1fr);');
+  });
+
   it('stretches HTML previews across the full editor area', () => {
     const preview = cssBlock('.file-preview-html');
     const frame = cssBlock('.file-preview-html iframe');

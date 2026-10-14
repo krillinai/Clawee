@@ -5,7 +5,7 @@ let activeResizeCleanup: (() => void) | undefined;
 export function beginPaneResize(
   event: ReactMouseEvent<HTMLElement>,
   update: (clientX: number) => void
-): void {
+): (() => void) | undefined {
   if (event.button !== 0) return;
 
   event.preventDefault();
@@ -35,4 +35,5 @@ export function beginPaneResize(
   window.addEventListener('mouseup', cleanup);
   window.addEventListener('blur', cleanup);
   update(event.clientX);
+  return cleanup;
 }

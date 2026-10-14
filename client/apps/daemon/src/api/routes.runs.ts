@@ -1,4 +1,5 @@
 import type { AttachmentResponse, RunRequest, RunResponse } from '@clawee/protocol';
+import { WORKBENCH_CONTEXT_MAX_CHARS } from '@clawee/protocol';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AttachmentService } from '../attachments/service.js';
 import type { RuntimeCapabilityMatrix } from '../codex/capabilities.js';
@@ -221,6 +222,15 @@ function parseRunRequest(body: unknown): ParseResult<RunRequest> {
       return { ok: false, message: 'model must be a non-empty string or null' };
     }
     value.model = typeof input.model === 'string' ? input.model.trim() : null;
+  }
+
+  if (input.workbenchContext !== undefined) {
+    if (typeof input.workbenchContext !== 'string' || input.workbenchContext.trim().length === 0
+      || input.workbenchContext.length > WORKBENCH_CONTEXT_MAX_CHARS) {
+      return { ok: false, message: 'workbenchContext must be a non-empty string within the context limit' };
+    }
+    if (value.threadId === undefined) return { ok: false, message: 'workbenchContext requires threadId' };
+    value.workbenchContext = input.workbenchContext;
   }
 
   if (input.resumeMode !== undefined) {

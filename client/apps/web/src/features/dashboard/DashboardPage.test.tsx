@@ -1,9 +1,10 @@
 import type { EnterpriseBilibiliDashboardResponse } from '@clawee/protocol';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '../../runtime/client.js';
 import { DashboardPage } from './DashboardPage.js';
+import type { WorkbenchConversationRuntime } from './use-workbench-conversation.js';
 
 function bilibiliDashboard(
   status: 'available' | 'partial' = 'available'
@@ -71,19 +72,111 @@ function bilibiliDashboard(
 }
 
 describe('DashboardPage', () => {
-  it('summarizes static Agent and knowledge data', () => {
+  it('masks the previous enterprise account data while a new user snapshot is loading', async () => {
+    const user = userEvent.setup();
+    let resolveDashboard!: (dashboard: EnterpriseBilibiliDashboardResponse) => void;
+    const service = { getBilibiliDashboard: vi.fn(async () => bilibiliDashboard()) };
+    const runtime: WorkbenchConversationRuntime = {
+      client: null, connection: null, connected: false, subjectId: 'member_1',
+      config: { permission: 'workspace-write', profile: 'default', model: null, reasoning: null }
+    };
+    const view = render(<DashboardPage connected enterpriseSignedIn service={service} conversationRuntime={runtime} />);
+    await screen.findByText('已采集 24 个稿件');
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(screen.getByText('品牌官方账号 · 近 7 天')).toBeInTheDocument();
+    service.getBilibiliDashboard.mockImplementation(() => new Promise(resolve => { resolveDashboard = resolve; }));
+    view.rerender(<DashboardPage connected enterpriseSignedIn service={service}
+      conversationRuntime={{ ...runtime, subjectId: 'member_2' }} />);
+    expect(screen.queryByText('品牌官方账号 · 近 7 天')).not.toBeInTheDocument();
+    expect(screen.queryByText('夏日新品开箱')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '输入任务' })).toBeDisabled();
+    await waitFor(() => expect(resolveDashboard).toBeDefined());
+    const next = bilibiliDashboard();
+    next.account!.name = '新用户账号';
+    await act(async () => { resolveDashboard(next); });
+    expect(await screen.findByText('新用户账号 · 近 7 天')).toBeInTheDocument();
+  });
+
+  it('shows available modules with concise summaries', () => {
     render(<DashboardPage />);
-    expect(screen.getByRole('heading', { name: '数据看板' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '业务洞察' })).toBeInTheDocument();
-    for (const name of ['竞品洞察', '客户管理', '小红书运营', '抖音投放']) {
+    expect(screen.getByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '全部模块' })).toBeInTheDocument();
+    const categories = screen.getByRole('group', { name: '模块分类' });
+    expect(within(categories).getAllByRole('button').map(button => button.textContent)).toEqual([
+      '全部1', '数据洞察1', '内容创作0', '素材设计0'
+    ]);
+    expect(within(categories).getByRole('button', { name: /^全部/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('打开模块')).not.toBeInTheDocument();
+    for (const name of ['趋势洞察', '客户转化', '视频翻译', '竞品洞察', '客户管理', '小红书运营', '抖音投放']) {
       expect(screen.queryByRole('heading', { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: /^编辑/ })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '哔哩哔哩运营' })).toBeInTheDocument();
-    expect(screen.getByRole('note')).toHaveTextContent('哔哩哔哩看板已连接企业服务');
+    expect(screen.queryByText('哔哩哔哩看板已连接企业服务')).not.toBeInTheDocument();
+    expect(screen.getByText('本地运行内核未连接')).toBeInTheDocument();
     expect(screen.queryByText('总 Token')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Agent 运行' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '知识资产' })).not.toBeInTheDocument();
+  });
+
+  it('shows Agent activity first only when access is allowed and opens its existing route', async () => {
+    const onOpenActivity = vi.fn();
+    const user = userEvent.setup();
+    const view = render(<DashboardPage activityAllowed={false} onOpenActivity={onOpenActivity} />);
+    expect(screen.queryByRole('button', { name: '打开Agent动态模块' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: '模块分类' })).getByRole('button', { name: /^全部/ })).toHaveTextContent('全部1');
+
+    view.rerender(<DashboardPage activityAllowed onOpenActivity={onOpenActivity} />);
+    const activityCard = screen.getByRole('button', { name: '打开Agent动态模块' });
+    expect(screen.getByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(activityCard).toBe(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }).previousElementSibling);
+    expect(within(screen.getByRole('group', { name: '模块分类' })).getByRole('button', { name: /^全部/ })).toHaveTextContent('全部2');
+    expect(within(screen.getByRole('group', { name: '模块分类' })).getByRole('button', { name: /^数据洞察/ })).toHaveTextContent('数据洞察2');
+    await user.click(activityCard);
+    expect(onOpenActivity).toHaveBeenCalledOnce();
+  });
+
+  it('keeps module cards simple while preserving live enterprise status', async () => {
+    const service = { getBilibiliDashboard: vi.fn().mockResolvedValue(bilibiliDashboard()) };
+    render(<DashboardPage connected enterpriseSignedIn service={service} />);
+    const bilibiliCard = screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' });
+    expect(within(bilibiliCard).getByRole('heading')).toBeInTheDocument();
+    expect(bilibiliCard.querySelector('dl')).not.toBeInTheDocument();
+    expect(within(bilibiliCard).queryByText('打开模块')).not.toBeInTheDocument();
+    expect(await within(bilibiliCard).findByText('已采集 24 个稿件')).toBeInTheDocument();
+    expect(within(bilibiliCard).queryByText('128,600')).not.toBeInTheDocument();
+  });
+
+  it('filters module categories and shows empty states without placeholder tools', async () => {
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+    const categories = screen.getByRole('group', { name: '模块分类' });
+
+    await user.click(within(categories).getByRole('button', { name: /^内容创作/ }));
+    expect(screen.getByRole('region', { name: '内容创作' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('尚未接入内容创作模块');
+    expect(screen.queryByRole('heading', { name: '视频翻译' })).not.toBeInTheDocument();
+    await user.click(within(categories).getByRole('button', { name: /^素材设计/ }));
+    expect(screen.getByRole('region', { name: '素材设计' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('尚未接入素材设计模块');
+    expect(screen.queryByRole('button', { name: /开始创作|开始设计/ })).not.toBeInTheDocument();
+
+    await user.click(within(categories).getByRole('button', { name: /^数据洞察/ }));
+    expect(screen.getByRole('region', { name: '数据洞察' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await user.click(within(categories).getByRole('button', { name: /^全部/ }));
+    expect(screen.getByRole('region', { name: '全部模块' })).toBeInTheDocument();
+  });
+
+  it('returns from a read-only module to the selected workbench category', async () => {
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+    await user.click(screen.getByRole('button', { name: /^数据洞察/ }));
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(screen.getByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^数据洞察/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('loads the enterprise Bilibili summary and opens its real dashboard', async () => {
@@ -97,8 +190,8 @@ describe('DashboardPage', () => {
     />);
 
     expect(await screen.findByText('已采集 24 个稿件')).toBeInTheDocument();
-    expect(await screen.findByText('128,600')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(screen.getByText('当前粉丝')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '哔哩哔哩数据洞察' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '增长趋势' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '互动构成' })).toBeInTheDocument();
@@ -196,7 +289,7 @@ describe('DashboardPage', () => {
       { date: '2026-09-12', followerCount: 1_000, viewCount: 8_260_000, interactionCount: 144_000, followerCountDelta: 0, viewCountDelta: 0, interactionCountDelta: 0 }
     ];
     render(<DashboardPage connected enterpriseSignedIn service={{
-      getBilibiliDashboard: async () => dashboard
+      getBilibiliDashboard: async filters => ({ ...dashboard, range: filters?.range ?? '7d' })
     }} />);
 
     await screen.findByText('已采集 24 个稿件');
