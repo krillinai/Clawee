@@ -259,33 +259,41 @@ describe('FileEditorPane', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('SVG 文件支持编辑和源码预览，不渲染图片', async () => {
+  it.each(['code', 'image'] as const)('SVG 文件（%s）默认显示图形，可切换到源码编辑', async (kind) => {
     const user = userEvent.setup();
-    const svgSource = '<svg viewBox="0 0 10 10"><rect width="10" height="10" /></svg>';
+    const svgSource = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text fill="#334155">流程图</text></svg>';
 
-    render(
+    const meta = createMeta({
+      name: 'logo.svg',
+      path: 'logo.svg',
+      kind,
+      mime: 'image/svg+xml',
+      editable: true,
+      previewable: true
+    });
+    const { rerender } = render(
       <FileEditorPane
-        meta={createMeta({
-          name: 'logo.svg',
-          path: 'logo.svg',
-          kind: 'image',
-          mime: 'image/svg+xml',
-          editable: true,
-          previewable: true
-        })}
+        meta={meta}
         content={svgSource}
-        objectUrl="blob:logo-svg"
       />
     );
 
-    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '预览' })).toBeInTheDocument();
+    const previewSource = (content: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`;
+    expect(screen.getByRole('button', { name: '预览' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('img', { name: 'logo.svg' })).toHaveAttribute('src', previewSource(svgSource));
+    expect(document.querySelector('.file-preview pre, .file-preview svg')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'logo.svg 编辑器' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
     expect(screen.getByRole('textbox', { name: 'logo.svg 编辑器' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'logo.svg' })).not.toBeInTheDocument();
+
+    const updatedSource = svgSource.replace('流程图', '更新后的流程图');
+    rerender(<FileEditorPane meta={meta} content={updatedSource} />);
 
     await user.click(screen.getByRole('button', { name: '预览' }));
 
-    expect(screen.queryByRole('img', { name: 'logo.svg' })).not.toBeInTheDocument();
-    expect(document.querySelector('.file-preview pre')?.textContent).toBe(svgSource);
+    expect(screen.getByRole('img', { name: 'logo.svg' })).toHaveAttribute('src', previewSource(updatedSource));
   });
 });
 

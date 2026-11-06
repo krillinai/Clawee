@@ -55,17 +55,41 @@ describe('private credential file', () => {
     }
   });
 
-  it('fails closed for unknown schemas and symbolic-link destinations', async () => {
+  it('preserves unknown fields and fails closed for unsupported schemas and symbolic-link destinations', async () => {
     const root = mkdtempSync(join(tmpdir(), 'clawee-private-credential-'));
     const path = resolvePrivateCredentialFilePath({ dataDir: root });
     mkdirSync(dirname(path), { recursive: true });
+    const unexpected = { nested: 'secret' };
+    const enterprise = {
+      accessToken: 'enterprise-token',
+      expiresAt: '2026-08-27T12:00:00.000Z'
+    };
     writeFileSync(path, JSON.stringify({
       schemaVersion: 1,
-      unexpected: 'secret'
+      unexpected,
+      enterprise
     }), { mode: 0o600 });
 
     try {
       const store = createPrivateCredentialFileStore({ path });
+      expect(await store.read('enterprise')).toEqual(enterprise);
+      await store.write('modelService', { apiKey: 'model-api-key' });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+        schemaVersion: 1,
+        unexpected,
+        enterprise,
+        modelService: { apiKey: 'model-api-key' }
+      });
+
+      await store.delete('enterprise');
+      await store.delete('modelService');
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+        schemaVersion: 1,
+        unexpected
+      });
+
+      rmSync(path);
+      writeFileSync(path, JSON.stringify({ schemaVersion: 2 }), { mode: 0o600 });
       await expect(store.read('enterprise')).rejects.toBeInstanceOf(
         PrivateCredentialFileError
       );

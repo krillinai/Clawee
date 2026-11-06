@@ -1,0 +1,45 @@
+.diagnostics-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostics-export button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diagnostics-export button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.diagnostics-export button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.diagnostics-export p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diagnostics-export p[role="alert"] {
+  color: var(--danger);
+}
+
+.enterprise-account-status .diagnostics-export {
+  margin-top: 10px;
+}

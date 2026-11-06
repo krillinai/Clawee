@@ -285,6 +285,7 @@ func delegatedBearerToken(header string) (string, bool) {
 func mountAdminMCPRoutes(admin *gin.RouterGroup, opts Options) {
 	mountAdminMCPResourceRoutes(admin, opts)
 	mountAdminMCPGovernanceRoutes(admin, opts)
+	mountAdminModelProxyAuditRoutes(admin, opts)
 }
 
 func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
@@ -663,7 +664,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		if !validateAdminAccountTokenTarget(c, opts.AccountService, userID, false) {
+		if _, ok := validateAdminAccountTokenTarget(c, opts.AccountService, userID, false); !ok {
 			return
 		}
 		token, err := opts.ProxyGateway.Store().GetLatestAccountToken(c.Request.Context(), userID)
@@ -695,10 +696,11 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		if !validateAdminAccountTokenTarget(c, opts.AccountService, userID, true) {
+		account, ok := validateAdminAccountTokenTarget(c, opts.AccountService, userID, true)
+		if !ok {
 			return
 		}
-		issued, err := opts.ProxyGateway.RotateAccountToken(c.Request.Context(), mcpgateway.AccountTokenIssueRequest{UserID: userID, ExpiresAt: req.ExpiresAt, Scopes: req.Scopes, Issuer: "claw-gateway-admin"})
+		issued, err := opts.ProxyGateway.RotateModelAccountToken(c.Request.Context(), userID, account.Name, req.ExpiresAt, "claw-gateway-admin")
 		if err != nil {
 			agentAPIError(c, err)
 			return
@@ -727,7 +729,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		if !validateAdminAccountTokenTarget(c, opts.AccountService, userID, false) {
+		if _, ok := validateAdminAccountTokenTarget(c, opts.AccountService, userID, false); !ok {
 			return
 		}
 		copied, err := opts.ProxyGateway.CopyActiveAccountToken(c.Request.Context(), userID)
@@ -767,7 +769,7 @@ func mountAdminMCPResourceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		if !validateAdminAccountTokenTarget(c, opts.AccountService, userID, false) {
+		if _, ok := validateAdminAccountTokenTarget(c, opts.AccountService, userID, false); !ok {
 			return
 		}
 		count, err := opts.ProxyGateway.RevokeAccountToken(c.Request.Context(), userID)
@@ -942,21 +944,21 @@ func rejectLegacyAgentIDQuery(c *gin.Context) bool {
 	return true
 }
 
-func validateAdminAccountTokenTarget(c *gin.Context, accountService *accounts.Service, userID string, requireActive bool) bool {
+func validateAdminAccountTokenTarget(c *gin.Context, accountService *accounts.Service, userID string, requireActive bool) (accounts.Account, bool) {
 	if accountService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "account service is disabled"})
-		return false
+		return accounts.Account{}, false
 	}
 	account, err := accountService.Account(c.Request.Context(), userID)
 	if err != nil {
 		agentAPIError(c, err)
-		return false
+		return accounts.Account{}, false
 	}
 	if requireActive && account.Status != accounts.StatusActive {
 		agentAPIError(c, accounts.ErrAccountNotActive)
-		return false
+		return accounts.Account{}, false
 	}
-	return true
+	return account, true
 }
 
 func capabilityID(c *gin.Context) string {

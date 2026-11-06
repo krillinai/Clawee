@@ -14,7 +14,7 @@ describe('SearchService', () => {
       query: '页面 / path',
       limit: 20,
       cursor: 'cursor+/=',
-      cwd: '/Users/wulien/项目',
+      cwd: '/Users/example/项目',
       itemTypes: ['assistant_message', 'file_change'],
       createdAfter: '2026-07-01T00:00:00.000Z',
       createdBefore: '2026-07-12T00:00:00.000Z'
@@ -24,7 +24,7 @@ describe('SearchService', () => {
       '/search/conversations?query=%E9%A1%B5%E9%9D%A2+%2F+path'
       + '&limit=20'
       + '&cursor=cursor%2B%2F%3D'
-      + '&cwd=%2FUsers%2Fwulien%2F%E9%A1%B9%E7%9B%AE'
+      + '&cwd=%2FUsers%2Fexample%2F%E9%A1%B9%E7%9B%AE'
       + '&types=assistant_message%2Cfile_change'
       + '&createdAfter=2026-07-01T00%3A00%3A00.000Z'
       + '&createdBefore=2026-07-12T00%3A00%3A00.000Z'

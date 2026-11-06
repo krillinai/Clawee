@@ -42,12 +42,14 @@ describe('Desktop local release preflight', () => {
     );
   });
 
-  it('checks evidence and remote status without creating a tag or workflow run', () => {
+  it('checks local evidence and pushed HEAD without requiring a separate remote preflight run', () => {
     expect(tagCheck).toContain(
       'Desktop tag check requires a clean Git worktree'
     );
     expect(tagCheck).toContain("gitOutput(['rev-parse', '@{upstream}'])");
-    expect(tagCheck).toContain('release-preflight');
+    expect(tagCheck).not.toContain("commandOutput('gh'");
+    expect(tagCheck).not.toContain('remote=passed');
+    expect(tagCheck).toContain('远端预检由 Tag 触发的 Release 工作流执行');
     expect(tagCheck).toContain('releaseReady !== true');
     expect(tagCheck).toContain('release tags are immutable');
     expect(tagCheck).toContain("commandOutput('pnpm', ['desktop:release:doctor']");

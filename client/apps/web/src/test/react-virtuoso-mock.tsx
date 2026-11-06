@@ -42,6 +42,7 @@ export const Virtuoso = forwardRef(function MockVirtuoso(
       if (scroller === null) return;
       scroller.scrollTop += location.top ?? 0;
     },
+    autoscrollToBottom() {},
     scrollToIndex() {
       setAtBottom(true);
       props.atBottomStateChange?.(true);

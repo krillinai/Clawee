@@ -1,5 +1,5 @@
-import { Fragment, type MouseEvent, type ReactNode } from 'react';
-import { Blocks } from 'lucide-react';
+import { Fragment, useState, type MouseEvent, type ReactNode } from 'react';
+import { Blocks, Globe2 } from 'lucide-react';
 
 export type MarkdownVariant = 'assistant' | 'user' | 'process' | 'tool' | 'diagnostic' | 'document';
 export type MarkdownLinkClickHandler = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
@@ -9,7 +9,7 @@ const WORKSPACE_FILE_EXTENSIONS = [
   'jsx', 'js', 'tsx', 'ts', 'css', 'scss', 'html', 'htm', 'xml', 'csv',
   'py', 'go', 'rs', 'java', 'kt', 'kts', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp',
   'sh', 'bash', 'zsh', 'sql', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp',
-  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'mp3', 'wav', 'mp4', 'mov', 'webm'
+  'pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'zip', 'mp3', 'wav', 'mp4', 'mov', 'webm'
 ].join('|');
 const WORKSPACE_FILE_PATH_SOURCE =
   `(?:~\\/|\\.{1,2}\\/|\\/)?(?:[^\\s\`<>"'()\\[\\]{}，。！？；：,;!?]+\\/)*`
@@ -45,25 +45,29 @@ function getSiteIconUrl(href: string): string | undefined {
 }
 
 export function isWorkspaceFilePath(value: string): boolean {
-  return new RegExp(`^(?:${WORKSPACE_FILE_PATH_SOURCE})$`, 'iu').test(value.trim().replace(/ /g, '%20'));
+  return new RegExp(`^(?:${WORKSPACE_FILE_PATH_SOURCE})$`, 'iu').test(value.trim().replace(/\\/g, '/').replace(/ /g, '%20').replace(/'/g, '%27'));
 }
 
 export function extractWorkspaceFilePaths(text: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
   // 文件链接整体匹配，避免把显示标签误当成另一个工作区路径。
-  const regex = new RegExp(`!?\\[[^\\]]*\\]\\(([^)]+)\\)|(${WORKSPACE_FILE_PATH_SOURCE})`, 'giu');
+  const regex = new RegExp(`!?\\[[^\\]]*\\]\\(([^)]+)\\)|\`([^\`]+)\`|(${WORKSPACE_FILE_PATH_SOURCE})`, 'giu');
   for (const match of text.matchAll(regex)) {
-    if (match[1] !== undefined && /^(?:[a-z][a-z\d+.-]*:|#)/i.test(match[1])) continue;
-    const path = match[1] !== undefined
-      ? match[1].replace(/:\d+(?::\d+)?$/, '')
-      : match[2]!;
-    if (!isWorkspaceFilePath(path)) continue;
-    if (seen.has(path)) continue;
-    seen.add(path);
-    paths.push(path);
+    const target = match[1]?.replace(/^<(.+)>$/u, '$1');
+    if (target !== undefined && /^(?:[a-z][a-z\d+.-]*:|#)/i.test(target) && !/^[a-z]:[\\/]/iu.test(target)) continue;
+    const candidates = match[2] !== undefined
+      ? (isWorkspaceFilePath(match[2]) ? [match[2]] : extractWorkspaceFilePaths(match[2]))
+      : [target !== undefined ? target.replace(/:\d+(?::\d+)?$/, '') : match[3]!];
+    for (const path of candidates) {
+      if (!isWorkspaceFilePath(path)) continue;
+      if (seen.has(path)) continue;
+      seen.add(path);
+      paths.push(path);
+    }
   }
-  return paths;
+  const fullNames = new Set(paths.filter(path => /^(?:\/|[a-z]:[\\/])/iu.test(path)).map(path => path.replace(/\\/g, '/').split('/').at(-1)));
+  return paths.filter(path => /[\\/]/u.test(path) || !fullNames.has(path));
 }
 
 export function isSafeHref(href: string, allowRelative: boolean): boolean {
@@ -103,6 +107,7 @@ function renderLink(
     allowWorkspaceFile?: boolean;
   }
 ): ReactNode {
+  href = href.replace(/^<(.+)>$/u, '$1');
   const workspaceFile = options.allowWorkspaceFile === true
     && options.onLinkClick !== undefined
     && isWorkspaceFilePath(href);
@@ -124,19 +129,27 @@ function renderLink(
       rel={external ? 'noreferrer noopener' : undefined}
       onClick={event => options.onLinkClick?.(href, event)}
     >
-      {siteIconUrl ? (
-        <img
-          className="md-link-site-icon"
-          src={siteIconUrl}
-          alt=""
-          aria-hidden="true"
-          onError={event => {
-            event.currentTarget.hidden = true;
-          }}
-        />
-      ) : null}
+      {siteIconUrl ? <SiteIcon src={siteIconUrl} /> : null}
       <span className="md-link-label">{label}</span>
     </a>
+  );
+}
+
+// The favicon request goes to the cited site without a referrer; a globe stands
+// in when the site has no icon or blocks it.
+function SiteIcon(props: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <Globe2 className="md-link-site-icon is-fallback" aria-hidden="true" size={14} />;
+  return (
+    <img
+      className="md-link-site-icon"
+      src={props.src}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -244,8 +257,8 @@ export function renderInlineMarkdown(
   const allowRelative = Boolean(options.onLinkClick);
   const userVariant = options.variant === 'user';
   const regex = userVariant
-    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)/g
-    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
+    ? /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)<>]+)/g
+    : /(`[^`]+`)|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)<>]+)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
@@ -280,7 +293,9 @@ export function renderInlineMarkdown(
       output.push(renderLink(match[5], match[4], key++, {
         allowRelative,
         onLinkClick: options.onLinkClick,
-        allowWorkspaceFile: options.linkifyWorkspaceFiles
+        allowWorkspaceFile: options.linkifyWorkspaceFiles,
+        // Cited sources in replies show the site's icon, like "🅰 官方报告".
+        siteIcon: !userVariant
       }));
     } else if (match[6]) {
       const [href, suffix] = splitTrailingAutolinkPunctuation(match[6]);

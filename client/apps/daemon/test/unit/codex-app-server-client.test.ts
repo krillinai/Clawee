@@ -12,6 +12,43 @@ afterEach(() => {
 });
 
 describe('Codex app-server client', () => {
+  it('reads history responses larger than 1 MiB without losing the frame', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-app-server-client-'));
+    const client = createCodexAppServerClient({
+      codexBin: createFakeAppServer(tempDir),
+      codexHome: join(tempDir, 'codex-home'),
+      requestTimeoutMs: 2_000
+    });
+
+    try {
+      const response = await client.request<{ data: string }>('thread/turns/list', {
+        bytes: 2 * 1024 * 1024
+      });
+      expect(response.data).toBe('x'.repeat(2 * 1024 * 1024));
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('rejects oversized frames explicitly and can start a fresh process', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-app-server-client-'));
+    const client = createCodexAppServerClient({
+      codexBin: createFakeAppServer(tempDir),
+      codexHome: join(tempDir, 'codex-home'),
+      requestTimeoutMs: 15_000
+    });
+
+    try {
+      await expect(client.request('thread/turns/list', {
+        bytes: 33 * 1024 * 1024
+      })).rejects.toMatchObject({ code: 'CODEX_APP_SERVER_FRAME_TOO_LARGE' });
+      await expect(client.request('thread/list', { limit: 50 }))
+        .resolves.toEqual({ data: [{ id: 'thread-1' }] });
+    } finally {
+      await client.close();
+    }
+  }, 30_000);
+
   it('initializes lazily and reuses one process for concurrent requests', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-app-server-client-'));
     const codexBin = createFakeAppServer(tempDir);
@@ -94,6 +131,10 @@ rl.on('line', line => {
   }
   if (message.method === 'initialized') return;
   fs.appendFileSync(requestsPath, message.method + '\\n');
+  if (message.method === 'thread/turns/list') {
+    send({ id: message.id, result: { data: 'x'.repeat(message.params.bytes) } });
+    return;
+  }
   if (message.method === 'thread/list') {
     send({ id: message.id, result: { data: [{ id: 'thread-1' }] } });
     return;

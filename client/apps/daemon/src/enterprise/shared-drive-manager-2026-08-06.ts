@@ -4,7 +4,9 @@ import type {
   EnterpriseSharedFileListResponse,
   EnterpriseSharedFileMutationResponse,
   EnterpriseSharedSpaceListResponse,
-  RuntimeErrorCode
+  RuntimeErrorCode,
+  EnterpriseWorkflowArtifact,
+  SharedDriveArtifact
 } from '@clawee/protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -24,12 +26,15 @@ import type {
   EnterpriseSharedFilePreview,
   EnterpriseRemoteSharedFile
 } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 import { ENTERPRISE_SHARED_FILE_MAX_BYTES } from './config-2026-07-30.js';
 
 export type EnterpriseSharedDriveManager = {
+  uploadWorkflowFile?(input: {
+    taskId: string; idempotencyKey: string; fileName: string; expectedSizeBytes: number; expectedSha256?: string; content: AsyncIterable<Uint8Array>; assertIdentity(): void;
+  }): Promise<EnterpriseWorkflowArtifact>;
   listSpaces(input?: {
     limit?: number;
     cursor?: string;
@@ -44,7 +49,9 @@ export type EnterpriseSharedDriveManager = {
   getFileDetail(fileId: string): Promise<EnterpriseSharedFileDetailResponse>;
   getFilePreview(fileId: string, signal?: AbortSignal): Promise<EnterpriseSharedFilePreview>;
   uploadFile(input: {
-    spaceId: string;
+    spaceId?: string;
+    forUserId?: string;
+    assertIdentity?(): void;
     logicalPath: string;
     expectedRevision?: number;
     contentType: string;
@@ -55,6 +62,8 @@ export type EnterpriseSharedDriveManager = {
     fileId: string;
     projectId: string;
     overwrite: boolean;
+    expectedArtifact?: EnterpriseWorkflowArtifact | SharedDriveArtifact;
+    assertIdentity?(): void;
   }): Promise<EnterpriseSharedFileDownloadResponse>;
 };
 
@@ -89,7 +98,8 @@ export function createEnterpriseSharedDriveManager(input: {
       if (error instanceof EnterpriseSessionError) {
         throw new EnterpriseSharedDriveManagerError(
           error.code,
-          error.statusCode
+          error.statusCode,
+          error.details
         );
       }
       throw error;
@@ -118,7 +128,7 @@ export function createEnterpriseSharedDriveManager(input: {
     return new EnterpriseSharedDriveManagerError(
       error.code,
       error.statusCode ?? defaultStatusCode(error.code),
-      error.details
+      { ...error.details, ...enterpriseHttpErrorDetails(error) }
     );
   }
 
@@ -194,14 +204,16 @@ export function createEnterpriseSharedDriveManager(input: {
   }
 
   async function uploadFile(request: {
-    spaceId: string;
+    spaceId?: string;
+    forUserId?: string;
+    assertIdentity?(): void;
     logicalPath: string;
     expectedRevision?: number;
     contentType: string;
     expectedSizeBytes: number;
     content: AsyncIterable<Uint8Array>;
   }): Promise<EnterpriseSharedFileMutationResponse> {
-    const spaceId = validateIdentifier(request.spaceId);
+    const spaceId = validateOptionalIdentifier(request.spaceId);
     const logicalPath = validateLogicalPath(request.logicalPath);
     const contentType = validateContentType(request.contentType);
     validateExpectedRevision(request.expectedRevision);
@@ -217,10 +229,13 @@ export function createEnterpriseSharedDriveManager(input: {
         maxFileBytes,
         temporaryPath
       });
-      try {
-        return await input.httpClient.uploadSharedFileContent({
+      request.assertIdentity?.();
+      const upload = async () => {
+        request.assertIdentity?.();
+        const result = await input.httpClient.uploadSharedFileContent({
           accessToken,
-          spaceId,
+          ...(spaceId ? { spaceId } : {}),
+          ...(request.forUserId ? { forUserId: validateIdentifier(request.forUserId) } : {}),
           logicalPath,
           ...(request.expectedRevision === undefined
             ? {}
@@ -230,19 +245,24 @@ export function createEnterpriseSharedDriveManager(input: {
           sha256: staged.sha256,
           contentType
         });
+        request.assertIdentity?.();
+        return result;
+      };
+      try {
+        return await upload();
       } catch (error) {
         if (
           request.expectedRevision === undefined
           && error instanceof EnterpriseHttpError
           && error.code === 'ENTERPRISE_SERVICE_UNAVAILABLE'
         ) {
-          const reconciled = await reconcileUnknownCreate({
-            accessToken,
-            spaceId,
-            logicalPath,
-            sha256: staged.sha256
-          });
-          if (reconciled !== undefined) return reconciled;
+          if (spaceId && !request.forUserId) {
+            const reconciled = await reconcileUnknownCreate({ accessToken, spaceId, logicalPath, sha256: staged.sha256, sizeBytes: staged.sizeBytes });
+            request.assertIdentity?.();
+            if (reconciled !== undefined) return reconciled;
+          }
+          // 跨用户上传没有读取权限，按同一路径与摘要重试核对未知回执。
+          try { return await upload(); } catch (retryError) { throw await managerErrorFromUnknown(retryError); }
         }
         throw await managerErrorFromUnknown(error);
       }
@@ -256,6 +276,7 @@ export function createEnterpriseSharedDriveManager(input: {
     spaceId: string;
     logicalPath: string;
     sha256: string;
+    sizeBytes: number;
   }): Promise<EnterpriseSharedFileMutationResponse | undefined> {
     let cursor: string | undefined;
     const seenCursors = new Set<string>();
@@ -272,7 +293,7 @@ export function createEnterpriseSharedDriveManager(input: {
           file => file.logicalPath === request.logicalPath
         );
         if (exact !== undefined) {
-          if (exact.sha256 !== request.sha256) {
+          if (exact.sha256 !== request.sha256 || exact.sizeBytes !== request.sizeBytes) {
             throw new EnterpriseSharedDriveManagerError(
               'ENTERPRISE_SHARED_FILE_ALREADY_EXISTS',
               409
@@ -297,6 +318,8 @@ export function createEnterpriseSharedDriveManager(input: {
     fileId: string;
     projectId: string;
     overwrite: boolean;
+    expectedArtifact?: EnterpriseWorkflowArtifact | SharedDriveArtifact;
+    assertIdentity?(): void;
   }): Promise<EnterpriseSharedFileDownloadResponse> {
     validateIdentifier(request.fileId);
     validateIdentifier(request.projectId);
@@ -324,6 +347,11 @@ export function createEnterpriseSharedDriveManager(input: {
         request.fileId
       )
     );
+    request.assertIdentity?.();
+    const expected = request.expectedArtifact;
+    if (expected && (file.fileId !== expected.file_id || ('space_id' in expected && file.spaceId !== expected.space_id) || (expected.size_bytes !== undefined && file.sizeBytes !== expected.size_bytes) || file.logicalPath !== expected.logical_path || file.revision !== expected.revision || file.sha256 !== expected.sha256)) {
+      throw new EnterpriseSharedDriveManagerError('ENTERPRISE_SHARED_FILE_REVISION_CONFLICT', 409);
+    }
     const relativePath = validateLocalRelativePath(file.logicalPath);
     let rootReal: string;
     let target: Awaited<ReturnType<typeof prepareLocalTarget>>;
@@ -345,6 +373,19 @@ export function createEnterpriseSharedDriveManager(input: {
         500
       );
     }
+    if (previous !== undefined && expected && 'space_id' in expected) {
+      const handle = await open(target.path, 'r');
+      try {
+        const stat = await handle.stat();
+        const hash = createHash('sha256');
+        for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk);
+        await assertUnchangedTarget(rootReal, target.path, previous);
+        request.assertIdentity?.();
+        if (stat.size === file.sizeBytes && hash.digest('hex') === expected.sha256) {
+          return { fileId: file.fileId, projectId: request.projectId, relativePath, sizeBytes: file.sizeBytes, sha256: file.sha256, revision: file.revision, overwritten: false };
+        }
+      } finally { await handle.close(); }
+    }
     if (previous !== undefined && !request.overwrite) {
       throw new EnterpriseSharedDriveManagerError(
         'ENTERPRISE_SHARED_FILE_LOCAL_EXISTS',
@@ -365,7 +406,12 @@ export function createEnterpriseSharedDriveManager(input: {
           destinationPath: temporaryPath
         })
       );
+      request.assertIdentity?.();
+      if (expected && (downloaded.revision !== expected.revision || downloaded.sha256 !== expected.sha256 || (expected.size_bytes !== undefined && downloaded.bytes !== expected.size_bytes))) {
+        throw new EnterpriseSharedDriveManagerError('ENTERPRISE_SHARED_FILE_REVISION_CONFLICT', 409);
+      }
       await assertUnchangedTarget(rootReal, target.path, previous);
+      request.assertIdentity?.();
       await commitDownloadedFile({
         targetPath: target.path,
         temporaryPath,
@@ -390,7 +436,28 @@ export function createEnterpriseSharedDriveManager(input: {
     }
   }
 
+  async function uploadWorkflowFile(request: {
+    taskId: string; idempotencyKey: string; fileName: string; expectedSizeBytes: number; expectedSha256?: string; content: AsyncIterable<Uint8Array>; assertIdentity(): void;
+  }): Promise<EnterpriseWorkflowArtifact> {
+    const upload = input.httpClient.uploadWorkflowFile;
+    if (!upload) throw new EnterpriseSharedDriveManagerError('ENTERPRISE_SERVICE_UNAVAILABLE', 503);
+    validateExpectedSize(request.expectedSizeBytes, maxFileBytes);
+    const accessToken = await requireToken();
+    request.assertIdentity();
+    await mkdir(tempDir, { recursive: true, mode: 0o700 });
+    const temporaryPath = join(tempDir, `${randomUUID()}.upload`);
+    try {
+      const staged = await stageFile({ content: request.content, expectedSizeBytes: request.expectedSizeBytes, maxFileBytes, temporaryPath });
+      if (request.expectedSha256 && staged.sha256 !== request.expectedSha256) throw new Error('待交付文件已变化，请重新确认附件');
+      request.assertIdentity();
+      const artifact = await runRemote(() => upload({ accessToken, taskId: request.taskId, idempotencyKey: request.idempotencyKey, fileName: request.fileName, filePath: temporaryPath, ...staged, contentType: 'application/octet-stream' }));
+      request.assertIdentity();
+      return artifact;
+    } finally { await rm(temporaryPath, { force: true }).catch(() => undefined); }
+  }
+
   return {
+    uploadWorkflowFile,
     listSpaces,
     listFiles,
     getFileDetail,
@@ -465,13 +532,13 @@ async function prepareLocalTarget(
   for (const segment of segments.slice(0, -1)) {
     const next = join(current, segment);
     try {
-      const stats = await lstat(next);
-      if (stats.isSymbolicLink() || !stats.isDirectory()) {
-        throw localPathEscape();
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
       await mkdir(next, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error;
+    }
+    const stats = await lstat(next);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw localPathEscape();
     }
     const nextReal = await realpath(next);
     assertInsideRoot(rootReal, nextReal);

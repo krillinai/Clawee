@@ -104,9 +104,13 @@ type DingTalkConfig struct {
 	AutoProvision    bool   `mapstructure:"auto_provision"`
 	StateTTL         string `mapstructure:"state_ttl"`
 	RequestTimeout   string `mapstructure:"request_timeout"`
+	EmployeeSource   string `mapstructure:"employee_source"`
 }
 
 func (cfg DingTalkConfig) Validate() (time.Duration, time.Duration, error) {
+	if cfg.EmployeeSource != "" && cfg.EmployeeSource != "dingtalk" {
+		return 0, 0, errors.New("dingtalk.employee_source only supports dingtalk in this build")
+	}
 	stateTTL, err := time.ParseDuration(strings.TrimSpace(cfg.StateTTL))
 	if err != nil || stateTTL < 5*time.Minute || stateTTL > 15*time.Minute {
 		return 0, 0, errors.New("dingtalk.state_ttl must be between 5m and 15m")
@@ -230,6 +234,7 @@ type KnowledgeConfig struct {
 }
 
 type SkillHubConfig struct {
+	ReviewAgentID     string `mapstructure:"review_agent_id"`
 	Enabled           bool   `mapstructure:"enabled"`
 	PackageRoot       string `mapstructure:"package_root"`
 	GitHubSyncEnabled bool   `mapstructure:"github_sync_enabled"`
@@ -321,6 +326,9 @@ func Load(path string) (Config, error) {
 	}
 
 	var cfg Config
+	if v.IsSet("dingtalk.rose") {
+		return Config{}, errors.New("this build does not support the legacy employee directory configuration")
+	}
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -449,6 +457,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("knowledge.bailian.access_key_id_ref", "ALIBABA_CLOUD_ACCESS_KEY_ID")
 	v.SetDefault("knowledge.bailian.access_key_secret_ref", "ALIBABA_CLOUD_ACCESS_KEY_SECRET")
 	v.SetDefault("skillhub.enabled", false)
+	_ = v.BindEnv("skillhub.review_agent_id", "CLAW_GATEWAY_SKILL_REVIEW_AGENT_ID")
 	v.SetDefault("skillhub.package_root", "data/skillhub/packages")
 	v.SetDefault("skillhub.github_sync_enabled", true)
 	v.SetDefault("skillhub.repository_root", "data/skillhub/repositories")
@@ -474,6 +483,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("dingtalk.auto_provision", false)
 	v.SetDefault("dingtalk.state_ttl", "10m")
 	v.SetDefault("dingtalk.request_timeout", "10s")
+	v.SetDefault("dingtalk.employee_source", "dingtalk")
 	v.SetDefault("bilibili.enabled", false)
 	v.SetDefault("bilibili.client_id", "")
 	v.SetDefault("bilibili.client_secret", "")
@@ -531,6 +541,7 @@ func bindEnv(v *viper.Viper) {
 		"dingtalk.auto_provision",
 		"dingtalk.state_ttl",
 		"dingtalk.request_timeout",
+		"dingtalk.employee_source",
 		"model_access.mode",
 		"agent_activity.reporting_enabled",
 	}

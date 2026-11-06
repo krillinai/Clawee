@@ -43,6 +43,19 @@ const designFile = createFile({
 });
 
 describe('SharedDrivePage', () => {
+  it('个人网盘未创建时可首次上传，打开页面不创建空间', async () => {
+    const upload = vi.fn();
+    renderDrive({ spaces: [], onUpload: upload });
+    expect(screen.getByText('首次上传文件后自动创建')).toBeInTheDocument();
+    expect(upload).not.toHaveBeenCalled();
+    const personalUpload = screen.getByRole('button', { name: /个人网盘-企业成员/ });
+    expect(personalUpload).toBeInTheDocument();
+    await userEvent.click(personalUpload);
+    const file = new File(['report'], 'report.txt', { type: 'text/plain' });
+    await userEvent.upload(screen.getByLabelText('选择上传到共享网盘的文件'), file);
+    expect(upload).toHaveBeenCalledWith(undefined, file);
+  });
+
   it('renders Runtime, session, service, and login gates', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
@@ -120,6 +133,34 @@ describe('SharedDrivePage', () => {
     );
     await user.keyboard('{Enter}');
     expect(onSearch).toHaveBeenCalledWith('design');
+  });
+
+  it('按员工姓名和工作流模板名称显示空间名称', () => {
+    const personalSpace = createSpace({
+      spaceId: 'space-personal',
+      name: '个人网盘-企业成员',
+      personalOwnerUserId: signedInSession.account?.subjectId
+    });
+    const workflowSpace = createSpace({
+      spaceId: 'space-workflow',
+      name: '工作流-生成一张 SVG 格式的玫瑰图片'
+    });
+    const unnamedWorkflowSpace = createSpace({
+      spaceId: 'space-workflow-unnamed',
+      name: '工作流-未命名模板'
+    });
+    renderDrive({
+      spaces: [personalSpace, workflowSpace, unnamedWorkflowSpace],
+      selectedSpaceId: workflowSpace.spaceId,
+      files: [createFile({ spaceId: workflowSpace.spaceId, spaceName: workflowSpace.name })]
+    });
+
+    const navigation = screen.getByRole('navigation', { name: '授权共享空间' });
+    expect(within(navigation).getByText('个人网盘-企业成员')).toBeInTheDocument();
+    expect(within(navigation).getByText('工作流-生成一张 SVG 格式的玫瑰图片')).toBeInTheDocument();
+    expect(within(navigation).getByText('工作流-未命名模板')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '工作流-生成一张 SVG 格式的玫瑰图片' })).toBeInTheDocument();
+    expect(screen.getByText('工作流-生成一张 SVG 格式的玫瑰图片', { selector: 'td' })).toBeInTheDocument();
   });
 
   it('keeps the upload entry visible and explains missing writable spaces', async () => {

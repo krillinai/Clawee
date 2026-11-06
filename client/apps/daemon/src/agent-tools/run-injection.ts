@@ -1,3 +1,5 @@
+import { MCP_CHAIN_TIMEOUT_MS } from '../task-mcp/constants.js';
+import { DRIVE_TOOL_SCOPES, type AgentDriveToolName } from './drive-tools.js';
 import type { BuiltInToolPolicy, CodexMcpServerConfig } from '../codex/argv.js';
 import type { RuntimeThread } from '../threads/types.js';
 import {
@@ -9,6 +11,8 @@ import {
   type AgentScheduleToolName
 } from './schedule-tools.js';
 import { AGENT_SCHEDULE_MCP_ROUTE } from './internal-routes.js';
+import { WORKFLOW_TOOL_SCOPES, type AgentWorkflowToolName } from './workflow-tools.js';
+import { SKILL_TOOL_SCOPES, SKILL_UPLOAD_TIMEOUT_MS, type AgentSkillToolName } from './skill-tools.js';
 
 export const AGENT_SCHEDULE_MCP_SERVER_NAME = 'clawee_schedule';
 export const AGENT_TOOL_BASE_URL_ENV = 'CLAWEE_AGENT_TOOL_URL';
@@ -75,15 +79,22 @@ export function createAgentScheduleRunInjector(input: {
   getBaseUrl(): string | undefined;
   env?: NodeJS.ProcessEnv;
   scheduleToolsEnabled?: boolean;
+  workflowToolsEnabled?(runId: string): boolean;
+  skillToolsEnabled?(thread: RuntimeThread): boolean;
+  driveToolsEnabled?(thread: RuntimeThread): boolean;
 }): AgentScheduleRunInjector {
   return {
     prepare(run) {
       const baseUrl = input.getBaseUrl();
 
       if (baseUrl === undefined) return undefined;
-      if (input.scheduleToolsEnabled === false) return undefined;
-
-      const allowed = allowedTools(run.createdBy, run.thread);
+      const allowed = [
+        ...(input.scheduleToolsEnabled === false ? [] : allowedTools(run.createdBy, run.thread)),
+        ...(input.workflowToolsEnabled?.(run.runId) ? WORKFLOW_TOOL_SCOPES : []),
+        ...(run.createdBy === 'api' && input.driveToolsEnabled?.(run.thread) ? DRIVE_TOOL_SCOPES : []),
+        ...(run.createdBy === 'api' && input.skillToolsEnabled?.(run.thread) ? SKILL_TOOL_SCOPES : [])
+      ];
+      if (allowed.length === 0) return undefined;
       const scopes = allowed.map(tool => tool.scope);
       const issued = input.capabilities.issue({
         runId: run.runId,
@@ -100,7 +111,7 @@ export function createAgentScheduleRunInjector(input: {
           enabledTools: allowed.map(tool => tool.name),
           required: true,
           startupTimeoutSec: 10,
-          toolTimeoutSec: 30
+          toolTimeoutSec: scopes.some(scope => scope.startsWith('drive:')) ? MCP_CHAIN_TIMEOUT_MS / 1000 : scopes.includes('skill:upload') ? SKILL_UPLOAD_TIMEOUT_MS / 1000 + 30 : 30
         }],
         env: {
           [AGENT_TOOL_CAPABILITY_TOKEN_ENV]: issued.token,
@@ -116,6 +127,10 @@ export function createAgentScheduleProcessInjector(input: {
   capabilities: AgentCapabilityTokenStore;
   getBaseUrl(): string | undefined;
   env?: NodeJS.ProcessEnv;
+  scheduleToolsEnabled?: boolean;
+  workflowToolsEnabled?(runId: string): boolean;
+  skillToolsEnabled?(thread: RuntimeThread): boolean;
+  driveToolsEnabled?(thread: RuntimeThread): boolean;
 }): AgentScheduleProcessInjector {
   return {
     create() {
@@ -123,7 +138,7 @@ export function createAgentScheduleProcessInjector(input: {
       if (baseUrl === undefined) return undefined;
       const lease = input.capabilities.issueProcess({
         createdBy: 'api',
-        maxScopes: TOOL_SCOPES.map(tool => tool.scope)
+        maxScopes: [...TOOL_SCOPES, ...WORKFLOW_TOOL_SCOPES, ...SKILL_TOOL_SCOPES, ...DRIVE_TOOL_SCOPES].map(tool => tool.scope)
       });
       const noProxy = loopbackNoProxy(input.env ?? process.env);
       return {
@@ -133,7 +148,7 @@ export function createAgentScheduleProcessInjector(input: {
           bearerTokenEnvVar: AGENT_TOOL_CAPABILITY_TOKEN_ENV,
           required: true,
           startupTimeoutSec: 10,
-          toolTimeoutSec: 30
+          toolTimeoutSec: input.driveToolsEnabled ? MCP_CHAIN_TIMEOUT_MS / 1000 : input.skillToolsEnabled ? SKILL_UPLOAD_TIMEOUT_MS / 1000 + 30 : 30
         }],
         env: {
           [AGENT_TOOL_CAPABILITY_TOKEN_ENV]: lease.token,
@@ -141,7 +156,12 @@ export function createAgentScheduleProcessInjector(input: {
           no_proxy: noProxy
         },
         activate(run) {
-          const allowed = allowedTools(run.createdBy, run.thread);
+          const allowed = [
+            ...(input.scheduleToolsEnabled === false ? [] : allowedTools(run.createdBy, run.thread)),
+            ...(input.workflowToolsEnabled?.(run.runId) ? WORKFLOW_TOOL_SCOPES : []),
+            ...(run.createdBy === 'api' && input.driveToolsEnabled?.(run.thread) ? DRIVE_TOOL_SCOPES : []),
+            ...(input.skillToolsEnabled?.(run.thread) ? SKILL_TOOL_SCOPES : [])
+          ];
           lease.activate({
             runId: run.runId,
             threadId: run.thread.id,
@@ -167,9 +187,9 @@ export function createAgentScheduleProcessInjector(input: {
 
 export function toolNamesForScopes(
   scopes: AgentCapabilityScope[]
-): AgentScheduleToolName[] {
+): Array<AgentScheduleToolName | AgentWorkflowToolName | AgentSkillToolName | AgentDriveToolName> {
   const allowed = new Set(scopes);
-  return TOOL_SCOPES
+  return [...TOOL_SCOPES, ...WORKFLOW_TOOL_SCOPES, ...SKILL_TOOL_SCOPES, ...DRIVE_TOOL_SCOPES]
     .filter(tool => allowed.has(tool.scope))
     .map(tool => tool.name);
 }

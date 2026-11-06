@@ -715,6 +715,9 @@ func TestKnowledgeCallTreatsMCPErrorResultAsProviderFailure(t *testing.T) {
 func TestKnowledgeConfirmationEncryptsQueryAndRedactsStoredResult(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
+	if err := store.RotateAccountToken(ctx, "agent-1", AccountToken{ID: "token-knowledge", UserID: "agent-1", TokenHash: HashToken("knowledge-token"), Status: StatusActive, Scopes: []string{"mcp:call"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveAgent(ctx, AgentRegistration{AgentID: "agent-1", Status: StatusActive}); err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +739,7 @@ func TestKnowledgeConfirmationEncryptsQueryAndRedactsStoredResult(t *testing.T) 
 			return KnowledgeBinding{ProviderType: "bailian", ExternalKnowledgeBaseID: "provider-kb"}, nil
 		}),
 	})
-	result, err := service.CallTool(ctx, ToolCallRequest{Identity: AgentIdentity{UserID: "agent-1", AgentID: "agent-1"}, ExposedName: capability.ExposedName, Arguments: JSONMap{"query": "private policy"}})
+	result, err := service.CallTool(ctx, ToolCallRequest{Identity: AgentIdentity{UserID: "agent-1", AgentID: "agent-1", TokenID: "token-knowledge"}, ExposedName: capability.ExposedName, Arguments: JSONMap{"query": "private policy"}, BearerToken: "knowledge-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2621,8 +2624,8 @@ func TestAcceptConfirmationRejectsCapabilityMovedToAnotherUpstream(t *testing.T)
 	upstream := &recordingUpstreamClient{}
 	service := newTestService(Config{Store: store, UpstreamClient: upstream})
 	result, err := service.CallTool(ctx, ToolCallRequest{
-		Identity: AgentIdentity{UserID: "usr_sales", AgentID: "sales_zhang_agent"}, ExposedName: capability.ExposedName,
-		Arguments: JSONMap{"keyword": "acme"}, EndpointUpstreamServerID: "crm-main",
+		Identity: AgentIdentity{UserID: "usr_sales", AgentID: "sales_zhang_agent", TokenID: "token_1"}, ExposedName: capability.ExposedName,
+		Arguments: JSONMap{"keyword": "acme"}, EndpointUpstreamServerID: "crm-main", BearerToken: "delegated-token",
 	})
 	if err != nil {
 		t.Fatalf("create gate: %v", err)
@@ -3004,6 +3007,9 @@ func TestAcceptConfirmationCompletesWhenUpstreamSucceedsButAuditSaveFails(t *tes
 
 func seedGrantedAndUngrantedTools(t *testing.T, ctx context.Context, store Store) {
 	t.Helper()
+	if err := store.RotateAccountToken(ctx, "usr_sales", AccountToken{ID: "token_1", UserID: "usr_sales", TokenHash: HashToken("delegated-token"), Status: StatusActive, Scopes: []string{"mcp:call"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveAgent(ctx, AgentRegistration{AgentID: "sales_zhang_agent", TenantID: "tenant_crm", Status: StatusActive}); err != nil {
 		t.Fatalf("save agent: %v", err)
 	}
@@ -3233,8 +3239,8 @@ func TestIssueRotateAndRevokeAccountToken(t *testing.T) {
 	if issued.Plaintext == "" || issued.Token.TokenHash == "" || issued.Token.Fingerprint == "" {
 		t.Fatalf("issued token = %#v", issued)
 	}
-	if issued.Token.Scopes[0] != "mcp:call" {
-		t.Fatalf("scopes = %#v, want mcp:call", issued.Token.Scopes)
+	if got, want := issued.Token.Scopes, []string{AccountTokenScopeMCPCall, AccountTokenScopeModelCall}; !equalStrings(got, want) {
+		t.Fatalf("scopes = %#v, want %#v", got, want)
 	}
 	stored, err := store.GetAccountTokenByHash(ctx, HashToken(issued.Plaintext))
 	if err != nil {
@@ -3266,6 +3272,37 @@ func TestIssueRotateAndRevokeAccountToken(t *testing.T) {
 	if revoked != 1 {
 		t.Fatalf("revoked token count = %d, want 1", revoked)
 	}
+}
+
+func TestRotateModelAccountTokenRequiresUsernameAndUnifiedScopes(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := newTestService(Config{Store: store, TokenCipher: testTokenCipher()})
+	service.SetIdentityResolvers(nil, func(context.Context, string) error { return nil })
+
+	if _, err := service.RotateModelAccountToken(ctx, "user_model", " ", nil, "claw-gateway-user"); !errors.Is(err, ErrAccountUsernameRequired) {
+		t.Fatalf("empty username error = %v, want %v", err, ErrAccountUsernameRequired)
+	}
+
+	issued, err := service.RotateModelAccountToken(ctx, "user_model", "模型用户", nil, "claw-gateway-user")
+	if err != nil {
+		t.Fatalf("issue model token: %v", err)
+	}
+	if got, want := issued.Token.Scopes, []string{AccountTokenScopeMCPCall, AccountTokenScopeModelCall}; !equalStrings(got, want) {
+		t.Fatalf("model token scopes = %#v, want %#v", got, want)
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestRotateAccountTokenRequiresTokenCipher(t *testing.T) {
@@ -3391,8 +3428,8 @@ func TestRotateAccountTokenUsesFixedPrefixAndMaskedPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
-	if len(issued.Plaintext) != 32 || !strings.HasPrefix(issued.Plaintext, "agt_") {
-		t.Fatalf("plaintext = %q, want 32-character agt_ token", issued.Plaintext)
+	if len(issued.Plaintext) != 31 || !strings.HasPrefix(issued.Plaintext, "sk-") {
+		t.Fatalf("plaintext = %q, want 31-character sk- token", issued.Plaintext)
 	}
 	copied, err := svc.CopyActiveAccountToken(ctx, "claw_gateway")
 	if err != nil {
@@ -3733,5 +3770,28 @@ func TestDecideGrantIgnoresExpiredMismatchedGrants(t *testing.T) {
 	}, "sales_zhang_agent", "cap_crm_customer_search", GrantTool)
 	if decision.Allowed || decision.Reason != DecisionNoMatchingGrant {
 		t.Fatalf("decision = %#v, want no_matching_grant", decision)
+	}
+}
+
+func TestServiceAddsRoleGrantsToEffectiveAccountAuthorization(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(Config{Store: store})
+	service.SetRoleIDsResolver(func(context.Context, string) ([]string, error) {
+		return []string{"role_sales"}, nil
+	})
+	if err := store.SaveGrant(ctx, AccountGrant{
+		ID: "grant_role_search", RoleID: "role_sales", CapabilityID: "cap_search", GrantType: GrantTool,
+	}); err != nil {
+		t.Fatalf("save role grant: %v", err)
+	}
+
+	grants, err := service.listEffectiveGrants(ctx, "user_sales", "cap_search", GrantTool)
+	if err != nil {
+		t.Fatalf("list effective grants: %v", err)
+	}
+	decision := DecideGrant(time.Now().UTC(), grants, "user_sales", "cap_search", GrantTool)
+	if !decision.Allowed || decision.Grant == nil || decision.Grant.ID != "grant_role_search" {
+		t.Fatalf("role grant decision = %#v, grants = %#v", decision, grants)
 	}
 }

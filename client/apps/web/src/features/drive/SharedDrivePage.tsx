@@ -28,6 +28,7 @@ import {
   type FormEvent,
   type ReactNode
 } from 'react';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import './shared-drive.css';
 import { SharedFilePreviewDialog } from './SharedFilePreviewDialog.js';
 
@@ -63,7 +64,7 @@ export type SharedDrivePageProps = {
   onSelectSpace(spaceId?: string): void;
   onSearch(query: string): void;
   onLoadMoreFiles(): void;
-  onUpload(spaceId: string, file: File): void;
+  onUpload(spaceId: string | undefined, file: File): void;
   onReplace(target: EnterpriseSharedFileResponse, file: File): void;
   onDownload(target: EnterpriseSharedFileResponse, overwrite: boolean): void;
   readPreview?(fileId: string, signal?: AbortSignal): Promise<Response>;
@@ -74,11 +75,20 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const replacementTargetRef = useRef<EnterpriseSharedFileResponse>();
   const pendingUploadSpaceIdRef = useRef<string>();
+  const spacePickerRef = useRef<HTMLElement>(null);
   const [searchValue, setSearchValue] = useState(props.query);
   const [selectionError, setSelectionError] = useState<string>();
   const [spacePickerOpen, setSpacePickerOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<EnterpriseSharedFileResponse>();
-  const selectedSpace = props.spaces?.find(
+  useModalBehavior(spacePickerRef, { open: spacePickerOpen, onClose: () => setSpacePickerOpen(false) });
+  const spaces = [...(props.spaces ?? [])].sort((a, b) => Number(b.personalOwnerUserId === props.session.account?.subjectId) - Number(a.personalOwnerUserId === props.session.account?.subjectId));
+  const personalSpace = spaces.find(space => space.personalOwnerUserId === props.session.account?.subjectId);
+  const personalSpaceName = props.session.account?.name?.trim()
+    ? `个人网盘-${props.session.account.name.trim()}`
+    : '个人网盘';
+  const spaceName = (space: EnterpriseSharedSpaceResponse) => space.name;
+  const pendingDefaultUploadRef = useRef(false);
+  const selectedSpace = spaces.find(
     space => space.spaceId === props.selectedSpaceId
   );
   const writableSpaces = props.spaces?.filter(space => space.permissions.write) ?? [];
@@ -97,24 +107,13 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
     replacementTargetRef.current = undefined;
   }, [props.selectedSpaceId]);
 
-  useEffect(() => {
-    if (!spacePickerOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setSpacePickerOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [spacePickerOpen]);
-
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     props.onSearch(searchValue.trim());
   }
 
   function chooseUpload() {
+    pendingDefaultUploadRef.current = false;
     setSelectionError(undefined);
     if (selectedSpace?.permissions.write) {
       uploadInputRef.current?.click();
@@ -125,6 +124,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
 
   function chooseUploadSpace(space: EnterpriseSharedSpaceResponse) {
     setSpacePickerOpen(false);
+    pendingDefaultUploadRef.current = false;
     pendingUploadSpaceIdRef.current = space.spaceId;
     uploadInputRef.current?.click();
   }
@@ -143,14 +143,11 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (file === undefined) return;
-    const targetSpaceId = selectedSpace?.permissions.write
+    const targetSpaceId = pendingDefaultUploadRef.current ? personalSpace?.spaceId : selectedSpace?.permissions.write
       ? selectedSpace.spaceId
       : pendingUploadSpaceIdRef.current;
+    pendingDefaultUploadRef.current = false;
     pendingUploadSpaceIdRef.current = undefined;
-    if (targetSpaceId === undefined) {
-      setSelectionError('请先选择要上传到的共享空间。');
-      return;
-    }
     const error = validateFile(file, props.maxFileSizeBytes);
     if (error !== undefined) {
       setSelectionError(error);
@@ -273,7 +270,8 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                       <span>跨全部授权空间查询</span>
                     </button>
                   </li>
-                  {props.spaces?.map(space => (
+                  {!personalSpace && !props.spacesLoading && !props.spacesHasNext ? <li><button type="button" onClick={() => { pendingDefaultUploadRef.current = true; pendingUploadSpaceIdRef.current = undefined; uploadInputRef.current?.click(); }}><strong>{personalSpaceName}</strong><span>首次上传文件后自动创建</span></button></li> : null}
+                  {spaces.map(space => (
                     <li key={space.spaceId}>
                       <button
                         type="button"
@@ -284,7 +282,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                         }
                         onClick={() => props.onSelectSpace(space.spaceId)}
                       >
-                        <strong>{space.name}</strong>
+                        <strong>{spaceName(space)}</strong>
                         <span>{space.description || '暂无说明'}</span>
                         {space.permissions.write ? <em>可写</em> : null}
                       </button>
@@ -308,7 +306,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
           <section className="shared-drive-files" aria-label="共享文件">
             <header className="shared-drive-files-header">
               <div>
-                <h2>{selectedSpace?.name ?? '全部文件'}</h2>
+                <h2>{selectedSpace ? spaceName(selectedSpace) : '全部文件'}</h2>
                 <p>
                   {selectedSpace?.description || '跨当前账户的全部授权空间查询'}
                 </p>
@@ -425,7 +423,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                                   </span>
                                 </span>
                               </td>
-                              <td>{file.spaceName || file.spaceId}</td>
+                              <td>{space ? spaceName(space) : file.spaceName || file.spaceId}</td>
                               <td>
                                 {file.updatedByUserId || file.updatedByAgentId || '未知'}
                               </td>
@@ -523,6 +521,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
           }}
         >
           <section
+            ref={spacePickerRef}
             className="shared-drive-space-picker"
             role="dialog"
             aria-modal="true"
@@ -539,7 +538,8 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                 <X size={16} aria-hidden="true" />
               </button>
             </header>
-            <p>请选择要把文件上传到哪个共享空间。</p>
+            <p>请选择要把文件上传到哪个空间。</p>
+            <button type="button" onClick={() => { setSpacePickerOpen(false); pendingDefaultUploadRef.current = true; pendingUploadSpaceIdRef.current = personalSpace?.spaceId; uploadInputRef.current?.click(); }}><strong>{personalSpace?.name ?? '个人网盘'}</strong><span>{personalSpace ? '上传到默认个人空间' : '首次上传文件后自动创建'}</span></button>
             {writableSpaces.length === 0 ? (
               <p>当前账号没有可上传文件的共享空间。</p>
             ) : (
@@ -547,7 +547,7 @@ export function SharedDrivePage(props: SharedDrivePageProps) {
                 {writableSpaces.map(space => (
                   <li key={space.spaceId}>
                     <button type="button" onClick={() => chooseUploadSpace(space)}>
-                      <strong>{space.name}</strong>
+                      <strong>{spaceName(space)}</strong>
                       <span>{space.description || '暂无说明'}</span>
                     </button>
                   </li>

@@ -1,4 +1,4 @@
-import { FolderOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
+import { Download, FolderOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 import type { FileEditorMode } from './FileEditorPane.js';
 
 type FileTopBarProps = {
@@ -11,8 +11,10 @@ type FileTopBarProps = {
   canToggleMode?: boolean;
   canSave?: boolean;
   saveDisabled?: boolean;
+  downloading?: boolean;
   onModeChange?(mode: FileEditorMode): void;
   onSave?(): void;
+  onDownload?(): void;
   onOpenFile?(): void;
   onToggleTree?(): void;
   onClose(): void;
@@ -64,6 +66,17 @@ export function FileTopBar(props: FileTopBarProps) {
         </div>
 
         <div className="file-top-bar-actions">
+          <button
+            className="icon-button file-toolbar-icon-button"
+            type="button"
+            aria-label="下载文件"
+            title={props.dirty ? '下载已保存的源文件，不包含未保存修改' : '下载文件'}
+            aria-busy={props.downloading}
+            disabled={!props.path || !props.onDownload || props.downloading}
+            onClick={props.onDownload}
+          >
+            <Download aria-hidden="true" size={16} />
+          </button>
           {props.canToggleMode && props.mode && props.onModeChange ? (
             <div className="file-editor-mode-toggle" aria-label="文件视图模式">
               <button

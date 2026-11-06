@@ -23,7 +23,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const temporaryCategoryPrefix = "claw-gateway-"
+const (
+	bailianNameLimit        = 20
+	temporaryCategoryPrefix = "claw-gateway-"
+)
 
 type BailianConfig struct {
 	Endpoint        string
@@ -72,7 +75,7 @@ func NewBailianProvider(cfg BailianConfig) (*BailianProvider, error) {
 }
 
 func (p *BailianProvider) CreateKnowledgeBase(ctx context.Context, req CreateKnowledgeBaseRequest) (ProviderKnowledgeBase, error) {
-	categoryName := temporaryCategoryPrefix + shortHash(req.Name+strconv.FormatInt(time.Now().UnixNano(), 10))
+	categoryName := temporaryCategoryName(req.Name + strconv.FormatInt(time.Now().UnixNano(), 10))
 	categoryResp, err := p.client.AddCategoryWithContext(ctx, dara.String(p.workspaceID), (&bailian.AddCategoryRequest{}).SetCategoryName(categoryName).SetCategoryType("UNSTRUCTURED"), nil, noRetryRuntime())
 	if err != nil {
 		return ProviderKnowledgeBase{}, p.sdkError("add_category", err)
@@ -414,11 +417,24 @@ func newCreateIndexRequest(req CreateKnowledgeBaseRequest, categoryID string) *b
 
 func providerName(name string) string {
 	name = strings.TrimSpace(name)
-	if utf8.RuneCountInString(name) <= 20 {
+	if utf8.RuneCountInString(name) <= bailianNameLimit {
 		return name
 	}
 	runes := []rune(name)
 	return string(runes[:11]) + "-" + shortHash(name)
+}
+
+func temporaryCategoryName(value string) string {
+	suffix := shortHash(value)
+	prefix := []rune(temporaryCategoryPrefix)
+	maxPrefixLength := bailianNameLimit - utf8.RuneCountInString(suffix)
+	if maxPrefixLength < 0 {
+		maxPrefixLength = 0
+	}
+	if len(prefix) > maxPrefixLength {
+		prefix = prefix[:maxPrefixLength]
+	}
+	return string(prefix) + suffix
 }
 
 func shortHash(value string) string {

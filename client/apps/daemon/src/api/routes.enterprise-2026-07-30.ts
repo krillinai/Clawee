@@ -1,5 +1,6 @@
 import type { RuntimeErrorCode } from '@clawee/protocol';
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { GatewayProfileStore } from '../enterprise/gateway-profile-store.js';
 import { z } from 'zod';
 import type {
   EnterpriseDingTalkCallbackFailureReason,
@@ -26,14 +27,24 @@ const skillUploadSchema = z.object({
   changelog: z.string().refine(value => Array.from(value).length <= 2000).default('')
 }).strict();
 
-const loginSchema = z.object({
-  email: z.string().trim().email(),
+const credentialsSchema = z.object({
+  email: z.string().trim().email().optional(),
+  phone: z.string().trim().transform(value => value.replace(/^(\+86|0086)/, '')).pipe(z.string().regex(/^1[3-9]\d{9}$/)).optional(),
   password: z.string().min(8)
 }).strict();
 
-const registerSchema = loginSchema.extend({
+function hasOneIdentifier(value: { email?: string; phone?: string }): boolean {
+  return (value.email !== undefined) !== (value.phone !== undefined);
+}
+
+function credentialIdentifier(value: { email?: string; phone?: string }) {
+  return value.phone === undefined ? { email: value.email! } : { phone: value.phone };
+}
+
+const loginSchema = credentialsSchema.refine(hasOneIdentifier).transform(value => ({ ...credentialIdentifier(value), password: value.password }));
+const registerSchema = credentialsSchema.extend({
   name: z.string().trim().min(1).optional()
-}).strict();
+}).strict().refine(hasOneIdentifier).transform(value => ({ ...credentialIdentifier(value), password: value.password, ...(value.name === undefined ? {} : { name: value.name }) }));
 
 const mcpPreferenceSchema = z.object({
   installed: z.boolean().optional(),
@@ -63,6 +74,8 @@ export async function registerEnterpriseRoutes(
     sessionManager: EnterpriseSessionManager;
     skillManager: EnterpriseSkillManager;
     mcpManager: EnterpriseMcpManager;
+    gatewayProfiles?: GatewayProfileStore;
+    getOrigin?(): string;
   }
 ): Promise<void> {
   server.addContentTypeParser(
@@ -73,6 +86,16 @@ export async function registerEnterpriseRoutes(
   server.get('/enterprise/skill-spaces', async (_request, reply) => {
     try {
       return await input.skillManager.listSpaces();
+    } catch (error) {
+      return sendEnterpriseError(reply, error);
+    }
+  });
+  server.get('/enterprise/cloud-skills', async (_request, reply) => {
+    if (input.skillManager.listCloudSkills === undefined) {
+      return reply.code(503).send(apiError('ENTERPRISE_SERVICE_UNAVAILABLE', 'Cloud skills are unavailable'));
+    }
+    try {
+      return await input.skillManager.listCloudSkills();
     } catch (error) {
       return sendEnterpriseError(reply, error);
     }
@@ -179,6 +202,21 @@ export async function registerEnterpriseRoutes(
     }
   });
 
+  server.post('/enterprise/session/renew', async (_request, reply) => {
+    try {
+      return await input.sessionManager.renew();
+    } catch (error) {
+      return sendEnterpriseError(reply, error);
+    }
+  });
+
+  server.get('/enterprise/login-preferences', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const gateway = input.getOrigin?.() ?? '';
+    const login = gateway === '' ? undefined : await input.gatewayProfiles?.readLogin(gateway);
+    return { gateway, login: login ?? null };
+  });
+
   server.post<{ Body: unknown }>('/enterprise/login', async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -188,6 +226,11 @@ export async function registerEnterpriseRoutes(
     }
     try {
       const session = await input.sessionManager.login(parsed.data);
+      if (session.status === 'signed_in' && input.gatewayProfiles !== undefined && input.getOrigin !== undefined) {
+        await input.gatewayProfiles.writeLogin(input.getOrigin(), parsed.data).catch(() => {
+          console.warn('服务器登录信息保存失败');
+        });
+      }
       await input.mcpManager.handleSessionAuthenticated();
       return session;
     } catch (error) {
@@ -204,6 +247,12 @@ export async function registerEnterpriseRoutes(
     }
     try {
       const session = await input.sessionManager.register(parsed.data);
+      if (session.status === 'signed_in' && input.gatewayProfiles !== undefined && input.getOrigin !== undefined) {
+        const { name: _name, ...login } = parsed.data;
+        await input.gatewayProfiles.writeLogin(input.getOrigin(), login).catch(() => {
+          console.warn('服务器登录信息保存失败');
+        });
+      }
       await input.mcpManager.handleSessionAuthenticated();
       return session;
     } catch (error) {
@@ -279,6 +328,20 @@ export async function registerEnterpriseRoutes(
       return sendEnterpriseError(reply, error);
     }
   });
+
+  server.post<{ Params: { upstreamId: string } }>(
+    '/enterprise/mcp/upstreams/:upstreamId/health',
+    async (request, reply) => {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(request.params.upstreamId)) {
+        return reply.code(400).send(apiError('VALIDATION_FAILED', 'MCP upstream ID is invalid'));
+      }
+      try {
+        return await input.mcpManager.checkHealth(request.params.upstreamId);
+      } catch (error) {
+        return sendEnterpriseError(reply, error);
+      }
+    }
+  );
 
   server.patch<{ Params: { upstreamId: string }; Body: unknown }>(
     '/enterprise/mcp/upstreams/:upstreamId/preference',
@@ -435,6 +498,10 @@ function dingTalkProviderErrorMessage(
       return '企业登录服务拒绝了本次登录状态，登录请求可能已经失效，请重新发起。';
     case 'dingtalk_upstream_unavailable':
       return '企业登录服务暂时无法连接钉钉，请稍后重新发起登录。';
+    case 'employee_directory_unavailable':
+      return '企业员工服务暂时不可用，请稍后重试。';
+    case 'employee_phone_missing':
+      return '企业员工资料缺少有效手机号，请联系企业管理员。';
     case 'not_enterprise_member':
       return '当前钉钉账号不是该企业的成员，请切换账号或联系企业管理员。';
     case 'dingtalk_email_missing':
@@ -494,12 +561,12 @@ function sendEnterpriseError(reply: FastifyReply, error: unknown) {
   if (error instanceof EnterpriseSkillManagerError) {
     return reply
       .code(error.statusCode)
-      .send(apiError(error.code, enterpriseErrorMessage(error.code)));
+      .send(apiError(error.code, enterpriseErrorMessage(error.code), error.details));
   }
   if (error instanceof EnterpriseMcpManagerError) {
     return reply
       .code(error.statusCode)
-      .send(apiError(error.code, enterpriseErrorMessage(error.code)));
+      .send(apiError(error.code, enterpriseErrorMessage(error.code), error.details));
   }
   throw error;
 }

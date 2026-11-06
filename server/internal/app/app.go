@@ -21,11 +21,13 @@ import (
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/activity"
 	"github.com/krillinai/Clawee/server/internal/agentactivitymcp"
+	"github.com/krillinai/Clawee/server/internal/agentprompt"
 	"github.com/krillinai/Clawee/server/internal/agentprovisioning"
 	"github.com/krillinai/Clawee/server/internal/businessdata"
 	"github.com/krillinai/Clawee/server/internal/businessdatamcp"
 	"github.com/krillinai/Clawee/server/internal/clawadmin"
 	"github.com/krillinai/Clawee/server/internal/clientdownloads"
+	"github.com/krillinai/Clawee/server/internal/cloudskills"
 	"github.com/krillinai/Clawee/server/internal/collectorpull"
 	"github.com/krillinai/Clawee/server/internal/config"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
@@ -48,6 +50,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/server"
 	"github.com/krillinai/Clawee/server/internal/settings"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
+	"github.com/krillinai/Clawee/server/internal/skillcontributionsmcp"
 	"github.com/krillinai/Clawee/server/internal/skillhub"
 	"github.com/krillinai/Clawee/server/internal/store"
 	"github.com/krillinai/Clawee/server/internal/sub2api"
@@ -126,11 +129,19 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		}
 	}()
 
+	if err := ensureNoLegacyOrganization(ctx, pool); err != nil {
+		return nil, err
+	}
+
 	proxyMemoryStore := mcpgateway.NewMemoryStore()
 	proxyStore := mcpgateway.Store(proxyMemoryStore)
+	modelUpstreamStore := mcpgateway.ModelUpstreamStore(mcpgateway.NewMemoryModelGroupStore())
+	modelGroupStore := mcpgateway.ModelGroupStore(modelUpstreamStore)
 	var mcpUsageStore activity.MCPUsageStore
 	if pool != nil {
 		proxyStore = store.NewMCPGatewayStore(pool)
+		modelUpstreamStore = store.NewModelGroupStore(pool)
+		modelGroupStore = modelUpstreamStore
 		mcpUsageStore = store.NewMCPUsagePostgresStore(pool)
 	}
 	dataAccessStore := dataaccess.Store(dataaccess.NewMemoryStore())
@@ -175,6 +186,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		credentialResolver = knowledge.ResolveCredential
 	}
 	proxyGateway := mcpgateway.NewService(mcpgateway.Config{
+		DataAccessService:          dataAccessSvc,
 		Store:                      proxyStore,
 		UpstreamClient:             upstreamClient,
 		TokenCipher:                tokenCipher,
@@ -214,8 +226,10 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		},
 	)
 	var accountGovernanceSvc *accountgovernance.Service
+	var accountGovernanceStore *accountgovernance.PostgresStore
 	if pool != nil {
-		accountGovernanceSvc = accountgovernance.NewService(accountgovernance.NewPostgresStore(pool))
+		accountGovernanceStore = accountgovernance.NewPostgresStore(pool)
+		accountGovernanceSvc = accountgovernance.NewService(accountGovernanceStore)
 	}
 	agentProvisioner := agentprovisioning.NewService(accountSvc, proxyGateway)
 	if pool == nil {
@@ -293,6 +307,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		platformBrandingStore = platformbranding.NewPostgresStore(pool)
 	}
 	platformBrandingSvc := platformbranding.NewService(platformBrandingStore)
+	agentPromptPolicyStore := agentprompt.Store(agentprompt.NewMemoryStore())
+	if pool != nil {
+		agentPromptPolicyStore = agentprompt.NewPostgresStore(pool)
+	}
+	agentPromptPolicySvc := agentprompt.NewService(agentPromptPolicyStore)
 	clientDownloadsStore := settings.Store(settings.NewMemoryStore())
 	if pool != nil {
 		clientDownloadsStore = settings.NewPostgresStore(pool)
@@ -306,6 +325,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	cloudSkillSvc := cloudskills.NewService(clientDownloadsStore, accountSvc, skillHubRuntime.Service)
 	var sharedFilesSvc *sharedfiles.Service
 	var sharedFileStorageConfigSvc *sharedfiles.StorageConfigurationService
 	var sharedFileStorageMigrationSvc *sharedfiles.StorageMigrationService
@@ -345,7 +365,17 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	officeUserDashboardAPI = officeAPIs.userDashboard
 	officeManagementAPI = officeAPIs.management
 	officeUserCollectorsAPI = officeAPIs.userCollectors
-	activitySvc, err := activity.NewService(snapshotClient, officeAPIs.activityStore, mcpUsageStore, "Asia/Shanghai")
+	activitySvc, err := activity.NewService(snapshotClient, officeAPIs.activityStore, mcpUsageStore, "Asia/Shanghai", func(ctx context.Context) ([]string, error) {
+		accounts, err := accountSvc.ListAccounts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			names = append(names, account.Name)
+		}
+		return names, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +415,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if err := routingClient.Register(businessdatamcp.ServerID, businessDataClient); err != nil {
 		return nil, err
 	}
+	if err := routingClient.Register(skillcontributionsmcp.ServerID, &skillcontributionsmcp.Client{Service: skillHubRuntime.Service, Access: dataAccessSvc}); err != nil {
+		return nil, err
+	}
+	if err := reconcileDataBuiltin(ctx, proxyStore, mcpgateway.UpstreamServer{ID: skillcontributionsmcp.ServerID, Name: "Skill 贡献", Domain: "skill_contributions", Namespace: "skill_contributions", Transport: mcpgateway.TransportBuiltin, Status: mcpgateway.StatusActive}); err != nil {
+		return nil, err
+	}
 	if err := reconcileAgentActivityBuiltin(ctx, proxyStore); err != nil {
 		return nil, err
 	}
@@ -396,7 +432,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 	}
-	for _, serverID := range []string{agentactivitymcp.ServerID, businessdatamcp.ServerID} {
+	for _, serverID := range []string{agentactivitymcp.ServerID, businessdatamcp.ServerID, skillcontributionsmcp.ServerID} {
 		if err := proxyGateway.SyncTools(ctx, serverID, ""); err != nil {
 			return nil, err
 		}
@@ -406,15 +442,18 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		Config: cfg,
 		Logger: log,
 		Router: server.NewRouter(server.Options{
-			WorkflowService:            &workflow.Service{DB: pool},
+			WorkflowService:            &workflow.Service{DB: pool, Files: sharedFilesSvc},
 			ProxyGateway:               proxyGateway,
+			ModelCredentialCipher:      tokenCipher,
+			ModelGroupStore:            modelGroupStore,
+			ModelUpstreamStore:         modelUpstreamStore,
+			ModelGatewayBaseURL:        strings.TrimRight(cfg.MCP.PublicBaseURL, "/"),
 			AgentProvisioningService:   agentProvisioner,
 			AccountService:             accountSvc,
 			AccountGovernanceService:   accountGovernanceSvc,
 			RBACService:                rbacSvc,
 			DataAccessService:          dataAccessSvc,
 			ActivityService:            activitySvc,
-			ModelConfigurationProvider: clawAdminClient,
 			ModelCredentialLifecycle:   clawAdminClient,
 			BillingProvider:            clawAdminClient,
 			ModelAccessMode:            server.ModelAccessMode(cfg.ModelAccess.Mode),
@@ -427,6 +466,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			Logger:                     log,
 			StaticDir:                  cfg.Static.Dir,
 			ClientDownloadsService:     clientDownloadsSvc,
+			CloudSkillService:          cloudSkillSvc,
 			SessionCookieName:          cfg.Security.SessionCookieName,
 			AdminSessionCookieName:     cfg.Security.AdminSessionCookieName,
 			SessionCookieSecure:        cfg.Security.SessionCookieSecure,
@@ -451,13 +491,14 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			SharedFileStorageService:   sharedFileStorageConfigSvc,
 			SharedFileMigrationService: sharedFileStorageMigrationSvc,
 			PlatformBrandingService:    platformBrandingSvc,
+			AgentPromptPolicyService:   agentPromptPolicySvc,
 			DingTalkAuth: server.DingTalkAuthOptions{
 				OAEnabled: cfg.DingTalk.OAEnabled, OAEventToken: cfg.DingTalk.OAEventToken,
 				OAEncodingAESKey: cfg.DingTalk.OAEncodingAESKey, OAClient: dingtalkClient,
 				PublicBaseURL: strings.TrimSuffix(cfg.DingTalk.RedirectURL, "/api/v1/auth/dingtalk/callback"),
 				Enabled:       cfg.DingTalk.Enabled, ProviderKey: cfg.DingTalk.ProviderKey,
 				RedirectURL: cfg.DingTalk.RedirectURL, AutoProvision: cfg.DingTalk.AutoProvision,
-				StateTTL: dingtalkStateTTL, Client: dingtalkClient,
+				StateTTL: dingtalkStateTTL, RequestTimeout: dingtalkTimeout, Client: dingtalkClient,
 			},
 			MCPAuth: server.MCPAuthOptions{
 				Enabled:              cfg.MCP.Auth.Enabled,
@@ -651,8 +692,9 @@ func buildSkillHubCore(ctx context.Context, pool *pgxpool.Pool, cfg config.Skill
 		return nil, "", err
 	}
 	return skillhub.NewService(skillhub.Config{
-		Store:       skillhub.NewPostgresStore(pool),
-		PackageRoot: packageRoot,
+		ReviewAgentID: cfg.ReviewAgentID,
+		Store:         skillhub.NewPostgresStore(pool),
+		PackageRoot:   packageRoot,
 	}), packageRoot, nil
 }
 

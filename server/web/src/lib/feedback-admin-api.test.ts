@@ -11,3 +11,16 @@ it('403保留反馈错误码并提供授权说明', async () => {
     message: '暂无反馈查看权限，请联系管理员开通问题反馈查看权限及全部反馈数据授权。'
   });
 });
+it('保留不可读取自动异常的类型与带时区分页游标', async () => {
+  const expired = { report_id: 'incident_1', kind: 'automatic_incident', upload_state: 'expired' };
+  const fetch = vi.fn().mockResolvedValue(Response.json({ data: [expired], meta: { next_cursor: '', has_next: false } }));
+  vi.stubGlobal('fetch', fetch);
+  const cursor = '2026-10-15T13:00:00.123456+08:00|11111111-1111-4111-8111-111111111111';
+  const result = await feedbackAdminApi.list(new URLSearchParams({ kind: 'automatic_incident', include_unavailable: 'true', cursor }));
+  expect(result.items).toEqual([expired]);
+  expect(result.items[0].incident).toBeUndefined();
+  const params = new URL(String(fetch.mock.calls[0][0]), 'https://example.invalid').searchParams;
+  expect(params.get('kind')).toBe('automatic_incident');
+  expect(params.get('include_unavailable')).toBe('true');
+  expect(params.get('cursor')).toBe(cursor);
+});

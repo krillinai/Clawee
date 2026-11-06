@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: claw_gateway
       POSTGRES_USER: claw_gateway
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_PASSWORD: ${CLAWEE_POSTGRES_PASSWORD:?CLAWEE_POSTGRES_PASSWORD is required}
     ports:
       - "127.0.0.1:15932:5432"
     volumes:

@@ -9,12 +9,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/krillinai/Clawee/server/internal/rbac"
+	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/workflow"
 )
 
 func workflowError(c *gin.Context, err error) {
 	status, code, message := 500, "internal_error", "工作流操作失败"
 	switch {
+	case errors.Is(err, workflow.ErrAssignees):
+		status, code, message = 400, "invalid_assignees", "节点负责人不存在、已禁用，或角色没有有效成员"
 	case errors.Is(err, workflow.ErrInvalid):
 		status, code, message = 400, "invalid_request", "请求字段无效"
 	case errors.Is(err, workflow.ErrLarge):
@@ -25,6 +28,9 @@ func workflowError(c *gin.Context, err error) {
 		status, code, message = 403, "forbidden", "无权操作"
 	case errors.Is(err, workflow.ErrConflict):
 		status, code, message = 409, "conflict", "状态或幂等键冲突"
+	case errors.Is(err, sharedfiles.ErrRevisionConflict), errors.Is(err, sharedfiles.ErrStorageUnavailable), errors.Is(err, sharedfiles.ErrInvalidRequest), errors.Is(err, sharedfiles.ErrInvalidDigest), errors.Is(err, sharedfiles.ErrInvalidLogicalPath), errors.Is(err, sharedfiles.ErrFileTooLarge), errors.Is(err, sharedfiles.ErrDigestMismatch), errors.Is(err, sharedfiles.ErrContentLengthMismatch):
+		writeSharedFileError(c, err)
+		return
 	}
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "details": []any{}}})
 }
@@ -64,6 +70,13 @@ func workflowList(c *gin.Context, data any, cursor string) {
 	c.JSON(200, gin.H{"data": data, "meta": gin.H{"next_cursor": cursor, "has_next": cursor != ""}})
 }
 
+func workflowFileAdmin(c *gin.Context, opts Options) (bool, error) {
+	if opts.RBACService == nil {
+		return false, nil
+	}
+	return opts.RBACService.HasPermission(c.Request.Context(), currentUserID(c), rbac.PermissionSharedFilesDownload)
+}
+
 func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow.Instance) bool {
 	ids := make(map[string]struct{})
 	for _, item := range items {
@@ -74,10 +87,16 @@ func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow
 			if node.Assignee != "" {
 				ids[node.Assignee] = struct{}{}
 			}
+			for _, user := range node.ResolvedUsers {
+				ids[user] = struct{}{}
+			}
 		}
 		for _, task := range item.Tasks {
 			if task.Assignee != "" {
 				ids[task.Assignee] = struct{}{}
+			}
+			for _, user := range task.AssigneeUsers {
+				ids[user] = struct{}{}
 			}
 			if task.HandledBy != "" {
 				ids[task.HandledBy] = struct{}{}
@@ -126,13 +145,91 @@ func workflowInstanceNames(c *gin.Context, s *workflow.Service, items []workflow
 			if name, ok := names[node.Assignee]; ok {
 				item.UserNames[node.Assignee] = name
 			}
+			for _, user := range node.ResolvedUsers {
+				if name, ok := names[user]; ok {
+					item.UserNames[user] = name
+				}
+			}
 		}
 		for _, task := range item.Tasks {
 			if name, ok := names[task.Assignee]; ok {
 				item.UserNames[task.Assignee] = name
 			}
+			for _, user := range task.AssigneeUsers {
+				if name, ok := names[user]; ok {
+					item.UserNames[user] = name
+				}
+			}
 			if name, ok := names[task.HandledBy]; ok {
 				item.UserNames[task.HandledBy] = name
+			}
+		}
+	}
+	return true
+}
+
+func workflowTemplateNames(c *gin.Context, s *workflow.Service, items []workflow.Template) bool {
+	ids := make(map[string]struct{})
+	for _, item := range items {
+		for _, node := range item.Nodes {
+			if node.Assignee != "" {
+				ids[node.Assignee] = struct{}{}
+			}
+			for _, user := range node.AssigneeUsers {
+				ids[user] = struct{}{}
+			}
+			for _, user := range node.ResolvedUsers {
+				ids[user] = struct{}{}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return true
+	}
+	userIDs := make([]string, 0, len(ids))
+	for id := range ids {
+		userIDs = append(userIDs, id)
+	}
+	rows, err := s.DB.Query(c.Request.Context(), `SELECT user_id,name,email FROM accounts WHERE user_id = ANY($1)`, userIDs)
+	if err != nil {
+		workflowError(c, err)
+		return false
+	}
+	defer rows.Close()
+	names := make(map[string]string, len(userIDs))
+	for rows.Next() {
+		var id, name, email string
+		if err = rows.Scan(&id, &name, &email); err != nil {
+			workflowError(c, err)
+			return false
+		}
+		if name == "" {
+			name = email
+		}
+		if name == "" {
+			name = "未命名账号"
+		}
+		names[id] = name
+	}
+	if err = rows.Err(); err != nil {
+		workflowError(c, err)
+		return false
+	}
+	for index := range items {
+		items[index].UserNames = make(map[string]string)
+		for _, node := range items[index].Nodes {
+			if name, ok := names[node.Assignee]; ok {
+				items[index].UserNames[node.Assignee] = name
+			}
+			for _, user := range node.AssigneeUsers {
+				if name, ok := names[user]; ok {
+					items[index].UserNames[user] = name
+				}
+			}
+			for _, user := range node.ResolvedUsers {
+				if name, ok := names[user]; ok {
+					items[index].UserNames[user] = name
+				}
 			}
 		}
 	}
@@ -183,6 +280,33 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 		}
 		workflowList(c, items, "")
 	})
+	admin.GET("/workflow-assignee-roles", requirePermission(opts.RBACService, rbac.PermissionWorkflowTemplateManage), func(c *gin.Context) {
+		query := strings.TrimSpace(c.Query("q"))
+		if len(query) > 100 {
+			workflowError(c, workflow.ErrInvalid)
+			return
+		}
+		rows, err := s.DB.Query(c.Request.Context(), `SELECT role_id,name FROM rbac_roles WHERE ($1='' OR role_id ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%') ORDER BY CASE WHEN role_id=$1 THEN 0 ELSE 1 END,name,role_id LIMIT 50`, query)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		defer rows.Close()
+		items := []gin.H{}
+		for rows.Next() {
+			var id, name string
+			if err = rows.Scan(&id, &name); err != nil {
+				workflowError(c, err)
+				return
+			}
+			items = append(items, gin.H{"role_id": id, "name": name})
+		}
+		if err = rows.Err(); err != nil {
+			workflowError(c, err)
+			return
+		}
+		workflowList(c, items, "")
+	})
 	admin.GET("/workflow-templates/:id", requirePermission(opts.RBACService, rbac.PermissionWorkflowTemplateManage), func(c *gin.Context) {
 		item, err := s.Template(c.Request.Context(), c.Param("id"), "", true)
 		if err != nil {
@@ -190,6 +314,21 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			return
 		}
 		c.JSON(200, gin.H{"data": item})
+	})
+	admin.POST("/workflow-templates/:id/instances", requirePermission(opts.RBACService, rbac.PermissionWorkflowTemplateManage), func(c *gin.Context) {
+		var body struct {
+			Input json.RawMessage `json:"initial_input"`
+			Key   string          `json:"idempotency_key"`
+		}
+		if !workflowBody(c, &body) {
+			return
+		}
+		result, err := s.Start(c.Request.Context(), c.Param("id"), currentUserID(c), body.Key, body.Input)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"data": result})
 	})
 	type saveRequest struct {
 		Name        string          `json:"name"`
@@ -241,7 +380,12 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 		workflowList(c, items, next)
 	})
 	admin.GET("/workflow-instances/:id", requirePermission(opts.RBACService, rbac.PermissionWorkflowInstanceRead), func(c *gin.Context) {
-		item, err := s.Instance(c.Request.Context(), c.Param("id"), "", true)
+		fileAdmin, err := workflowFileAdmin(c, opts)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		item, err := s.Instance(c.Request.Context(), c.Param("id"), currentUserID(c), true, fileAdmin)
 		if err != nil {
 			workflowError(c, err)
 			return
@@ -264,12 +408,7 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
-		item, err := s.Instance(c.Request.Context(), c.Param("id"), "", true)
-		if err != nil {
-			workflowError(c, err)
-			return
-		}
-		c.JSON(200, gin.H{"data": item})
+		c.JSON(200, gin.H{"data": workflow.Instance{ID: c.Param("id"), Status: "terminated"}})
 	})
 	app.GET("/workflow-templates", func(c *gin.Context) {
 		limit, cursor, ok := workflowPage(c)
@@ -281,6 +420,9 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
+		if !workflowTemplateNames(c, s, items) {
+			return
+		}
 		workflowList(c, items, next)
 	})
 	app.GET("/workflow-templates/:id", func(c *gin.Context) {
@@ -289,7 +431,11 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
-		c.JSON(200, gin.H{"data": item})
+		items := []workflow.Template{item}
+		if !workflowTemplateNames(c, s, items) {
+			return
+		}
+		c.JSON(200, gin.H{"data": items[0]})
 	})
 	app.POST("/workflow-templates/:id/instances", func(c *gin.Context) {
 		var body struct {
@@ -316,6 +462,9 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
+		if !workflowInstanceNames(c, s, items) {
+			return
+		}
 		workflowList(c, items, next)
 	})
 	app.GET("/workflow-instances/:id", func(c *gin.Context) {
@@ -324,7 +473,11 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 			workflowError(c, err)
 			return
 		}
-		c.JSON(200, gin.H{"data": item})
+		items := []workflow.Instance{item}
+		if !workflowInstanceNames(c, s, items) {
+			return
+		}
+		c.JSON(200, gin.H{"data": items[0]})
 	})
 	app.GET("/workflow-tasks", func(c *gin.Context) {
 		limit, cursor, ok := workflowPage(c)
@@ -359,6 +512,47 @@ func mountWorkflowRoutes(app, admin *gin.RouterGroup, opts Options) {
 		if err != nil {
 			workflowError(c, err)
 			return
+		}
+		c.JSON(200, gin.H{"data": result})
+	})
+	app.POST("/workflow-tasks/:id/files", func(c *gin.Context) {
+		if _, ok := parseSharedFileUpload(c); !ok {
+			return
+		}
+		principal, ok := currentPrincipal(c)
+		if !ok || principal.AgentID == "" {
+			workflowError(c, workflow.ErrForbidden)
+			return
+		}
+		ref, err := s.UploadAttachment(c.Request.Context(), c.Param("id"), currentUserID(c), principal.AgentID,
+			c.Query("idempotency_key"), c.Query("file_name"), c.GetHeader("Content-Type"), c.Request.ContentLength, c.GetHeader("X-Content-SHA256"), c.Request.Body)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"data": ref})
+	})
+	app.POST("/workflow-tasks/:id/complete", func(c *gin.Context) {
+		principal, ok := currentPrincipal(c)
+		if !ok || principal.AgentID == "" {
+			workflowError(c, workflow.ErrForbidden)
+			return
+		}
+		var body struct {
+			Output      json.RawMessage     `json:"output"`
+			Key         string              `json:"idempotency_key"`
+			Attachments []workflow.Artifact `json:"attachments"`
+		}
+		if !workflowBody(c, &body) {
+			return
+		}
+		result, err := s.Complete(c.Request.Context(), c.Param("id"), currentUserID(c), principal.AgentID, body.Key, "", "", body.Output, body.Attachments...)
+		if err != nil {
+			workflowError(c, err)
+			return
+		}
+		if result.NextTask != nil {
+			result.NextTask.ID = ""
 		}
 		c.JSON(200, gin.H{"data": result})
 	})

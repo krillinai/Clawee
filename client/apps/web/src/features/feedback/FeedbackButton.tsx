@@ -9,6 +9,7 @@ const states: Record<FeedbackDraft['state'], string> = { collecting: '正在采�
 const centreStates: Record<string, string> = { open: '待处理', investigating: '处理中', resolved: '已处理' };
 export function FeedbackButton({ client, threadId }: { client: RuntimeClient | null; threadId: string }) {
   const [allowed, setAllowed] = useState(false);
+  const [origin, setOrigin] = useState('');
   const [open, setOpen] = useState(false);
   useEffect(() => {
     client?.setFeedbackThread(threadId);
@@ -16,11 +17,11 @@ export function FeedbackButton({ client, threadId }: { client: RuntimeClient | n
     window.addEventListener('error', error); window.addEventListener('unhandledrejection', rejection);
     return () => { client?.setFeedbackThread(undefined); window.removeEventListener('error', error); window.removeEventListener('unhandledrejection', rejection); };
   }, [client, threadId]);
-  useEffect(() => { let active = true; setAllowed(false); void client?.get<{ external_feedback_allowed: boolean }>('/feedback/policy').then(p => { if (active) setAllowed(p.external_feedback_allowed); }).catch(() => {}); return () => { active = false; }; }, [client, threadId]);
+  useEffect(() => { let active = true; setAllowed(false); void client?.get<{ external_feedback_allowed: boolean; origin?: string }>('/feedback/policy').then(p => { if (active) { setAllowed(p.external_feedback_allowed); setOrigin(p.origin ?? ''); } }).catch(() => {}); return () => { active = false; }; }, [client, threadId]);
   if (!client || !allowed) return null;
-  return <><button type="button" className="sidebar-collapse-button" title="反馈当前会话问题" aria-label="反馈当前会话问题" onClick={() => setOpen(true)}><Bug size={18} /></button>{open ? <FeedbackDialog client={client} threadId={threadId} onClose={() => setOpen(false)} /> : null}</>;
+  return <><button type="button" className="sidebar-collapse-button" title="反馈当前会话问题" aria-label="反馈当前会话问题" onClick={() => setOpen(true)}><Bug size={18} /></button>{open ? <FeedbackDialog client={client} threadId={threadId} origin={origin} onClose={() => setOpen(false)} /> : null}</>;
 }
-function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; threadId: string; onClose(): void }) {
+function FeedbackDialog({ client, threadId, origin, onClose }: { client: RuntimeClient; threadId: string; origin: string; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const fieldId = useId();
   const [description, setDescription] = useState('');
@@ -52,7 +53,7 @@ function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; 
     for (const a of draft.manifest.artifacts) { const response = await client.rawGet(`/feedback/drafts/${draft.local_feedback_id}/artifacts/${a.artifact_id}`); download(await response.blob(), a.name); }
   }
   const frozen = draft !== undefined;
-  const legacy = draft?.manifest && !draft.manifest.collection_scope && draft.state !== 'submitted';
+  const legacy = draft?.error_code === 'FEEDBACK_TARGET_CHANGED' || (draft?.manifest && !draft.manifest.collection_scope && draft.state !== 'submitted');
   return createPortal(<dialog ref={dialog} className="feedback-dialog" onCancel={onClose}>
     <header><h2>反馈当前会话问题</h2><button type="button" aria-label="关闭" title="关闭" onClick={onClose}><X size={18} /></button></header>
     {draft ? <div role="status" aria-live="polite" className={`feedback-receipt feedback-receipt--${draft.state}`}>
@@ -64,7 +65,7 @@ function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; 
       </div>
     </div> : null}
     <div className="feedback-dialog-body" onPaste={event => { if (frozen) return; const files = Array.from(event.clipboardData.files).filter(f => ['image/png', 'image/jpeg', 'image/webp'].includes(f.type)); if (files.length) { event.preventDefault(); setScreenshots(old => [...old, ...files].slice(0, 5)); } }}>
-      <p>接收方：Clawee 软件维护方<br />接收域名：gateway.clawee.work<br />当前会话：{threadId}</p>
+      <p>接收方：当前后台反馈中心<br />接收地址：{draft?.origin || origin || '尚未配置'}<br />当前会话：{threadId}</p>
       <div className="feedback-field"><label htmlFor={`${fieldId}-description`}>问题描述</label><textarea id={`${fieldId}-description`} rows={4} maxLength={10000} value={draft?.description ?? description} readOnly={frozen} onChange={e => setDescription(e.target.value)} /></div>
       {!frozen ? <><label>发生时间<input type="datetime-local" value={occurredAt} onChange={e => setOccurredAt(e.target.value)} /></label><div className="feedback-field"><label htmlFor={`${fieldId}-steps`}>复现步骤</label><textarea id={`${fieldId}-steps`} rows={4} maxLength={10000} value={steps} onChange={e => setSteps(e.target.value)} /></div><label>问题截图<input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => { setScreenshots(old => [...old, ...Array.from(e.target.files ?? [])].slice(0, 5)); e.target.value = ''; }} /></label><div className="feedback-screenshots">{screenshots.map((file, index) => <ScreenshotEditor key={`${index}:${file.name}`} file={file} onChange={next => setScreenshots(old => old.map((f, i) => i === index ? next : f))} onRemove={() => setScreenshots(old => old.filter((_, i) => i !== index))} />)}</div></> : null}
       {!frozen ? <label className="feedback-check"><input type="checkbox" checked={includeDiagnostics} onChange={e => setIncludeDiagnostics(e.target.checked)} />附加诊断信息（最近 10 分钟，最多 200 条）</label> : null}
@@ -75,14 +76,14 @@ function FeedbackDialog({ client, threadId, onClose }: { client: RuntimeClient; 
         {!screenshots.length && draft.manifest.artifacts.some(a => a.kind === 'screenshot') ? <div className="feedback-screenshots">{draft.manifest.artifacts.filter(a => a.kind === 'screenshot').map(artifact => <ScreenshotPreview key={artifact.artifact_id} client={client} draftId={draft.local_feedback_id} artifact={artifact} />)}</div> : null}
         <details><summary>材料明细</summary><ul>{draft.manifest.artifacts.map(a => <li key={a.artifact_id}>{a.name} · {a.record_count} 条 · {(a.size_bytes / 1024).toFixed(1)} KiB</li>)}</ul>{draft.manifest.missing_items.length ? <><h3>未能采集的材料</h3><ul>{draft.manifest.missing_items.map(item => <li key={item}>{item}</li>)}</ul></> : null}</details>
       </> : null}{draft.error_code ? <p role="alert">{draft.error_code}；材料保留在本机。</p> : null}</> : null}
-      {draft?.state === 'awaiting_consent' && draft.manifest && !legacy ? <><label className="feedback-check"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />同意将上述问题说明、主动添加的截图及诊断摘要发送给 Clawee 软件维护方 gateway.clawee.work。</label>{draft.manifest.completeness === 'partial' ? <label className="feedback-check"><input type="checkbox" checked={partial} onChange={e => setPartial(e.target.checked)} />已查看缺失项，同意发送部分资料</label> : null}</> : null}
+      {draft?.state === 'awaiting_consent' && draft.manifest && !legacy ? <><label className="feedback-check"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />同意将上述问题说明、主动添加的截图及诊断摘要提交到当前后台反馈中心（{draft.origin}）。</label>{draft.manifest.completeness === 'partial' ? <label className="feedback-check"><input type="checkbox" checked={partial} onChange={e => setPartial(e.target.checked)} />已查看缺失项，同意发送部分资料</label> : null}</> : null}
       {error ? <p role="alert">{error}</p> : null}
     </div><footer>
       {!draft ? <button type="button" disabled={busy || !description.trim()} onClick={() => void run(collect)}>采集并预览</button> : null}
       {draft?.state === 'awaiting_consent' && !draft.manifest ? <button type="button" disabled={busy} onClick={() => void run(async () => { await client.post(`/feedback/drafts/${draft.local_feedback_id}/collect`, {}); await refresh(draft.local_feedback_id); })}>重新采集</button> : null}
       {draft?.state === 'awaiting_consent' && draft.manifest && !legacy ? <button type="button" disabled={busy || !confirmed || (draft.manifest.completeness === 'partial' && !partial)} onClick={() => void run(async () => { await client.post(`/feedback/drafts/${draft.local_feedback_id}/send`, { confirmed, manifest_sha256: draft.manifest_sha256, accept_partial: partial }); await refresh(draft.local_feedback_id); })}>确认发送</button> : null}
       {draft?.state === 'failed' && draft.error_code !== 'FEEDBACK_QUOTA_EXCEEDED' && !legacy ? <button type="button" disabled={busy} onClick={() => void run(async () => { await client.post(`/feedback/drafts/${draft.local_feedback_id}/${draft.consent_at ? 'retry' : 'collect'}`, {}); await refresh(draft.local_feedback_id); })}>重试</button> : null}
-      {draft?.error_code === 'FEEDBACK_QUOTA_EXCEEDED' ? <p role="alert">材料超过上传限额，已生成资料可本地导出。请联系维护方调整限额；本次反馈尚未完整采集，不能发送。</p> : null}
+      {draft?.error_code === 'FEEDBACK_QUOTA_EXCEEDED' ? <p role="alert">材料超过上传限额，已生成资料可本地导出。请联系当前后台管理员调整限额；本次反馈尚未完整采集，不能发送。</p> : null}
       {draft?.manifest ? <button type="button" disabled={busy} onClick={() => void run(exportFiles)}><Download size={16} />本地导出</button> : null}
       {draft && !['submitted', 'cancelled'].includes(draft.state) ? <button type="button" disabled={busy} onClick={() => void run(async () => { await client.post(`/feedback/drafts/${draft.local_feedback_id}/cancel`); await refresh(draft.local_feedback_id); })}>取消上传</button> : null}
       {draft ? <button type="button" disabled={busy || ['collecting', 'queued', 'uploading'].includes(draft.state)} onClick={() => { localStorage.removeItem(receiptKey); setDraft(undefined); setConfirmed(false); setPartial(false); setIncludeDiagnostics(false); }}>新建反馈</button> : null}

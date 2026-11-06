@@ -1,5 +1,6 @@
 import type {
   EnterpriseDingTalkLoginPrepareResponse,
+  EnterpriseGatewayConfiguration,
   EnterpriseLoginRequest,
   EnterpriseRegisterRequest,
   EnterpriseSessionReason,
@@ -9,7 +10,6 @@ import {
   LoaderCircle,
   LogOut,
   RefreshCw,
-  Save,
   ShieldCheck,
   WifiOff
 } from 'lucide-react';
@@ -23,6 +23,9 @@ import {
 } from 'react';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { ApiClientError } from '../../runtime/errors.js';
+import { GatewayConfiguration } from './GatewayConfiguration.js';
+import { getEnterpriseAccountDisplayName } from './enterprise-account-display.js';
+import { ExportDiagnosticsButton } from '../connection/ExportDiagnosticsButton.js';
 
 type AccountMode = 'login' | 'register';
 type AccountOperation = AccountMode | 'refresh' | 'logout';
@@ -42,8 +45,9 @@ export type EnterpriseAccountPageProps = {
   onCheckSession?(): Promise<EnterpriseSessionResponse>;
   onLogout(): Promise<EnterpriseSessionResponse>;
   onRefresh(): Promise<EnterpriseSessionResponse>;
-  onReadGateway?(): Promise<{ gateway: string; configurable: boolean }>;
-  onSaveGateway?(gateway: string): Promise<void>;
+  onReadGateway?(): Promise<EnterpriseGatewayConfiguration>;
+  onSaveGateway?(gateway: string, gateways?: string[]): Promise<void>;
+  onReadLogin?(gateway: string): Promise<EnterpriseLoginRequest | null>;
 };
 
 export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
@@ -52,24 +56,14 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(true);
   const [agreementDialogOpen, setAgreementDialogOpen] = useState(false);
   const [operation, setOperation] = useState<AccountOperation>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  const [gateway, setGateway] = useState('');
-  const [gatewayConfigurable, setGatewayConfigurable] = useState(false);
   const [savingGateway, setSavingGateway] = useState(false);
-  const readGatewayRef = useRef(props.onReadGateway);
-  readGatewayRef.current = props.onReadGateway;
-  useEffect(() => {
-    if (!props.connected) return;
-    let canceled = false;
-    void readGatewayRef.current?.().then(value => {
-      if (!canceled) { setGateway(value.gateway); setGatewayConfigurable(value.configurable); }
-    }).catch(() => { if (!canceled) setGatewayConfigurable(false); });
-    return () => { canceled = true; };
-  }, [props.connected]);
+  const [readingLogin, setReadingLogin] = useState(false);
+  const [gatewayReady, setGatewayReady] = useState(props.onReadGateway === undefined);
   const [dingTalkAuthorization, setDingTalkAuthorization] =
     useState<EnterpriseDingTalkLoginPrepareResponse>();
   const [dingTalkPreparing, setDingTalkPreparing] = useState(false);
@@ -81,8 +75,14 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   const prepareDingTalkLoginRef = useRef(props.onPrepareDingTalkLogin);
   const checkSessionRef = useRef(props.onCheckSession);
   const agreementActionRef = useRef<'account' | 'dingtalk'>('account');
+  const currentGateway = useRef('');
+  const loginDrafts = useRef(new Map<string, { email: string; password: string }>());
+  const loginReadId = useRef(0);
   const normalizedEmail = email.trim();
-  const accountFieldsValid = !savingGateway && enterpriseEmailPattern.test(normalizedEmail)
+  const normalizedPhone = normalizedEmail.replace(/^(\+86|0086)/, '');
+  const phoneIdentifier = /^1[3-9]\d{9}$/.test(normalizedPhone);
+  const accountIdentifier = phoneIdentifier ? { phone: normalizedPhone } : { email: normalizedEmail };
+  const accountFieldsValid = gatewayReady && !savingGateway && !readingLogin && (phoneIdentifier || enterpriseEmailPattern.test(normalizedEmail))
     && password.length >= 8
     && (
       accountMode === 'login'
@@ -102,6 +102,46 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
     setPasswordConfirmation('');
   }
 
+  async function restoreLogin(gateway: string) {
+    const cached = loginDrafts.current.get(gateway);
+    if (cached !== undefined) {
+      setEmail(cached.email);
+      setPassword(cached.password);
+      return;
+    }
+    if (props.onReadLogin === undefined || gateway === '') return;
+    const readId = ++loginReadId.current;
+    setReadingLogin(true);
+    try {
+      const login = await props.onReadLogin(gateway);
+      if (readId !== loginReadId.current) return;
+      setEmail(login?.email ?? login?.phone ?? '');
+      setPassword(login?.password ?? '');
+    } catch {
+      if (readId === loginReadId.current) setError('已保存的登录信息读取失败，请手动输入。');
+    } finally {
+      if (readId === loginReadId.current) setReadingLogin(false);
+    }
+  }
+
+  async function readGateway() {
+    const configuration = await props.onReadGateway!();
+    currentGateway.current = configuration.gateway;
+    if (accountMode === 'login') await restoreLogin(configuration.gateway);
+    return configuration;
+  }
+
+  async function saveGateway(gateway: string, gateways?: string[]) {
+    const previous = currentGateway.current;
+    if (accountMode === 'login') loginDrafts.current.set(previous, { email, password });
+    await props.onSaveGateway!(gateway, gateways);
+    currentGateway.current = gateway;
+    if (previous === gateway || previous === '') return;
+    clearSecretValues();
+    setEmail('');
+    if (accountMode === 'login') await restoreLogin(gateway);
+  }
+
   useLayoutEffect(() => {
     return () => {
       if (passwordRef.current !== null) passwordRef.current.value = '';
@@ -109,8 +149,15 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
     };
   }, [accountMode, props.session.status]);
 
+  useEffect(() => () => { loginReadId.current += 1; }, []);
+
   useEffect(() => {
-    if (props.session.status === 'signed_in') clearSecretValues();
+    if (props.session.status === 'signed_in') {
+      loginReadId.current += 1;
+      setReadingLogin(false);
+      loginDrafts.current.clear();
+      clearSecretValues();
+    }
   }, [props.session.status]);
 
   useEffect(() => {
@@ -162,9 +209,9 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
   }
 
   async function runAccountOperation() {
-    if (savingGateway || operation !== undefined || dingTalkWaiting || !props.connected) return;
+    if (!gatewayReady || savingGateway || operation !== undefined || dingTalkWaiting || !props.connected) return;
     if (!accountFieldsValid) {
-      setError('请输入有效邮箱和至少 8 位密码。');
+      setError('请输入有效邮箱或手机号和至少 8 位密码。');
       return;
     }
     if (accountMode === 'register' && password !== passwordConfirmation) {
@@ -177,9 +224,9 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
     setOperation(accountMode);
     try {
       const response = accountMode === 'login'
-        ? await props.onLogin({ email: normalizedEmail, password })
+        ? await props.onLogin({ ...accountIdentifier, password })
         : await props.onRegister({
-            email: normalizedEmail,
+            ...accountIdentifier,
             ...(name.trim().length === 0 ? {} : { name: name.trim() }),
             password
           });
@@ -197,8 +244,10 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
         if (typeof registeredEmail === 'string' && registeredEmail.length > 0) {
           setEmail(registeredEmail);
         }
+        const registeredPhone = reason.details?.phone;
+        if (typeof registeredPhone === 'string') setEmail(registeredPhone);
         setAccountMode('login');
-        setNotice('账户已创建，请使用该邮箱登录。');
+        setNotice('账户已创建，请使用该账号登录。');
         window.setTimeout(() => passwordRef.current?.focus(), 0);
       } else {
         setError(formatAccountError(reason));
@@ -243,7 +292,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
 
   function requestDingTalkLogin() {
     if (
-      savingGateway || dingTalkPreparing
+      !gatewayReady || savingGateway || dingTalkPreparing
       || dingTalkWaiting
       || !props.connected
       || props.sessionInitialized === false
@@ -265,7 +314,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
     if (
       prepare === undefined
       || open === undefined
-      || savingGateway
+      || !gatewayReady || savingGateway
       || dingTalkPreparing
       || dingTalkWaiting
       || !props.connected
@@ -362,8 +411,8 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
           </div>
           <div className="enterprise-account-profile-copy">
             <span>已连接企业账户</span>
-            <h2>{props.session.account.name}</h2>
-            <p>{props.session.account.email}</p>
+            <h2>{getEnterpriseAccountDisplayName(props.session.account.name)}</h2>
+            {props.session.account.email ? <p>{props.session.account.email}</p> : null}
             {props.session.expiresAt !== undefined ? (
               <small>会话有效期至 {formatExpiry(props.session.expiresAt)}</small>
             ) : null}
@@ -411,6 +460,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
               <div>
                 <strong>正在等待本地 Runtime</strong>
                 <span>连接恢复后即可继续登录。</span>
+                <ExportDiagnosticsButton />
               </div>
             </div>
           ) : null}
@@ -424,31 +474,25 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
 
           <div className="enterprise-auth-content">
             <div className="enterprise-email-auth">
-              {gatewayConfigurable && props.onSaveGateway ? (
-                <form className="enterprise-email-form" onSubmit={event => {
-                  event.preventDefault();
-                  setSavingGateway(true);
-                  setError(undefined);
-                  clearSecretValues();
-                  void props.onSaveGateway!(gateway).then(() => setNotice('服务端地址已保存'))
-                    .catch(reason => setError(reason instanceof Error ? reason.message : '服务端地址保存失败'))
-                    .finally(() => setSavingGateway(false));
-                }}>
-                  <label htmlFor="clawee-gateway">服务端地址</label>
-                  <input id="clawee-gateway" type="url" value={gateway} required
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}
-                    onChange={event => setGateway(event.target.value)} />
-                  <button type="submit" className="enterprise-account-secondary-action"
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}>
-                    <Save size={16} aria-hidden="true" /><span>{savingGateway ? '保存中' : '保存地址'}</span>
-                  </button>
-                </form>
+              {props.onReadGateway && props.onSaveGateway ? (
+                <GatewayConfiguration connected={props.connected}
+                  disabled={readingLogin || operation !== undefined || dingTalkWaiting || dingTalkPreparing}
+                  onRead={readGateway} onSave={saveGateway}
+                  onReadyChange={setGatewayReady}
+                  onBusyChange={busy => {
+                    setSavingGateway(busy);
+                    if (busy) {
+                      setError(undefined);
+                      setNotice(undefined);
+                      setDingTalkAuthorization(undefined);
+                    }
+                  }} />
               ) : null}
               <div className="enterprise-email-mode" role="group" aria-label="账户操作">
                   <button
                     type="button"
                     aria-pressed={accountMode === 'login'}
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}
+                    disabled={savingGateway || readingLogin || operation !== undefined || dingTalkWaiting}
                     onClick={() => switchAccountMode('login')}
                   >
                     登录
@@ -456,7 +500,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
                   <button
                     type="button"
                     aria-pressed={accountMode === 'register'}
-                    disabled={savingGateway || operation !== undefined || dingTalkWaiting}
+                    disabled={savingGateway || readingLogin || operation !== undefined || dingTalkWaiting}
                     onClick={() => switchAccountMode('register')}
                   >
                     注册
@@ -483,14 +527,14 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
                     </label>
                   ) : null}
                   <label className="enterprise-email-field">
-                    <span className="app-visually-hidden">邮箱</span>
+                    <span className="app-visually-hidden">邮箱或手机号</span>
                     <input
-                      aria-label="邮箱"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="请输入邮箱"
+                      aria-label="邮箱或手机号"
+                      type="text"
+                      autoComplete="username"
+                      placeholder="请输入邮箱或手机号"
                       required
-                      disabled={savingGateway || operation !== undefined || dingTalkWaiting}
+                      disabled={savingGateway || readingLogin || operation !== undefined || dingTalkWaiting}
                       value={email}
                       onChange={event => setEmail(event.target.value)}
                     />
@@ -507,7 +551,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
                       minLength={8}
                       placeholder="请输入密码（至少 8 位）"
                       required
-                      disabled={savingGateway || operation !== undefined || dingTalkWaiting}
+                      disabled={savingGateway || readingLogin || operation !== undefined || dingTalkWaiting}
                       value={password}
                       onChange={event => setPassword(event.target.value)}
                     />
@@ -553,7 +597,7 @@ export function EnterpriseAccountPage(props: EnterpriseAccountPageProps) {
                         className="enterprise-dingtalk-action"
                         type="button"
                         disabled={
-                          savingGateway || operation !== undefined
+                          !gatewayReady || savingGateway || operation !== undefined
                           || dingTalkPreparing
                           || dingTalkWaiting
                           || !props.connected
@@ -685,7 +729,7 @@ function formatAccountError(error: unknown): string {
 function accountErrorMessage(error: ApiClientError): string {
   switch (error.code) {
     case 'ENTERPRISE_UNAUTHORIZED':
-      return '邮箱或密码不正确，请重新输入。';
+      return '邮箱、手机号或密码不正确，请重新输入。';
     case 'ENTERPRISE_ACCOUNT_INACTIVE':
       return '该企业账户当前不可用。';
     case 'ENTERPRISE_FRONTEND_FORBIDDEN':
@@ -702,7 +746,7 @@ function accountErrorMessage(error: ApiClientError): string {
       return '企业登录服务暂时不可用，请稍后重试。';
     case 'VALIDATION_FAILED':
     case 'ENTERPRISE_INVALID_REQUEST':
-      return '请检查邮箱、名称和密码后重试。';
+      return '请检查邮箱或手机号、名称和密码后重试。';
     default:
       return error.message && error.message !== 'Enterprise operation failed'
         ? error.message

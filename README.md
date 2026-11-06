@@ -26,15 +26,11 @@ Clawee 由两个边界清晰、彼此协作的部分组成：
 
 - **本地执行层**：共享 Web、本地 daemon、Electron 桌面端与内嵌 Codex Runtime，负责任务、会话、工作区文件、模型、Skill、定时任务和系统原生能力。
 
-<p align="center">
-  <img src="./docs/assets/clawee-homepage.png" alt="Clawee 首页" width="960" />
-</p>
+
 
 - **企业治理层**：Go Gateway 与管理台，负责账号与会话、Agent 身份、RBAC、MCP 上游与能力目录、授权门禁、审计、Skill Hub、知识库和共享文件。
 
-<p align="center">
-  <img src="./docs/assets/gateway.png" alt="Gateway 接入治理链路" width="960" />
-</p>
+
 
 桌面端和浏览器端使用同一套任务界面。桌面端额外提供内嵌 Runtime、文件系统、通知和更新等原生能力。Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一入口。
 
@@ -61,19 +57,19 @@ Clawee 采用 Apache-2.0，通用能力全部开放。模型托管、计费、�
 
 Agent 动态是 Clawee 可承载的运行观测与使用分析场景。以下以 Agent 工作台为例，展示任务运行、Token 使用和 Agent 活跃情况等信息的统一视图；具体展示内容由接入的运行数据与治理需求决定。
 
-![Agent 动态](docs/delivery/user-guides/assets/agent-activity.jpg)
+
 
 ### 数据洞察
 
 数据洞察是 Clawee 可承载的一类业务场景。以下以哔哩哔哩运营看板为例，展示将业务数据接入工作台后形成的分析视图；具体指标、筛选项和数据结构由接入的数据源与业务需求决定。
 
-![哔哩哔哩数据洞察看板](docs/delivery/user-guides/assets/bilibili-data-insight.jpg)
+
 
 ### Skill 中心
 
 Skill 中心用于集中校验、发布和回滚企业 Skill 包，支持按技能空间、发布状态和来源筛选，帮助团队统一维护可复用的工作方法。管理员可以在管理台查看版本摘要、配置授权范围，并将已发布的 Skill 提供给客户端使用；本地执行仍由 daemon 负责，Gateway 负责共享资源与治理边界。
 
-![Clawee 管理台技能中心](docs/assets/skills.png)
+
 
 ## 核心工作流
 
@@ -207,6 +203,8 @@ pnpm run client:dev
 浏览器端与桌面端的本地数据目录彼此独立。原生文件选择、托盘、通知和更新等能力仅在桌面端提供；本地 daemon 始终只应监听回环地址。
 
 ## 配置与安全
+
+公开版本使用标准钉钉员工来源，不包含客户专属员工目录和组织同步。历史数据库迁移与有效角色视图保留以维持权限结构；已有专属组织数据的数据库会拒绝启动，应继续使用原部署并单独规划迁移。文档中的 `example.com` 和文档保留 IP 均须替换为自己的环境。
 
 ### 默认端口
 

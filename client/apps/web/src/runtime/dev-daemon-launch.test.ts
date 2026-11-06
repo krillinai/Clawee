@@ -61,7 +61,7 @@ describe('Vite Runtime daemon launch', () => {
     });
 
     expect(env.CLAWEE_CODEX_RUNTIME_DESCRIPTOR).toBe(descriptor);
-    expect(env.CLAWEE_DATA_DIR).toBe('/tmp/clawee-data');
+    expect(env.CLAWEE_DATA_DIR).toBe(resolve('/tmp/clawee-data'));
     expect(env.CLAWEE_DEFAULT_CWD).toBe('/tmp/clawee-repo');
     expect(env.CLAWEE_DEFAULT_PROJECT_ROOT).toBe('/tmp/clawee-repo');
     expect(env.CODEX_BIN).toBeUndefined();

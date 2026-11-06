@@ -12,6 +12,7 @@ import {
   createGeneratedModel,
   readBundledModelCatalog,
   selectModelTemplate,
+  SOL_REASONING_LEVELS,
   type BundledModelCatalog,
   type JsonRecord
 } from './current-model-catalog.js';
@@ -118,12 +119,21 @@ export async function installModelCatalog(input: {
         previousMeta.contentHash
       );
       if (cached === undefined) return fallback();
-      return writeCurrentCatalog(
+      const corrected = {
+        ...cached,
+        models: cached.models.map(model => correctKimiReasoningSummary(correctSolReasoning(model)))
+      };
+      const result = writeCurrentCatalog(
         input.codexHome,
-        cached,
+        corrected,
         'remote',
         previousMeta.remoteShape
       );
+      if (result.contentHash !== previousMeta.contentHash) {
+        writePrivateJson(paths.lastSuccess, corrected);
+        writePrivateJson(paths.meta, { ...previousMeta, contentHash: result.contentHash, updatedAt: new Date().toISOString() });
+      }
+      return result;
     }
     if (response.status !== 200) return fallback();
 
@@ -222,7 +232,7 @@ function normalizeManifestModels(
     const slug = modelId(value.slug);
     if (seen.has(slug)) throw new Error('remote manifest contains duplicate slugs');
     seen.add(slug);
-    models.push({ ...value, slug });
+    models.push(correctKimiReasoningSummary(correctSolReasoning({ ...value, slug })));
   }
   if (models.length === 0) throw new Error('remote manifest is empty');
   if (!seen.has(defaultModel)) {
@@ -233,6 +243,20 @@ function normalizeManifestModels(
     ));
   }
   return models;
+}
+
+function correctSolReasoning(model: JsonRecord): JsonRecord {
+  const levels = model.supported_reasoning_levels;
+  if (model.slug !== 'gpt-6.1-sol' || model.default_reasoning_level !== 'none'
+    || !Array.isArray(levels) || levels.length !== 1 || !isRecord(levels[0]) || levels[0].effort !== 'none') return model;
+  return { ...model, default_reasoning_level: 'medium', supported_reasoning_levels: SOL_REASONING_LEVELS };
+}
+
+function correctKimiReasoningSummary(model: JsonRecord): JsonRecord {
+  if (typeof model.slug !== 'string'
+    || !model.slug.toLowerCase().startsWith('k3.1')
+    || model.default_reasoning_summary !== 'auto') return model;
+  return { ...model, default_reasoning_summary: 'detailed' };
 }
 
 function createFallbackCatalog(

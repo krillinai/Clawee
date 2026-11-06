@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Download, File, Folder, GitCommitHorizontal, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Download, File, Folder, GitCommitHorizontal, UserRoundCheck, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useSearchParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
+import { SkillAIReviewAdvice, SkillAIReviewReport, SkillAIReviewStatusBadge } from "@/components/skill-ai-review-report";
+import { skillAIAllowsScoring, type SkillAIReview } from "@/lib/skill-ai-review-api";
 
 import {
   ConfirmDialog,
   DataTableShell,
+  DetailDrawer,
   EmptyState,
   ErrorAlert,
   LoadingState,
@@ -27,8 +30,10 @@ import {
   BreadcrumbSeparator
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -36,12 +41,14 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { permissions } from "@/lib/rbac-api";
 import { trimInput } from "@/lib/text";
+import { APIError } from "@/lib/api";
 import {
   clearCurrentSkillVersion,
   githubCommitURL,
   getSkill,
   getSkillVersionFile,
   getSkillVersionPackageURL,
+  hasLocalSkillApproval,
   listSkillVersionFiles,
   listSkillSpaces,
   publishOwnSkillVersion,
@@ -53,6 +60,9 @@ import {
   approvalStatusText,
   approvalInstanceURL,
   SkillHubAPIError,
+  type LocalApproval,
+  type SkillReviewInput,
+  type SkillReviewScores,
   type SkillVersion,
   type SkillVersionFile,
   type SkillVersionSource
@@ -61,6 +71,101 @@ import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { cn } from "@/lib/utils";
 
 const previewSizeLimit = 512 * 1024;
+
+const reviewDimensions: Array<{ key: keyof SkillReviewScores; label: string; description: string }> = [
+  { key: "scenario_value", label: "场景价值", description: "是否解决真实工作问题：1–2 场景模糊；3 能解决真实任务；4–5 高频、耗时或影响业务结果。" },
+  { key: "result_effectiveness", label: "结果有效", description: "输出是否准确、完整、可用：1–2 不可用或错误较多；3 基本可用；4–5 稳定、可直接使用并提效。" },
+  { key: "ease_of_use", label: "使用友好", description: "非作者能否成功使用：1–2 只有作者会用；3 稍加摸索可用；4–5 输入清楚，新用户基本一次成功。" },
+  { key: "reuse_value", label: "复用价值", description: "是否可反复使用：1–2 一次性个案；3 同岗位或同类场景可复用；4–5 通用方法，可供多人、多场景使用。" }
+];
+
+function completeReviewScores(scores?: SkillReviewScores) {
+  return reviewDimensions.every(({ key }) => Number.isInteger(scores?.[key]) && scores![key]! >= 1 && scores![key]! <= 5);
+}
+
+export function SkillReviewForm({ decision, pending, error, aiReview, confirmLabel, onCancel, onSubmit }: {
+  decision?: "approved" | "rejected";
+  pending: boolean;
+  error?: unknown;
+  aiReview?: SkillAIReview;
+  confirmLabel?: string;
+  onCancel: () => void;
+  onSubmit: (scores: SkillReviewScores, comment: string, decision: "approved" | "rejected") => void;
+}) {
+  const [scores, setScores] = useState<SkillReviewScores>({});
+  const [comment, setComment] = useState("");
+  const validInput = comment.length <= 2000 && Object.values(scores).every((score) => Number.isInteger(score) && score >= 1 && score <= 5);
+  const canApprove = validInput && completeReviewScores(scores);
+  const canReject = validInput && Boolean(trimInput(comment));
+  function submitReview(nextDecision: "approved" | "rejected") {
+    if (!pending && (nextDecision === "approved" ? canApprove : canReject)) onSubmit({ ...scores }, trimInput(comment), nextDecision);
+  }
+  return <form onSubmit={(event) => { event.preventDefault(); submitReview(decision ?? "approved"); }}><FieldGroup>
+    <SkillAIReviewAdvice review={aiReview} />
+    <FieldDescription>评分标准 manual-v1 · 各项为 1–5 整数；通过四项必填，驳回意见必填且允许部分评分。</FieldDescription>
+    <div className="grid gap-4 sm:grid-cols-2">{reviewDimensions.map(({ key, label, description }) => <Field key={key}>
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2"><FieldLabel id={`skill-review-${key}-label`}>{label}</FieldLabel>{aiReview?.report?.suggestedScores?.[key] != null ? <Badge variant="outline" className="text-muted-foreground">AI 建议：{aiReview.report.suggestedScores[key]} / 5</Badge> : null}</div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-xs text-muted-foreground">{scores[key] === undefined ? "未评分" : `${scores[key]} 分`}</span>
+          <Button aria-label={`清空${label}评分`} disabled={pending || scores[key] === undefined} size="icon" title={`清空${label}评分`} variant="ghost" className="size-8" onClick={() => setScores((current) => {
+            const next = { ...current };
+            delete next[key];
+            return next;
+          })}><X aria-hidden="true" /></Button>
+        </div>
+      </div>
+      <RadioGroup aria-labelledby={`skill-review-${key}-label`} aria-describedby={`skill-review-${key}-description`} className="grid-cols-5 gap-1" disabled={pending} name={`skill-review-${key}`} orientation="horizontal" required={decision === "approved"} value={scores[key] === undefined ? "" : String(scores[key])} onValueChange={(value) => setScores((current) => ({ ...current, [key]: Number(value) }))}>
+        {[1, 2, 3, 4, 5].map((score) => <RadioGroupItem aria-label={`${score} 分`} key={score} value={String(score)} className="flex h-9 w-full aspect-auto items-center justify-center rounded-md border-input bg-card text-sm font-medium text-foreground shadow-none transition-colors hover:bg-accent data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:hover:bg-primary/90">{score}</RadioGroupItem>)}
+      </RadioGroup>
+      <FieldDescription id={`skill-review-${key}-description`}>{description}</FieldDescription>
+    </Field>)}</div>
+    <Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea disabled={pending} id="skill-review-comment" maxLength={2000} required={decision === "rejected"} value={comment} onChange={(event) => setComment(event.target.value)} /><FieldDescription>{decision === "rejected" ? "必填，不能只包含空白。" : decision === "approved" ? "可选。" : "通过审核时可选，驳回审核时必填，不能只包含空白。"}最多 2000 字。</FieldDescription></Field>
+    {error ? <ErrorAlert error={error}>审核失败：{errorMessage(error)}</ErrorAlert> : null}
+    <Field className="flex-wrap justify-end" orientation="horizontal">
+      <Button disabled={pending} type="button" variant="outline" onClick={onCancel}>取消</Button>
+      {!decision ? <Button disabled={pending || !canReject} type="button" variant="destructive" onClick={() => submitReview("rejected")}>驳回审核</Button> : null}
+      <Button disabled={pending || !(decision === "rejected" ? canReject : canApprove)} type="submit" variant={decision === "rejected" ? "destructive" : "primary"}>{pending ? "提交中..." : confirmLabel ?? "通过审核"}</Button>
+    </Field>
+  </FieldGroup></form>;
+}
+
+export function SkillApprovalProgress({ approval }: { approval: LocalApproval }) {
+  const incomplete = (approval.status === "approved" && !approval.scoreSummary)
+    || approval.approvers.some((person) => person.status === "approved" && !completeReviewScores(person.scores))
+    || (!approval.scoringStandardVersion && approval.status !== "pending" && approval.approvers.some((person) => person.status !== "pending" && !completeReviewScores(person.scores)));
+  const unscored = approval.status !== "pending" && approval.approvers.every((person) => !reviewDimensions.some(({ key }) => person.scores?.[key] != null));
+  const summary = approval.status === "approved" ? approval.scoreSummary : undefined;
+  return <div className="grid min-w-0 gap-5 text-sm">
+    <section aria-label="人工审核与评分" className="grid min-w-0 gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 font-semibold"><UserRoundCheck aria-hidden="true" className="size-4 text-muted-foreground" />人工审核与评分</h3>
+        <Badge variant={approval.status === "approved" ? "success" : "outline"}>已通过 {approval.approved}/{approval.total}</Badge>
+      </div>
+      {summary ? <div aria-label="正式评分汇总" className="grid gap-4 rounded-md bg-muted/50 p-4" role="group">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1"><h4 className="font-medium">Skill 评分</h4><p className="text-xs text-muted-foreground">正式评分 · 人工评审平均分</p></div>
+          <p className="text-xl font-semibold tabular-nums">总分：{summary.total.toFixed(2)} / 20</p>
+        </div>
+        <Separator />
+        <div className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">{reviewDimensions.map(({ key, label }) => <span key={key}>{label}：{summary[key].toFixed(2)}</span>)}</div>
+      </div> : null}
+      {incomplete ? <p className="text-muted-foreground">{unscored ? "历史记录未评分" : "历史评分不完整"}</p> : null}
+      {approval.scoringStandardVersion ? <p className="text-xs text-muted-foreground">评分标准：{approval.scoringStandardVersion}</p> : null}
+      <Collapsible defaultOpen={!summary}>
+        <CollapsibleTrigger asChild><Button variant="ghost" size="sm" className="group w-full justify-between"><span>评审人明细（{approval.approvers.length}）</span><ChevronDown aria-hidden="true" className="size-4 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" /></Button></CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="grid divide-y pt-2">{approval.approvers.map((person) => <div className="grid min-w-0 gap-3 py-3" key={person.userId}>
+            <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all font-medium">{person.name || person.userId}</span><Badge variant={person.status === "approved" ? "success" : person.status === "rejected" ? "danger" : "muted"}>{person.status === "approved" ? "通过" : person.status === "rejected" ? "驳回" : "待审"}</Badge>{person.decidedAt ? <span className="text-xs text-muted-foreground">{formatDateTime(person.decidedAt)}</span> : null}</div>
+            {person.status !== "pending" ? <div className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">{reviewDimensions.map(({ key, label }) => <span key={key}>{label}：{person.scores?.[key] == null ? "未评分" : `${person.scores[key]} 分`}</span>)}</div> : null}
+            {person.comment ? <p className="whitespace-pre-wrap break-words leading-6">{person.comment}</p> : null}
+          </div>)}</div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
+    {approval.aiReview ? <SkillAIReviewReport review={approval.aiReview} /> : null}
+  </div>;
+}
 
 type DetailTab = "overview" | "files" | "history";
 type PublishTarget = { versionId: string; version: string };
@@ -102,6 +207,7 @@ type SkillDetailViewProps = {
   backHref: string;
   backLabel: string;
   breadcrumbLabel: string;
+  canDownload?: boolean;
   detail: SkillDetailData;
   getPackageURL: (skillId: string, versionId: string) => string;
   loadFile: (skillId: string, versionId: string, path: string) => Promise<{ path: string; size: number; content: string }>;
@@ -114,6 +220,7 @@ type SkillDetailViewProps = {
 
 export function SkillDetailPage() {
   const account = useAdminAccount();
+  const canDownload = useAdminPermission(permissions.skillDownload);
   const canPublish = useAdminPermission(permissions.skillPublish);
   const canUnpublish = useAdminPermission(permissions.skillUnpublish);
   const [searchParams] = useSearchParams();
@@ -122,8 +229,8 @@ export function SkillDetailPage() {
   const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [reviewTarget, setReviewTarget] = useState<{ version: SkillVersion; decision: "approved" | "rejected" } | null>(null);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<{ version: SkillVersion; requestId: string; decision: "approved" | "rejected" } | null>(null);
+  const [reviewConflict, setReviewConflict] = useState("");
   const [providerInstanceId, setProviderInstanceId] = useState("");
   const [resolveTarget, setResolveTarget] = useState<SkillVersion | null>(null);
 
@@ -134,7 +241,7 @@ export function SkillDetailPage() {
   });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const space = spacesQuery.data?.find((item) => item.spaceId === detailQuery.data?.skill.spaceId);
-  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !space.approvers.length && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
+  const canSelfPublish = (version: SkillVersion) => Boolean(space && space.approvalProvider !== "dingtalk" && !hasLocalSkillApproval(space) && account?.userId && version.uploadedByUserId === account.userId && version.approvalStatus !== "rejected");
   const canSubmitApproval = (version: SkillVersion) => Boolean(space?.approvalProvider === "dingtalk" && !version.source && version.versionId !== detailQuery.data?.skill.currentVersionId && account?.userId === version.uploadedByUserId && (!version.approvalInstance || ["failed", "terminated"].includes(version.approvalInstance.status) || version.approvalInstance.status === "finished" && version.approvalInstance.decision === "rejected"));
   const approvalMutation = useMutation({
     mutationFn: (input: { version: SkillVersion; action: "submit" | "sync" | "not_created" | "bind_instance"; providerId?: string }) => {
@@ -174,13 +281,29 @@ export function SkillDetailPage() {
     }
   });
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
-    onSuccess: () => {
-      setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
+    mutationFn: (input: SkillReviewInput) => reviewSkillVersion(input.skillId, input.versionId, input.requestId, input.decision, input.comment, input.scores),
+    onSuccess: (_result, input) => {
+      setNotice(input.decision === "approved" ? "版本审批通过" : "版本已驳回");
       setReviewTarget(null);
-      void queryClient.invalidateQueries({ queryKey: ["skill", skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+    onError: (error, input) => {
+      if (error instanceof APIError && [403, 409].includes(error.status)) {
+        setReviewConflict(error.status === 403 ? "审核权限已变化，请刷新后确认可用操作。" : "审核状态已变化，请查看最新审核记录后重新操作。");
+        setReviewTarget(null);
+        void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+        void queryClient.invalidateQueries({ queryKey: ["skills"] });
+      }
     }
   });
+
+  useEffect(() => {
+    if (reviewTarget && !reviewMutation.isPending && detailQuery.data) {
+      const current = detailQuery.data.versions.find((version) => version.versionId === reviewTarget.version.versionId);
+      if (skillId !== reviewTarget.version.skillId || current?.localApproval?.requestId !== reviewTarget.requestId || !skillAIAllowsScoring(current?.localApproval?.aiReview)) setReviewTarget(null);
+    }
+  }, [skillId, detailQuery.data, reviewTarget, reviewMutation.isPending]);
 
   if (detailQuery.isLoading) {
     return <PageShell><LoadingState label="正在加载 Skill 详情" /></PageShell>;
@@ -195,10 +318,12 @@ export function SkillDetailPage() {
 
   return (
     <>
+      {reviewConflict ? <ErrorAlert>{reviewConflict}</ErrorAlert> : null}
       <SkillDetailView
         backHref={`/admin/skills?space_id=${encodeURIComponent(detail.skill.spaceId ?? "")}`}
         backLabel="返回 Skill 列表"
         breadcrumbLabel="技能中心"
+        canDownload={canDownload}
         detail={detail}
         getPackageURL={getSkillVersionPackageURL}
         loadFile={getSkillVersionFile}
@@ -211,11 +336,11 @@ export function SkillDetailPage() {
           onSubmitApproval: (version) => approvalMutation.mutate({ version, action: "submit" }),
           onSyncApproval: (version) => approvalMutation.mutate({ version, action: "sync" }),
           onBeginResolveApproval: (version) => { approvalMutation.reset(); setProviderInstanceId(""); setResolveTarget(version); },
-          canReviewVersion: (version) => version.localApproval?.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending"),
+          canReviewVersion: (version) => Boolean(skillAIAllowsScoring(version.localApproval?.aiReview) && version.localApproval?.requestId && version.localApproval.status === "pending" && version.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending")),
           canSelfPublish,
           reviewPending: reviewMutation.isPending,
-          onReview: (version, decision) => { setReviewTarget({ version, decision }); setReviewComment(""); reviewMutation.reset(); },
-          canPublish: canPublish && Boolean(space?.approvers.length || space?.approvalProvider === "dingtalk"),
+          onReview: (version, decision) => { setReviewTarget({ version, requestId: version.localApproval!.requestId!, decision }); setReviewConflict(""); reviewMutation.reset(); },
+          canPublish: canPublish && (hasLocalSkillApproval(space) || space?.approvalProvider === "dingtalk"),
           canUnpublish,
           clearPending: clearMutation.isPending,
           publishPending: publishMutation.isPending,
@@ -242,11 +367,7 @@ export function SkillDetailPage() {
       </ModalShell>
 
       <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "通过版本审批" : "驳回版本"} contextLabel={`版本 ${reviewTarget?.version.version ?? ""}`}>
-        <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}><FieldGroup>
-          <Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-          {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审核失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
-          <Field className="justify-end" orientation="horizontal"><Button disabled={reviewMutation.isPending} type="button" variant="outline" onClick={() => setReviewTarget(null)}>取消</Button><Button disabled={reviewMutation.isPending} type="submit" variant={reviewTarget?.decision === "rejected" ? "destructive" : "primary"}>{reviewMutation.isPending ? "提交中..." : "确认"}</Button></Field>
-        </FieldGroup></form>
+        {reviewTarget ? <SkillReviewForm key={`${reviewTarget.version.versionId}:${reviewTarget.requestId}:${reviewTarget.decision}`} decision={reviewTarget.decision} pending={reviewMutation.isPending} error={reviewMutation.isError ? reviewMutation.error : undefined} aiReview={reviewTarget.version.localApproval?.aiReview} confirmLabel="确认" onCancel={() => setReviewTarget(null)} onSubmit={(scores, comment) => reviewMutation.mutate({ skillId: reviewTarget.version.skillId, versionId: reviewTarget.version.versionId, requestId: reviewTarget.requestId, decision: reviewTarget.decision, scores, comment })} /> : null}
       </ModalShell>
 
       <ConfirmDialog
@@ -257,8 +378,8 @@ export function SkillDetailPage() {
           publishMutation.reset();
         }}
         onConfirm={() => publishTarget && publishMutation.mutate(publishTarget)}
-        title="设为当前版本"
-        description={publishTarget ? `确认将 Skill“${detail.skill.name}”的版本 ${publishTarget.version} 设为当前版本？` : ""}
+        title="发布当前版本"
+        description={publishTarget ? `确认发布 Skill“${detail.skill.name}”的版本 ${publishTarget.version}？` : ""}
         confirmLabel={publishMutation.isPending ? "发布中..." : "确认发布"}
         pending={publishMutation.isPending}
         error={publishMutation.isError ? `发布失败：${errorMessage(publishMutation.error)}。请确认版本仍然存在。` : undefined}
@@ -288,6 +409,7 @@ export function SkillDetailView({
   backHref,
   backLabel,
   breadcrumbLabel,
+  canDownload = true,
   detail,
   getPackageURL,
   loadFile,
@@ -388,7 +510,7 @@ export function SkillDetailView({
                 {viewedVersion.versionId === detail.skill.currentVersionId ? <Badge variant="success">当前发布</Badge> : <Badge variant="muted">历史版本</Badge>}
               </div>
               {showSourceEvidence && viewedVersion.source ? <VersionSourceEvidence source={viewedVersion.source} /> : null}
-              <Button asChild variant="primary">
+              {canDownload ? <Button asChild variant="primary">
                 <a
                   download={`${detail.skill.name}-${viewedVersion.version}.zip`}
                   href={getPackageURL(skillId, viewedVersion.versionId)}
@@ -396,7 +518,10 @@ export function SkillDetailView({
                   <Download data-icon="inline-start" aria-hidden="true" />
                   下载 ZIP 包安装
                 </a>
-              </Button>
+              </Button> : <div className="grid gap-2">
+                <Button disabled variant="primary"><Download data-icon="inline-start" aria-hidden="true" />下载 ZIP 包安装</Button>
+                <p className="text-xs text-muted-foreground">需要管理员授予“下载技能包”权限。请联系管理员配置角色权限。</p>
+              </div>}
             </CardContent>
             {management ? (
               <>
@@ -420,10 +545,11 @@ export function SkillDetailView({
                     {management.canPublish && ["submitting", "uncertain"].includes(viewedVersion.approvalInstance?.status ?? "") ? <Button disabled={management.approvalPending} size="sm" variant="outline" onClick={() => management.onBeginResolveApproval?.(viewedVersion)}>核对申请</Button> : null}
                   </div> : null}
                   {viewedVersion.skillName && viewedVersion.skillName !== detail.skill.name ? <p className="break-all text-xs text-muted-foreground">待发布名称：{viewedVersion.skillName}</p> : null}
-                  {viewedVersion.localApproval ? <div className="grid gap-1 text-sm"><span>已通过 {viewedVersion.localApproval.approved}/{viewedVersion.localApproval.total}</span>{viewedVersion.localApproval.approvers.map((person) => <span key={person.userId}>{person.name || person.userId} · {person.status === "approved" ? "通过" : person.status === "rejected" ? "驳回" : "待审"}{person.decidedAt ? ` · ${formatDateTime(person.decidedAt)}` : ""}{person.comment ? ` · ${person.comment}` : ""}</span>)}</div> : null}
+                  {viewedVersion.localApproval ? <SkillApprovalProgress approval={viewedVersion.localApproval} /> : null}
+                  {viewedVersion.localApproval?.aiReview && !skillAIAllowsScoring(viewedVersion.localApproval.aiReview) && viewedVersion.localApproval.requestId ? <Button asChild size="sm" variant="outline"><Link to={`/app/approvals/skill/${encodeURIComponent(viewedVersion.localApproval.requestId)}`}>查看 AI 报告与评估状态</Link></Button> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewedBy ? <p className="break-all text-xs text-muted-foreground">审批人：{viewedVersion.reviewedBy} · {formatDateTime(viewedVersion.reviewedAt ?? "")}</p> : null}
                   {!viewedVersion.localApproval && viewedVersion.reviewComment ? <p className="whitespace-pre-wrap break-words text-sm">{viewedVersion.reviewComment}</p> : null}
-                  {management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
+                  {skillAIAllowsScoring(viewedVersion.localApproval?.aiReview) && management.canReviewVersion?.(viewedVersion) ? <div className="flex flex-wrap gap-2">
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "approved"); }} size="sm" variant="primary"><Check data-icon="inline-start" aria-hidden="true" />审批通过</Button>
                     <Button disabled={management.reviewPending} onClick={() => { setSelectedVersionId(viewedVersion.versionId); management.onReview?.(viewedVersion, "rejected"); }} size="sm" variant="destructive"><X data-icon="inline-start" aria-hidden="true" />驳回</Button>
                   </div> : null}
@@ -434,13 +560,13 @@ export function SkillDetailView({
                   ) : null}
                   {(management.canPublish || management.canSelfPublish?.(viewedVersion)) && viewedVersion.versionId !== detail.skill.currentVersionId ? (
                     <Button
-                      aria-label={`设为当前查看版本 ${viewedVersion.version}`}
+                      aria-label={`发布当前版本 ${viewedVersion.version}`}
                       disabled={management.publishPending || (viewedVersion.approvalStatus !== "approved" && !management.canSelfPublish?.(viewedVersion) && !(management.externalApproval && viewedVersion.source))}
                       onClick={() => management.onPublish(viewedVersion)}
                       size="sm"
                       variant="secondary"
                     >
-                      设为当前版本
+                      发布当前版本
                     </Button>
                   ) : null}
                 </CardFooter>
@@ -678,7 +804,11 @@ function VersionHistory({
   versions: SkillVersion[];
   viewedVersionId: string;
 }) {
+  const [reviewTarget, setReviewTarget] = useState<{ versionId: string; requestId?: string } | null>(null);
+  const reviewVersion = versions.find(item => item.versionId === reviewTarget?.versionId && item.localApproval?.requestId === reviewTarget?.requestId);
+  const hasAIReview = versions.some(item => item.localApproval?.aiReview);
   return (
+    <>
     <DataTableShell dense embedded minWidth={720}>
       <TableHeader>
         <TableRow>
@@ -686,6 +816,7 @@ function VersionHistory({
           <TableHead>更新说明</TableHead>
           <TableHead>上传时间</TableHead>
           {showSourceEvidence ? <TableHead>来源</TableHead> : null}
+          {hasAIReview ? <TableHead>AI 前置审核</TableHead> : null}
           <TableHead className="text-right">操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -707,13 +838,17 @@ function VersionHistory({
               <TableCell className="max-w-72 text-muted-foreground"><span className="block truncate" title={item.changelog || undefined}>{item.changelog || "-"}</span></TableCell>
               <TableCell className="font-mono text-xs">{formatDateTime(item.createdAt)}</TableCell>
               {showSourceEvidence ? <TableCell>{item.source ? <VersionSourceEvidence compact source={item.source} /> : "-"}</TableCell> : null}
+              {hasAIReview ? <TableCell>{item.localApproval?.aiReview ? <div className="flex flex-wrap items-center gap-2">
+                <SkillAIReviewStatusBadge status={item.localApproval.aiReview.status} />
+                <Button aria-label={`查看版本 ${item.version} 的 AI 审核报告`} size="sm" variant="ghost" onClick={() => setReviewTarget({ versionId: item.versionId, requestId: item.localApproval?.requestId })}>查看报告</Button>
+              </div> : <span className="text-xs text-muted-foreground">暂无可查看记录</span>}</TableCell> : null}
               <TableCell>
                 <div className="flex justify-end gap-2">
                   <Button aria-label={`查看此版本 ${item.version}`} disabled={viewed} onClick={() => onView(item.versionId)} size="sm" variant="ghost">
                     {viewed ? "正在查看" : "查看"}
                   </Button>
                   {(canPublish || canSelfPublish?.(item)) && !current ? (
-                    <Button aria-label={`设为当前版本 ${item.version}`} disabled={pending || (item.approvalStatus !== "approved" && !canSelfPublish?.(item) && !(externalApproval && item.source))} onClick={() => onPublish(item)} size="sm" variant="secondary">设为当前</Button>
+                    <Button aria-label={`发布当前版本 ${item.version}`} disabled={pending || (item.approvalStatus !== "approved" && !canSelfPublish?.(item) && !(externalApproval && item.source))} onClick={() => onPublish(item)} size="sm" variant="secondary">发布当前版本</Button>
                   ) : null}
                 </div>
               </TableCell>
@@ -722,6 +857,16 @@ function VersionHistory({
         })}
       </TableBody>
     </DataTableShell>
+    <DetailDrawer open={Boolean(reviewVersion?.localApproval?.aiReview)} onClose={() => setReviewTarget(null)} title="AI 审核记录" subtitle="查看此版本的 AI 前置审核报告与本轮历史尝试。AI 结论仅供参考。">
+      {reviewVersion?.localApproval?.aiReview ? <>
+        <dl className="grid gap-3 text-sm">
+          <div className="space-y-1"><dt className="text-xs text-muted-foreground">所属版本</dt><dd className="break-all font-mono">{reviewVersion.version}</dd></div>
+          <div className="space-y-1"><dt className="text-xs text-muted-foreground">审批轮次</dt><dd className="break-all font-mono text-xs">{reviewVersion.localApproval.requestId || "历史记录未记录"}</dd></div>
+        </dl>
+        <SkillAIReviewReport key={`${reviewVersion.versionId}:${reviewVersion.localApproval.requestId}`} review={reviewVersion.localApproval.aiReview} />
+      </> : null}
+    </DetailDrawer>
+    </>
   );
 }
 

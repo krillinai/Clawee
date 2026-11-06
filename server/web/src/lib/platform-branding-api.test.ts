@@ -10,7 +10,37 @@ const response = {
 };
 
 describe("平台外观接口", () => {
+  it("兼容没有深色版的旧响应，独立发送深色版图片和清除操作", async () => {
+    expect(await getPlatformBranding()).toMatchObject({
+      sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null,
+      sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null
+    });
+    vi.mocked(adminApi.get).mockResolvedValue({ ...response,
+      sidebar_logo_dark_configured: true, sidebar_logo_dark_url: "/api/v1/admin/platform-branding/sidebar-logo-dark"
+    });
+    expect(await getPlatformBranding()).toMatchObject({
+      sidebarLogoDarkConfigured: true, sidebarLogoDarkUrl: "/api/v1/admin/platform-branding/sidebar-logo-dark"
+    });
+    const file = new File(["dark"], "dark.png", { type: "image/png" });
+    await updatePlatformBranding({ sidebarLogoAction: "keep", sidebarCompactLogoAction: "keep",
+      sidebarLogoDarkAction: "replace", sidebarLogoDark: file, sidebarCompactLogoDarkAction: "reset"
+    });
+    const form = vi.mocked(adminApi.putForm).mock.lastCall![1];
+    expect(form.get("sidebar_logo_dark_action")).toBe("replace");
+    expect(form.get("sidebar_logo_dark")).toBe(file);
+    expect(form.get("sidebar_compact_logo_dark_action")).toBe("reset");
+    expect(form.has("sidebar_logo")).toBe(false);
+  });
+
+  it("下发品牌高亮色且支持清空，不设置内置默认色", async () => {
+    expect((await getPlatformBranding()).accentColor).toBeUndefined();
+    vi.mocked(adminApi.get).mockResolvedValue({ ...response, accent_color: "#f2e9ea" });
+    expect((await getPlatformBranding()).accentColor).toBe("#f2e9ea");
+    await updatePlatformBranding({ sidebarLogoAction: "keep", sidebarCompactLogoAction: "keep", accentColor: "" });
+    expect(vi.mocked(adminApi.putForm).mock.lastCall?.[1].get("accent_color")).toBe("");
+  });
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(adminApi.get).mockResolvedValue(response);
     vi.mocked(adminApi.putForm).mockResolvedValue(response);
   });

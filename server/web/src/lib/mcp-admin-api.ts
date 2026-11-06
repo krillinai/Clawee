@@ -150,6 +150,7 @@ type MCPCapabilityResponse = {
 type MCPGrantResponse = {
   ID: string;
   UserID: string;
+  RoleID?: string;
   CapabilityID: string;
   GrantType: string;
   DataScope: unknown;
@@ -269,7 +270,8 @@ export type RotateMCPAccountTokenInput = {
 };
 
 export type CreateMCPGrantInput = {
-  userId: string;
+  userId?: string;
+  roleId?: string;
   capabilityId: string;
   grantType: string;
   dataScope?: unknown;
@@ -300,6 +302,7 @@ export type MCPAgentFilters = {
 
 export type MCPGrantFilters = {
   userId?: string;
+  roleId?: string;
   capabilityId?: string;
   grantType?: string;
 };
@@ -411,6 +414,7 @@ export type MCPAgentCollector = {
 export type MCPGrant = {
   id: string;
   userId: string;
+  roleId?: string;
   capabilityId: string;
   grantType: string;
   dataScope: unknown;
@@ -418,6 +422,12 @@ export type MCPGrant = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type MCPGrantRole = {
+  roleId: string;
+  code: string;
+  name: string;
 };
 
 export type MCPAudit = {
@@ -737,7 +747,8 @@ function mapGate(gate: MCPGateResponse): MCPGate {
 function mapGrant(grant: MCPGrantResponse): MCPGrant {
   return {
     id: responseField(grant, "ID", "id"),
-    userId: responseField(grant, "UserID", "user_id"),
+    userId: responseField(grant, "UserID", "user_id") ?? "",
+    roleId: responseField(grant, "RoleID", "role_id") ?? "",
     capabilityId: responseField(grant, "CapabilityID", "capability_id"),
     grantType: responseField(grant, "GrantType", "grant_type"),
     dataScope: responseField(grant, "DataScope", "data_scope"),
@@ -972,6 +983,7 @@ export async function listMCPGrants(filters: MCPGrantFilters = {}) {
   const response = await adminApi.get<ListResponse<MCPGrantResponse>>(
     `/mcp/grants${queryString({
       user_id: filters.userId,
+      role_id: filters.roleId,
       capability_id: filters.capabilityId,
       grant_type: filters.grantType
     })}`
@@ -979,9 +991,15 @@ export async function listMCPGrants(filters: MCPGrantFilters = {}) {
   return response.items.map(mapGrant);
 }
 
+export async function listMCPGrantRoles(): Promise<MCPGrantRole[]> {
+  const response = await adminApi.get<ListResponse<{ role_id: string; code: string; name: string }>>("/mcp/grants/roles");
+  return response.items.map((role) => ({ roleId: role.role_id, code: role.code, name: role.name }));
+}
+
 export async function createMCPGrant(input: CreateMCPGrantInput) {
   const response = await adminApi.post<MCPGrantResponse>("/mcp/grants", {
     user_id: input.userId,
+    role_id: input.roleId,
     capability_id: input.capabilityId,
     grant_type: input.grantType,
     data_scope: input.dataScope,

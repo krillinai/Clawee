@@ -2,17 +2,19 @@ import type {
   EnterpriseActivityCapabilityResponse,
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
+  EnterpriseActivityRuntimeResponse,
   EnterpriseActivityStatisticsResponse,
   RuntimeErrorCode
 } from '@clawee/protocol';
 import { createHash } from 'node:crypto';
 import type { EnterpriseHttpClient } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 
 export type EnterpriseActivityManager = {
   getCapability(): Promise<EnterpriseActivityCapabilityResponse>;
+  getRuntime(): Promise<EnterpriseActivityRuntimeResponse>;
   getStatistics(
     range: EnterpriseActivityRange
   ): Promise<EnterpriseActivityStatisticsResponse>;
@@ -63,7 +65,7 @@ export function createEnterpriseActivityManager(input: {
   }
 
   async function runRemote<T>(
-    stage: 'capability' | 'statistics' | 'detail',
+    stage: 'capability' | 'statistics' | 'detail' | 'runtime',
     range: EnterpriseActivityRange | undefined,
     operation: () => Promise<T>
   ): Promise<T> {
@@ -197,7 +199,8 @@ export function createEnterpriseActivityManager(input: {
         () => loadDetail(
           accessToken,
           request.collectorId,
-          request.agentId
+          request.agentId,
+          request.range
         )
       );
     } catch (error) {
@@ -213,6 +216,14 @@ export function createEnterpriseActivityManager(input: {
 
   return {
     getCapability,
+    async getRuntime() {
+      const accessToken = await requireToken();
+      const loadRuntime = input.httpClient.getActivityRuntime;
+      if (loadRuntime === undefined) {
+        throw new EnterpriseActivityManagerError('ENTERPRISE_ACTIVITY_UNAVAILABLE', 503);
+      }
+      return runRemote('runtime', undefined, () => loadRuntime(accessToken));
+    },
     getStatistics,
     getDetail,
     clear
@@ -227,6 +238,7 @@ function diagnosticDetails(
   error: EnterpriseHttpError
 ): Record<string, unknown> | undefined {
   const details = {
+    ...(error.details?.failureKind ? enterpriseHttpErrorDetails(error) : {}),
     ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
     ...(error.retryAfterMs === undefined
       ? {}
@@ -264,7 +276,7 @@ function activityStatusCode(error: EnterpriseHttpError): number {
 }
 
 function logActivity(input: {
-  stage: 'capability' | 'statistics' | 'detail';
+  stage: 'capability' | 'statistics' | 'detail' | 'runtime';
   outcome: 'success' | 'failed';
   range?: EnterpriseActivityRange;
   statusCode?: number;

@@ -299,7 +299,7 @@ function resumeModeFlag(flags: Record<string, string | boolean>): RunRequest['re
 function reasoningFlag(flags: Record<string, string | boolean>): RunRequest['reasoning'] {
   const value = stringFlag(flags, 'reasoning');
   if (value === undefined) return undefined;
-  if (value === 'default' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') {
+  if (value === 'default' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max') {
     return value;
   }
   throw new Error('--reasoning must be default, low, medium, high, or xhigh');

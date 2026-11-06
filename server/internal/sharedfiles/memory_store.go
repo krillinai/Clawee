@@ -40,6 +40,46 @@ func (s *MemoryStore) SetAccount(userID, name, email, status string) {
 	s.accounts[userID] = memoryAccount{UserID: userID, Name: name, Email: email, Status: status}
 }
 
+func (s *MemoryStore) EnsurePersonalSpace(ctx context.Context, space Space) (SpaceSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return SpaceSummary{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.accounts[space.PersonalOwnerUserID].Status != "active" {
+		return SpaceSummary{}, ErrMemberNotFound
+	}
+	for _, current := range s.spaces {
+		if current.PersonalOwnerUserID == space.PersonalOwnerUserID {
+			return s.summaryLocked(current), nil
+		}
+	}
+	space.Name = personalSpaceBaseName(displayName(s.accounts[space.PersonalOwnerUserID]))
+	created := false
+	for attempt := 0; attempt < 100; attempt++ {
+		candidate := space
+		candidate.Name = generatedSpaceName(space.Name, space.CreatedAt, attempt)
+		conflict := false
+		for _, current := range s.spaces {
+			if strings.EqualFold(current.Name, candidate.Name) {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			space = candidate
+			created = true
+			break
+		}
+	}
+	if !created {
+		return SpaceSummary{}, ErrSpaceNameConflict
+	}
+	s.spaces[space.SpaceID] = space
+	s.grants[space.SpaceID] = map[string]memoryGrant{space.PersonalOwnerUserID: {Read: true, Write: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}}
+	return s.summaryLocked(space), nil
+}
+
 func (s *MemoryStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return SpaceSummary{}, err
@@ -102,6 +142,9 @@ func (s *MemoryStore) ListSpaceSummaries(ctx context.Context, filter SpaceFilter
 	defer s.mu.RUnlock()
 	items := []SpaceSummary{}
 	for _, space := range s.spaces {
+		if filter.PersonalOwnerUserID != "" && space.PersonalOwnerUserID != filter.PersonalOwnerUserID {
+			continue
+		}
 		if filter.Query != "" && !strings.Contains(strings.ToLower(space.Name), strings.ToLower(filter.Query)) {
 			continue
 		}
@@ -124,13 +167,16 @@ func (s *MemoryStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilt
 	defer s.mu.RUnlock()
 	items := []Space{}
 	for id, space := range s.spaces {
-		if !s.grants[id][filter.UserID].Read || !afterTimeCursor(space.UpdatedAt, id, filter.Cursor) {
+		if (space.PersonalOwnerUserID != "" && space.PersonalOwnerUserID != filter.UserID) || !s.grants[id][filter.UserID].Read || !afterPersonalCursor(space, filter.Cursor) {
 			continue
 		}
 		space.Permissions = &SpacePermissions{Read: true, Write: s.grants[id][filter.UserID].Write}
 		items = append(items, space)
 	}
 	sort.Slice(items, func(i, j int) bool {
+		if (items[i].PersonalOwnerUserID != "") != (items[j].PersonalOwnerUserID != "") {
+			return items[i].PersonalOwnerUserID != ""
+		}
 		return timeIDLess(items[i].UpdatedAt, items[i].SpaceID, items[j].UpdatedAt, items[j].SpaceID)
 	})
 	return take(items, filter.Limit), nil
@@ -243,7 +289,7 @@ func (s *MemoryStore) ListFiles(ctx context.Context, filter FileFilter) ([]File,
 	defer s.mu.RUnlock()
 	items := []File{}
 	for _, file := range s.files {
-		if !s.grants[file.SpaceID][filter.UserID].Read || (filter.SpaceID != "" && file.SpaceID != filter.SpaceID) ||
+		if !s.personalAccessLocked(filter.UserID, file.SpaceID) || !s.grants[file.SpaceID][filter.UserID].Read || (filter.SpaceID != "" && file.SpaceID != filter.SpaceID) ||
 			(filter.Query != "" && !containsAny(filter.Query, file.FileID, file.FileName)) ||
 			(filter.LogicalPathPrefix != "" && !strings.HasPrefix(file.LogicalPath, filter.LogicalPathPrefix)) || !afterTimeCursor(file.UpdatedAt, file.FileID, filter.Cursor) {
 			continue
@@ -286,7 +332,7 @@ func (s *MemoryStore) CheckSpaceAccess(ctx context.Context, userID, spaceID, act
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	grant := s.grants[spaceID][userID]
-	if _, ok := s.spaces[spaceID]; !ok || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if _, ok := s.spaces[spaceID]; !ok || !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
 		return ErrSharedSpaceNotFound
 	}
 	return nil
@@ -300,7 +346,7 @@ func (s *MemoryStore) GetAuthorizedFile(ctx context.Context, userID, fileID, act
 	defer s.mu.RUnlock()
 	file, ok := s.files[fileID]
 	grant := s.grants[file.SpaceID][userID]
-	if !ok || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if !ok || !s.personalAccessLocked(userID, file.SpaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
 		return File{}, ErrSharedFileNotFound
 	}
 	file.SpaceName = s.spaces[file.SpaceID].Name
@@ -314,7 +360,7 @@ func (s *MemoryStore) GetAuthorizedFileByPath(ctx context.Context, userID, space
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	grant := s.grants[spaceID][userID]
-	if (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
 		return File{}, ErrSharedFileNotFound
 	}
 	for _, file := range s.files {
@@ -443,6 +489,11 @@ func (s *MemoryStore) replaceFileLocked(file File, expectedRevision int64) (File
 
 func (s *MemoryStore) summaryLocked(space Space) SpaceSummary {
 	item := SpaceSummary{Space: space}
+	if space.PersonalOwnerUserID != "" {
+		a := s.accounts[space.PersonalOwnerUserID]
+		item.PersonalOwnerName = displayName(a)
+		item.PersonalOwnerEmail = a.Email
+	}
 	for _, grant := range s.grants[space.SpaceID] {
 		if grant.Read {
 			item.MemberCount++
@@ -516,4 +567,20 @@ func take[T any](items []T, limit int) []T {
 		return items[:limit]
 	}
 	return items
+}
+
+func afterPersonalCursor(space Space, cursor Cursor) bool {
+	if cursor.ID == "" {
+		return true
+	}
+	personal := space.PersonalOwnerUserID != ""
+	if personal != (cursor.Name == "personal") {
+		return !personal
+	}
+	return afterTimeCursor(space.UpdatedAt, space.SpaceID, cursor)
+}
+
+func (s *MemoryStore) personalAccessLocked(user, spaceID string) bool {
+	owner := s.spaces[spaceID].PersonalOwnerUserID
+	return owner == "" || (owner == user && s.accounts[owner].Status == "active")
 }

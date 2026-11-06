@@ -30,7 +30,7 @@ describe("RegisterPage", () => {
       </ThemeProvider>
     );
 
-    fireEvent.change(screen.getByLabelText("邮箱地址"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "user@example.com" } });
     fireEvent.change(screen.getByLabelText("密码"), { target: { value: "passw0rd!" } });
     const nameInput = screen.getByLabelText("姓名");
     const submit = screen.getByRole("button", { name: "注册并进入" });
@@ -58,7 +58,7 @@ describe("RegisterPage", () => {
       </ThemeProvider>
     );
 
-    fireEvent.change(screen.getByLabelText("邮箱地址"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "user@example.com" } });
     fireEvent.change(screen.getByLabelText("姓名"), { target: { value: "Alice" } });
     fireEvent.change(screen.getByLabelText("密码"), { target: { value: "passw0rd!" } });
     fireEvent.click(screen.getByRole("button", { name: "注册并进入" }));

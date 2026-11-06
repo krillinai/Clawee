@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/textutil"
 	"github.com/krillinai/Clawee/server/internal/tokenutil"
 )
@@ -34,6 +36,7 @@ var (
 const encryptedKnowledgeQueryPrefix = "encrypted:v1:"
 
 type Config struct {
+	DataAccessService          *dataaccess.Service
 	Store                      Store
 	UpstreamClient             UpstreamClient
 	TokenCipher                TokenCipher
@@ -43,9 +46,11 @@ type Config struct {
 	ResolveCredential          func(string) (string, error)
 	KnowledgeResolver          KnowledgeBindingResolver
 	KnowledgeMCPAccessResolver KnowledgeMCPAccessResolver
+	ResolveRoleIDs             func(context.Context, string) ([]string, error)
 }
 
 type Service struct {
+	dataAccessService          *dataaccess.Service
 	store                      Store
 	upstreamClient             UpstreamClient
 	tokenCipher                TokenCipher
@@ -55,6 +60,7 @@ type Service struct {
 	resolveCredential          func(string) (string, error)
 	knowledgeResolver          KnowledgeBindingResolver
 	knowledgeMCPAccessResolver KnowledgeMCPAccessResolver
+	resolveRoleIDs             func(context.Context, string) ([]string, error)
 	agentOwnerResolver         func(context.Context, string) (string, error)
 	accountActiveValidator     func(context.Context, string) error
 	ensureAccountTokenMu       sync.Mutex
@@ -162,20 +168,25 @@ func (s *Service) CreateOwnedAgent(ctx context.Context, userID string, agent Age
 	return s.store.CreateOwnedAgent(ctx, userID, agent)
 }
 
-// EnsureAccountToken creates the first account-level MCP token without rotating
-// an existing token, including one that was revoked or expired.
+// EnsureAccountToken makes sure the account has an active token usable by both
+// the MCP and model gateways.
 func (s *Service) EnsureAccountToken(ctx context.Context, userID string) error {
 	s.ensureAccountTokenMu.Lock()
 	defer s.ensureAccountTokenMu.Unlock()
 
-	if _, err := s.store.GetLatestAccountToken(ctx, userID); err == nil {
+	active, err := s.store.GetActiveAccountToken(ctx, userID)
+	if err == nil && active.Status == StatusActive &&
+		(active.ExpiresAt == nil || active.ExpiresAt.After(s.clock())) &&
+		slices.Contains(active.Scopes, AccountTokenScopeMCPCall) &&
+		slices.Contains(active.Scopes, AccountTokenScopeModelCall) {
 		return nil
-	} else if !errors.Is(err, ErrAccountTokenNotFound) {
+	}
+	if err != nil && !errors.Is(err, ErrAccountTokenNotFound) {
 		return err
 	}
-	_, err := s.RotateAccountToken(ctx, AccountTokenIssueRequest{
+	_, err = s.RotateAccountToken(ctx, AccountTokenIssueRequest{
 		UserID: userID,
-		Scopes: []string{"mcp:call"},
+		Scopes: []string{AccountTokenScopeMCPCall, AccountTokenScopeModelCall},
 		Issuer: "claw-gateway-user",
 	})
 	return err
@@ -200,6 +211,7 @@ func NewService(cfg Config) *Service {
 		logger = zap.NewNop()
 	}
 	return &Service{
+		dataAccessService:          cfg.DataAccessService,
 		store:                      store,
 		upstreamClient:             cfg.UpstreamClient,
 		tokenCipher:                tokenCipher,
@@ -209,6 +221,7 @@ func NewService(cfg Config) *Service {
 		resolveCredential:          cfg.ResolveCredential,
 		knowledgeResolver:          cfg.KnowledgeResolver,
 		knowledgeMCPAccessResolver: cfg.KnowledgeMCPAccessResolver,
+		resolveRoleIDs:             cfg.ResolveRoleIDs,
 	}
 }
 
@@ -219,6 +232,34 @@ func (s *Service) Store() Store {
 func (s *Service) SetIdentityResolvers(owner func(context.Context, string) (string, error), accountActive func(context.Context, string) error) {
 	s.agentOwnerResolver = owner
 	s.accountActiveValidator = accountActive
+}
+
+func (s *Service) SetRoleIDsResolver(resolve func(context.Context, string) ([]string, error)) {
+	s.resolveRoleIDs = resolve
+}
+
+func (s *Service) listEffectiveGrants(ctx context.Context, userID string, capabilityID string, grantType string) ([]AccountGrant, error) {
+	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: userID, CapabilityID: capabilityID, GrantType: grantType})
+	if err != nil || s.resolveRoleIDs == nil {
+		return grants, err
+	}
+	roleIDs, err := s.resolveRoleIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, roleID := range roleIDs {
+		roleGrants, err := s.store.ListGrants(ctx, GrantFilter{RoleID: roleID, CapabilityID: capabilityID, GrantType: grantType})
+		if err != nil {
+			return nil, err
+		}
+		for _, grant := range roleGrants {
+			// DecideGrant intentionally works on effective account grants. Keep the
+			// original RoleID for audit/UI queries while materializing the user target.
+			grant.UserID = userID
+			grants = append(grants, grant)
+		}
+	}
+	return grants, nil
 }
 
 func (s *Service) validateCaller(ctx context.Context, userID, agentID string) error {
@@ -266,7 +307,7 @@ func (s *Service) CanIssueAccountToken() error {
 }
 
 func (s *Service) prepareAccountToken(req AccountTokenIssueRequest) (AccountTokenIssueResult, error) {
-	plaintext, err := tokenutil.Generate32("agt_")
+	plaintext, err := tokenutil.Generate32("sk-")
 	if err != nil {
 		return AccountTokenIssueResult{}, err
 	}
@@ -276,10 +317,7 @@ func (s *Service) prepareAccountToken(req AccountTokenIssueRequest) (AccountToke
 	}
 	now := s.clock()
 	tokenHash := HashToken(plaintext)
-	scopes := append([]string(nil), req.Scopes...)
-	if len(scopes) == 0 {
-		scopes = []string{"mcp:call"}
-	}
+	scopes := []string{AccountTokenScopeMCPCall, AccountTokenScopeModelCall}
 	issuer := req.Issuer
 	if strings.TrimSpace(issuer) == "" {
 		issuer = "claw-gateway-admin"
@@ -340,6 +378,18 @@ func (s *Service) RotateAccountToken(ctx context.Context, req AccountTokenIssueR
 		return AccountTokenIssueResult{}, err
 	}
 	return issued, nil
+}
+
+func (s *Service) RotateModelAccountToken(ctx context.Context, userID, accountName string, expiresAt *time.Time, issuer string) (AccountTokenIssueResult, error) {
+	if strings.TrimSpace(accountName) == "" {
+		return AccountTokenIssueResult{}, ErrAccountUsernameRequired
+	}
+	return s.RotateAccountToken(ctx, AccountTokenIssueRequest{
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+		Scopes:    []string{AccountTokenScopeMCPCall, AccountTokenScopeModelCall},
+		Issuer:    issuer,
+	})
 }
 
 func (s *Service) RevokeAccountToken(ctx context.Context, userID string) (int64, error) {
@@ -477,7 +527,7 @@ func (s *Service) ToolCatalog(ctx context.Context, identity AgentIdentity) ([]To
 	if err != nil {
 		return nil, err
 	}
-	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: identity.UserID, GrantType: GrantTool})
+	grants, err := s.listEffectiveGrants(ctx, identity.UserID, "", GrantTool)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +546,10 @@ func (s *Service) ToolCatalog(ctx context.Context, identity AgentIdentity) ([]To
 		for _, capability := range capabilitiesByServer[server.ID] {
 			decision := GrantDecision{}
 			if server.Status == StatusActive && capability.Status == StatusActive {
-				decision = decideToolGrant(now, grants, identity.UserID, capability)
+				decision, err = s.toolAuthorization(ctx, now, identity.UserID, server, capability, grants)
+				if err != nil {
+					return nil, err
+				}
 			}
 			var expiresAt *time.Time
 			if decision.Allowed && decision.Grant != nil {
@@ -624,7 +677,7 @@ func (s *Service) visibleTools(ctx context.Context, identity AgentIdentity, upst
 		saveListAudit(s, audit)
 		return nil, fmt.Errorf("%w: %s", ErrUpstreamServerNotFound, upstreamServerID)
 	}
-	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: identity.UserID, GrantType: GrantTool})
+	grants, err := s.listEffectiveGrants(ctx, identity.UserID, "", GrantTool)
 	if err != nil {
 		audit.Decision = DecisionInternalError
 		audit.DecisionReason = err.Error()
@@ -643,7 +696,13 @@ func (s *Service) visibleTools(ctx context.Context, identity AgentIdentity, upst
 			audit.FilteredCount++
 			continue
 		}
-		decision := decideToolGrant(now, grants, identity.UserID, capability)
+		decision, err := s.toolAuthorization(ctx, now, identity.UserID, serverByID[capability.UpstreamServerID], capability, grants)
+		if err != nil {
+			audit.Decision = DecisionInternalError
+			audit.DecisionReason = err.Error()
+			saveListAudit(s, audit)
+			return nil, err
+		}
 		if !decision.Allowed {
 			audit.FilteredCount++
 			continue
@@ -807,7 +866,7 @@ func (s *Service) CallTool(ctx context.Context, req ToolCallRequest) (ToolCallRe
 		return ToolCallResult{}, fmt.Errorf("upstream server is disabled: %s", server.ID)
 	}
 
-	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: req.Identity.UserID, CapabilityID: capability.ID, GrantType: GrantTool})
+	grants, err := s.listEffectiveGrants(ctx, req.Identity.UserID, capability.ID, GrantTool)
 	if err != nil {
 		audit.Decision = DecisionInternalError
 		audit.DecisionReason = err.Error()
@@ -815,7 +874,13 @@ func (s *Service) CallTool(ctx context.Context, req ToolCallRequest) (ToolCallRe
 		saveProxyAudit(s, started, &audit)
 		return ToolCallResult{}, err
 	}
-	decision := DecideGrant(started, grants, req.Identity.UserID, capability.ID, GrantTool)
+	decision, err := s.toolAuthorization(ctx, started, req.Identity.UserID, server, capability, grants)
+	if err != nil {
+		audit.Decision = DecisionInternalError
+		audit.DecisionReason = err.Error()
+		saveProxyAudit(s, started, &audit)
+		return ToolCallResult{}, err
+	}
 	if !decision.Allowed {
 		audit.Decision = decision.Reason
 		audit.DecisionReason = decision.Reason
@@ -1187,6 +1252,9 @@ func (s *Service) ResolveConfirmation(ctx context.Context, req ConfirmationRetry
 	switch strings.TrimSpace(req.Action) {
 	case SyncConfirmationAccepted:
 		if gate.Status == GateCompleted {
+			if err := s.CheckGateResultAccess(ctx, req.Identity, gate); err != nil {
+				return ToolCallResult{}, err
+			}
 			return ToolCallResult{StructuredContent: cloneJSONMap(gate.ResponseBody)}, nil
 		}
 		if gate.Status != GatePending {
@@ -1209,6 +1277,54 @@ func (s *Service) ResolveConfirmation(ctx context.Context, req ConfirmationRetry
 	default:
 		return ToolCallResult{}, errors.New("unsupported confirmation action")
 	}
+}
+
+func (s *Service) CheckGateResultAccess(ctx context.Context, identity AgentIdentity, gate GateRequest) error {
+	if gate.UpstreamServerID != "skill-contributions" {
+		return nil
+	}
+	server, err := s.store.GetUpstreamServer(ctx, gate.UpstreamServerID)
+	if err != nil {
+		return err
+	}
+	capability := Capability{UpstreamServerID: gate.UpstreamServerID, Type: gate.CapabilityType, UpstreamName: gate.UpstreamName}
+	if !IsSkillContributionsTool(server, capability) {
+		return nil
+	}
+	if gate.UserID != identity.UserID || gate.AgentID != identity.AgentID {
+		return errors.New("mcp gate is not accessible by current account")
+	}
+	if err := s.validateCaller(ctx, identity.UserID, identity.AgentID); err != nil {
+		return err
+	}
+	agent, err := s.store.GetAgent(ctx, identity.AgentID)
+	if err != nil {
+		return err
+	}
+	if agent.Status != StatusActive || agent.TenantID != gate.TenantID {
+		return errors.New("mcp gate is not accessible by current agent")
+	}
+	if server.Status != StatusActive {
+		return fmt.Errorf("upstream server is disabled: %s", server.ID)
+	}
+	capability, err = s.store.GetCapabilityByExposedName(ctx, gate.ExposedName)
+	if err != nil {
+		return err
+	}
+	if capability.ID != gate.CapabilityID || capability.UpstreamServerID != gate.UpstreamServerID || capability.UpstreamName != gate.UpstreamName || (gate.EndpointUpstreamServerID != "" && capability.UpstreamServerID != gate.EndpointUpstreamServerID) {
+		return fmt.Errorf("%w: %s", ErrCapabilityNotAvailableOnEndpoint, gate.ExposedName)
+	}
+	if capability.Type != CapabilityTool || capability.Status != StatusActive {
+		return fmt.Errorf("capability is disabled: %s", gate.ExposedName)
+	}
+	decision, err := s.toolAuthorization(ctx, s.clock(), identity.UserID, server, capability, nil)
+	if err != nil {
+		return err
+	}
+	if !decision.Allowed {
+		return errors.New("mcp gate result requires current data permission")
+	}
+	return nil
 }
 
 func (s *Service) validateConfirmationRetry(ctx context.Context, gate GateRequest, req ConfirmationRetryRequest) error {
@@ -1289,6 +1405,15 @@ func (s *Service) executeAcceptedConfirmation(ctx context.Context, id string, pr
 		failed, failErr := s.failExecutingGate(ctx, gate, "", fmt.Errorf("agent is not active: %s", gate.AgentID))
 		return failed, ToolCallResult{}, failErr
 	}
+	token, err := s.store.GetAccountTokenByHash(ctx, gate.TokenHash)
+	if err != nil {
+		failed, failErr := s.failExecutingGate(ctx, gate, "", err)
+		return failed, ToolCallResult{}, failErr
+	}
+	if gate.TokenHash == "" || gate.TokenID == "" || gate.UserID == "" || token.TokenHash != gate.TokenHash || token.ID != gate.TokenID || token.UserID != gate.UserID || token.Status != StatusActive || (token.ExpiresAt != nil && !token.ExpiresAt.After(now)) || !slices.Contains(token.Scopes, "mcp:call") {
+		failed, failErr := s.failExecutingGate(ctx, gate, "", errors.New("original mcp token is no longer valid"))
+		return failed, ToolCallResult{}, failErr
+	}
 	capability, err := s.store.GetCapabilityByExposedName(ctx, gate.ExposedName)
 	if err != nil {
 		failed, failErr := s.failExecutingGate(ctx, gate, "", err)
@@ -1303,19 +1428,23 @@ func (s *Service) executeAcceptedConfirmation(ctx context.Context, id string, pr
 		failed, failErr := s.failExecutingGate(ctx, gate, "", fmt.Errorf("capability is disabled: %s", gate.ExposedName))
 		return failed, ToolCallResult{}, failErr
 	}
-	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: gate.UserID, CapabilityID: capability.ID, GrantType: GrantTool})
+	grants, err := s.listEffectiveGrants(ctx, gate.UserID, capability.ID, GrantTool)
 	if err != nil {
 		failed, failErr := s.failExecutingGate(ctx, gate, "", err)
-		return failed, ToolCallResult{}, failErr
-	}
-	decision := DecideGrant(now, grants, gate.UserID, capability.ID, GrantTool)
-	if !decision.Allowed {
-		failed, failErr := s.failExecutingGate(ctx, gate, "", fmt.Errorf("mcp tool is not granted after confirmation: %s", decision.Reason))
 		return failed, ToolCallResult{}, failErr
 	}
 	server, err := s.store.GetUpstreamServer(ctx, gate.UpstreamServerID)
 	if err != nil {
 		failed, failErr := s.failExecutingGate(ctx, gate, "", err)
+		return failed, ToolCallResult{}, failErr
+	}
+	decision, err := s.toolAuthorization(ctx, now, gate.UserID, server, capability, grants)
+	if err != nil {
+		failed, failErr := s.failExecutingGate(ctx, gate, "", err)
+		return failed, ToolCallResult{}, failErr
+	}
+	if !decision.Allowed {
+		failed, failErr := s.failExecutingGate(ctx, gate, "", fmt.Errorf("mcp tool is not granted after confirmation: %s", decision.Reason))
 		return failed, ToolCallResult{}, failErr
 	}
 	if server.Status != StatusActive {
@@ -1781,7 +1910,7 @@ var errNoMatchingKnowledgeScope = errors.New(DecisionNoMatchingKnowledgeScope)
 
 func knowledgeIDsFromAuditOrAccount(ctx context.Context, s *Service, req ToolExecutionRequest, audit ProxyAuditRecord) ([]string, error) {
 	auditIDs := knowledgeBaseIDsFromResolvedScope(audit.ResolvedDataScope)
-	grants, err := s.store.ListGrants(ctx, GrantFilter{UserID: req.Request.Identity.UserID, CapabilityID: req.Capability.ID, GrantType: GrantTool})
+	grants, err := s.listEffectiveGrants(ctx, req.Request.Identity.UserID, req.Capability.ID, GrantTool)
 	if err != nil {
 		return nil, err
 	}

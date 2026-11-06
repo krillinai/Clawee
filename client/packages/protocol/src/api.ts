@@ -1,4 +1,6 @@
-import type { PublicRunStatus } from './events.js';
+import type { SharedDriveState } from './shared-drive.js';
+import type { ModelResponseError, PublicRunStatus, TerminationReason } from './events.js';
+import type { EnterpriseWorkflowCompletion } from './workflow.js';
 import type {
   CodexRuntimeActivationState,
   CodexRuntimeSource
@@ -6,7 +8,7 @@ import type {
 
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 export type WorkspaceMode = 'managed' | 'external';
-export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type ResumeMode = 'auto' | 'new_thread' | 'resume_thread';
 export type RunSubmissionMode = 'enqueue' | 'interrupt_and_enqueue';
 export type ApprovalKind = 'command_execution' | 'file_change' | 'permissions';
@@ -36,6 +38,17 @@ export type CodexMcpOperationType =
   | 'list';
 export type CodexMcpOperationStatus = 'succeeded' | 'failed';
 
+export type CodexNetworkPath = 'direct' | 'http_proxy' | 'system_proxy' | 'unknown';
+export type CodexProxyStage = 'resolve' | 'connect' | 'tunnel' | 'response_headers' | 'response_body' | 'stream';
+export type CodexProxyErrorCode =
+  | 'PROXY_AUTH_REQUIRED'
+  | 'PROXY_CONNECT_FAILED'
+  | 'PROXY_CONNECT_TIMEOUT'
+  | 'PROXY_TUNNEL_FAILED'
+  | 'PROXY_POLICY_DENIED'
+  | 'PROXY_STREAM_INTERRUPTED';
+export type CodexFailureOrigin = 'client_proxy' | 'gateway' | 'model_upstream' | 'local_runtime' | 'unknown';
+
 export type CodexAvailabilityProbe = {
   status: 'pending' | 'succeeded' | 'failed' | 'skipped';
   checkedAt?: string;
@@ -44,6 +57,21 @@ export type CodexAvailabilityProbe = {
   markerMatched?: boolean;
   errorCode?: string;
   message?: string;
+  httpStatus?: number;
+  diagnostic?: string;
+  stage?: 'response_headers' | 'response_body' | 'model_text';
+  headersReceived?: boolean;
+  transportCode?: string;
+  suggestion?: string;
+  terminationReason?: string;
+  requestId?: string;
+  networkPath?: CodexNetworkPath;
+  proxyEnvKeys?: string[];
+  proxyApplies?: boolean;
+  proxyStage?: CodexProxyStage;
+  proxyErrorCode?: CodexProxyErrorCode;
+  failureOrigin?: CodexFailureOrigin;
+  retryable?: boolean;
 };
 
 export type RuntimeHealthResponse = {
@@ -136,6 +164,7 @@ export type CodexModelResponse = {
 
 export type CodexModelListResponse = {
   models: CodexModelResponse[];
+  updatesAvailable?: boolean;
 };
 
 export type WorkspaceFileKind =
@@ -147,11 +176,14 @@ export type WorkspaceFileKind =
   | 'html'
   | 'image'
   | 'pdf'
+  | 'office'
   | 'binary'
   | 'unknown';
 
 export type WorkspaceFileMeta = {
   path: string;
+  /** daemon 校验后的真实路径，用于桌面原生文件操作。 */
+  absolutePath?: string;
   name: string;
   type: 'file' | 'directory';
   kind: WorkspaceFileKind;
@@ -287,6 +319,8 @@ export type CleanupDeleteResponse = {
   warnings: string[];
 };
 
+export const ATTACHMENT_MAX_SIZE_BYTES = 50 * 1024 * 1024;
+
 export type AttachmentStatus = 'draft' | 'committed';
 
 export type AttachmentResponse = {
@@ -330,8 +364,11 @@ export type AttachmentDeleteResponse = {
   deleted: true;
 };
 
+export const WORKBENCH_CONTEXT_MAX_CHARS = 128_000;
+
 export type RunRequest = {
   prompt: string;
+  workbenchContext?: string;
   threadId?: string;
   draftId?: string;
   attachmentIds?: string[];
@@ -344,7 +381,10 @@ export type RunRequest = {
   sandbox?: SandboxMode;
 };
 
+export type RunQueueReason = 'thread_active' | 'thread_finalizing' | 'capacity';
+
 export type RunResponse = {
+  sharedDriveState?: SharedDriveState;
   id: string;
   threadId?: string;
   codexThreadId?: string | null;
@@ -353,6 +393,7 @@ export type RunResponse = {
   attachments?: AttachmentResponse[];
   submissionMode?: RunSubmissionMode;
   queuePosition?: number;
+  queueReason?: RunQueueReason;
 };
 
 export type RuntimeApproval = {
@@ -417,6 +458,8 @@ export type TaskItem = {
   cwd: string;
   profile: string;
   createdBy: string;
+  initiatorUserId?: string;
+  initiatorAgentId?: string;
   submissionMode: RunSubmissionMode;
   queuePosition?: number;
   createdAt: string;
@@ -561,7 +604,20 @@ export type ThreadPurpose =
   | 'conversation'
   | 'knowledge_conversation'
   | 'schedule_draft'
-  | 'schedule_task';
+  | 'schedule_task'
+  | 'skill_review';
+
+export type SkillReviewThreadContext = {
+  requestId: string;
+  attemptId: string;
+  skillName: string;
+  versionId: string;
+  version?: string;
+  attemptNumber?: number;
+  reviewSkillVersion: string;
+  reviewSkillSHA256: string;
+  approvalURL?: string;
+};
 
 export type ProjectResponse = {
   id: string;
@@ -697,6 +753,7 @@ export type ThreadResponse = {
   sandbox: SandboxMode;
   status: ThreadStatus;
   purpose: ThreadPurpose;
+  skillReview?: SkillReviewThreadContext;
   scheduleId?: string;
   createdAt: string;
   updatedAt: string;
@@ -712,7 +769,15 @@ export type ThreadRunsResponse = {
   runs: RunResponse[];
 };
 
-export type ThreadHistoryItem =
+export type ThreadHistoryOrigin = {
+  runId?: string;
+  turnId?: string;
+  rawEventId?: string;
+  eventId?: string;
+  eventSeq?: number;
+};
+
+export type ThreadHistoryItem = ThreadHistoryOrigin & (
   | {
       id: string;
       type: 'workflow_start';
@@ -734,6 +799,7 @@ export type ThreadHistoryItem =
       runId: string;
       taskId: string;
       status: string;
+      completion?: EnterpriseWorkflowCompletion;
       createdAt: string;
       turnId?: string;
     }
@@ -755,10 +821,10 @@ export type ThreadHistoryItem =
       runId?: string;
       turnId?: string;
     }
-  | { id: string; type: 'assistant_message'; text: string; createdAt: string; turnId?: string }
+  | { id: string; type: 'assistant_message'; text: string; createdAt: string; turnId?: string; messageState?: 'streaming' | 'complete' | 'interrupted' }
   | { id: string; type: 'reasoning_summary'; text: string; createdAt: string; turnId?: string }
   | { id: string; type: 'tool_use'; name: string; input: Record<string, unknown>; createdAt: string; turnId?: string }
-  | { id: string; type: 'tool_result'; name: string; output: string; isError: boolean; createdAt: string; turnId?: string }
+  | { id: string; type: 'tool_result'; name: string; output: string; isError: boolean; createdAt: string; turnId?: string; runId?: string }
   | {
       id: string;
       type: 'file_change';
@@ -767,7 +833,18 @@ export type ThreadHistoryItem =
       createdAt: string;
       turnId?: string;
     }
-  | { id: string; type: 'done'; status: 'succeeded' | 'failed' | 'canceled'; createdAt: string; turnId?: string };
+  | {
+      id: string;
+      type: 'diagnostic';
+      severity: 'info' | 'warning' | 'error';
+      code: string;
+      message: string;
+      modelResponse: ModelResponseError;
+      runId: string;
+      createdAt: string;
+      turnId?: string;
+    }
+  | { id: string; type: 'done'; status: 'succeeded' | 'failed' | 'canceled'; createdAt: string; turnId?: string; runId?: string; terminationReason?: TerminationReason; terminalSource?: 'daemon' | 'runtime_turn' });
 
 export type ThreadHistoryResponse = {
   threadId: string;
@@ -896,8 +973,20 @@ export type EnterpriseTransportSecurity =
 export type EnterpriseAccountSummary = {
   subjectId: string;
   email: string;
+  phone?: string;
   name: string;
   avatarUrl?: string;
+};
+
+export type EnterpriseGatewayConfiguration = {
+  gateway: string;
+  gateways?: string[];
+  configurable: boolean;
+};
+
+export type EnterpriseGatewayUpdateRequest = {
+  gateway: string;
+  gateways?: string[];
 };
 
 export type EnterpriseSessionResponse = {
@@ -916,21 +1005,32 @@ export type EnterpriseSidebarMenuLabels = Partial<Record<
 >>;
 
 export type EnterprisePlatformBrandingResponse = {
+  accentColor?: string;
   adminUrl?: string;
   sidebarLogoConfigured: boolean;
   sidebarCompactLogoConfigured: boolean;
+  sidebarLogoDarkConfigured?: boolean;
+  sidebarCompactLogoDarkConfigured?: boolean;
   sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
 };
 
-export type EnterpriseLoginRequest = {
-  email: string;
+export type EnterprisePlatformBrandingImageKind =
+  | 'sidebar-logo'
+  | 'sidebar-compact-logo'
+  | 'sidebar-logo-dark'
+  | 'sidebar-compact-logo-dark';
+
+export type EnterpriseLoginRequest = ({ email: string; phone?: never } | { phone: string; email?: never }) & {
   password: string;
 };
 
-export type EnterpriseRegisterRequest = {
-  email: string;
+export type EnterpriseLoginPreferencesResponse = {
+  gateway: string;
+  login: EnterpriseLoginRequest | null;
+};
+
+export type EnterpriseRegisterRequest = EnterpriseLoginRequest & {
   name?: string;
-  password: string;
 };
 
 export type EnterpriseDingTalkLoginPrepareResponse = {
@@ -1115,9 +1215,41 @@ export type EnterpriseActivityAgentSummary = {
   agentId: string;
   name: string;
   status: string;
+  employeeId?: string;
+  employeeName?: string;
   sessionCount: number;
   turnCount: number;
   lastActivityAt?: string;
+};
+
+export type EnterpriseActivitySkillUsage = {
+  skillId: string;
+  skillName: string;
+  skillKey: string;
+  source: string;
+  requestedRuns: number;
+  observedRuns: number;
+  implicitRuns: number;
+};
+
+export type EnterpriseActivityRuntimeResponse = {
+  schemaVersion: 'office.v1';
+  scope: 'organization';
+  serverTime: string;
+  summary: {
+    totalAgents: number;
+    onlineAgents: number;
+    workingAgents: number;
+    blockedAgents: number;
+    errorAgents: number;
+  };
+  agents: Array<{
+    collectorId: string;
+    agentId: string;
+    status: string;
+    currentTask?: string;
+    lastSeenAt: string;
+  }>;
 };
 
 export type EnterpriseActivityStatisticsResponse = {
@@ -1131,7 +1263,19 @@ export type EnterpriseActivityStatisticsResponse = {
     activeEmployees: number;
     activeAgents: number;
     completedTurns: number;
+    platformActivity?: {
+      activeUsers: number;
+      totalUsers: number;
+      rate: number;
+    };
     mcpDistribution: EnterpriseActivityUsageDistributionItem[];
+    skillUsage?: EnterpriseActivitySkillUsage[];
+    skillUsageTotals?: {
+      requestedSkillRuns: number;
+      observedSkillRuns: number;
+      explicitSkillRuns: number;
+      implicitSkillRuns: number;
+    };
   };
   trend: {
     granularity: 'hour' | 'day';
@@ -1201,7 +1345,35 @@ export type EnterpriseActivityRecentItem = {
   occurredAt?: string;
 };
 
+export type EnterpriseActivityAgentUsage = {
+  collectorId: string;
+  agentId: string;
+  range: EnterpriseActivityRange;
+  timezone: string;
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  sessionCount: number;
+  turnCount: number;
+  completedTurns: number;
+  toolCallCount: number;
+  granularity: 'hour' | 'day';
+  points: Array<{
+    bucketStart: string;
+    sessionCount: number;
+    turnCount: number;
+    completedTurns: number;
+    toolCallCount: number;
+    totalTokens?: number;
+  }>;
+  mcpDistribution: EnterpriseActivityUsageDistributionItem[];
+  mcpStatus: 'available' | 'unlinked';
+  skillUsage: EnterpriseActivitySkillUsage[];
+  skillUsageTotals: NonNullable<EnterpriseActivityStatisticsResponse['organization']['skillUsageTotals']>;
+};
+
 export type EnterpriseActivityDetailResponse = {
+  usage?: EnterpriseActivityAgentUsage;
   schemaVersion: 'office.v1';
   serverTime: string;
   agent: {
@@ -1237,6 +1409,18 @@ export type EnterpriseActivityDetailResponse = {
 };
 
 export type EnterpriseMcpTokenStatus = 'ready' | 'missing';
+
+export type TaskMcpHealthResponse = {
+  runtime: 'ready' | 'unavailable' | 'unknown';
+  model: 'configured' | 'configuration_required' | 'unknown';
+};
+
+export type EnterpriseMcpHealthResponse = {
+  status: 'ready' | 'attention' | 'connection_failed' | 'unknown';
+  message: string;
+  checkedAt: string;
+  checks?: TaskMcpHealthResponse;
+};
 
 export type EnterpriseMcpToolResponse = {
   toolId: string;
@@ -1364,6 +1548,8 @@ export type EnterpriseSharedSpacePermissions = {
 };
 
 export type EnterpriseSharedSpaceResponse = {
+  personalOwnerUserId?: string;
+  workflowTemplateName?: string;
   spaceId: string;
   name: string;
   description: string;
@@ -1486,6 +1672,22 @@ export type EnterpriseSkillListResponse = {
   refreshedAt: string;
 };
 
+export type EnterpriseCloudSkillResponse = {
+  skillId: string;
+  name: string;
+  description?: string;
+  version?: string;
+  updatedAt?: string;
+};
+
+export type EnterpriseCloudSkillListResponse = {
+  agentEmail: string;
+  agentName: string;
+  promptTemplate: string;
+  skills: EnterpriseCloudSkillResponse[];
+  refreshedAt: string;
+};
+
 export const ENTERPRISE_SKILL_PACKAGE_MAX_BYTES = 50 * 1024 * 1024;
 
 export type EnterpriseSkillSpaceResponse = {
@@ -1500,6 +1702,8 @@ export type EnterpriseSkillSpaceListResponse = {
 };
 
 export type EnterpriseSkillUploadResponse = {
+  approvalRequestId?: string;
+  approvalURL?: string;
   skillId: string;
   spaceId: string;
   name: string;
@@ -1545,6 +1749,7 @@ export type CodexMcpServerResponse = {
   enabled: boolean;
   transport: CodexMcpTransport;
   status: CodexMcpStatus;
+  authStatus?: 'unknown' | 'unsupported' | 'not_logged_in' | 'bearer_token' | 'oauth';
   command?: string;
   args?: string[];
   url?: string;
@@ -1736,7 +1941,25 @@ export type ScheduleRunTrace = {
 };
 export type ScheduleRunSummary = Pick<RunResponse, 'id' | 'threadId' | 'status'>;
 
+export type ScheduleAction = 'agent_run' | 'workflow_start';
+export type WorkflowScheduleConfiguration = {
+  templateId: string;
+  initialInput: Record<string, unknown>;
+};
+export type CreateWorkflowScheduleRequest = {
+  action: 'workflow_start';
+  requestId?: string;
+  name: string;
+  cron: string;
+  timezone?: string;
+  enabled?: boolean;
+  workflow: WorkflowScheduleConfiguration;
+};
+export type UpdateWorkflowScheduleRequest = Partial<Omit<CreateWorkflowScheduleRequest, 'requestId'>>;
+export type RunScheduleNowRequest = { triggerId?: string };
+
 export type CreateScheduleRequest = {
+  action?: 'agent_run';
   name: string;
   cron: string;
   timezone?: string;
@@ -1762,7 +1985,10 @@ export type UpdateScheduleRequest = Partial<
 
 export type ScheduleResponse = {
   id: string;
-  threadId: string;
+  threadId: string | null;
+  action?: ScheduleAction;
+  workflow?: WorkflowScheduleConfiguration;
+  lastWorkflowInstanceId?: string | null;
   name: string;
   cron: string;
   timezone: string;
@@ -1799,6 +2025,8 @@ export type RunScheduleNowResponse = {
   schedule: ScheduleResponse;
   skipped: boolean;
   queued: boolean;
+  triggerId?: string;
+  workflowInstanceId?: string;
 };
 
 export type ScheduleOperationResponse = {
@@ -1807,6 +2035,8 @@ export type ScheduleOperationResponse = {
   scheduleId: string;
   status: ScheduleOperationStatus;
   runId?: string | null;
+  triggerId?: string | null;
+  workflowInstanceId?: string | null;
   actorType?: ScheduleActorType | null;
   actorRunId?: string | null;
   diagnosticEvent?: ScheduleDiagnosticEventType;

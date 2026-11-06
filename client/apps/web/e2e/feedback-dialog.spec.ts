@@ -16,7 +16,7 @@ for (const theme of ['light', 'dark']) {
       description,
       preview: { description, reproduction_steps: steps, diagnostics: [{ environment: { app_version: '1.0.0' } }] },
       state: submitted ? 'submitted' : 'awaiting_consent',
-      origin: 'https://gateway.clawee.work',
+      origin: 'https://customer.test',
       size_bytes: 81920,
       screenshots: [],
       retry_count: 0,
@@ -41,7 +41,7 @@ for (const theme of ['light', 'dark']) {
       }
       const path = new URL(route.request().url()).pathname;
       if (path.endsWith('/policy')) {
-        await route.fulfill({ json: { external_feedback_allowed: true } });
+        await route.fulfill({ json: { external_feedback_allowed: true, origin: 'https://customer.test' } });
         return;
       }
       if (path.endsWith('/drafts') && route.request().method() === 'POST') {
@@ -59,6 +59,7 @@ for (const theme of ['light', 'dark']) {
     await page.getByRole('button', { name: '反馈当前会话问题' }).click();
     await page.setViewportSize(viewport);
     const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/接收地址：https:\/\/customer.test/)).toBeVisible();
     const problem = dialog.getByLabel('问题描述', { exact: true });
     const reproduction = dialog.getByLabel('复现步骤', { exact: true });
     await expect(dialog.getByRole('checkbox', { name: /附加诊断信息/ })).not.toBeChecked();

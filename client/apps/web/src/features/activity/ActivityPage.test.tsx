@@ -1,11 +1,16 @@
 import type {
   EnterpriseActivityDetailResponse,
+  EnterpriseActivityAgentUsage,
+  EnterpriseActivityRuntimeResponse,
   EnterpriseActivityStatisticsResponse
 } from '@clawee/protocol';
 import { render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ActivityPage } from './ActivityPage.js';
+import { buildActivityAgentModuleContext, buildActivityModuleContext } from '../dashboard/workbench-module-context.js';
+
+vi.mock('react-virtuoso', async () => import('../../test/react-virtuoso-mock.js'));
 
 const statistics: EnterpriseActivityStatisticsResponse = {
   range: '7d',
@@ -23,6 +28,11 @@ const statistics: EnterpriseActivityStatisticsResponse = {
     activeEmployees: 3,
     activeAgents: 2,
     completedTurns: 42,
+    platformActivity: {
+      activeUsers: 2,
+      totalUsers: 4,
+      rate: 0.5
+    },
     mcpDistribution: [{
       id: 'filesystem',
       label: 'filesystem',
@@ -152,6 +162,16 @@ const detail: EnterpriseActivityDetailResponse = {
   }
 };
 
+const personalUsage: EnterpriseActivityAgentUsage = {
+  collectorId: 'collector-shanghai', agentId: 'agent-research', range: '7d', timezone: 'Asia/Shanghai',
+  startDate: '2026-08-12', endDate: '2026-08-18', generatedAt: '2026-08-18T08:00:00Z',
+  sessionCount: 51, turnCount: 123, completedTurns: 120, toolCallCount: 345, granularity: 'day',
+  points: [{ bucketStart: '2026-08-18T00:00:00+08:00', sessionCount: 51, turnCount: 123, completedTurns: 120, toolCallCount: 345 }],
+  mcpStatus: 'available', mcpDistribution: [{ id: 'search', label: '搜索服务', invocationCount: 77, share: 1 }],
+  skillUsage: [{ skillId: 'research', skillKey: 'research', skillName: '调研', source: 'enterprise', requestedRuns: 8, observedRuns: 5, implicitRuns: 2 }],
+  skillUsageTotals: { requestedSkillRuns: 8, observedSkillRuns: 5, explicitSkillRuns: 3, implicitSkillRuns: 2 }
+};
+
 function overviewProps() {
   return {
     route: { view: 'activity' as const, range: '7d' as const },
@@ -160,16 +180,135 @@ function overviewProps() {
     detailLoading: false,
     onRetryStatistics: vi.fn(),
     onRetryDetail: vi.fn(),
+    onBack: vi.fn(),
     onNavigate: vi.fn()
   };
 }
 
 describe('ActivityPage', () => {
+  it('shows Skill evidence separately and filters Agents by employee name', async () => {
+    const user = userEvent.setup();
+    render(<ActivityPage {...overviewProps()} statistics={{ ...statistics,
+      agents: [{ ...statistics.agents[0]!, employeeId: 'employee-1', employeeName: '张三' }, statistics.agents[1]!],
+      organization: { ...statistics.organization,
+        skillUsage: [{ skillId: 'skill-1', skillKey: 'research', skillName: '调研', source: 'enterprise', requestedRuns: 8, observedRuns: 5, implicitRuns: 2 }],
+        skillUsageTotals: { requestedSkillRuns: 8, observedSkillRuns: 5, explicitSkillRuns: 3, implicitSkillRuns: 2 }
+      }
+    }} />);
+    const skills = screen.getByRole('region', { name: 'Skill 使用情况' });
+    expect(within(skills).getByText('观察到使用', { selector: 'dt' }).nextElementSibling).toHaveTextContent('5');
+    expect(within(skills).getByText('用户指定', { selector: 'dt' }).nextElementSibling).toHaveTextContent('8');
+    expect(within(skills).getByText('调研')).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox', { name: '搜索 Agent' }), '张三');
+    const agents = screen.getByRole('table', { name: 'Agent 列表' });
+    expect(within(agents).getByText('研究助理')).toBeInTheDocument();
+    expect(within(agents).queryByText('客户洞察')).not.toBeInTheDocument();
+    expect(within(agents).queryByRole('columnheader', { name: '当前任务' })).not.toBeInTheDocument();
+    expect(within(agents).queryByText('状态未同步')).not.toBeInTheDocument();
+  });
+
+  it('uses current runtime status instead of the historical status and includes it in analysis', () => {
+    const runtime: EnterpriseActivityRuntimeResponse = {
+      schemaVersion: 'office.v1', scope: 'organization', serverTime: '2026-10-28T00:00:00Z',
+      summary: { totalAgents: 2, onlineAgents: 1, workingAgents: 0, blockedAgents: 1, errorAgents: 0 },
+      agents: [{ collectorId: statistics.agents[0]!.collectorId, agentId: statistics.agents[0]!.agentId,
+        status: 'blocked', currentTask: '等待确认调研范围', lastSeenAt: '2026-10-28T00:00:00Z' }]
+    };
+    render(<ActivityPage {...overviewProps()} runtime={runtime} />);
+    const agents = screen.getByRole('table', { name: 'Agent 列表' });
+    expect(within(agents).getByText('阻塞')).toBeInTheDocument();
+    expect(within(agents).getByText('等待确认调研范围')).toBeInTheDocument();
+    expect(within(agents).queryByText('在线')).not.toBeInTheDocument();
+    expect(screen.getByText('当前网关尚未提供 Skill 使用统计')).toBeInTheDocument();
+    expect(within(agents).getByRole('columnheader', { name: '当前任务' })).toBeInTheDocument();
+    const context = buildActivityModuleContext({ range: '7d', statistics, loading: false, runtime });
+    expect(JSON.parse(context.workbenchContext!).runtime).toEqual(runtime);
+  });
+
+  it('shows a side conversation with the selected activity period and mobile view switch', async () => {
+    const user = userEvent.setup();
+    const props = overviewProps();
+    render(<ActivityPage {...props} conversationRuntime={{
+      client: null, connection: null, connected: false,
+      config: { permission: 'workspace-write', profile: 'default', model: null, reasoning: null }
+    }} />);
+    const panel = screen.getByRole('complementary', { name: '模块对话' });
+    expect(within(panel).getByText('团队 Agent · 近 7 天')).toBeInTheDocument();
+    expect(within(panel).getByText('例如：分析本周 Token 用量趋势，哪些 Agent 最活跃？')).toBeInTheDocument();
+    expect(within(panel).getByRole('textbox', { name: '输入任务' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /^对话$/ }));
+    expect(screen.getByRole('button', { name: /^对话$/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+  });
+
+  it('includes the current activity snapshot and marks missing sources for analysis', () => {
+    const context = buildActivityModuleContext({ range: '7d', statistics, loading: false });
+    expect(context.unavailableReason).toBeUndefined();
+    expect(JSON.parse(context.workbenchContext!)).toMatchObject({
+      moduleId: 'activity', mode: 'read-only', range: '7d',
+      organization: statistics.organization, agents: statistics.agents
+    });
+    const partial = buildActivityModuleContext({ range: '7d', loading: false,
+      statistics: { ...statistics, dataStatus: { ...statistics.dataStatus, activity: 'unavailable' } } });
+    expect(partial.partial).toBe(true);
+    expect(JSON.parse(partial.workbenchContext!).dataStatus.activity).toBe('unavailable');
+  });
+
+  it('shows a personal side conversation scoped to the selected Agent and keeps it across tabs', async () => {
+    const user = userEvent.setup();
+    const route = { view: 'activity-agent' as const, collectorId: detail.agent.collectorId,
+      agentId: detail.agent.agentId, range: '7d' as const };
+    render(<ActivityPage {...overviewProps()} route={route} detail={{ ...detail, usage: personalUsage }}
+      conversationRuntime={{ client: null, connection: null, connected: false,
+        config: { permission: 'workspace-write', profile: 'default', model: null, reasoning: null } }} />);
+    const panel = screen.getByRole('complementary', { name: '模块对话' });
+    expect(within(panel).getByText('研究助理 · 近 7 天')).toBeInTheDocument();
+    expect(within(panel).getByRole('textbox', { name: '输入任务' })).toBeDisabled();
+    await user.click(screen.getByRole('tab', { name: '活动详情' }));
+    expect(screen.getByRole('complementary', { name: '模块对话' })).toBe(panel);
+    const context = buildActivityAgentModuleContext({ ...route, detail: { ...detail, usage: personalUsage }, loading: false });
+    expect(JSON.parse(context.workbenchContext!)).toMatchObject({ scope: 'agent', range: '7d', agent: detail.agent });
+    expect(context.workbenchContext).not.toContain('研发团队');
+    const otherContext = buildActivityAgentModuleContext({ ...route, agentId: 'other-agent', detail, loading: false });
+    expect(otherContext.scopeKey).not.toBe(context.scopeKey);
+    expect(otherContext.workbenchContext).toBeUndefined();
+    const staleUsage = buildActivityAgentModuleContext({ ...route, range: 'today', detail: { ...detail, usage: personalUsage }, loading: false });
+    expect(staleUsage.partial).toBe(true);
+    expect(JSON.parse(staleUsage.workbenchContext!).usage).toBeUndefined();
+  });
+
+  it('does not send stale, failed, loading, or oversized activity data to the model', () => {
+    for (const input of [
+      { range: 'today' as const, statistics, loading: false },
+      { range: '7d' as const, statistics, loading: true },
+      { range: '7d' as const, statistics, loading: false, error: '加载失败' },
+      { range: '7d' as const, loading: false },
+      { range: '7d' as const, loading: false,
+        statistics: { ...statistics, agents: [{ ...statistics.agents[0]!, name: 'x'.repeat(128000) }] } }
+    ]) {
+      const context = buildActivityModuleContext(input);
+      expect(context.workbenchContext).toBeUndefined();
+      expect(context.unavailableReason).toBeDefined();
+    }
+  });
+
+  it('returns from the overview to the workbench', async () => {
+    const onBack = vi.fn();
+    const user = userEvent.setup();
+    render(<ActivityPage {...overviewProps()} onBack={onBack} />);
+
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it('renders only fields supplied by the activity statistics contract', () => {
     render(<ActivityPage {...overviewProps()} />);
 
     expect(screen.getByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
     expect(screen.getByTestId('total-tokens')).toHaveTextContent('18,396,247');
+    expect(screen.getByRole('heading', { name: '平台活跃度' })).toBeInTheDocument();
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByText('2 / 4 名用户')).toBeInTheDocument();
     expect(screen.getByText('活跃员工')).toBeInTheDocument();
     expect(screen.getByText('模型分布')).toBeInTheDocument();
     expect(screen.getByText('MCP 使用分布')).toBeInTheDocument();
@@ -224,7 +363,7 @@ describe('ActivityPage', () => {
         statisticsLoading
       />
     );
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载 Agent 动态');
+    expect(screen.getByRole('heading', { name: '正在加载 Agent 动态' })).toBeInTheDocument();
 
     rerender(
       <ActivityPage
@@ -238,29 +377,97 @@ describe('ActivityPage', () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it('renders detail while exposing only sanitized Tool metadata', () => {
-    render(
-      <ActivityPage
-        {...overviewProps()}
-        route={{
-          view: 'activity-agent',
-          collectorId: 'collector-shanghai',
-          agentId: 'agent-research',
-          range: '7d'
-        }}
-        detail={detail}
-      />
-    );
+  it('merges turns into their own sessions and removes the Tool detail view', async () => {
+    const user = userEvent.setup();
+    render(<ActivityPage {...overviewProps()}
+      route={{ view: 'activity-agent', collectorId: 'collector-shanghai', agentId: 'agent-research', range: '7d' }}
+      detail={{ ...detail,
+        sessions: [...detail.sessions, { sessionId: 'session-2', title: '第二会话' }],
+        turns: [...detail.turns,
+          { turnId: 'turn-2', sessionId: 'session-2', prompt: '只属于第二会话' },
+          { turnId: 'orphan', sessionId: 'missing-session', prompt: '尚未关联的交互' }
+        ]
+      }} />);
+    const tabs = screen.getByRole('tablist', { name: 'Agent 个人详情分区' });
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(2);
+    expect(screen.queryByText('提示：整理本周公开资料')).not.toBeInTheDocument();
+    await user.click(within(tabs).getByRole('tab', { name: '活动详情' }));
+    expect(screen.getByRole('heading', { name: '会话' })).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: '活动详情类型' })).not.toBeInTheDocument();
+    const firstSession = screen.getByRole('group', { name: '竞品调研' });
+    expect(within(firstSession).getByText('提示：整理本周公开资料')).toBeVisible();
+    expect(within(firstSession).getByText('回答：已形成摘要')).toBeVisible();
+    expect(within(firstSession).queryByText('提示：只属于第二会话')).not.toBeInTheDocument();
+    const secondSession = screen.getByRole('group', { name: '第二会话' });
+    expect(within(secondSession).getByText('提示：只属于第二会话')).not.toBeVisible();
+    await user.click(within(secondSession).getByRole('heading', { name: '第二会话' }));
+    expect(within(secondSession).getByText('提示：只属于第二会话')).toBeVisible();
+    const unlinked = screen.getByRole('group', { name: '未关联会话' });
+    await user.click(within(unlinked).getByRole('heading', { name: '未关联会话' }));
+    expect(within(unlinked).getByText('提示：尚未关联的交互')).toBeVisible();
+    expect(screen.queryByText('WebSearch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Tool 调用' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '子 Agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '最近活动' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  });
 
-    expect(screen.getByRole('heading', { name: '研究助理' })).toBeInTheDocument();
-    expect(screen.getByText('会话')).toBeInTheDocument();
-    expect(screen.getByText('Turn')).toBeInTheDocument();
-    expect(screen.getByText('WebSearch')).toBeInTheDocument();
-    expect(screen.getByText('1.8 秒')).toBeInTheDocument();
-    expect(screen.getByText('提示：整理本周公开资料')).toBeInTheDocument();
-    expect(screen.getByText('回答：已形成摘要')).toBeInTheDocument();
-    expect(screen.queryByText(/private customer query/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/raw tool response/i)).not.toBeInTheDocument();
+  it('shows scoped personal usage totals, trends and MCP/Skill without using organization Token data', async () => {
+    const user = userEvent.setup();
+    render(<ActivityPage {...overviewProps()}
+      route={{ view: 'activity-agent', collectorId: 'collector-shanghai', agentId: 'agent-research', range: '7d' }}
+      detail={{ ...detail, usage: personalUsage }} />);
+    expect(screen.getByRole('tablist', { name: 'Agent 个人详情分区' })).toBeInTheDocument();
+    expect(screen.getByText('123')).toBeInTheDocument();
+    expect(screen.getByText('345')).toBeInTheDocument();
+    expect(screen.getByText('搜索服务')).toBeInTheDocument();
+    expect(screen.getByText('调研')).toBeInTheDocument();
+    expect(screen.queryByTestId('total-tokens')).not.toBeInTheDocument();
+    expect(screen.getByText('当前网关尚未提供按 Agent 归属的 Token 和模型用量。')).toBeInTheDocument();
+    const chart = screen.getByRole('region', { name: '个人执行趋势' });
+    expect(within(chart).getByRole('button', { name: 'Token 消耗' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(chart).getByText('当前网关尚未提供此 Agent 的 Token 消耗数据')).toBeInTheDocument();
+    expect(within(chart).queryByRole('img')).not.toBeInTheDocument();
+    await user.click(within(chart).getByRole('button', { name: '交互轮次' }));
+    expect(within(chart).getByRole('img')).toHaveAttribute('aria-label', expect.stringContaining('123 次'));
+    await user.click(within(chart).getByRole('button', { name: '工具调用' }));
+    expect(within(chart).getByRole('img')).toHaveAttribute('aria-label', expect.stringContaining('345 次'));
+    await user.click(screen.getByRole('tab', { name: '活动详情' }));
+    expect(screen.queryByText('搜索服务')).not.toBeInTheDocument();
+    await user.keyboard('{Home}');
+    expect(screen.getByText('搜索服务')).toBeInTheDocument();
+    expect(screen.getByText('调研')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '个人执行趋势' })).toBeInTheDocument();
+  });
+
+  it('defaults to personal Token consumption and does not fill gaps with other usage metrics', () => {
+    const props = { ...overviewProps(), route: { view: 'activity-agent' as const,
+      collectorId: 'collector-shanghai', agentId: 'agent-research', range: '7d' as const } };
+    const usage = { ...personalUsage, points: personalUsage.points.map(point => ({ ...point, totalTokens: 76_000 })) };
+    const { rerender } = render(<ActivityPage {...props} detail={{ ...detail, usage }} />);
+    const chart = screen.getByRole('region', { name: '个人执行趋势' });
+    expect(within(chart).getByRole('img')).toHaveAttribute('aria-label', expect.stringContaining('76,000 Token'));
+    expect(within(chart).getByRole('button', { name: 'Token 消耗' })).toHaveAttribute('aria-pressed', 'true');
+    rerender(<ActivityPage {...props} detail={{ ...detail, usage: { ...usage,
+      points: [...usage.points, { ...personalUsage.points[0]!, bucketStart: '2026-08-17T00:00:00+08:00' }] } }} />);
+    expect(within(chart).queryByRole('img')).not.toBeInTheDocument();
+    expect(within(chart).getByText('当前网关尚未提供此 Agent 的 Token 消耗数据')).toBeInTheDocument();
+  });
+
+  it('keeps execution history accessible when personal usage is missing or belongs to another range or Agent', async () => {
+    const user = userEvent.setup();
+    const props = { ...overviewProps(), route: { view: 'activity-agent' as const, collectorId: 'collector-shanghai', agentId: 'agent-research', range: '7d' as const } };
+    const { rerender } = render(<ActivityPage {...props} detail={detail} />);
+    for (const usage of [undefined, { ...personalUsage, range: 'today' as const }, { ...personalUsage, collectorId: 'other' }]) {
+      rerender(<ActivityPage {...props} detail={{ ...detail, ...(usage === undefined ? {} : { usage }) }} />);
+      await user.click(screen.getByRole('tab', { name: '概览' }));
+      expect(screen.getByText('个人使用统计暂不可用，请重试或升级网关。')).toBeInTheDocument();
+      expect(screen.queryByText('345')).not.toBeInTheDocument();
+      expect(screen.queryByText('WebSearch')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: '活动详情' }));
+      expect(screen.getByText('提示：整理本周公开资料')).toBeVisible();
+      expect(screen.queryByText('WebSearch')).not.toBeInTheDocument();
+    }
   });
 
   it('renders account billing independently from activity statistics', async () => {

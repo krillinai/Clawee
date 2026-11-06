@@ -17,6 +17,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
 	"github.com/krillinai/Clawee/server/internal/office/management"
+	"github.com/krillinai/Clawee/server/internal/skillcontributionsmcp"
 )
 
 type appAccountTokenActionRequest struct {
@@ -117,13 +118,7 @@ func handleRotateAccountToken(proxyGateway *mcpgateway.Service) gin.HandlerFunc 
 		if !ok {
 			return
 		}
-		scopes := req.Scopes
-		if len(scopes) == 0 {
-			scopes = []string{"mcp:call"}
-		}
-		issued, err := proxyGateway.RotateAccountToken(c.Request.Context(), mcpgateway.AccountTokenIssueRequest{
-			UserID: account.UserID, ExpiresAt: req.ExpiresAt, Scopes: scopes, Issuer: "claw-gateway-user",
-		})
+		issued, err := proxyGateway.RotateModelAccountToken(c.Request.Context(), account.UserID, account.Name, req.ExpiresAt, "claw-gateway-user")
 		if err != nil {
 			agentAPIError(c, err)
 			return
@@ -260,12 +255,15 @@ func filterDataAuthorizedMCPUpstreams(ctx context.Context, service *dataaccess.S
 	}
 	canReadBusinessData := allowedViews[dataaccess.ViewXiaohongshuOperation] ||
 		allowedViews[dataaccess.ViewDouyinAds] || allowedViews[dataaccess.ViewBilibiliOperation]
-	return excludeDataMCPUpstreams(upstreams, allowedViews[dataaccess.ViewAgentActivity], canReadBusinessData), nil
+	return excludeDataMCPUpstreams(upstreams, allowedViews[dataaccess.ViewAgentActivity], canReadBusinessData, allowedViews[dataaccess.ViewSkillContributions]), nil
 }
 
-func excludeDataMCPUpstreams(upstreams []mcpgateway.ToolCatalogUpstream, canReadAgentActivity, canReadBusinessData bool) []mcpgateway.ToolCatalogUpstream {
+func excludeDataMCPUpstreams(upstreams []mcpgateway.ToolCatalogUpstream, canReadAgentActivity, canReadBusinessData bool, contributions ...bool) []mcpgateway.ToolCatalogUpstream {
 	out := make([]mcpgateway.ToolCatalogUpstream, 0, len(upstreams))
 	for _, upstream := range upstreams {
+		if upstream.ID == skillcontributionsmcp.ServerID && (len(contributions) == 0 || !contributions[0]) {
+			continue
+		}
 		if upstream.ID == agentactivitymcp.ServerID && !canReadAgentActivity {
 			continue
 		}
@@ -542,6 +540,8 @@ func agentAPIError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 	case errors.Is(err, mcpgateway.ErrAccountTokenNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "account_token_not_found"})
+	case errors.Is(err, mcpgateway.ErrAccountUsernameRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "username_required"})
 	case errors.Is(err, accounts.ErrAccountNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "account_not_found"})
 	case errors.Is(err, accounts.ErrAccountNotActive):

@@ -1,4 +1,5 @@
 import type { AgentEventEnvelope } from '@clawee/protocol';
+import { createWebIncidentObserver } from '../../services/incident-observer.js';
 import {
   subscribeRunEvents as defaultSubscribeRunEvents,
   type SubscribeRunEventsInput
@@ -19,6 +20,7 @@ export type StartRunEventControllerInput = Omit<
   onEvent(event: AgentEventEnvelope): void;
   onStateChange(state: RunEventControllerState): void;
   onError(error: Error): void;
+  onStreamEnd?(lastSeq: number): Promise<boolean>;
 };
 
 export type RunEventController = {
@@ -40,6 +42,8 @@ type ActiveSubscription = {
   reconnectTimer?: ReturnType<typeof setTimeout>;
   done: boolean;
   state?: RunEventControllerState;
+  incidentObserver: ReturnType<typeof createWebIncidentObserver>;
+  disconnectedAt?: number;
 };
 
 const DEFAULT_RECONNECT_DELAYS = [500, 1_000, 2_000, 4_000, 8_000];
@@ -62,6 +66,7 @@ export function createRunEventController(
     generation += 1;
     if (current?.reconnectTimer !== undefined) clearTimeout(current.reconnectTimer);
     current?.abortController?.abort();
+    current?.incidentObserver.dispose();
   }
 
   function setState(
@@ -84,7 +89,8 @@ export function createRunEventController(
       input,
       lastSeq: input.fromSeq ?? 0,
       reconnectAttempt: 0,
-      done: false
+      done: false,
+      incidentObserver: createWebIncidentObserver()
     };
     active = subscription;
     setState(subscription, 'connecting');
@@ -97,6 +103,7 @@ export function createRunEventController(
     const abortController = new AbortController();
     subscription.abortController = abortController;
     let connectionError: Error | undefined;
+    const startedAt = Date.now();
 
     try {
       await subscribe({
@@ -114,9 +121,14 @@ export function createRunEventController(
           subscription.lastSeq = event.seq;
           subscription.reconnectAttempt = 0;
           setState(subscription, 'connected');
+          if (subscription.disconnectedAt !== undefined) {
+            subscription.incidentObserver.report({ event_type: 'recovered', stage: 'event_stream', error_code: 'WEB_STREAM_ENDED', run_id: event.runId, duration_ms: Math.max(0, Date.now() - subscription.disconnectedAt) });
+            subscription.disconnectedAt = undefined;
+          }
           subscription.input.onEvent(event);
           if (event.type === 'done') {
             subscription.done = true;
+            subscription.incidentObserver.dispose();
             setState(subscription, 'idle');
           }
         },
@@ -134,6 +146,23 @@ export function createRunEventController(
     }
 
     if (!isCurrent(subscription) || abortController.signal.aborted || subscription.done) return;
+    if (connectionError === undefined && subscription.input.onStreamEnd !== undefined) {
+      try {
+        const synchronized = await subscription.input.onStreamEnd(subscription.lastSeq);
+        if (!isCurrent(subscription)) return;
+        if (synchronized) {
+          subscription.done = true;
+          subscription.incidentObserver.dispose();
+          setState(subscription, 'idle');
+          return;
+        }
+      } catch (error) {
+        connectionError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    if (!isCurrent(subscription)) return;
+    subscription.disconnectedAt ??= Date.now();
+    subscription.incidentObserver.report({ event_type: 'error', stage: 'event_stream', error_code: 'WEB_STREAM_ENDED', run_id: subscription.input.runId, duration_ms: Math.max(0, Date.now() - startedAt) });
     scheduleReconnect(
       subscription,
       connectionError ?? new Error('SSE connection closed unexpectedly')
@@ -144,6 +173,7 @@ export function createRunEventController(
     if (!isCurrent(subscription) || subscription.done) return;
     const delay = reconnectDelays[subscription.reconnectAttempt];
     if (delay === undefined) {
+      subscription.incidentObserver.dispose();
       setState(subscription, 'disconnected');
       subscription.input.onError(error);
       return;

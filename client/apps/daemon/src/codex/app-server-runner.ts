@@ -9,6 +9,7 @@ import {
   type CodexAppServerProcess,
   type CodexAppServerResult
 } from './app-server-host-2026-07-28.js';
+import type { AgentPromptPolicySnapshot } from '../threads/types.js';
 
 export type {
   AppServerApprovalDecision,
@@ -19,6 +20,8 @@ export type {
 export { buildCodexAppServerArgs };
 
 export type StartCodexAppServerInput = {
+  configOverrides?: string[];
+  isolatedEnvironment?: boolean;
   codexBin: string;
   codexHome: string;
   cwd: string;
@@ -33,6 +36,7 @@ export type StartCodexAppServerInput = {
   spawnTimeoutMs?: number;
   inactivityTimeoutMs?: number;
   serverDeployment?: boolean;
+  agentPromptPolicy?: AgentPromptPolicySnapshot;
   forceKillGraceMs?: number;
   mcpServers?: CodexMcpServerConfig[];
   builtInTools?: BuiltInToolPolicy;
@@ -67,7 +71,7 @@ export function startCodexAppServer(
       })
     };
   }
-  const isolatedHome = input.builtInTools !== undefined
+  const isolatedHome = input.builtInTools !== undefined && input.isolatedEnvironment !== true
     ? input.isolatedHomePath === undefined
       ? createCodexProbeHome(input.codexHome)
       : createCodexIsolatedHome(input.codexHome, input.isolatedHomePath)
@@ -79,6 +83,8 @@ export function startCodexAppServer(
     profile: input.profile,
     mcpServers: input.mcpServers,
     builtInTools: input.builtInTools,
+    configOverrides: input.configOverrides,
+    isolatedEnvironment: input.isolatedEnvironment,
     env: input.env,
     spawnTimeoutMs: input.spawnTimeoutMs,
     forceKillGraceMs: input.forceKillGraceMs
@@ -94,6 +100,7 @@ export function startCodexAppServer(
     timeoutMs: input.timeoutMs,
     inactivityTimeoutMs: input.inactivityTimeoutMs,
     serverDeployment: input.serverDeployment,
+    agentPromptPolicy: input.agentPromptPolicy,
     onBeforeWritableRequest: input.onBeforeWritableRequest,
     onNotification: input.onNotification,
     onThreadStarted: input.onThreadStarted,

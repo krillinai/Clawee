@@ -28,6 +28,28 @@ func TestKnowledgeBaseActionsAreWhitelisted(t *testing.T) {
 	}
 }
 
+func TestAgentActivityContentRequiresReadAndExplicitGrant(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	ctx := context.Background()
+	input := SetInput{UserID: "analyst", ResourceType: ResourceDataView, ResourceID: ViewAgentActivity, CreatedBy: "admin"}
+	input.Actions = []string{"read_content"}
+	if _, err := service.Create(ctx, input); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("content alone must be rejected: %v", err)
+	}
+	input.Actions = []string{ActionRead, "read_content"}
+	if _, err := service.Create(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := service.HasAction(ctx, "analyst", ResourceDataView, ViewAgentActivity, "read_content")
+	if err != nil || !allowed {
+		t.Fatalf("explicit content grant = %v, %v", allowed, err)
+	}
+	input.ResourceID = ViewDouyinAds
+	if _, err := service.Create(ctx, input); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("other views must not accept content permission: %v", err)
+	}
+}
+
 func TestSharedSpaceActionsAreWhitelisted(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	if _, err := service.Create(context.Background(), SetInput{
@@ -134,7 +156,7 @@ func TestDataViewAcceptsBilibiliConnectOnlyWithReadAndAuditsRemoval(t *testing.T
 
 func TestResourceCatalogDefinesBilibiliManagementActions(t *testing.T) {
 	definition, ok := ResourceDefinitionFor(ResourceDataView)
-	if !ok || definition.Name != "数据视图" || len(definition.Actions) != 3 {
+	if !ok || definition.Name != "数据视图" || len(definition.Actions) != 4 {
 		t.Fatalf("data view definition = %#v, %t", definition, ok)
 	}
 	if definition.Actions[0].Action != ActionRead || definition.Actions[1].Action != ActionConnect || definition.Actions[2].Action != ActionManage {
@@ -145,7 +167,7 @@ func TestResourceCatalogDefinesBilibiliManagementActions(t *testing.T) {
 		t.Fatalf("bilibili actions = %#v", bilibiliActions)
 	}
 	otherActions := ActionDefinitionsFor(ResourceDataView, ViewAgentActivity)
-	if len(otherActions) != 1 || otherActions[0].Action != ActionRead {
+	if len(otherActions) != 2 || otherActions[0].Action != ActionRead || otherActions[1].Action != ActionReadContent || otherActions[1].DefaultChecked || otherActions[1].Required {
 		t.Fatalf("other data view actions = %#v", otherActions)
 	}
 

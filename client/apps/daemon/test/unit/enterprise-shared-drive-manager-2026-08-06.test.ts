@@ -36,6 +36,75 @@ afterEach(() => {
 });
 
 describe('enterprise shared drive manager', () => {
+  it('并行取回新目录中的成果，复用相同内容并保留冲突文件', async () => {
+    tempDir = createTempDirectory();
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir);
+    const content = Buffer.from('delivered result');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const artifacts = ['a.txt', 'b.txt'].map(fileName => ({ space_id: 'space_1', file_id: fileName, logical_path: `tasks/remote/${fileName}`, file_name: fileName, content_type: 'text/plain', revision: 1, sha256, size_bytes: content.length }));
+    const downloadSharedFileContent = vi.fn(async input => {
+      writeFileSync(input.destinationPath, content);
+      return { bytes: content.length, sha256, revision: 1, contentType: 'text/plain' };
+    });
+    const manager = createManager({ project: projectResponse(projectDir), getSharedFileDetail: vi.fn(async (_token, fileId) => {
+      const artifact = artifacts.find(file => file.file_id === fileId)!;
+      return sharedFile({ fileId, logicalPath: artifact.logical_path, fileName: artifact.file_name, sizeBytes: content.length, sha256, revision: 1 });
+    }), downloadSharedFileContent });
+    await Promise.all(artifacts.map(expectedArtifact => manager.downloadToProject({ fileId: expectedArtifact.file_id, projectId: 'project_1', overwrite: false, expectedArtifact })));
+    for (const artifact of artifacts) expect(readFileSync(join(projectDir, artifact.logical_path))).toEqual(content);
+    const request = { fileId: artifacts[0]!.file_id, projectId: 'project_1', overwrite: false, expectedArtifact: artifacts[0]! };
+    await expect(manager.downloadToProject(request)).resolves.toMatchObject({ overwritten: false, sha256 });
+    expect(downloadSharedFileContent).toHaveBeenCalledTimes(2);
+    const target = join(projectDir, artifacts[0]!.logical_path);
+    writeFileSync(target, 'local change');
+    await expect(manager.downloadToProject(request)).rejects.toMatchObject({ code: 'ENTERPRISE_SHARED_FILE_LOCAL_EXISTS' });
+    expect(readFileSync(target, 'utf8')).toBe('local change');
+  });
+
+  it('stages explicitly delivered workflow attachments and cleans up on identity changes', async () => {
+    tempDir = createTempDirectory();
+    const content = Buffer.from('workflow attachment');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const artifact = { file_id: 'file_1', logical_path: 'instances/i/nodes/n/sub/attachments/report.txt', revision: 1, sha256 };
+    let stagedPath = '';
+    const uploadWorkflowFile = vi.fn(async input => {
+      stagedPath = input.filePath;
+      expect(readFileSync(stagedPath)).toEqual(content);
+      expect(input).toMatchObject({ accessToken: 'enterprise-token', taskId: 'task_1', idempotencyKey: 'submission', fileName: 'report.txt', sizeBytes: content.length, sha256 });
+      return artifact;
+    });
+    const manager = createManager({ uploadWorkflowFile });
+    const request = { taskId: 'task_1', idempotencyKey: 'submission', fileName: 'report.txt', expectedSizeBytes: content.length, content: chunks(content), assertIdentity: vi.fn() };
+    await expect(manager.uploadWorkflowFile!(request)).resolves.toEqual(artifact);
+    expect(existsSync(stagedPath)).toBe(false);
+    const changedIdentity = vi.fn().mockImplementationOnce(() => undefined).mockImplementationOnce(() => { throw new Error('identity changed'); });
+    await expect(manager.uploadWorkflowFile!({ ...request, content: chunks(content), assertIdentity: changedIdentity })).rejects.toThrow('identity changed');
+    expect(uploadWorkflowFile).toHaveBeenCalledOnce();
+  });
+
+  it.each(['metadata', 'download', 'identity'] as const)('rejects workflow %s changes without replacing the local file', async change => {
+    tempDir = createTempDirectory();
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(join(projectDir, 'docs'), { recursive: true });
+    const targetPath = join(projectDir, 'docs/design.md');
+    writeFileSync(targetPath, 'local version');
+    const content = Buffer.from('formal result');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const expectedArtifact = { file_id: 'file_1', logical_path: 'docs/design.md', revision: 3, sha256 };
+    const downloadSharedFileContent = vi.fn(async input => {
+      writeFileSync(input.destinationPath, content);
+      return { bytes: content.length, sha256, revision: change === 'download' ? 4 : 3, contentType: 'text/markdown' };
+    });
+    const assertIdentity = vi.fn().mockImplementationOnce(() => undefined).mockImplementation(() => {
+      if (change === 'identity') throw new Error('identity changed');
+    });
+    const manager = createManager({ project: projectResponse(projectDir), getSharedFileDetail: vi.fn(async () => sharedFile({ sha256, revision: change === 'metadata' ? 4 : 3 })), downloadSharedFileContent });
+    await expect(manager.downloadToProject({ fileId: 'file_1', projectId: 'project_1', overwrite: true, expectedArtifact, assertIdentity })).rejects.toMatchObject({ code: change === 'identity' ? 'ENTERPRISE_SHARED_FILE_LOCAL_WRITE_FAILED' : 'ENTERPRISE_SHARED_FILE_REVISION_CONFLICT' });
+    expect(readFileSync(targetPath, 'utf8')).toBe('local version');
+    expect(downloadSharedFileContent).toHaveBeenCalledTimes(change === 'metadata' ? 0 : 1);
+  });
+
   it('reads preview using the enterprise session without writing project files', async () => {
     tempDir = createTempDirectory();
     const content = Buffer.from('# design');
@@ -216,7 +285,7 @@ describe('enterprise shared drive manager', () => {
     });
   });
 
-  it('reports an existing remote path when unknown create reconciliation finds another digest', async () => {
+  it.each(['digest', 'size'])('reports an existing remote path when unknown create reconciliation finds another %s', async mismatch => {
     tempDir = createTempDirectory();
     const content = Buffer.from('new shared file');
     const manager = createManager({
@@ -230,7 +299,8 @@ describe('enterprise shared drive manager', () => {
         files: [
           sharedFile({
             logicalPath: 'docs/design.md',
-            sha256: 'f'.repeat(64)
+            sha256: mismatch === 'digest' ? 'f'.repeat(64) : createHash('sha256').update(content).digest('hex'),
+            sizeBytes: content.length + 1
           })
         ],
         meta: { nextCursor: '', hasNext: false }
@@ -363,6 +433,7 @@ function createSessionManager(): EnterpriseSessionManager {
       transportSecurity: 'secure_https' as const
     })),
     refresh: vi.fn(),
+    renew: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),

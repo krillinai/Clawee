@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/testpostgres"
 )
 
@@ -33,6 +34,68 @@ func TestObjectAndCursorValidation(t *testing.T) {
 	}
 }
 
+func TestWorkflowStartRejectsInvalidRequestBeforeDatabase(t *testing.T) {
+	service := &Service{}
+	for _, test := range []struct {
+		name  string
+		key   string
+		input string
+		want  error
+	}{
+		{"空幂等键", "", `{}`, ErrInvalid},
+		{"超长幂等键", strings.Repeat("k", 201), `{}`, ErrInvalid},
+		{"数组", "start", `[]`, ErrInvalid},
+		{"空值", "start", `null`, ErrInvalid},
+		{"字符串", "start", `"input"`, ErrInvalid},
+		{"数字", "start", `1`, ErrInvalid},
+		{"非法JSON", "start", `{broken`, ErrInvalid},
+		{"超过1MiB", "start", `{"value":"` + strings.Repeat("x", 1<<20) + `"}`, ErrLarge},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := service.Start(context.Background(), "template", "user", test.key, json.RawMessage(test.input)); !errors.Is(err, test.want) {
+				t.Fatalf("Start error=%v, want=%v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestWorkflowStartConcurrentReplay(t *testing.T) {
+	service := workflowTestService(t)
+	ctx := context.Background()
+	template, err := service.Save(ctx, "a", "", "并发发起", "", 0, []Node{{ID: "first", Type: "agent", Title: "首节点", Instruction: "执行", Assignee: "a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetStatus(ctx, template.ID, "a", true); err != nil {
+		t.Fatal(err)
+	}
+	type started struct {
+		result Result
+		err    error
+	}
+	ready := make(chan struct{})
+	results := make(chan started, 2)
+	for range 2 {
+		go func() {
+			<-ready
+			result, err := service.Start(ctx, template.ID, "a", "same-trigger", json.RawMessage(`{"text":"原输入"}`))
+			results <- started{result, err}
+		}()
+	}
+	close(ready)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || first.result.InstanceID == "" || first.result != second.result {
+		t.Fatalf("concurrent start results: %+v %+v", first, second)
+	}
+	var instances, tasks, events int
+	if err := service.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM workflow_instances WHERE template_id=$1),(SELECT count(*) FROM workflow_node_tasks WHERE instance_id=$2),(SELECT count(*) FROM workflow_events WHERE instance_id=$2 AND event_type='instance_started')`, template.ID, first.result.InstanceID).Scan(&instances, &tasks, &events); err != nil {
+		t.Fatal(err)
+	}
+	if instances != 1 || tasks != 1 || events != 1 {
+		t.Fatalf("concurrent duplicate creation: instances=%d tasks=%d events=%d", instances, tasks, events)
+	}
+}
+
 func workflowTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := testpostgres.New(t)
@@ -52,8 +115,18 @@ func workflowTestDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+func workflowTestService(t *testing.T) *Service {
+	t.Helper()
+	pool := workflowTestDB(t)
+	storage, err := sharedfiles.NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Service{DB: pool, Files: sharedfiles.NewService(sharedfiles.NewPostgresStore(pool), storage, nil)}
+}
+
 func TestWorkflowSerialLifecycle(t *testing.T) {
-	s := &Service{DB: workflowTestDB(t)}
+	s := workflowTestService(t)
 	ctx := context.Background()
 	nodes := []Node{{ID: "first", Order: 0, Type: "agent", Title: "生成", Assignee: "a", Instruction: "生成"}, {ID: "review", Order: 1, Type: "approval", Title: "审核", Assignee: "b", Instruction: "审核"}, {ID: "last", Order: 2, Type: "agent", Title: "收尾", Assignee: "c", Instruction: "收尾"}}
 	template, err := s.Save(ctx, "a", "", "案例", "", 0, nodes)
@@ -146,7 +219,7 @@ func TestWorkflowSerialLifecycle(t *testing.T) {
 }
 
 func TestWorkflowTaskPagination(t *testing.T) {
-	s := &Service{DB: workflowTestDB(t)}
+	s := workflowTestService(t)
 	ctx := context.Background()
 	nodes := []Node{{ID: "first", Order: 0, Type: "agent", Title: "生成", Assignee: "a", Instruction: "生成"}}
 	template, err := s.Save(ctx, "a", "", "分页", "", 0, nodes)
@@ -175,6 +248,21 @@ func TestWorkflowTaskPagination(t *testing.T) {
 	if first[0].ID != ids[20] || second[0].ID != ids[0] {
 		t.Fatalf("unexpected task order: first=%s last=%s", first[0].ID, second[0].ID)
 	}
+	for _, tasks := range [][]Task{first, second} {
+		for _, task := range tasks {
+			raw, err := json.Marshal(task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if string(payload["artifacts"]) != "[]" {
+				t.Fatalf("待办任务空附件必须序列化为空数组: %s", raw)
+			}
+		}
+	}
 	for _, task := range first {
 		if task.ID == second[0].ID {
 			t.Fatal("duplicate task across pages")
@@ -183,7 +271,7 @@ func TestWorkflowTaskPagination(t *testing.T) {
 }
 
 func TestWorkflowRejectAndTerminate(t *testing.T) {
-	s := &Service{DB: workflowTestDB(t)}
+	s := workflowTestService(t)
 	ctx := context.Background()
 	nodes := []Node{{ID: "review", Order: 0, Type: "approval", Title: "审核", Assignee: "a", Instruction: "审核"}, {ID: "agent", Order: 1, Type: "agent", Title: "执行", Assignee: "b", Instruction: "执行"}}
 	tpl, err := s.Save(ctx, "a", "", "审查", "", 0, nodes)

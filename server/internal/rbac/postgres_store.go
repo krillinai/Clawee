@@ -119,7 +119,7 @@ func (s *PostgresStore) CreateRole(ctx context.Context, role Role, audit Operati
 
 func (s *PostgresStore) UpdateRole(ctx context.Context, role Role, audit OperationAudit) error {
 	return s.withTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE rbac_roles SET name = $2, updated_at = $3 WHERE role_id = $1`, role.RoleID, role.Name, role.UpdatedAt)
+		tag, err := tx.Exec(ctx, `UPDATE rbac_roles SET name = CASE WHEN EXISTS(SELECT 1 FROM rose_departments d WHERE d.role_id=rbac_roles.role_id OR d.manager_role_id=rbac_roles.role_id) THEN name ELSE $2 END, updated_at = $3 WHERE role_id = $1`, role.RoleID, role.Name, role.UpdatedAt)
 		if err != nil {
 			return err
 		}
@@ -154,9 +154,17 @@ func (s *PostgresStore) ListAccountRoles(ctx context.Context, userID string) ([]
 		return nil, ErrPostgresStoreUnavailable
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT ar.user_id, ar.role_id, r.code, r.name, r.is_system, ar.created_at
-		FROM account_roles ar
+		SELECT ar.user_id, ar.role_id, r.code, r.name, r.is_system,
+		COALESCE(m.created_at, auto.created_at),
+		array_remove(ARRAY[CASE WHEN m.user_id IS NOT NULL THEN 'manual' END,
+		CASE WHEN auto.user_id IS NOT NULL THEN 'rose_department' END], NULL),
+		COALESCE(d.dingtalk_dept_id, ''), COALESCE(d.name, ''),
+		CASE WHEN d.role_id=ar.role_id THEN 'default' WHEN d.manager_role_id=ar.role_id THEN 'manager' ELSE '' END
+		FROM effective_account_roles ar
 		JOIN rbac_roles r ON r.role_id = ar.role_id
+		LEFT JOIN account_roles m ON m.user_id=ar.user_id AND m.role_id=ar.role_id
+		LEFT JOIN rose_account_roles auto ON auto.user_id=ar.user_id AND auto.role_id=ar.role_id
+		LEFT JOIN rose_departments d ON d.role_id=ar.role_id OR d.manager_role_id=ar.role_id
 		WHERE ar.user_id = $1
 		ORDER BY r.code
 	`, userID)
@@ -167,7 +175,7 @@ func (s *PostgresStore) ListAccountRoles(ctx context.Context, userID string) ([]
 	var roles []AccountRole
 	for rows.Next() {
 		var role AccountRole
-		if err := rows.Scan(&role.UserID, &role.RoleID, &role.RoleCode, &role.RoleName, &role.System, &role.CreatedAt); err != nil {
+		if err := rows.Scan(&role.UserID, &role.RoleID, &role.RoleCode, &role.RoleName, &role.System, &role.CreatedAt, &role.Sources, &role.DepartmentID, &role.DepartmentName, &role.DepartmentRoleType); err != nil {
 			return nil, err
 		}
 		roles = append(roles, role)
@@ -254,7 +262,7 @@ func (s *PostgresStore) CountRoleAccounts(ctx context.Context, roleID string) (i
 		return 0, ErrPostgresStoreUnavailable
 	}
 	var count int
-	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM account_roles WHERE role_id = $1`, roleID).Scan(&count)
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM effective_account_roles WHERE role_id = $1`, roleID).Scan(&count)
 	return count, err
 }
 
@@ -283,7 +291,9 @@ func (s *PostgresStore) withTx(ctx context.Context, fn func(pgx.Tx) error) error
 const roleSelectSQL = `
 	SELECT r.role_id, r.code, r.name, r.is_system, r.created_at, r.updated_at,
 		COALESCE(array_agg(rp.permission_code ORDER BY rp.permission_code)
-			FILTER (WHERE rp.permission_code IS NOT NULL), ARRAY[]::TEXT[])
+			FILTER (WHERE rp.permission_code IS NOT NULL), ARRAY[]::TEXT[]),
+		COALESCE((SELECT dingtalk_dept_id FROM rose_departments d WHERE d.role_id=r.role_id OR d.manager_role_id=r.role_id), ''),
+		COALESCE((SELECT CASE WHEN d.role_id=r.role_id THEN 'default' ELSE 'manager' END FROM rose_departments d WHERE d.role_id=r.role_id OR d.manager_role_id=r.role_id), '')
 	FROM rbac_roles r
 	LEFT JOIN role_permissions rp ON rp.role_id = r.role_id
 `
@@ -298,7 +308,7 @@ type rowScanner interface {
 
 func scanRole(row rowScanner) (Role, error) {
 	var role Role
-	err := row.Scan(&role.RoleID, &role.Code, &role.Name, &role.System, &role.CreatedAt, &role.UpdatedAt, &role.Permissions)
+	err := row.Scan(&role.RoleID, &role.Code, &role.Name, &role.System, &role.CreatedAt, &role.UpdatedAt, &role.Permissions, &role.DepartmentID, &role.DepartmentRoleType)
 	return role, err
 }
 

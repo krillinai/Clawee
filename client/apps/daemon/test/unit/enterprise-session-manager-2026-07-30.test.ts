@@ -30,6 +30,115 @@ afterEach(() => {
 });
 
 describe('enterprise session manager', () => {
+  it('合并并发续期并持久化新 Token，校验和后台取 Token 不会自动保活', async () => {
+    const result = deferred<EnterpriseCredential>();
+    const renewSession = vi.fn(async () => result.promise);
+    const store = createStore(credential);
+    const onSignedIn = vi.fn();
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(), credentialStore: store,
+      httpClient: createClient({ renewSession }), transportSecurity: 'secure_https', onSignedIn
+    });
+    await manager.refresh();
+    await manager.requireAccessToken();
+    await manager.requireIdentity();
+    expect(renewSession).not.toHaveBeenCalled();
+    const first = manager.renew();
+    const second = manager.renew();
+    await vi.waitFor(() => expect(renewSession).toHaveBeenCalledTimes(1));
+    expect(manager.getSnapshot().status).toBe('signed_in');
+    const renewed = { accessToken: 'renewed-token', expiresAt: '2099-01-01T00:00:00Z' };
+    result.resolve(renewed);
+    await Promise.all([first, second]);
+    expect(store.write).toHaveBeenCalledWith(renewed);
+    await expect(manager.requireAccessToken()).resolves.toBe(renewed.accessToken);
+    expect(manager.getSnapshot().expiresAt).toBe(renewed.expiresAt);
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
+    manager.startRestore();
+    await vi.waitFor(() => expect(manager.getSnapshot().status).toBe('signed_in'));
+    await expect(manager.requireAccessToken()).resolves.toBe(renewed.accessToken);
+  });
+
+  it('续期断网保留凭据，可重试；服务端拒绝后清理登录态', async () => {
+    const renewSession = vi.fn()
+      .mockRejectedValueOnce(new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request', 503))
+      .mockResolvedValueOnce({ accessToken: 'renewed-token', expiresAt: '2099-01-01T00:00:00Z' })
+      .mockRejectedValueOnce(new EnterpriseHttpError('ENTERPRISE_UNAUTHORIZED', 'response', 401));
+    const store = createStore(credential);
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(), credentialStore: store,
+      httpClient: createClient({ renewSession }), transportSecurity: 'secure_https'
+    });
+    await manager.refresh();
+    await expect(manager.renew()).rejects.toMatchObject({ code: 'ENTERPRISE_SERVICE_UNAVAILABLE' });
+    expect(store.delete).not.toHaveBeenCalled();
+    expect(manager.getSnapshot().status).toBe('signed_in');
+    await manager.renew();
+    await expect(manager.requireAccessToken()).resolves.toBe('renewed-token');
+    await expect(manager.renew()).rejects.toMatchObject({ code: 'ENTERPRISE_UNAUTHORIZED' });
+    expect(manager.getSnapshot()).toMatchObject({ status: 'signed_out', reason: 'session_expired' });
+    expect(await store.read()).toBeUndefined();
+  });
+
+  it.each(['业务请求', '身份校验'])('%s 等待正在进行的续期，使用换发后的 Token', async kind => {
+    const result = deferred<EnterpriseCredential>();
+    const renewSession = vi.fn(async () => result.promise);
+    const getMe = vi.fn(async () => activeMe());
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(), credentialStore: createStore(credential),
+      httpClient: createClient({ renewSession, getMe }), transportSecurity: 'secure_https'
+    });
+    await manager.refresh();
+    getMe.mockClear();
+    const renewal = manager.renew();
+    await vi.waitFor(() => expect(renewSession).toHaveBeenCalledTimes(1));
+    const request = kind === '业务请求' ? manager.requireAccessToken() : manager.requireIdentity();
+    expect(getMe).not.toHaveBeenCalled();
+    result.resolve({ accessToken: 'renewed-token', expiresAt: '2099-01-01T00:00:00Z' });
+    await renewal;
+    if (kind === '业务请求') {
+      await expect(request).resolves.toBe('renewed-token');
+    } else {
+      await expect(request).resolves.toMatchObject({ accessToken: 'renewed-token' });
+      expect(getMe).toHaveBeenCalledWith('renewed-token');
+    }
+  });
+
+  it('退出后晚到的续期响应不能恢复登录或覆盖凭据', async () => {
+    const result = deferred<EnterpriseCredential>();
+    const renewSession = vi.fn(async () => result.promise);
+    const store = createStore(credential);
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(), credentialStore: store,
+      httpClient: createClient({ renewSession }), transportSecurity: 'secure_https'
+    });
+    await manager.refresh();
+    const renewal = manager.renew();
+    await vi.waitFor(() => expect(renewSession).toHaveBeenCalledTimes(1));
+    await manager.logout();
+    result.resolve({ accessToken: 'late-token', expiresAt: '2099-01-01T00:00:00Z' });
+    await renewal;
+    expect(manager.getSnapshot().status).toBe('signed_out');
+    expect(store.write).not.toHaveBeenCalled();
+    expect(await store.read()).toBeUndefined();
+  });
+
+  it('续期凭据保存失败时保留旧凭据供重试', async () => {
+    const store = createStore(credential);
+    store.write.mockRejectedValueOnce(new EnterpriseCredentialStoreError('write'));
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(), credentialStore: store,
+      httpClient: createClient({ renewSession: vi.fn(async () => ({ accessToken: 'renewed-token', expiresAt: '2099-01-01T00:00:00Z' })) }),
+      transportSecurity: 'secure_https'
+    });
+    await manager.refresh();
+    await expect(manager.renew()).rejects.toMatchObject({ code: 'ENTERPRISE_SECURE_STORAGE_UNAVAILABLE' });
+    await expect(manager.requireAccessToken()).resolves.toBe(credential.accessToken);
+    expect(await store.read()).toEqual(credential);
+    await manager.renew();
+    await expect(manager.requireAccessToken()).resolves.toBe('renewed-token');
+  });
+
   it('reuses an account-specific Agent after switching A to B and back', async () => {
     const otherAgentId = 'clawee_123e4567-e89b-42d3-a456-426614174000';
     const identityStore: EnterpriseAgentIdentityStore = {
@@ -421,6 +530,28 @@ describe('enterprise session manager', () => {
       'Enterprise session restore failed [ENTERPRISE_PROTOCOL_ERROR]'
     );
     warn.mockRestore();
+  });
+
+  it('allows the server to wait for session restore before accepting tasks', async () => {
+    const stored = deferred<EnterpriseCredential | undefined>();
+    const store = createStore();
+    store.read.mockImplementationOnce(() => stored.promise);
+    const manager = createEnterpriseSessionManager({
+      agentIdentityStore: createAgentIdentityStore(),
+      credentialStore: store,
+      httpClient: createClient(),
+      transportSecurity: 'secure_https'
+    });
+
+    manager.startRestore();
+    const restored = manager.waitForRestore!();
+    expect(manager.getSnapshot().status).toBe('checking');
+    stored.resolve(undefined);
+
+    await expect(restored).resolves.toMatchObject({
+      status: 'signed_out',
+      transportSecurity: 'secure_https'
+    });
   });
 
   it('settles asynchronous restore when secure storage does not respond', async () => {
@@ -1010,7 +1141,9 @@ describe('enterprise session manager', () => {
             403,
             'agent_forbidden',
             undefined,
-            'req_auth_me_test'
+            'req_auth_me_test',
+            { failureKind: 'response', stage: 'response', requestMethod: 'GET', requestUrl: 'https://enterprise.example/api/v1/auth/me?code=private-value',
+              durationMs: 10516, timeoutMs: 15000, attempts: 1, maxAttempts: 1, causeChain: 'Error: upstream unavailable Bearer private-value', accessToken: 'private-value' }
           );
         })
       }),
@@ -1042,8 +1175,11 @@ describe('enterprise session manager', () => {
       errorCode: 'ENTERPRISE_AGENT_FORBIDDEN',
       upstreamCode: 'agent_forbidden',
       statusCode: 403,
-      requestId: 'req_auth_me_test'
+      requestId: 'req_auth_me_test',
+      requestStage: 'response', failureKind: 'response', requestMethod: 'GET', requestUrl: 'https://enterprise.example/api/v1/auth/me',
+      durationMs: 10516, timeoutMs: 15000, attempts: 1, maxAttempts: 1, causeChain: 'Error: upstream unavailable Bearer [REDACTED]'
     });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private-value');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('dingtalk-session-token');
   });
 

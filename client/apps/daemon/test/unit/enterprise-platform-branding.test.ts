@@ -10,6 +10,16 @@ import type { EnterpriseSessionManager } from '../../src/enterprise/session-mana
 const ORIGIN = 'https://enterprise.example';
 
 describe('enterprise platform branding', () => {
+  it('maps the optional brand accent color without introducing a default', async () => {
+    const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ data: { ...data, accent_color: '#F2E9EA' } })));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getPlatformBranding!('token')).resolves.toMatchObject({ accentColor: '#F2E9EA' });
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data })));
+    expect((await client.getPlatformBranding!('token')).accentColor).toBeUndefined();
+    fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ data: { ...data, accent_color: 'invalid' } })));
+    await expect(client.getPlatformBranding!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+  });
   it('maps configured menu labels up to ten characters with the admin link and rejects invalid names', async () => {
     const data = { sidebar_logo_configured: false, sidebar_compact_logo_configured: false };
     const fetch = vi.fn(async () => new Response(JSON.stringify({
@@ -24,6 +34,8 @@ describe('enterprise platform branding', () => {
       adminUrl: 'https://gateway.example/admin',
       sidebarLogoConfigured: false,
       sidebarCompactLogoConfigured: false,
+      sidebarLogoDarkConfigured: false,
+      sidebarCompactLogoDarkConfigured: false,
       sidebarMenuLabels: { skills: '一二三四五六七八九十', drive: '𠮷𠮷𠮷𠮷' }
     });
     for (const value of ['', '一二三四五六七八九十百', 'a\nb', 'a\u200bb', ' 字 ']) {
@@ -60,7 +72,9 @@ describe('enterprise platform branding', () => {
 
     await expect(client.getPlatformBranding!('token')).resolves.toEqual({
       sidebarLogoConfigured: true,
-      sidebarCompactLogoConfigured: false
+      sidebarCompactLogoConfigured: false,
+      sidebarLogoDarkConfigured: false,
+      sidebarCompactLogoDarkConfigured: false
     });
     await expect(client.getPlatformBrandingImage!('token', 'sidebar-logo')).resolves.toEqual({
       content: new Uint8Array([137, 80, 78, 71]),
@@ -126,6 +140,32 @@ describe('enterprise platform branding', () => {
     expect(image.headers['content-type']).toBe('image/jpeg');
     expect(image.headers['cache-control']).toBe('no-store');
     expect(image.rawPayload).toEqual(Buffer.from([1, 2, 3]));
+    for (const kind of ['sidebar-logo-dark', 'sidebar-compact-logo-dark']) {
+      const image = await server.inject(`/enterprise/platform-branding/${kind}`);
+      expect(image.statusCode).toBe(200);
+      expect(image.headers['cache-control']).toBe('no-store');
+      expect(image.rawPayload).toEqual(Buffer.from([1, 2, 3]));
+      expect(httpClient.getPlatformBrandingImage).toHaveBeenLastCalledWith('token', kind);
+    }
     await server.close();
+  });
+
+  it('maps dark logo configuration and downloads its exact routes', async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/platform-branding')) return new Response(JSON.stringify({ data: {
+        sidebar_logo_configured: true, sidebar_compact_logo_configured: false,
+        sidebar_logo_dark_configured: true, sidebar_compact_logo_dark_configured: true
+      } }));
+      return new Response(new Uint8Array([1, 2]), { headers: { 'content-type': 'image/png' } });
+    });
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.getPlatformBranding!('token')).resolves.toMatchObject({
+      sidebarLogoDarkConfigured: true, sidebarCompactLogoDarkConfigured: true
+    });
+    for (const kind of ['sidebar-logo-dark', 'sidebar-compact-logo-dark'] as const) {
+      await client.getPlatformBrandingImage!('token', kind);
+      expect(fetch).toHaveBeenLastCalledWith(new URL(`/api/v1/app/platform-branding/${kind}`, ORIGIN),
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer token' }) }));
+    }
   });
 });

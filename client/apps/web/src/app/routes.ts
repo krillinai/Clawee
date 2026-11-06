@@ -5,13 +5,15 @@ export type AppRoute =
   | { view: 'schedules'; scheduleId?: string }
   | { view: 'tasks' }
   | { view: 'dashboard' }
+  | { view: 'skill-contributions' }
   | { view: 'activity'; range: ActivityRange }
   | { view: 'activity-agent'; collectorId: string; agentId: string; range: ActivityRange }
   | { view: 'activity-recharge-records'; range: ActivityRange }
-  | { view: 'plugins'; source?: 'enterprise' | 'public' }
+  | { view: 'plugins'; source?: 'enterprise' | 'public' | 'cloud' }
   | { view: 'connections' }
   | { view: 'knowledge' }
   | { view: 'workflow' }
+  | { view: 'enterprise-approvals' }
   | { view: 'drive' }
   | { view: 'account' }
   | { view: 'capabilities' }
@@ -54,16 +56,18 @@ export function parseRoute(hash: string): AppRoute {
   }
   if (path === '#/tasks') return { view: 'tasks' };
   if (path === '#/dashboard') return { view: 'dashboard' };
+  if (path === '#/skill-contributions') return { view: 'skill-contributions' };
   if (path === '#/activity') return { view: 'activity', range: parseActivityRange(query) };
   if (path === '#/plugins') {
     const fields = parseQuery(query);
-    return fields.source === 'enterprise' || fields.source === 'public'
+    return fields.source === 'enterprise' || fields.source === 'public' || fields.source === 'cloud'
       ? { view: 'plugins', source: fields.source }
       : { view: 'plugins' };
   }
   if (path === '#/connections') return { view: 'connections' };
   if (path === '#/knowledge') return { view: 'knowledge' };
   if (path === '#/workflow') return { view: 'workflow' };
+  if (path === '#/approvals') return { view: 'enterprise-approvals' };
   if (path === '#/drive') return { view: 'drive' };
   if (path === '#/account') return { view: 'account' };
   if (path === '#/capabilities') return { view: 'capabilities' };
@@ -103,6 +107,8 @@ export function formatRoute(route: AppRoute): string {
       return '#/tasks';
     case 'dashboard':
       return '#/dashboard';
+    case 'skill-contributions':
+      return '#/skill-contributions';
     case 'activity':
       return `#/activity?range=${route.range}`;
     case 'activity-agent':
@@ -119,6 +125,8 @@ export function formatRoute(route: AppRoute): string {
       return '#/knowledge';
     case 'workflow':
       return '#/workflow';
+    case 'enterprise-approvals':
+      return '#/approvals';
     case 'drive':
       return '#/drive';
     case 'account':
@@ -150,7 +158,7 @@ function parseQuery(query: string): {
   runId?: string;
   approvalId?: string;
   scheduleId?: string;
-  source?: 'enterprise' | 'public';
+  source?: 'enterprise' | 'public' | 'cloud';
 } {
   const fields: {
     threadId?: string;
@@ -158,7 +166,7 @@ function parseQuery(query: string): {
     runId?: string;
     approvalId?: string;
     scheduleId?: string;
-    source?: 'enterprise' | 'public';
+    source?: 'enterprise' | 'public' | 'cloud';
   } = {};
   for (const pair of query.split('&')) {
     if (pair.length === 0) continue;
@@ -171,7 +179,7 @@ function parseQuery(query: string): {
     if (key === 'runId') fields.runId = value;
     if (key === 'approvalId') fields.approvalId = value;
     if (key === 'scheduleId') fields.scheduleId = value;
-    if (key === 'source' && (value === 'enterprise' || value === 'public')) fields.source = value;
+    if (key === 'source' && (value === 'enterprise' || value === 'public' || value === 'cloud')) fields.source = value;
   }
   return fields;
 }

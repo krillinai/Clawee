@@ -16,7 +16,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/rbac"
 )
 
-const platformBrandingRequestMaxBytes = 2*platformbranding.MaxImageSize + 64*1024
+const platformBrandingRequestMaxBytes = 4*platformbranding.MaxImageSize + 64*1024
 
 func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 	if opts.PlatformBrandingService == nil {
@@ -32,8 +32,10 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, appPlatformBrandingResponse(configuration))
 	})
-	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-logo", opts.PlatformBrandingService, false)
-	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-compact-logo", opts.PlatformBrandingService, true)
+	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-logo", opts.PlatformBrandingService, false, false)
+	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-compact-logo", opts.PlatformBrandingService, true, false)
+	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-logo-dark", opts.PlatformBrandingService, false, true)
+	mountPlatformBrandingImageRoute(app, "/platform-branding/sidebar-compact-logo-dark", opts.PlatformBrandingService, true, true)
 
 	protected := admin.Group("/platform-branding")
 	protected.Use(requirePermission(opts.RBACService, rbac.PermissionPlatformBrandingRead))
@@ -46,8 +48,10 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, adminPlatformBrandingResponse(configuration))
 	})
-	mountPlatformBrandingImageRoute(protected, "/sidebar-logo", opts.PlatformBrandingService, false)
-	mountPlatformBrandingImageRoute(protected, "/sidebar-compact-logo", opts.PlatformBrandingService, true)
+	mountPlatformBrandingImageRoute(protected, "/sidebar-logo", opts.PlatformBrandingService, false, false)
+	mountPlatformBrandingImageRoute(protected, "/sidebar-compact-logo", opts.PlatformBrandingService, true, false)
+	mountPlatformBrandingImageRoute(protected, "/sidebar-logo-dark", opts.PlatformBrandingService, false, true)
+	mountPlatformBrandingImageRoute(protected, "/sidebar-compact-logo-dark", opts.PlatformBrandingService, true, true)
 	admin.PUT("/platform-branding", requirePermission(opts.RBACService, rbac.PermissionPlatformBrandingUpdate), func(c *gin.Context) {
 		account, ok := currentAccount(c)
 		if !ok {
@@ -62,6 +66,14 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 		defer c.Request.MultipartForm.RemoveAll()
 		var menuLabels map[string]*string
 		var adminURL *string
+		var accentColor *string
+		if values, exists := c.Request.MultipartForm.Value["accent_color"]; exists {
+			if len(values) != 1 {
+				platformBrandingInvalid(c, "品牌高亮色无效")
+				return
+			}
+			accentColor = &values[0]
+		}
 		if values, exists := c.Request.MultipartForm.Value["admin_url"]; exists {
 			if len(values) != 1 {
 				platformBrandingInvalid(c, "管理后台地址无效")
@@ -78,6 +90,8 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 
 		logoAction := platformbranding.Action(c.PostForm("sidebar_logo_action"))
 		compactAction := platformbranding.Action(c.PostForm("sidebar_compact_logo_action"))
+		logoDarkAction := platformbranding.Action(c.DefaultPostForm("sidebar_logo_dark_action", string(platformbranding.ActionKeep)))
+		compactDarkAction := platformbranding.Action(c.DefaultPostForm("sidebar_compact_logo_dark_action", string(platformbranding.ActionKeep)))
 		logo, err := brandingUpload(c.Request.MultipartForm, "sidebar_logo", logoAction)
 		if err != nil {
 			platformBrandingInvalid(c, err.Error())
@@ -88,12 +102,29 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 			platformBrandingInvalid(c, err.Error())
 			return
 		}
-		configuration, err := opts.PlatformBrandingService.Update(c.Request.Context(), platformbranding.UpdateInput{
+		logoDark, err := brandingUpload(c.Request.MultipartForm, "sidebar_logo_dark", logoDarkAction)
+		if err != nil {
+			platformBrandingInvalid(c, err.Error())
+			return
+		}
+		compactLogoDark, err := brandingUpload(c.Request.MultipartForm, "sidebar_compact_logo_dark", compactDarkAction)
+		if err != nil {
+			platformBrandingInvalid(c, err.Error())
+			return
+		}
+		input := platformbranding.UpdateInput{
 			SidebarLogoAction: logoAction, SidebarLogo: logo,
 			SidebarCompactLogoAction: compactAction, SidebarCompactLogo: compactLogo,
-			UpdatedBy: account.UserID, SidebarMenuLabels: menuLabels, AdminURL: adminURL,
-		})
+			SidebarLogoDarkAction: logoDarkAction, SidebarLogoDark: logoDark,
+			SidebarCompactLogoDarkAction: compactDarkAction, SidebarCompactLogoDark: compactLogoDark,
+			UpdatedBy: account.UserID, SidebarMenuLabels: menuLabels, AdminURL: adminURL, AccentColor: accentColor,
+		}
+		configuration, err := opts.PlatformBrandingService.Update(c.Request.Context(), input)
 		if err != nil {
+			if errors.Is(err, platformbranding.ErrInvalidAccentColor) {
+				platformBrandingInvalid(c, "品牌高亮色必须是 #RRGGBB 格式，留空恢复客户端默认颜色")
+				return
+			}
 			if errors.Is(err, platformbranding.ErrInvalidAdminURL) {
 				platformBrandingInvalid(c, "管理后台地址必须是有效的 HTTP 或 HTTPS 地址（最多 2048 字符）")
 				return
@@ -109,13 +140,13 @@ func mountPlatformBrandingRoutes(app, admin *gin.RouterGroup, opts Options) {
 			platformBrandingUnavailable(c)
 			return
 		}
-		logPlatformBrandingUpdate(opts.Logger, account.UserID, logoAction, compactAction, configuration)
+		logPlatformBrandingUpdate(opts.Logger, input, configuration)
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, adminPlatformBrandingResponse(configuration))
 	})
 }
 
-func mountPlatformBrandingImageRoute(group *gin.RouterGroup, path string, service *platformbranding.Service, compact bool) {
+func mountPlatformBrandingImageRoute(group *gin.RouterGroup, path string, service *platformbranding.Service, compact, dark bool) {
 	group.GET(path, func(c *gin.Context) {
 		configuration, err := service.Get(c.Request.Context())
 		if err != nil {
@@ -125,6 +156,12 @@ func mountPlatformBrandingImageRoute(group *gin.RouterGroup, path string, servic
 		image := configuration.SidebarLogo
 		if compact {
 			image = configuration.SidebarCompactLogo
+		}
+		if dark {
+			image = configuration.SidebarLogoDark
+			if compact {
+				image = configuration.SidebarCompactLogoDark
+			}
 		}
 		if image == nil {
 			c.Header("Cache-Control", "no-store")
@@ -164,21 +201,29 @@ func brandingUpload(form *multipart.Form, field string, action platformbranding.
 
 func appPlatformBrandingResponse(configuration platformbranding.Configuration) gin.H {
 	return gin.H{
-		"sidebar_menu_labels":             configuration.SidebarMenuLabels,
-		"admin_url":                       configuration.AdminURL,
-		"sidebar_logo_configured":         configuration.SidebarLogo != nil,
-		"sidebar_compact_logo_configured": configuration.SidebarCompactLogo != nil,
+		"sidebar_menu_labels":                  configuration.SidebarMenuLabels,
+		"admin_url":                            configuration.AdminURL,
+		"accent_color":                         configuration.AccentColor,
+		"sidebar_logo_configured":              configuration.SidebarLogo != nil,
+		"sidebar_compact_logo_configured":      configuration.SidebarCompactLogo != nil,
+		"sidebar_logo_dark_configured":         configuration.SidebarLogoDark != nil,
+		"sidebar_compact_logo_dark_configured": configuration.SidebarCompactLogoDark != nil,
 	}
 }
 
 func adminPlatformBrandingResponse(configuration platformbranding.Configuration) gin.H {
 	return gin.H{
-		"sidebar_menu_labels":             configuration.SidebarMenuLabels,
-		"admin_url":                       configuration.AdminURL,
-		"sidebar_logo_configured":         configuration.SidebarLogo != nil,
-		"sidebar_logo_url":                optionalBrandingURL(configuration.SidebarLogo, "/api/v1/admin/platform-branding/sidebar-logo"),
-		"sidebar_compact_logo_configured": configuration.SidebarCompactLogo != nil,
-		"sidebar_compact_logo_url":        optionalBrandingURL(configuration.SidebarCompactLogo, "/api/v1/admin/platform-branding/sidebar-compact-logo"),
+		"sidebar_menu_labels":                  configuration.SidebarMenuLabels,
+		"admin_url":                            configuration.AdminURL,
+		"accent_color":                         configuration.AccentColor,
+		"sidebar_logo_configured":              configuration.SidebarLogo != nil,
+		"sidebar_logo_url":                     optionalBrandingURL(configuration.SidebarLogo, "/api/v1/admin/platform-branding/sidebar-logo"),
+		"sidebar_compact_logo_configured":      configuration.SidebarCompactLogo != nil,
+		"sidebar_compact_logo_url":             optionalBrandingURL(configuration.SidebarCompactLogo, "/api/v1/admin/platform-branding/sidebar-compact-logo"),
+		"sidebar_logo_dark_configured":         configuration.SidebarLogoDark != nil,
+		"sidebar_logo_dark_url":                optionalBrandingURL(configuration.SidebarLogoDark, "/api/v1/admin/platform-branding/sidebar-logo-dark"),
+		"sidebar_compact_logo_dark_configured": configuration.SidebarCompactLogoDark != nil,
+		"sidebar_compact_logo_dark_url":        optionalBrandingURL(configuration.SidebarCompactLogoDark, "/api/v1/admin/platform-branding/sidebar-compact-logo-dark"),
 	}
 }
 
@@ -197,19 +242,23 @@ func platformBrandingUnavailable(c *gin.Context) {
 	abortAuthorizationError(c, http.StatusServiceUnavailable, "platform_branding_unavailable", "平台外观服务暂不可用")
 }
 
-func logPlatformBrandingUpdate(logger *zap.Logger, operator string, logoAction, compactAction platformbranding.Action, configuration platformbranding.Configuration) {
+func logPlatformBrandingUpdate(logger *zap.Logger, input platformbranding.UpdateInput, configuration platformbranding.Configuration) {
 	if logger == nil {
 		return
 	}
 	logger.Info("platform branding updated",
-		zap.String("operator_user_id", operator),
+		zap.String("operator_user_id", input.UpdatedBy),
 		zap.Time("updated_at", configuration.UpdatedAt),
 		zap.Any("sidebar_menu_labels", configuration.SidebarMenuLabels),
 		zap.String("admin_url", configuration.AdminURL),
-		zap.String("sidebar_logo_action", string(logoAction)),
-		zap.String("sidebar_compact_logo_action", string(compactAction)),
+		zap.String("sidebar_logo_action", string(input.SidebarLogoAction)),
+		zap.String("sidebar_compact_logo_action", string(input.SidebarCompactLogoAction)),
+		zap.String("sidebar_logo_dark_action", string(input.SidebarLogoDarkAction)),
+		zap.String("sidebar_compact_logo_dark_action", string(input.SidebarCompactLogoDarkAction)),
 		zap.Any("sidebar_logo", brandingImageSummary(configuration.SidebarLogo)),
 		zap.Any("sidebar_compact_logo", brandingImageSummary(configuration.SidebarCompactLogo)),
+		zap.Any("sidebar_logo_dark", brandingImageSummary(configuration.SidebarLogoDark)),
+		zap.Any("sidebar_compact_logo_dark", brandingImageSummary(configuration.SidebarCompactLogoDark)),
 	)
 }
 

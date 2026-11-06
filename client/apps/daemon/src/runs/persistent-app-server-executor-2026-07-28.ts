@@ -77,46 +77,65 @@ export type PersistentAppServerExecutorInput = {
 
 export const DEFAULT_PERSISTENT_APP_SERVER_MAX_CONCURRENCY = 10;
 export const MAX_PERSISTENT_APP_SERVER_MAX_CONCURRENCY = 10;
+export const PERSISTENT_APP_SERVER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
 export function createPersistentAppServerExecutor(
   input: PersistentAppServerExecutorInput
 ): PersistentAppServerExecutor {
   const maxConcurrency = normalizeMaxConcurrency(input.maxConcurrency);
-  if (maxConcurrency === 1) {
-    return createPersistentAppServerSlotExecutor(input);
-  }
-
   type Slot = {
     executor: PersistentAppServerExecutor;
     busy: boolean;
-    threadIds: Set<string>;
+    threadId?: string;
+    idleSince: number;
+    idleTimer?: NodeJS.Timeout;
   };
   const slots: Slot[] = [];
   let closing = false;
   let closeWork: Promise<void> | undefined;
 
   function createSlot(): Slot {
-    const slot = {
+    const slot: Slot = {
       executor: createPersistentAppServerSlotExecutor(input),
       busy: false,
-      threadIds: new Set<string>()
+      idleSince: 0
     };
     slots.push(slot);
     return slot;
   }
 
   function findOwner(threadId: string): Slot | undefined {
-    return slots.find(slot => slot.threadIds.has(threadId));
+    return slots.find(slot => slot.threadId === threadId);
   }
 
   function selectSlot(threadId: string): Slot | undefined {
     const owner = findOwner(threadId);
     if (owner !== undefined) return owner.busy ? undefined : owner;
-    const available = slots
+    const empty = slots.find(slot => !slot.busy && slot.threadId === undefined);
+    if (empty !== undefined) return empty;
+    if (slots.length < maxConcurrency) return createSlot();
+    return slots
       .filter(slot => !slot.busy)
-      .sort((left, right) => left.threadIds.size - right.threadIds.size)[0];
-    return available
-      ?? (slots.length < maxConcurrency ? createSlot() : undefined);
+      .sort((left, right) => left.idleSince - right.idleSince)[0];
+  }
+
+  function clearIdleTimer(slot: Slot): void {
+    if (slot.idleTimer === undefined) return;
+    clearTimeout(slot.idleTimer);
+    slot.idleTimer = undefined;
+  }
+
+  function retainIdleSlot(slot: Slot): void {
+    slot.idleSince = Date.now();
+    if (closing) return;
+    slot.idleTimer = setTimeout(() => {
+      slot.idleTimer = undefined;
+      slot.threadId = undefined;
+      void slot.executor.invalidate('idle_timeout').catch(error => {
+        console.warn('Failed to recycle idle app-server process', error);
+      });
+    }, PERSISTENT_APP_SERVER_IDLE_TIMEOUT_MS);
+    slot.idleTimer.unref();
   }
 
   return {
@@ -129,15 +148,17 @@ export function createPersistentAppServerExecutor(
         throw new Error('Persistent app-server executor is busy');
       }
 
+      clearIdleTimer(slot);
+      const previousThreadId = slot.threadId;
       slot.busy = true;
-      const alreadyOwned = slot.threadIds.has(threadId);
-      slot.threadIds.add(threadId);
+      slot.threadId = threadId;
       let execution: PersistentAppServerExecution;
       try {
         execution = slot.executor.start(run);
       } catch (error) {
         slot.busy = false;
-        if (!alreadyOwned) slot.threadIds.delete(threadId);
+        slot.threadId = previousThreadId;
+        retainIdleSlot(slot);
         throw error;
       }
       return {
@@ -145,6 +166,7 @@ export function createPersistentAppServerExecutor(
         started: execution.started,
         result: execution.result.finally(() => {
           slot.busy = false;
+          retainIdleSlot(slot);
         })
       };
     },
@@ -160,11 +182,17 @@ export function createPersistentAppServerExecutor(
     },
     async invalidate(reason) {
       if (closing) return;
+      for (const slot of slots) {
+        if (slot.busy) continue;
+        clearIdleTimer(slot);
+        slot.threadId = undefined;
+      }
       await Promise.all(slots.map(slot => slot.executor.invalidate(reason)));
     },
     async close(options = {}) {
       if (closeWork !== undefined) return closeWork;
       closing = true;
+      for (const slot of slots) clearIdleTimer(slot);
       closeWork = (async () => {
         const results = await Promise.allSettled(
           slots.map(slot => slot.executor.close(options))
@@ -186,6 +214,7 @@ function createPersistentAppServerSlotExecutor(
   let host: CodexAppServerHost | undefined;
   let injection: AgentToolProcessInjection | undefined;
   let profile: string | undefined;
+  let threadId: string | undefined;
   let runtimeConfigurationFingerprint: string | undefined;
   let activeRunId: string | undefined;
   let activeExecution: PersistentAppServerExecution | undefined;
@@ -279,14 +308,18 @@ function createPersistentAppServerSlotExecutor(
     }
     let reused = host !== undefined
       && host.isReusable()
+      && threadId === run.thread.id
       && profile === nextProfile
       && runtimeConfigurationFingerprint
         === nextRuntimeConfigurationFingerprint;
     if (host !== undefined && !reused) {
       const previousProfile = profile;
-      const reason = previousProfile !== nextProfile
-        ? 'profile_changed'
-        : 'runtime_configuration_changed';
+      const reason = threadId !== run.thread.id
+        ? 'idle_slot_reassigned'
+        : previousProfile !== nextProfile
+          ? 'profile_changed'
+          : 'runtime_configuration_changed';
+      // 新会话启动前，必须先关闭承载旧会话状态的进程。
       await clearHost(reason, run.forceKillGraceMs);
       assertOpen();
       if (previousProfile !== undefined && previousProfile !== nextProfile) {
@@ -307,6 +340,7 @@ function createPersistentAppServerSlotExecutor(
       });
       try {
         profile = nextProfile;
+        threadId = run.thread.id;
         runtimeConfigurationFingerprint =
           nextRuntimeConfigurationFingerprint;
         const processConfiguration = mergeInjections(
@@ -394,6 +428,7 @@ function createPersistentAppServerSlotExecutor(
     host = undefined;
     injection = undefined;
     profile = undefined;
+    threadId = undefined;
     runtimeConfigurationFingerprint = undefined;
     try {
       await currentHost?.close(reason, forceKillGraceMs);

@@ -1,6 +1,7 @@
 package skillhub
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -29,6 +30,7 @@ var (
 	ErrConflict                 = errors.New("skillhub operation conflict")
 	ErrVersionChanged           = errors.New("skillhub current version changed")
 	ErrFileNotPreviewable       = errors.New("skill file is not previewable")
+	ErrStoredPackageMissing     = errors.New("stored skill package is missing")
 	ErrStoredPackageInvalid     = errors.New("stored skill package is invalid")
 	ErrSpaceNotFound            = errors.New("skill space not found")
 	ErrSpaceNameConflict        = errors.New("skill space name conflict")
@@ -39,6 +41,29 @@ var (
 	ErrSelfPublishForbidden     = errors.New("only the uploader can publish without approval")
 	ErrExternalApprovalConflict = errors.New("external approval request conflicts with existing request")
 )
+
+const (
+	SkillConflictExisting = "existing_skill"
+	SkillConflictVersion  = "existing_version"
+)
+
+// SkillConflictError keeps enough context for the API to explain which
+// existing Skill caused an upload conflict while remaining compatible with
+// callers that check ErrConflict.
+type SkillConflictError struct {
+	Kind      string
+	SkillName string
+	SpaceName string
+	Version   string
+}
+
+func (e *SkillConflictError) Error() string {
+	return "skill upload conflicts with an existing skill"
+}
+
+func (e *SkillConflictError) Unwrap() error {
+	return ErrConflict
+}
 
 type Skill struct {
 	SkillID          string              `json:"skill_id"`
@@ -64,6 +89,7 @@ type SkillLatestVersion struct {
 }
 
 type OwnPendingVersion struct {
+	LocalApproval    *LocalApproval    `json:"local_approval,omitempty"`
 	SkillID          string            `json:"skill_id"`
 	SpaceID          string            `json:"space_id"`
 	Name             string            `json:"name"`
@@ -90,6 +116,7 @@ type ApprovalInstance struct {
 }
 
 type Version struct {
+	ApprovalRequestID string                 `json:"-"`
 	LocalApproval     *LocalApproval         `json:"local_approval,omitempty"`
 	SkillName         string                 `json:"skill_name"`
 	ApprovalStatus    string                 `json:"approval_status"`
@@ -117,18 +144,54 @@ type Approver struct {
 	Name   string `json:"name"`
 }
 
+type ApprovalRole struct {
+	RoleID string `json:"role_id"`
+	Name   string `json:"name"`
+}
+
+type ApprovalRoleLookup func(context.Context, string) (ApprovalRole, []Approver, error)
+
 type ApprovalDecision struct {
 	Approver
-	Status    string     `json:"status"`
-	Comment   string     `json:"comment"`
-	DecidedAt *time.Time `json:"decided_at"`
+	Scores    *ReviewScores `json:"scores,omitempty"`
+	Status    string        `json:"status"`
+	Comment   string        `json:"comment"`
+	DecidedAt *time.Time    `json:"decided_at"`
 }
 
 type LocalApproval struct {
-	Status    string             `json:"status"`
-	Total     int                `json:"total"`
-	Approved  int                `json:"approved"`
-	Approvers []ApprovalDecision `json:"approvers"`
+	WorkflowStage          string             `json:"workflow_stage,omitempty"`
+	CanSubmitReview        bool               `json:"can_submit_review"`
+	CanRetryAI             bool               `json:"can_retry_ai"`
+	AIReview               *AIReview          `json:"ai_review,omitempty"`
+	RequestID              string             `json:"request_id"`
+	ContentDigest          string             `json:"content_digest"`
+	ScoringStandardVersion string             `json:"scoring_standard_version,omitempty"`
+	ScoreSummary           *ScoreSummary      `json:"score_summary,omitempty"`
+	Status                 string             `json:"status"`
+	Total                  int                `json:"total"`
+	Approved               int                `json:"approved"`
+	Approvers              []ApprovalDecision `json:"approvers"`
+}
+
+type ReviewScores struct {
+	ScenarioValue       *int `json:"scenario_value,omitempty"`
+	ResultEffectiveness *int `json:"result_effectiveness,omitempty"`
+	EaseOfUse           *int `json:"ease_of_use,omitempty"`
+	ReuseValue          *int `json:"reuse_value,omitempty"`
+}
+
+type ScoreSummary struct {
+	ScenarioValue       float64 `json:"scenario_value"`
+	ResultEffectiveness float64 `json:"result_effectiveness"`
+	EaseOfUse           float64 `json:"ease_of_use"`
+	ReuseValue          float64 `json:"reuse_value"`
+	Total               float64 `json:"total"`
+}
+
+type ReviewInput struct {
+	RequestID string
+	Scores    *ReviewScores
 }
 
 type AdminDetail struct {
@@ -138,8 +201,9 @@ type AdminDetail struct {
 }
 
 type MutationResult struct {
-	Skill   Skill   `json:"skill"`
-	Version Version `json:"version"`
+	ApprovalRequestID string  `json:"approval_request_id,omitempty"`
+	Skill             Skill   `json:"skill"`
+	Version           Version `json:"version"`
 }
 
 type SkillSpaceMoveResult struct {
@@ -207,17 +271,19 @@ type CreateVersionInput struct {
 }
 
 type Space struct {
-	Approvers                  []Approver `json:"approvers"`
-	ApprovalProvider           string     `json:"approval_provider"`
-	ExternalApprovalTemplateID string     `json:"external_approval_template_id"`
-	SpaceID                    string     `json:"space_id"`
-	Name                       string     `json:"name"`
-	Description                string     `json:"description"`
-	CreatedBy                  string     `json:"created_by,omitempty"`
-	UpdatedBy                  string     `json:"updated_by,omitempty"`
-	CreatedAt                  time.Time  `json:"created_at,omitempty"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
-	Actions                    []string   `json:"actions,omitempty"`
+	ApproverRoleIDs            []string       `json:"approver_role_ids"`
+	ApproverRoles              []ApprovalRole `json:"approver_roles"`
+	Approvers                  []Approver     `json:"approvers"`
+	ApprovalProvider           string         `json:"approval_provider"`
+	ExternalApprovalTemplateID string         `json:"external_approval_template_id"`
+	SpaceID                    string         `json:"space_id"`
+	Name                       string         `json:"name"`
+	Description                string         `json:"description"`
+	CreatedBy                  string         `json:"created_by,omitempty"`
+	UpdatedBy                  string         `json:"updated_by,omitempty"`
+	CreatedAt                  time.Time      `json:"created_at,omitempty"`
+	UpdatedAt                  time.Time      `json:"updated_at"`
+	Actions                    []string       `json:"actions,omitempty"`
 }
 
 type SpaceSummary struct {

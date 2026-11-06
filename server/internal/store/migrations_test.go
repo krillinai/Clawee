@@ -976,3 +976,87 @@ func TestSkillSpacesMigrationAddsOwnershipAndBackfillsDefaultSpace(t *testing.T)
 		}
 	}
 }
+
+func TestModelProxyAuditMigrationCreatesAnalysisIndexes(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/00081_model_proxy_audit.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	migration := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"create table if not exists model_proxy_audit_records",
+		"api_key_fingerprint text not null",
+		"request_headers jsonb",
+		"usage_available boolean not null default false",
+		"idx_model_proxy_audit_user_created",
+		"idx_model_proxy_audit_model_created",
+		"idx_model_proxy_audit_status_created",
+		"idx_model_proxy_audit_request_id",
+		"drop table if exists model_proxy_audit_records",
+	} {
+		if !strings.Contains(migration, fragment) {
+			t.Fatalf("migration missing %q", fragment)
+		}
+	}
+}
+
+func TestModelProxyAuditMetricsMigrationAddsUsageFields(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/00083_model_proxy_audit_metrics.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	migration := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table model_proxy_audit_records",
+		"add column if not exists request_type text",
+		"add column if not exists cache_read_tokens bigint",
+		"add column if not exists first_byte_ms bigint",
+		"drop column if exists first_byte_ms",
+		"drop column if exists cache_read_tokens",
+		"drop column if exists request_type",
+	} {
+		if !strings.Contains(migration, fragment) {
+			t.Fatalf("migration missing %q", fragment)
+		}
+	}
+}
+
+func TestModelProxyUsageContractMigrationAddsUsageAttribution(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/00087_model_proxy_usage_contract.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	migration := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"add column if not exists requested_model text",
+		"add column if not exists upstream_model text",
+		"add column if not exists response_model text",
+		"add column if not exists cache_creation_tokens bigint",
+		"add column if not exists reasoning_tokens bigint",
+		"add column if not exists usage_status text",
+		"add column if not exists usage_source text",
+		"update model_proxy_audit_records",
+		"drop column if exists usage_source",
+	} {
+		if !strings.Contains(migration, fragment) {
+			t.Fatalf("migration missing %q", fragment)
+		}
+	}
+}
+
+func TestModelAPIKeyCiphertextMigrationAddsEncryptedSecret(t *testing.T) {
+	raw, err := os.ReadFile("../../db/migrations/00084_model_api_key_ciphertext.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	migration := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table model_api_keys",
+		"add column if not exists api_key_ciphertext bytea",
+		"drop column if exists api_key_ciphertext",
+	} {
+		if !strings.Contains(migration, fragment) {
+			t.Fatalf("migration missing %q", fragment)
+		}
+	}
+}

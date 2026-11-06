@@ -25,18 +25,17 @@ import (
 )
 
 const (
-	dingtalkProviderType    = "dingtalk"
-	dingtalkStateCookie     = "claw_dingtalk_oauth_state"
-	dingtalkCookiePath      = "/api/v1/auth/dingtalk"
-	intentLogin             = "login"
-	intentBind              = "bind_current_user"
-	intentClaweeLogin       = "login_clawee"
-	pkceMethodS256          = "S256"
-	claweeLoopbackHost      = "127.0.0.1"
-	claweeLoopbackPath      = "/enterprise/dingtalk/callback"
-	authorizationCodeTTL    = time.Minute
-	claweeTokenBodyLimit    = 4096
-	dingtalkUnbindBodyLimit = 4096
+	dingtalkProviderType = "dingtalk"
+	dingtalkStateCookie  = "claw_dingtalk_oauth_state"
+	dingtalkCookiePath   = "/api/v1/auth/dingtalk"
+	intentLogin          = "login"
+	intentBind           = "bind_current_user"
+	intentClaweeLogin    = "login_clawee"
+	pkceMethodS256       = "S256"
+	claweeLoopbackHost   = "127.0.0.1"
+	claweeLoopbackPath   = "/enterprise/dingtalk/callback"
+	authorizationCodeTTL = time.Minute
+	claweeTokenBodyLimit = 4096
 )
 
 type dingtalkClaweeTokenRequest struct {
@@ -47,10 +46,6 @@ type dingtalkClaweeTokenRequest struct {
 	RedirectURI        string `json:"redirect_uri"`
 	CodeVerifier       string `json:"code_verifier"`
 	AccountScopedAgent bool   `json:"account_scoped_agent"`
-}
-
-type dingtalkUnbindRequest struct {
-	Password string `json:"password"`
 }
 
 var errDingTalkEmailMissing = errors.New("dingtalk email is missing")
@@ -198,7 +193,9 @@ func handleDingTalkCallback(opts Options, cookies authCookieConfig) gin.HandlerF
 		}
 		member, err := config.Client.ResolveMember(c.Request.Context(), code)
 		if err != nil {
-			if dingtalk.IsNotEnterpriseMember(err) {
+			if errors.Is(err, dingtalk.ErrEmployeePhoneMissing) {
+				rejectTrustedDingTalkLogin(c, opts, loginState, state, "employee_phone_missing", "")
+			} else if dingtalk.IsNotEnterpriseMember(err) {
 				rejectTrustedDingTalkLogin(c, opts, loginState, state, "not_enterprise_member", "")
 			} else {
 				logDingTalkUpstreamError(opts.Logger, err)
@@ -209,6 +206,7 @@ func handleDingTalkCallback(opts Options, cookies authCookieConfig) gin.HandlerF
 		identity := accounts.AccountIdentity{
 			ProviderType: dingtalkProviderType, ProviderKey: config.ProviderKey, ProviderSubject: member.UnionID,
 			ExternalUserID: member.UserID, VerifiedAt: time.Now().UTC(),
+			EnterpriseUserID: member.EnterpriseUserID,
 		}
 		if loginState.Intent == intentBind {
 			handleDingTalkBindCallback(c, opts, cookies, loginState, identity, member)
@@ -269,7 +267,7 @@ func resolveDingTalkAccount(c *gin.Context, opts Options, identity accounts.Acco
 			return accounts.Account{}, false, adminErr
 		}
 		account, created, err = opts.AccountService.ProvisionExternalAccountWithCreated(c.Request.Context(), identity,
-			accounts.ExternalAccountRequest{Email: member.Email, Name: member.Name}, opts.DingTalkAuth.AutoProvision, hasActiveAdmin)
+			accounts.ExternalAccountRequest{Email: member.Email, Phone: member.Phone, Name: member.Name}, opts.DingTalkAuth.AutoProvision, hasActiveAdmin)
 		if err == nil && created {
 			logDingTalkEvent(c, opts, "dingtalk_account_provisioned", account.UserID, identity.ProviderSubject,
 				zap.Bool("auto_provisioned", true))
@@ -426,32 +424,8 @@ func handleDingTalkUnbind(opts Options) gin.HandlerFunc {
 			dingtalkJSONError(c, http.StatusUnauthorized, "unauthorized", "未认证")
 			return
 		}
-		var req dingtalkUnbindRequest
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, dingtalkUnbindBodyLimit)
-		if err := c.ShouldBindJSON(&req); err != nil {
-			dingtalkJSONError(c, http.StatusBadRequest, "invalid_request", "请求无效")
-			return
-		}
-		identity, err := opts.AccountService.UnbindExternalIdentity(
-			c.Request.Context(), account.UserID, dingtalkProviderType, opts.DingTalkAuth.ProviderKey, req.Password,
-		)
-		if err != nil {
-			status, code, message := http.StatusInternalServerError, "internal_error", "解绑失败，请稍后重试"
-			switch {
-			case errors.Is(err, accounts.ErrInvalidCredentials):
-				status, code, message = http.StatusForbidden, "invalid_password", "当前密码错误"
-			case errors.Is(err, accounts.ErrLocalPasswordRequired):
-				status, code, message = http.StatusConflict, "local_password_required", "当前账户未设置本地密码，无法解绑钉钉"
-			case errors.Is(err, accounts.ErrAccountIdentityNotFound):
-				status, code, message = http.StatusConflict, "dingtalk_not_bound", "当前账户未绑定钉钉"
-			}
-			logDingTalkEvent(c, opts, "dingtalk_identity_unbind_rejected", account.UserID, "", zap.String("error_code", code))
-			dingtalkJSONError(c, status, code, message)
-			return
-		}
-		logDingTalkEvent(c, opts, "dingtalk_identity_unbound", account.UserID, identity.ProviderSubject,
-			zap.Bool("bound", false))
-		c.Status(http.StatusNoContent)
+		logDingTalkEvent(c, opts, "dingtalk_identity_unbind_rejected", account.UserID, "", zap.String("error_code", "dingtalk_unbind_forbidden"))
+		dingtalkJSONError(c, http.StatusForbidden, "dingtalk_unbind_forbidden", "不允许解绑钉钉账户")
 	}
 }
 
@@ -627,6 +601,8 @@ func dingtalkAccountErrorCode(err error) string {
 	switch {
 	case errors.Is(err, errDingTalkEmailMissing):
 		return "dingtalk_email_missing"
+	case errors.Is(err, dingtalk.ErrEmployeePhoneMissing):
+		return "employee_phone_missing"
 	case errors.Is(err, accounts.ErrExternalAccountConflict):
 		return "account_binding_required"
 	case errors.Is(err, accounts.ErrExternalAccountProvisionDisabled):

@@ -39,6 +39,9 @@ func (s *Service) Read(ctx context.Context, a Actor, id, kind string, in ReadInp
 		if e != nil {
 			return e
 		}
+		if r.Kind == "automatic_incident" && (a.AgentID != "" || a.ManualOnly) {
+			return ErrNotFound
+		}
 		return readable(r, s.clock())
 	})
 	if err != nil {

@@ -1,5 +1,5 @@
-import { Check, ChevronDown, Ellipsis, ImagePlus, LayoutDashboard, Link2, LogOut, RotateCcw, Unlink, UserRound } from "lucide-react";
-import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } from "react";
+import { Check, Download, Ellipsis, ImagePlus, Link2, LogOut, RotateCcw } from "lucide-react";
+import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -14,15 +14,13 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { deleteAccountAvatar, hasAnyAdminPermission, logout, uploadAccountAvatar, unbindDingTalk, type Account } from "@/lib/auth-api";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { deleteAccountAvatar, hasAnyAdminPermission, logout, uploadAccountAvatar, type Account } from "@/lib/auth-api";
 
 type AccountPaneProps = {
   account?: Account;
-  collapseLogout?: boolean;
-  showThemeSwitcher?: boolean;
   switchTo?: "admin" | "app";
   accountActions?: ReactNode;
 };
@@ -33,12 +31,7 @@ export function startDingTalkBinding(assign: (url: string) => void = window.loca
   assign(dingtalkBindURL);
 }
 
-export function AccountPane({ account, collapseLogout = false, showThemeSwitcher = true, switchTo, accountActions }: AccountPaneProps) {
-  const [unbindOpen, setUnbindOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [unbindPending, setUnbindPending] = useState(false);
-  const [unbindError, setUnbindError] = useState<unknown>();
-  const [unboundUserID, setUnboundUserID] = useState("");
+export function AccountPane({ account, switchTo, accountActions }: AccountPaneProps) {
   const [avatarNonce, setAvatarNonce] = useState(0);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -48,39 +41,13 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
   const accountNameRef = useRef<HTMLButtonElement>(null);
   const isAdmin = account !== undefined && hasAnyAdminPermission(account);
   const alternatePortal = switchTo === "admin" && isAdmin
-    ? { href: "/admin", icon: LayoutDashboard, label: "进入管理后台" }
+    ? { href: "/admin", label: "管理后台" }
     : switchTo === "app"
-      ? { href: "/app/agents", icon: UserRound, label: "进入用户中心" }
+      ? { href: "/app/agents", label: "用户中心" }
       : null;
-  const AlternatePortalIcon = alternatePortal?.icon;
-  const accountRole = account?.adminRoles?.length
-    ? account.adminRoles.join(", ")
+  const accountRole = account?.adminRoleNames?.length
+    ? account.adminRoleNames.join("、")
     : isAdmin ? "后台用户" : "前台用户";
-  const dingtalkBound = account?.dingtalkBound === true && account.userId !== unboundUserID;
-
-  function closeUnbind() {
-    if (unbindPending) return;
-    setUnbindOpen(false);
-    setPassword("");
-    setUnbindError(undefined);
-  }
-
-  async function submitUnbind(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!password || unbindPending) return;
-    setUnbindPending(true);
-    setUnbindError(undefined);
-    try {
-      await unbindDingTalk(password);
-      setUnboundUserID(account?.userId ?? "");
-      setUnbindOpen(false);
-      setPassword("");
-    } catch (error) {
-      setUnbindError(error);
-    } finally {
-      setUnbindPending(false);
-    }
-  }
 
   function signOut() {
     logout().finally(() => window.location.assign("/login"));
@@ -116,7 +83,7 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
     }
   }
 
-  const avatarLabel = (account?.name || account?.email || "用户").trim().slice(0, 1).toUpperCase() || "用";
+  const avatarLabel = (account?.name || account?.phone || account?.email || "用户").trim().slice(0, 1).toUpperCase() || "用";
   const avatarSrc = account?.avatarUrl ? `${account.avatarUrl}${avatarNonce ? `?v=${avatarNonce}` : ""}` : undefined;
   const showAvatar = avatarSrc !== undefined && avatarSrc !== failedAvatarSrc;
 
@@ -129,104 +96,81 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
               <span aria-hidden={showAvatar ? "true" : undefined}>{avatarLabel}</span>
               {showAvatar ? <img alt="" className="absolute inset-0 size-full object-cover" onError={() => setFailedAvatarSrc(avatarSrc)} src={avatarSrc} /> : null}
             </div>
-            <button
-              aria-haspopup="dialog"
-              className="min-w-0 flex-1 truncate rounded-sm text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => { setAvatarError(undefined); setAvatarOpen(true); }}
-              ref={accountNameRef}
-              title="设置头像"
-              type="button"
-            >
-              {account?.name || "用户"}
-            </button>
-            <Badge className="shrink-0" variant="muted">
-              {accountRole}
-            </Badge>
-            {collapseLogout ? (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button aria-label="账户操作" size="icon" variant="ghost">
-                    <Ellipsis aria-hidden="true" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-40 p-1">
-                  <Button
-                    aria-label="退出登录"
-                    className="w-full justify-start"
-                    onClick={signOut}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    <LogOut aria-hidden="true" data-icon="inline-start" />
-                    退出登录
-                  </Button>
-                </PopoverContent>
-              </Popover>
-            ) : null}
-          </div>
-          {accountActions ? <div className="flex items-center gap-2">{accountActions}</div> : null}
-          <span className="break-all font-mono text-xs text-muted-foreground">{account?.email}</span>
-          {dingtalkBound ? (
-            <div className="grid gap-2">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Check className="size-3.5" aria-hidden="true" />
-                <span className="min-w-0 flex-1">已绑定钉钉</span>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button aria-label="更多钉钉操作" size="sm" variant="ghost">
-                      更多
-                      <ChevronDown aria-hidden="true" data-icon="inline-end" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-40 p-1">
-                    <Button
-                      aria-label="解绑钉钉"
-                      className="w-full justify-start"
-                      disabled={!account.localPasswordConfigured}
-                      onClick={() => setUnbindOpen(true)}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <Unlink aria-hidden="true" data-icon="inline-start" />
-                      解绑钉钉
-                    </Button>
-                  </PopoverContent>
-                </Popover>
+            <div className="grid min-w-0 flex-1 gap-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <button
+                  aria-haspopup="dialog"
+                  className="min-w-0 flex-1 truncate rounded-sm text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => { setAvatarError(undefined); setAvatarOpen(true); }}
+                  ref={accountNameRef}
+                  title="设置头像"
+                  type="button"
+                >
+                  {account?.name || "用户"}
+                </button>
+                <Badge className="min-w-0 max-w-[65%] shrink-0 border-transparent px-1 text-[10px]" title={accountRole} variant="muted">
+                  <span className="truncate">{accountRole}</span>
+                </Badge>
               </div>
-              {!account.localPasswordConfigured ? (
-                <p className="text-xs text-muted-foreground">当前账户仅支持钉钉登录，请先联系管理员设置本地密码。</p>
-              ) : null}
+              <span className="truncate text-xs text-muted-foreground" title={account?.phone || account?.email}>{account?.phone || account?.email}</span>
             </div>
-          ) : account?.dingtalkEnabled ? (
-            <Button
-              className="w-full"
-              onClick={() => startDingTalkBinding()}
-              size="sm"
-              variant="outline"
-            >
-              <Link2 aria-hidden="true" data-icon="inline-start" />
-              绑定钉钉
-            </Button>
-          ) : null}
-          {alternatePortal && AlternatePortalIcon ? (
-            <Button asChild className="w-full" size="sm" variant="outline">
-              <Link to={alternatePortal.href}>
-                <AlternatePortalIcon aria-hidden="true" data-icon="inline-start" />
-                {alternatePortal.label}
-              </Link>
-            </Button>
-          ) : null}
-          {showThemeSwitcher || !collapseLogout ? (
-            <div className="flex items-center gap-2">
-              {showThemeSwitcher ? <ThemeSwitcher compact /> : null}
-              {!collapseLogout ? (
-                <Button className="h-8 min-w-0 flex-1 px-2 text-xs" onClick={signOut} variant="secondary">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button aria-label="账户操作" className="size-7 shrink-0 [&_svg]:size-4" size="icon" variant="ghost">
+                  <Ellipsis aria-hidden="true" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-40 p-1">
+                {account?.dingtalkBound ? (
+                  <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+                    <Check aria-hidden="true" className="size-3.5" />
+                    已绑定钉钉
+                  </div>
+                ) : account?.dingtalkEnabled ? (
+                  <Button className="w-full justify-start" onClick={() => startDingTalkBinding()} size="sm" variant="ghost">
+                    <Link2 aria-hidden="true" data-icon="inline-start" />
+                    绑定钉钉
+                  </Button>
+                ) : null}
+                {accountActions}
+                {account?.dingtalkBound || account?.dingtalkEnabled || accountActions ? <Separator className="my-1" /> : null}
+                <Button
+                  aria-label="退出登录"
+                  className="w-full justify-start"
+                  onClick={signOut}
+                  size="sm"
+                  variant="ghost"
+                >
                   <LogOut aria-hidden="true" data-icon="inline-start" />
                   退出登录
                 </Button>
-              ) : null}
+              </PopoverContent>
+            </Popover>
+          </div>
+          <div className="flex min-w-0 items-center justify-between gap-1">
+            {alternatePortal ? (
+              <Button asChild className="h-7 shrink-0 px-0.5 text-xs" size="sm" variant="ghost">
+                <Link to={alternatePortal.href}>
+                  <span>{alternatePortal.label}</span>
+                </Link>
+              </Button>
+            ) : null}
+            <div aria-label="快捷操作" className="ml-auto flex shrink-0 items-center gap-1" role="group">
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button asChild className="size-7 [&_svg]:size-3.5" size="icon" variant="outline">
+                      <Link aria-label="下载客户端" to="/downloads">
+                        <Download aria-hidden="true" />
+                      </Link>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>下载客户端</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <ThemeSwitcher compact />
             </div>
-          ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -257,55 +201,6 @@ export function AccountPane({ account, collapseLogout = false, showThemeSwitcher
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Dialog
-        open={unbindOpen}
-        onOpenChange={(open) => {
-          if (!open) closeUnbind();
-        }}
-      >
-        <DialogContent>
-          <form className="contents" onSubmit={submitUnbind}>
-            <DialogHeader>
-              <DialogTitle>解绑钉钉账户</DialogTitle>
-              <DialogDescription>解绑后将无法继续使用当前钉钉账户登录，请确认本地密码可用。</DialogDescription>
-            </DialogHeader>
-            <FieldGroup>
-              <Field data-invalid={Boolean(unbindError) || undefined}>
-                <FieldLabel htmlFor="dingtalk-unbind-password">当前密码</FieldLabel>
-                <Input
-                  aria-invalid={Boolean(unbindError) || undefined}
-                  autoComplete="current-password"
-                  autoFocus
-                  id="dingtalk-unbind-password"
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    if (unbindError) setUnbindError(undefined);
-                  }}
-                  required
-                  type="password"
-                  value={password}
-                />
-                <FieldDescription>密码仅用于本次身份校验。</FieldDescription>
-                <FieldError>{unbindError ? unbindErrorMessage(unbindError) : null}</FieldError>
-              </Field>
-            </FieldGroup>
-            <DialogFooter>
-              <Button disabled={unbindPending} onClick={closeUnbind} type="button" variant="outline">
-                取消
-              </Button>
-              <Button disabled={!password || unbindPending} type="submit" variant="destructive">
-                <Unlink aria-hidden="true" data-icon="inline-start" />
-                {unbindPending ? "解绑中..." : "确认解绑"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </>
   );
-}
-
-function unbindErrorMessage(error: unknown) {
-  return error instanceof Error && error.message ? error.message : "解绑失败，请稍后重试。";
 }

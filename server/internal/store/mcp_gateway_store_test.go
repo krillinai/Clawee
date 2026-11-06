@@ -112,7 +112,7 @@ func TestMCPGatewayStoreNilPoolDoesNotPanic(t *testing.T) {
 		return store.DeleteCapability(ctx, "missing")
 	})
 	assertNoPanic(t, "SaveGrant", func() error {
-		return store.SaveGrant(ctx, mcpgateway.AccountGrant{})
+		return store.SaveGrant(ctx, mcpgateway.AccountGrant{UserID: "user-test"})
 	})
 	assertNoPanic(t, "DeleteGrant", func() error {
 		return store.DeleteGrant(ctx, "missing")

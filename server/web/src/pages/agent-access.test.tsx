@@ -48,7 +48,7 @@ const accountToken = {
   tokenExpiresAt: null,
   tokenLastUsedAt: null,
   tokenIssuer: "claw-gateway-user",
-  tokenScopes: ["mcp:call"],
+  tokenScopes: ["mcp:call", "model:call"],
   createdAt: "2026-08-28T08:00:00Z"
 };
 
@@ -62,13 +62,13 @@ describe("AgentAccessPage", () => {
     ]);
     getMyAccountTokenMock.mockResolvedValue(accountToken);
     revealMyAccountTokenMock.mockResolvedValue({
-      token: "agt_account_secret",
-      authorizationHeader: "Authorization: Bearer agt_account_secret",
+      token: "sk-account-secret",
+      authorizationHeader: "Authorization: Bearer sk-account-secret",
       tokenInfo: accountToken
     });
     rotateMyAccountTokenMock.mockResolvedValue({
-      token: "agt_account_rotated",
-      authorizationHeader: "Authorization: Bearer agt_account_rotated",
+      token: "sk-account-rotated",
+      authorizationHeader: "Authorization: Bearer sk-account-rotated",
       tokenInfo: { ...accountToken, tokenId: "token_2", tokenFingerprint: "fp_5678" }
     });
     revokeMyAccountTokenMock.mockResolvedValue({ userId: "usr_user", revokedTokenCount: 1, tokenStatus: "revoked" });
@@ -104,7 +104,7 @@ describe("AgentAccessPage", () => {
   it("只展示一份账户 Token，并只请求一次账户 Catalog", async () => {
     renderPage();
 
-    expect(await screen.findByText("账户 MCP Token")).toBeInTheDocument();
+    expect(await screen.findByText("平台接入 Token")).toBeInTheDocument();
     expect(await screen.findAllByText("fp_1234")).toHaveLength(1);
     expect(await screen.findByText("agent_one")).toBeInTheDocument();
     expect(await screen.findByText("agent_two")).toBeInTheDocument();
@@ -120,9 +120,9 @@ describe("AgentAccessPage", () => {
     expect(await screen.findByText("暂无匹配的智能体。")).toBeInTheDocument();
     expect(screen.queryByText("加载智能体接入信息失败")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看 Token" }));
-    expect(await screen.findByRole("heading", { name: "账户级 Token 与 MCP 配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "账户级 Token 与接入配置" })).toBeInTheDocument();
     await waitFor(() => expect(revealMyAccountTokenMock).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("region", { name: "Token" })).toHaveTextContent("agt_account_secret");
+    expect(await screen.findByRole("region", { name: "Token" })).toHaveTextContent("sk-account-secret");
     expect(screen.queryByRole("region", { name: "MCP 配置" })).not.toBeInTheDocument();
   });
 
@@ -132,11 +132,11 @@ describe("AgentAccessPage", () => {
 
     fireEvent.click(within(row).getByRole("button", { name: "查看 辅助 Agent 令牌详情" }));
 
-    expect(await screen.findByRole("heading", { name: "账户级 Token 与 MCP 配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "账户级 Token 与接入配置" })).toBeInTheDocument();
     await waitFor(() => expect(revealMyAccountTokenMock).toHaveBeenCalledTimes(1));
     const config = await screen.findByRole("region", { name: "MCP 配置" });
     expect(config).toHaveTextContent("Authorization");
-    expect(config).toHaveTextContent("Bearer agt_account_secret");
+    expect(config).toHaveTextContent("Bearer sk-account-secret");
     expect(config).toHaveTextContent("X-Claw-Agent-ID");
     expect(config).toHaveTextContent("agent_two");
   });
@@ -160,6 +160,19 @@ describe("AgentAccessPage", () => {
     fireEvent.change(screen.getByLabelText("Agent 名称"), { target: { value: "销售助手" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(updateMyAgentNameMock).toHaveBeenCalledWith("agent_one", "销售助手"));
+  });
+
+  it("编辑名称弹窗有可访问描述且不产生描述缺失警告", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      renderPage();
+      const row = await findRowByText("agent_one");
+      fireEvent.click(within(row).getByRole("button", { name: "编辑 agent_one 名称" }));
+      expect(screen.getByRole("dialog", { name: "编辑 Agent 名称" })).toHaveAccessibleDescription("修改 Agent 名称，不影响 Agent ID 和已有授权。");
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
   });
 });
 

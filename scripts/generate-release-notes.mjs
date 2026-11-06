@@ -14,12 +14,15 @@ export function renderReleaseNotes({ manifest, generatedNotes, repository, templ
     throw new Error(`Invalid GitHub repository: ${repository}`);
   }
   const version = release.version;
+  const desktopOnly = manifest.components?.length === 1 && manifest.components[0] === 'desktop';
   const downloads = [
     ['Windows x64', `Clawee-Setup-${version}.exe`],
     ['macOS（Apple 芯片 / arm64）', `Clawee-${version}-arm64.dmg`],
     ['macOS（Intel / x64）', `Clawee-${version}.dmg`],
-    ['Linux x64（自托管服务端）', `clawee-server-${release.tag}-linux-amd64.tar.gz`],
-    ['Linux arm64（自托管服务端）', `clawee-server-${release.tag}-linux-arm64.tar.gz`]
+    ...(desktopOnly ? [] : [
+      ['Linux x64（自托管服务端）', `clawee-server-${release.tag}-linux-amd64.tar.gz`],
+      ['Linux arm64（自托管服务端）', `clawee-server-${release.tag}-linux-arm64.tar.gz`]
+    ])
   ];
   const artifactNames = new Set(manifest.artifacts.map(artifact => artifact.name));
   for (const [, name] of downloads) {
@@ -34,6 +37,7 @@ export function renderReleaseNotes({ manifest, generatedNotes, repository, templ
   ].join('\n');
   const guide = template
     .replace('{{DOWNLOADS}}', table)
+    .replace('{{SERVER_NOTE}}', desktopOnly ? '' : 'Linux 压缩包用于部署服务端，不是桌面安装包。')
     .trim();
   const changelog = generatedNotes.replace(downloadGuide, '').trim();
   return `${guide}${changelog ? `\n\n${changelog}` : ''}\n`;

@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminPermissionsProvider } from "@/components/admin-permissions";
 import { permissions } from "@/lib/rbac-api";
+import { APIError } from "@/lib/api";
 
 import {
   clearCurrentSkillVersion,
@@ -16,6 +17,7 @@ import {
   reviewSkillVersion,
   SkillHubAPIError,
   type AdminSkillDetail,
+  type SkillSpace,
   type SkillVersion
 } from "@/lib/skillhub-api";
 
@@ -32,7 +34,7 @@ vi.mock("@/lib/skillhub-api", async () => {
     listSkillVersionFiles: vi.fn(),
     publishOwnSkillVersion: vi.fn(),
     setCurrentSkillVersion: vi.fn(),
-    reviewSkillVersion: vi.fn()
+    reviewSkillVersion: vi.fn(),
   };
 });
 
@@ -60,14 +62,146 @@ const detail: AdminSkillDetail = {
   ]
 };
 
+const approvalConfigurations: Array<{ name: string; config: Partial<SkillSpace> }> = [
+  { name: "仅账户", config: { approvers: [{ userId: "reviewer", name: "审批人" }] } },
+  { name: "仅角色", config: { approvers: [], approverRoleIds: ["reviewers"] } },
+  { name: "账户与角色", config: { approvers: [{ userId: "reviewer", name: "审批人" }], approverRoleIds: ["reviewers"] } },
+  { name: "仅角色详情", config: { approvers: [], approverRoles: [{ roleId: "reviewers", name: "审核组" }] } }
+];
+
 describe("SkillDetailPage", () => {
+  it("版本历史报告入口绑定所选版本和轮次，查看报告不切换材料版本", async () => {
+    const target: AdminSkillDetail = { ...detail, versions: detail.versions.map((item, index) => index === 2 ? item : {
+      ...item,
+      localApproval: { ...reviewerProgress(), requestId: `request-${item.versionId}`, status: "approved", aiReview: {
+        status: "completed", attemptId: `attempt-${item.versionId}`, agentId: "agent", updatedAt: item.createdAt,
+        report: { conclusion: "recommend_approve", summary: `版本 ${item.version} 的独立报告`, findings: [] }
+      } }
+    }) };
+    getSkillMock.mockResolvedValue(target);
+    const { queryClient } = renderPage();
+    clickTab(await screen.findByRole("tab", { name: "版本历史" }));
+    const history = screen.getByRole("tabpanel", { name: "版本历史" });
+    expect(within(history).getByRole("columnheader", { name: "AI 前置审核" })).toBeInTheDocument();
+    expect(within(history).queryByRole("button", { name: "查看版本 1.2.0 的 AI 审核报告" })).not.toBeInTheDocument();
+    expect(within(history).getByText("暂无可查看记录")).toBeInTheDocument();
+
+    fireEvent.click(within(history).getByRole("button", { name: "查看版本 1.0.0 的 AI 审核报告" }));
+    let drawer = screen.getByRole("dialog", { name: "AI 审核记录" });
+    expect(within(drawer).getByText("1.0.0", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("request-version-1")).toBeInTheDocument();
+    expect(within(drawer).getByText("版本 1.0.0 的独立报告")).toBeInTheDocument();
+    expect(within(drawer).queryByText("版本 1.1.0 的独立报告")).not.toBeInTheDocument();
+    expect(screen.getByText("当前查看版本 1.1.0")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 ZIP 包安装" })).toHaveAttribute("href", expect.stringContaining("version_id=version-2"));
+    fireEvent.click(within(drawer).getByRole("button", { name: "关闭详情抽屉" }));
+
+    fireEvent.click(within(history).getByRole("button", { name: "查看版本 1.1.0 的 AI 审核报告" }));
+    drawer = screen.getByRole("dialog", { name: "AI 审核记录" });
+    expect(within(drawer).getByText("request-version-2")).toBeInTheDocument();
+    expect(within(drawer).getByText("版本 1.1.0 的独立报告")).toBeInTheDocument();
+    expect(within(drawer).queryByText("版本 1.0.0 的独立报告")).not.toBeInTheDocument();
+
+    getSkillMock.mockResolvedValue({ ...target, versions: target.versions.map(item => item.localApproval ? { ...item, localApproval: { ...item.localApproval, requestId: "new-round" } } : item) });
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["skill", "skill-1"] }); });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "AI 审核记录" })).not.toBeInTheDocument());
+  });
+
+  it.each(["pending", "running", "failed"] as const)("旧管理入口 %s 展示本轮 AI 报告与审批中心链接，不开放评分", async status => {
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), aiReview: { status, reviewSkillVersion: "1.0.0", reviewSkillSHA256: "a".repeat(64), attemptId: "attempt", agentId: "agent", updatedAt: "2026-10-09T09:00:00Z", report: { conclusion: "needs_attention", summary: "管理入口本轮摘要", findings: [] } } } }));
+    renderPage();
+    expect(await screen.findByText("管理入口本轮摘要")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看 AI 报告与评估状态" })).toHaveAttribute("href", "/app/approvals/skill/request-1");
+    expect(screen.queryByRole("button", { name: "审批通过" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "驳回" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试 AI 审核" })).not.toBeInTheDocument();
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it.each(["completed"] as const)("旧管理入口 %s 仍按原人工四维评分，不预填 AI 建议", async status => {
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), aiReview: { status, reviewSkillVersion: "1.0.0", reviewSkillSHA256: "a".repeat(64), attemptId: "attempt", agentId: "agent", updatedAt: "2026-10-09T09:00:00Z", report: { conclusion: "recommend_approve", summary: "建议通过", findings: [], suggestedScores: { scenario_value: 5, result_effectiveness: 5, ease_of_use: 5, reuse_value: 5 } } } } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    expect(within(dialog).getByRole("region", { name: "AI 审核建议" })).toBeInTheDocument();
+    expect(within(dialog).getAllByText("AI 建议：5 / 5")).toHaveLength(4);
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeDisabled();
+    expect(within(within(dialog).getByRole("radiogroup", { name: "场景价值" })).getByRole("radio", { name: "5 分" })).not.toBeChecked();
+  });
+  it.each(approvalConfigurations)("$name 审批全员通过后，非上传者管理员使用正常发布接口", async ({ config }) => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);
+    const approvedVersion = version({
+      uploadedByUserId: "writer-id",
+      localApproval: { status: "approved", total: 2, approved: 2, approvers: [
+        { userId: "reviewer", name: "审批人", status: "approved", comment: "", decidedAt: null },
+        { userId: "role-reviewer", name: "角色审批人", status: "approved", comment: "", decidedAt: null }
+      ] }
+    });
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [approvedVersion] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "发布当前版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "发布当前版本" })).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(setCurrentSkillVersionMock).toHaveBeenCalledWith("skill-1", "version-default"));
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it.each(approvalConfigurations)("$name 审批待审时，上传者没有免审发布入口", async ({ config }) => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, ...config }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id", localApproval: reviewerProgress() })] });
+    renderPage(true);
+    await screen.findByText("当前查看版本 1.0.0");
+    expect(screen.queryByRole("button", { name: /发布当前版本/ })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it("仅角色审批部分通过时，管理员不能发布", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvers: [], approverRoleIds: ["reviewers"] }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", localApproval: { ...reviewerProgress(), total: 2, approved: 1 } })] });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "发布当前版本 1.0.0" })).toBeDisabled();
+    expect(setCurrentSkillVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("无审批配置时，非上传者管理员不获得发布入口", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvers: [] }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ uploadedByUserId: "writer-id" })] });
+    renderPage();
+    await screen.findByText("当前查看版本 1.0.0");
+    expect(screen.queryByRole("button", { name: /发布当前版本/ })).not.toBeInTheDocument();
+  });
+
+  it("钉钉待审仍提供提交审批入口，上传者不能免审发布", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvalProvider: "dingtalk", approvers: [], externalApprovalTemplateId: "PROC-1" }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });
+    renderPage(true);
+    expect(await screen.findByRole("button", { name: "提交钉钉审批" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /发布当前版本/ })).not.toBeInTheDocument();
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
+  it("钉钉审批通过后，管理员仍使用正常发布接口", async () => {
+    const [space] = await listSkillSpaces();
+    vi.mocked(listSkillSpaces).mockResolvedValue([{ ...space, approvalProvider: "dingtalk", approvers: [], externalApprovalTemplateId: "PROC-1" }]);
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ uploadedByUserId: "writer-id", approvalInstance: { id: "approval-1", status: "finished", decision: "approved", providerInstanceId: "oa-1" } })] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "发布当前版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "发布当前版本" })).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(setCurrentSkillVersionMock).toHaveBeenCalledWith("skill-1", "version-default"));
+    expect(publishOwnSkillVersion).not.toHaveBeenCalled();
+  });
+
   it("allows the uploader to publish a pending version when approval is off", async () => {
     vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", description: "", approvers: [], actions: [], memberCount: 0, skillCount: 1, publishedCount: 0, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending", uploadedByUserId: "writer-id" })] });
     vi.mocked(publishOwnSkillVersion).mockResolvedValue({ skill: detail.skill, version: version({}) });
     renderPage(true);
-    fireEvent.click(await screen.findByRole("button", { name: "设为当前查看版本 1.0.0" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "设为当前版本" })).getByRole("button", { name: /确认发布/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "发布当前版本 1.0.0" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "发布当前版本" })).getByRole("button", { name: /确认发布/ }));
     await waitFor(() => expect(publishOwnSkillVersion).toHaveBeenCalledWith("skill-1", "version-default"));
     expect(setCurrentSkillVersionMock).not.toHaveBeenCalled();
   });
@@ -79,8 +213,9 @@ describe("SkillDetailPage", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
     const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    await fillScores(dialog);
     fireEvent.submit(dialog.querySelector("form")!);
-    await waitFor(() => expect(screen.getByRole("button", { name: "设为当前查看版本 1.2.0" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "发布当前版本 1.2.0" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "取消当前发布" })).not.toBeInTheDocument();
   });
 
@@ -89,24 +224,219 @@ describe("SkillDetailPage", () => {
     vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: decision }));
     renderPage();
     const approve = await screen.findByRole("button", { name: "审批通过" });
-    expect(screen.getByRole("button", { name: /设为当前查看版本/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /发布当前版本/ })).toBeDisabled();
     fireEvent.click(decision === "approved" ? approve : screen.getByRole("button", { name: "驳回" }));
     const dialog = screen.getByRole("dialog", { name: decision === "approved" ? "通过版本审批" : "驳回版本" });
+    if (decision === "approved") await fillScores(dialog);
     fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "审核意见" } });
     fireEvent.submit(dialog.querySelector("form")!);
-    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith("skill-1", "pending-version", decision, "审核意见"));
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith("skill-1", "pending-version", "request-1", decision, "审核意见", decision === "approved" ? scores : {}));
   });
+
+  it("旧 pending 通过仍需四项评分，不预填也不接受缺项", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    vi.mocked(reviewSkillVersion).mockResolvedValue(version({}));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    expect(within(dialog).getByText(/manual-v1/)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("radiogroup")).toHaveLength(4);
+    for (const radio of within(dialog).getAllByRole("radio")) expect(radio).not.toBeChecked();
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+    await selectScore(dialog, "场景价值", 1);
+    await selectScore(dialog, "结果有效", 5);
+    await selectScore(dialog, "使用友好", 3);
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeDisabled();
+    await selectScore(dialog, "复用价值", 4);
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith("skill-1", "pending-version", "request-1", "approved", "", { scenario_value: 1, result_effectiveness: 5, ease_of_use: 3, reuse_value: 4 }));
+  });
+
+  it("数字评分保持单选，重复点击不取消，清空只影响当前维度", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    const group = within(dialog).getByRole("radiogroup", { name: "场景价值" });
+    expect(group).toHaveAttribute("aria-required", "true");
+    expect(group).toHaveAccessibleDescription(/是否解决真实工作问题/);
+    expect(within(dialog).getByRole("button", { name: "清空场景价值评分" })).toBeDisabled();
+    await fillScores(dialog);
+    await selectScore(dialog, "场景价值", 5);
+    await selectScore(dialog, "场景价值", 5);
+    expect(within(group).getByRole("radio", { name: "5 分" })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: "4 分" })).not.toBeChecked();
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeEnabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "清空场景价值评分" }));
+    for (const radio of within(group).getAllByRole("radio")) expect(radio).not.toBeChecked();
+    expect(within(within(dialog).getByRole("radiogroup", { name: "结果有效" })).getByRole("radio", { name: "4 分" })).toBeChecked();
+    expect(within(dialog).getByRole("button", { name: "清空场景价值评分" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeDisabled();
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+    await selectScore(dialog, "场景价值", 1);
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeEnabled();
+  });
+
+  it("驳回拒绝空白意见，允许部分分值并在取消后清空", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    vi.mocked(reviewSkillVersion).mockResolvedValue(version({ approvalStatus: "rejected" }));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "驳回" }));
+    let dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "   " } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+    await selectScore(dialog, "使用友好", 2);
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "驳回" }));
+    dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    expect(within(within(dialog).getByRole("radiogroup", { name: "使用友好" })).getByRole("radio", { name: "2 分" })).not.toBeChecked();
+    expect(within(dialog).getByLabelText("审批意见")).toHaveValue("");
+    await selectScore(dialog, "使用友好", 2);
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "  说明不足  " } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(reviewSkillVersion).toHaveBeenCalledWith("skill-1", "pending-version", "request-1", "rejected", "说明不足", { ease_of_use: 2 }));
+  });
+
+  it("请求切换后关闭旧表单，重新打开不继承旧分值", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    const { queryClient } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    await selectScore(dialog, "场景价值", 4);
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), requestId: "request-2" } }));
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["skill", "skill-1"] }); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "审批通过" }));
+    expect(within(within(screen.getByRole("dialog")).getByRole("radiogroup", { name: "场景价值" })).getByRole("radio", { name: "4 分" })).not.toBeChecked();
+  });
+
+  it("切换查看版本后重新评分，不复用另一版本的输入", async () => {
+    getSkillMock.mockResolvedValue({ ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ versionId: "version-1", version: "1.0.0", localApproval: reviewerProgress(), approvalStatus: "pending" }), version({ versionId: "version-3", version: "1.2.0", createdAt: "2026-07-27T10:30:00Z", localApproval: { ...reviewerProgress(), requestId: "request-3" }, approvalStatus: "pending" })] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    await selectScore(dialog, "复用价值", 5);
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    clickTab(screen.getByRole("tab", { name: "版本历史" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看此版本 1.0.0" }));
+    fireEvent.click(screen.getByRole("button", { name: "审批通过" }));
+    expect(within(within(screen.getByRole("dialog")).getByRole("radiogroup", { name: "复用价值" })).getByRole("radio", { name: "5 分" })).not.toBeChecked();
+  });
+
+  it("评分选项仅 1–5 整数，超长意见不能提交", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "驳回" }));
+    const dialog = screen.getByRole("dialog", { name: "驳回版本" });
+    expect(within(within(dialog).getByRole("radiogroup", { name: "场景价值" })).getAllByRole("radio").map((radio) => radio.getAttribute("aria-label"))).toEqual(["1 分", "2 分", "3 分", "4 分", "5 分"]);
+    fireEvent.change(within(dialog).getByLabelText("审批意见"), { target: { value: "字".repeat(2001) } });
+    fireEvent.submit(dialog.querySelector("form")!);
+    expect(reviewSkillVersion).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "确认" })).toBeDisabled();
+  });
+
+  it.each(["pending", "approved", "rejected"])("%s 历史缺分不补零或自行汇总", async (status) => {
+    const localApproval = { ...reviewerProgress(), status, approved: 1, approvers: [{ ...reviewerProgress().approvers[0], status: "approved" as const, scores: { scenario_value: 4 }, comment: "历史意见" }] };
+    getSkillMock.mockResolvedValue(reviewDetail({ approvalStatus: status as SkillVersion["approvalStatus"], localApproval }));
+    renderPage();
+    expect(await screen.findByText("历史评分不完整")).toBeInTheDocument();
+    expect(screen.getByText("场景价值：4 分")).toBeInTheDocument();
+    expect(screen.getByText("结果有效：未评分")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "正式评分汇总" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/：0 分/)).not.toBeInTheDocument();
+  });
+
+  it("历史已结束无评分显示未评分，完整原始分也不代替后端汇总", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail({ approvalStatus: "approved", localApproval: { ...reviewerProgress(), status: "approved", approved: 1, approvers: [{ ...reviewerProgress().approvers[0], status: "approved" }] } }));
+    const { queryClient } = renderPage();
+    expect(await screen.findByText("历史记录未评分")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "正式评分汇总" })).not.toBeInTheDocument();
+    getSkillMock.mockResolvedValue(reviewDetail({ approvalStatus: "approved", localApproval: { ...reviewerProgress(), status: "approved", approved: 1, approvers: [{ ...reviewerProgress().approvers[0], status: "approved", scores }] } }));
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["skill", "skill-1"] }); });
+    expect(screen.queryByRole("group", { name: "正式评分汇总" })).not.toBeInTheDocument();
+  });
+
+  it("QA-B-01 全员通过且原始评分完整但无正式汇总时明确历史评分不完整", async () => {
+    getSkillMock.mockResolvedValue(reviewDetail({ approvalStatus: "approved", localApproval: { ...reviewerProgress(), status: "approved", approved: 1, scoringStandardVersion: "manual-v1", approvers: [{ ...reviewerProgress().approvers[0], status: "approved", scores }] } }));
+    renderPage();
+    expect(await screen.findByText("已通过 1/1")).toBeInTheDocument();
+    for (const label of ["场景价值", "结果有效", "使用友好", "复用价值"]) expect(screen.getByText(`${label}：4 分`)).toBeInTheDocument();
+    expect(screen.getByText("历史评分不完整")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "正式评分汇总" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/总分：/)).not.toBeInTheDocument();
+  });
+
+  it("正式汇总只展示后端值且两位小数，pending 不展示总分", async () => {
+    const localApproval = { ...reviewerProgress(), status: "approved", approved: 1, scoringStandardVersion: "manual-v1", approvers: [{ ...reviewerProgress().approvers[0], status: "approved" as const, scores }], scoreSummary: { scenario_value: 10 / 3, result_effectiveness: 11 / 3, ease_of_use: 13 / 3, reuse_value: 14 / 3, total: 16.125 } };
+    getSkillMock.mockResolvedValue(reviewDetail({ approvalStatus: "approved", localApproval }));
+    const { queryClient } = renderPage();
+    const summary = await screen.findByRole("group", { name: "正式评分汇总" });
+    expect(within(summary).getByText("场景价值：3.33")).toBeInTheDocument();
+    expect(within(summary).getByText("复用价值：4.67")).toBeInTheDocument();
+    expect(within(summary).getByText("总分：16.13 / 20")).toBeInTheDocument();
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...localApproval, status: "pending" } }));
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["skill", "skill-1"] }); });
+    expect(screen.queryByRole("group", { name: "正式评分汇总" })).not.toBeInTheDocument();
+  });
+
+  it.each([403, 409])("审批 %s 捕获原请求、禁止重复提交并刷新，不重试新请求", async (status) => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    let rejectReview: (error: Error) => void = () => {};
+    vi.mocked(reviewSkillVersion).mockReturnValue(new Promise((_resolve, reject) => { rejectReview = reject; }));
+    const { queryClient } = renderPage();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    fireEvent.click(await screen.findByRole("button", { name: "审批通过" }));
+    const dialog = screen.getByRole("dialog", { name: "通过版本审批" });
+    await fillScores(dialog);
+    fireEvent.submit(dialog.querySelector("form")!);
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "提交中..." })).toBeDisabled());
+    expect(within(dialog).getByRole("button", { name: "取消" })).toBeDisabled();
+    for (const radio of within(dialog).getAllByRole("radio")) expect(radio).toBeDisabled();
+    for (const button of within(dialog).getAllByRole("button", { name: /^清空/ })) expect(button).toBeDisabled();
+    fireEvent.submit(dialog.querySelector("form")!);
+    getSkillMock.mockResolvedValue(reviewDetail({ localApproval: { ...reviewerProgress(), requestId: "request-2" } }));
+    await act(async () => { rejectReview(new APIError("审核冲突", status, "approval_conflict")); });
+    expect(await screen.findByText(status === 403 ? /审核权限已变化/ : /审核状态已变化/)).toBeInTheDocument();
+    expect(reviewSkillVersion).toHaveBeenCalledExactlyOnceWith("skill-1", "pending-version", "request-1", "approved", "", scores);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["skill", "skill-1"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["skills"] });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("驳回版本只读，不提供原版本重提入口", async () => {
+    getSkillMock.mockResolvedValue(rejectedDetail());
+    renderPage(true, [permissions.skillRead, permissions.skillVersionUpload]);
+    await screen.findByRole("heading", { name: "web-tools-guide" });
+    expect(screen.queryByRole("button", { name: "重新提交审核" })).not.toBeInTheDocument();
+  });
+
+  it.each(["非上传者", "无上传权限", "来源版本", "已发布", "非驳回", "缺请求ID"])("%s 不显示重提入口", async (condition) => {
+    const rejected = rejectedDetail();
+    if (condition === "来源版本") rejected.versions[0].source = { sourceId: "source", repositoryOwner: "org", repositoryName: "repo", path: "skill", commitSha: "sha", contentSha256: "digest" };
+    if (condition === "已发布") rejected.skill.currentVersionId = "pending-version";
+    if (condition === "非驳回") rejected.versions[0].localApproval!.status = "pending";
+    if (condition === "缺请求ID") rejected.versions[0].localApproval!.requestId = undefined;
+    getSkillMock.mockResolvedValue(rejected);
+    renderPage(condition !== "非上传者", condition === "无上传权限" ? [permissions.skillRead] : [permissions.skillRead, permissions.skillVersionUpload]);
+    await screen.findByRole("heading", { name: "web-tools-guide" });
+    expect(screen.queryByRole("button", { name: "重新提交审核" })).not.toBeInTheDocument();
+  });
+
 
   it("keeps review unavailable for users who are not space reviewers", async () => {
     getSkillMock.mockResolvedValue({ ...detail, canReview: false, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ approvalStatus: "pending" })] });
     renderPage();
-    expect(await screen.findByRole("button", { name: /设为当前查看版本/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /发布当前版本/ })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "审批通过" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "驳回" })).not.toBeInTheDocument();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(reviewSkillVersion).mockReset();
     vi.mocked(listSkillSpaces).mockResolvedValue([{ spaceId: "skillspace_default", name: "默认技能空间", approvers: [{ userId: "reviewer", name: "审批人" }], description: "", actions: [], memberCount: 0, skillCount: 1, publishedCount: 1, createdBy: "admin", updatedBy: "admin", createdAt: "2026-07-27T08:00:00Z", updatedAt: "2026-07-27T08:00:00Z" }]);
     getSkillMock.mockResolvedValue(detail);
     listSkillVersionFilesMock.mockImplementation(async (_skillId, versionId) => ({
@@ -149,6 +479,26 @@ describe("SkillDetailPage", () => {
     );
   });
 
+  it.each([false, true])("仅有技能查看权限时禁止下载 ZIP（上传者：%s）", async (asUploader) => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    renderPage(asUploader, [permissions.skillRead]);
+
+    await screen.findByText("当前查看版本 1.0.0");
+    expect(screen.queryByRole("link", { name: "下载 ZIP 包安装" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载 ZIP 包安装" })).toBeDisabled();
+    expect(screen.getByText("需要管理员授予“下载技能包”权限。请联系管理员配置角色权限。")).toBeInTheDocument();
+  });
+
+  it.each([[permissions.skillDownload], [permissions.skillManage]])("获得下载授权 %s 后可下载待审版本", async (granted) => {
+    getSkillMock.mockResolvedValue(reviewDetail());
+    renderPage(false, [permissions.skillRead, granted]);
+
+    expect(await screen.findByRole("link", { name: "下载 ZIP 包安装" })).toHaveAttribute(
+      "href",
+      "/api/v1/admin/skills/version-package?skill_id=skill-1&version_id=pending-version"
+    );
+  });
+
   it("switches overview, files, and package target when viewing a historical version", async () => {
     renderPage();
 
@@ -165,7 +515,8 @@ describe("SkillDetailPage", () => {
 
     expect(await screen.findByRole("heading", { name: "最新版概述" })).toBeInTheDocument();
     expect(screen.getByText("当前查看版本 1.2.0")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "设为当前查看版本 1.2.0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布当前版本 1.2.0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布当前版本 1.2.0" })).toHaveTextContent("发布当前版本");
     expect(screen.getByRole("link", { name: "下载 ZIP 包安装" })).toHaveAttribute(
       "href",
       "/api/v1/admin/skills/version-package?skill_id=skill-1&version_id=version-3"
@@ -239,8 +590,8 @@ describe("SkillDetailPage", () => {
     renderPage();
 
     clickTab(await screen.findByRole("tab", { name: "版本历史" }));
-    fireEvent.click(screen.getByRole("button", { name: "设为当前版本 1.2.0" }));
-    let confirm = screen.getByRole("dialog", { name: "设为当前版本" });
+    fireEvent.click(screen.getByRole("button", { name: "发布当前版本 1.2.0" }));
+    let confirm = screen.getByRole("dialog", { name: "发布当前版本" });
     expect(setCurrentSkillVersionMock).not.toHaveBeenCalled();
     fireEvent.click(within(confirm).getByRole("button", { name: "确认发布" }));
     await waitFor(() => expect(setCurrentSkillVersionMock).toHaveBeenCalledWith("skill-1", "version-3"));
@@ -306,21 +657,40 @@ function clickTab(tab: HTMLElement) {
   fireEvent.click(tab);
 }
 
-function renderPage(asUploader = false) {
+function renderPage(asUploader = false, adminPermissions?: string[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/admin/skills/detail?skill_id=skill-1"]}>
         <Routes>
-          <Route path="/admin/skills/detail" element={<AdminPermissionsProvider account={{ userId: asUploader ? "writer-id" : "reviewer", email: "reviewer@example.com", name: "审批人", status: "active", adminPermissions: asUploader ? [permissions.skillRead] : [permissions.skillRead, permissions.skillPublish, permissions.skillUnpublish] }}><SkillDetailPage /></AdminPermissionsProvider>} />
+          <Route path="/admin/skills/detail" element={<AdminPermissionsProvider account={{ userId: asUploader ? "writer-id" : "reviewer", email: "reviewer@example.com", name: "审批人", status: "active", adminPermissions: adminPermissions ?? (asUploader ? [permissions.skillRead] : [permissions.skillRead, permissions.skillDownload, permissions.skillPublish, permissions.skillUnpublish]) }}><SkillDetailPage /></AdminPermissionsProvider>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   );
+  return { ...result, queryClient };
 }
 
 function reviewerProgress(): NonNullable<SkillVersion["localApproval"]> {
-  return { status: "pending", total: 1, approved: 0, approvers: [{ userId: "reviewer", name: "审批人", status: "pending", comment: "", decidedAt: null }] };
+  return { requestId: "request-1", contentDigest: "digest-1", status: "pending", total: 1, approved: 0, approvers: [{ userId: "reviewer", name: "审批人", status: "pending", comment: "", decidedAt: null }] };
+}
+
+const scores = { scenario_value: 4, result_effectiveness: 4, ease_of_use: 4, reuse_value: 4 };
+
+async function selectScore(dialog: HTMLElement, label: string, score: number) {
+  fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: label })).getByRole("radio", { name: `${score} 分` }));
+}
+
+async function fillScores(dialog: HTMLElement) {
+  for (const label of ["场景价值", "结果有效", "使用友好", "复用价值"]) await selectScore(dialog, label, 4);
+}
+
+function reviewDetail(overrides: Partial<SkillVersion> = {}): AdminSkillDetail {
+  return { ...detail, skill: { ...detail.skill, currentVersionId: null }, versions: [version({ versionId: "pending-version", approvalStatus: "pending", localApproval: reviewerProgress(), ...overrides })] };
+}
+
+function rejectedDetail(): AdminSkillDetail {
+  return reviewDetail({ approvalStatus: "rejected", uploadedByUserId: "writer-id", localApproval: { ...reviewerProgress(), status: "rejected", approvers: [{ ...reviewerProgress().approvers[0], status: "rejected", comment: "需要修改" }] } });
 }
 
 function version(overrides: Partial<SkillVersion>): SkillVersion {

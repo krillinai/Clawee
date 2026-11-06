@@ -46,7 +46,7 @@ export function createScheduleTaskSummaries(
 ): ScheduleTaskSummary[] {
   const threadById = new Map(threads.map(thread => [thread.id, thread]));
 
-  return schedules.map(schedule => {
+  return schedules.filter(schedule => schedule.action !== 'workflow_start').map(schedule => {
     const base = createSummaryBase(schedule);
     const threadId = readScheduleThreadId(schedule);
     if (threadId === null) {

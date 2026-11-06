@@ -22,7 +22,8 @@ type NotificationApi = {
 };
 
 const SETTINGS_KEY = 'clawee.tasks.notifications.v1';
-const UNREAD_KEY = 'clawee.tasks.unread.v1';
+// 旧版任务未读不代表会话未读，升级时从新的已读基线开始。
+const UNREAD_KEY = 'clawee.tasks.unread.v2';
 
 export function createNotificationService(input: {
   hostBridge: HostBridge;

@@ -58,13 +58,15 @@ function mapTurn(turn: CodexTurn): ThreadHistoryItem[] {
     item,
     turn.id,
     startedAt,
-    completedAt
+    completedAt,
+    turn.status
   ));
 
   if (turn.status !== 'inProgress') {
     items.push({
       id: `history_done_${turn.id}`,
       type: 'done',
+      terminalSource: 'runtime_turn',
       status:
         turn.status === 'completed'
           ? 'succeeded'
@@ -82,7 +84,8 @@ function mapTurnItem(
   item: CodexThreadItem,
   turnId: string,
   startedAt: string,
-  completedAt: string
+  completedAt: string,
+  turnStatus: CodexTurn['status']
 ): ThreadHistoryItem[] {
   if (isUserMessageItem(item)) {
     const rawText = item.content
@@ -120,6 +123,8 @@ function mapTurnItem(
     return [{
       id: item.id,
       type: 'assistant_message',
+      rawEventId: item.id,
+      messageState: turnStatus === 'inProgress' ? 'streaming' : 'complete',
       text: item.text,
       createdAt: completedAt,
       turnId

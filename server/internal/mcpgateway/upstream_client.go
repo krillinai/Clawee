@@ -191,7 +191,7 @@ func NewSDKUpstreamClient(clientName string) *SDKUpstreamClient {
 }
 
 func (c *SDKUpstreamClient) ListTools(ctx context.Context, server UpstreamServer, bearerToken string) ([]UpstreamTool, error) {
-	session, err := c.connect(ctx, server, bearerToken, nil)
+	session, err := c.connect(ctx, server, bearerToken, nil, AgentIdentity{})
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,11 @@ func (c *SDKUpstreamClient) CallTool(ctx context.Context, req UpstreamCallReques
 			},
 		}
 	}
-	session, err := c.connect(ctx, req.Server, req.BearerToken, options)
+	caller := AgentIdentity{}
+	if req.Capability.UpstreamName == "clawee_submit_task" {
+		caller = req.Caller
+	}
+	session, err := c.connect(ctx, req.Server, req.BearerToken, options, caller)
 	if err != nil {
 		return UpstreamCallResult{}, err
 	}
@@ -288,14 +292,14 @@ func normalizeSDKProgressToken(token any) (any, error) {
 	}
 }
 
-func (c *SDKUpstreamClient) connect(ctx context.Context, server UpstreamServer, bearerToken string, options *mcp.ClientOptions) (*mcp.ClientSession, error) {
+func (c *SDKUpstreamClient) connect(ctx context.Context, server UpstreamServer, bearerToken string, options *mcp.ClientOptions, caller AgentIdentity) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: c.clientName, Version: "v0.1.0"}, options)
 	switch normalizeTransport(server.Transport) {
 	case TransportStreamableHTTP:
 		if strings.TrimSpace(server.Endpoint) == "" {
 			return nil, fmt.Errorf("%w: streamable_http endpoint is required", ErrInvalidUpstreamConfig)
 		}
-		transport := &bearerRoundTripper{token: bearerToken, rejectUnauthorized: server.AuthType == "static_bearer"}
+		transport := &bearerRoundTripper{token: bearerToken, caller: caller, rejectUnauthorized: server.AuthType == "static_bearer"}
 		session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 			Endpoint: server.Endpoint,
 			HTTPClient: &http.Client{
@@ -364,6 +368,7 @@ func schemaToJSONMap(value any) JSONMap {
 
 type bearerRoundTripper struct {
 	token              string
+	caller             AgentIdentity
 	base               http.RoundTripper
 	rejectUnauthorized bool
 	unauthorized       atomic.Bool
@@ -371,6 +376,14 @@ type bearerRoundTripper struct {
 
 func (rt *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
+	req.Header.Del("X-Claw-User-ID")
+	req.Header.Del("X-Claw-Agent-ID")
+	if rt.caller.UserID != "" {
+		req.Header.Set("X-Claw-User-ID", rt.caller.UserID)
+	}
+	if rt.caller.AgentID != "" {
+		req.Header.Set("X-Claw-Agent-ID", rt.caller.AgentID)
+	}
 	if rt.token != "" {
 		req.Header.Set("Authorization", "Bearer "+rt.token)
 	}

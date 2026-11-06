@@ -13,8 +13,10 @@ import (
 )
 
 type PostgresStore struct {
-	pool  *pgxpool.Pool
-	clock func() time.Time
+	pool                  *pgxpool.Pool
+	clock                 func() time.Time
+	AcquireOrganization   func(context.Context) (func(), error)
+	ReconcileOrganization func(context.Context, pgx.Tx, string, string, string) error
 }
 
 func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
@@ -86,6 +88,13 @@ func (s *PostgresStore) TransferAgent(ctx context.Context, input TransferAgentIn
 }
 
 func (s *PostgresStore) MergeAccounts(ctx context.Context, input MergeAccountsInput) (result Result, err error) {
+	if s.AcquireOrganization != nil {
+		release, err := s.AcquireOrganization(ctx)
+		if err != nil {
+			return Result{}, err
+		}
+		defer release()
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return Result{}, err
@@ -101,6 +110,14 @@ func (s *PostgresStore) MergeAccounts(ctx context.Context, input MergeAccountsIn
 	}
 	if statuses[input.TargetUserID] != "active" {
 		return Result{}, ErrTargetAccountNotActive
+	}
+
+	var hasPersonalSpace bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM shared_spaces WHERE personal_owner_user_id = $1)`, input.SourceUserID).Scan(&hasPersonalSpace); err != nil {
+		return Result{}, err
+	}
+	if hasPersonalSpace {
+		return Result{}, ErrPersonalSpaceConflict
 	}
 
 	var identityConflict bool
@@ -170,6 +187,11 @@ func (s *PostgresStore) MergeAccounts(ctx context.Context, input MergeAccountsIn
 	}
 	for _, statement := range statements {
 		if _, err := tx.Exec(ctx, statement.query, statement.args...); err != nil {
+			return Result{}, err
+		}
+	}
+	if s.ReconcileOrganization != nil {
+		if err := s.ReconcileOrganization(ctx, tx, input.TargetUserID, "merge", input.OperatorUserID); err != nil {
 			return Result{}, err
 		}
 	}

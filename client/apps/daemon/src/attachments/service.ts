@@ -5,6 +5,7 @@ import type {
   AttachmentUploadResponse,
   RuntimeErrorCode
 } from '@clawee/protocol';
+import { ATTACHMENT_MAX_SIZE_BYTES } from '@clawee/protocol';
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import {
@@ -24,7 +25,7 @@ import { nanoid } from 'nanoid';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { OFFICE_ATTACHMENT_FORMATS, OfficeAttachmentError, processOfficeAttachment } from './office.js';
 
-export const ATTACHMENT_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+export { ATTACHMENT_MAX_SIZE_BYTES } from '@clawee/protocol';
 export const ATTACHMENT_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const ATTACHMENT_CONTEXT_CHAR_LIMIT = 80_000;
 export const ATTACHMENT_CONTEXT_FILE_CHAR_LIMIT = 40_000;

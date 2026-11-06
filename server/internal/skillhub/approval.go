@@ -9,17 +9,28 @@ import (
 )
 
 func (s *Service) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator)
+}
+
+func (s *Service) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string) (int64, error) {
 	store, ok := s.store.(ReviewStore)
-	if !ok || strings.TrimSpace(spaceID) == "" || strings.TrimSpace(operator) == "" || (provider != "local" && provider != "dingtalk") || provider == "dingtalk" && (template == "" || len(template) > 128 || len(userIDs) != 0) {
+	if !ok || strings.TrimSpace(spaceID) == "" || strings.TrimSpace(operator) == "" || (provider != "local" && provider != "dingtalk") || provider == "dingtalk" && (template == "" || len(template) > 128 || len(userIDs) != 0 || len(roleIDs) != 0) {
 		return 0, ErrInvalidRequest
 	}
-	seen := map[string]bool{}
-	for i, id := range userIDs {
-		if id == "" || id != strings.TrimSpace(id) || seen[id] {
-			return 0, ErrInvalidRequest
+	for _, ids := range [][]string{userIDs, roleIDs} {
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if id == "" || id != strings.TrimSpace(id) || seen[id] {
+				return 0, ErrInvalidRequest
+			}
+			seen[id] = true
 		}
-		seen[id] = true
-		userIDs[i] = id
+	}
+	if roleStore, ok := s.store.(RoleReviewStore); ok {
+		return roleStore.SetSpaceApprovalSubjects(ctx, strings.TrimSpace(spaceID), provider, strings.TrimSpace(template), userIDs, roleIDs, confirmed, operator, s.clock().UTC())
+	}
+	if len(roleIDs) != 0 {
+		return 0, ErrInvalidRequest
 	}
 	return store.SetSpaceApprovers(ctx, strings.TrimSpace(spaceID), provider, strings.TrimSpace(template), userIDs, confirmed, operator, s.clock().UTC())
 }
@@ -41,16 +52,26 @@ func (s *Service) SetSpaceApprover(ctx context.Context, spaceID, userID, operato
 	return err
 }
 
-func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string) (Version, error) {
+func (s *Service) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, inputs ...ReviewInput) (Version, error) {
 	store, ok := s.store.(ReviewStore)
 	comment = textutil.TrimInput(comment)
-	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(reviewer) == "" || len([]rune(comment)) > 2000 {
+	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(reviewer) == "" || len(inputs) != 1 {
 		return Version{}, ErrInvalidRequest
 	}
-	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, s.clock().UTC())
+	if err := validateReview(approve, comment, inputs[0]); err != nil {
+		return Version{}, err
+	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return Version{}, err
+	}
+	return store.ReviewVersion(ctx, skillID, versionID, reviewer, approve, comment, inputs[0], s.clock().UTC())
 }
 
-func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+func (s *MemoryStore) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator, now)
+}
+
+func (s *MemoryStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	space, ok := s.spaces[spaceID]
@@ -58,10 +79,34 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 		return 0, ErrSpaceNotFound
 	}
 	if provider == "dingtalk" {
+		if len(roleIDs) != 0 {
+			return 0, ErrInvalidRequest
+		}
 		userIDs = nil
 	}
-	if space.ApprovalProvider == provider && space.ExternalApprovalTemplateID == template && sameApprovers(space.Approvers, userIDs) {
+	if provider == "local" {
+		template = ""
+	}
+	if space.ApprovalProvider == provider && space.ExternalApprovalTemplateID == template && sameApprovers(space.Approvers, userIDs) && sameIDSet(space.ApproverRoleIDs, roleIDs) {
 		return 0, nil
+	}
+	configured := space
+	configured.ApprovalProvider, configured.ExternalApprovalTemplateID = provider, template
+	configured.Approvers = make([]Approver, 0, len(userIDs))
+	for _, id := range userIDs {
+		configured.Approvers = append(configured.Approvers, Approver{UserID: id, Name: id})
+	}
+	configured.ApproverRoleIDs = append([]string{}, roleIDs...)
+	configured.ApproverRoles = []ApprovalRole{}
+	for _, id := range roleIDs {
+		if s.approvalRoleLookup == nil {
+			return 0, ErrInvalidRequest
+		}
+		role, _, err := s.approvalRoleLookup(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		configured.ApproverRoles = append(configured.ApproverRoles, role)
 	}
 	if space.ApprovalProvider != provider || space.ExternalApprovalTemplateID != template {
 		for _, skill := range s.skills {
@@ -90,11 +135,15 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 	if affected > 0 && !confirmed {
 		return affected, nil
 	}
-	space.ApprovalProvider, space.ExternalApprovalTemplateID = provider, template
-	space.Approvers = make([]Approver, 0, len(userIDs))
-	for _, id := range userIDs {
-		space.Approvers = append(space.Approvers, Approver{UserID: id, Name: id})
+	var resolved []Approver
+	if affected > 0 {
+		var err error
+		resolved, err = s.resolveLocalApproversLocked(ctx, configured)
+		if err != nil {
+			return 0, err
+		}
 	}
+	space = configured
 	space.UpdatedBy, space.UpdatedAt = operator, now
 	s.spaces[spaceID] = space
 	for _, skill := range s.skills {
@@ -108,7 +157,7 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 				s.invalidateLocalLocked(v.VersionID)
 				v.ApprovalStatus, v.ApprovedSpaceID, v.ReviewedBy, v.ReviewedAt, v.ReviewComment = "pending", "", "", nil, ""
 				if provider == "local" {
-					s.createLocalLocked(*v, space, now)
+					s.createLocalResolvedLocked(*v, space, resolved, now)
 				}
 			}
 		}
@@ -116,14 +165,17 @@ func (s *MemoryStore) SetSpaceApprovers(_ context.Context, spaceID, provider, te
 	return affected, nil
 }
 
-func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, reviewer string, approve bool, comment string, now time.Time) (Version, error) {
+func (s *MemoryStore) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, input ReviewInput, now time.Time) (Version, error) {
+	if err := validateReview(approve, comment, input); err != nil {
+		return Version{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	skill, ok := s.skills[skillID]
 	if !ok {
 		return Version{}, ErrNotFound
 	}
-	if s.spaces[skill.SpaceID].ApprovalProvider != "local" || reviewer == "" {
+	if s.spaces[skill.SpaceID].ApprovalProvider != "local" || reviewer == "" || !s.hasAccessLocked(reviewer, skill.SpaceID, SpaceActionRead) {
 		return Version{}, ErrReviewForbidden
 	}
 	for i, version := range s.versions[skillID] {
@@ -132,9 +184,17 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 		}
 		request := s.currentLocalLocked(version, skill.SpaceID)
 		if request == nil {
+			for _, old := range s.localApprovals[versionID] {
+				if old.Status != "invalidated" || old.ID == input.RequestID {
+					return Version{}, ErrConflict
+				}
+			}
 			return Version{}, ErrReviewForbidden
 		}
-		if request.Status != "pending" {
+		if request.Status != "pending" || request.ID != input.RequestID {
+			return Version{}, ErrConflict
+		}
+		if request.ScoringStandardVersion != "" && request.ScoringStandardVersion != manualScoringStandard {
 			return Version{}, ErrConflict
 		}
 		if _, ok := request.Decisions[reviewer]; !ok {
@@ -143,7 +203,17 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 		if request.Decisions[reviewer].Status != "pending" {
 			return Version{}, ErrConflict
 		}
+		if len(request.AIAttempts) > 0 && (s.aiIdentityLookup == nil || s.aiIdentityLookup(ctx, reviewer, "") != nil) {
+			return Version{}, ErrReviewForbidden
+		}
+		if version.Source == nil && !aiAllowsHuman(request.AIAttempts, now) {
+			return Version{}, ErrAIReviewRequired
+		}
 		decision := request.Decisions[reviewer]
+		decision.Scores = cloneScores(input.Scores)
+		if request.ScoringStandardVersion == "" && hasScores(input.Scores) {
+			request.ScoringStandardVersion = manualScoringStandard
+		}
 		decision.Status, decision.Comment, decision.DecidedAt = "rejected", comment, &now
 		if approve {
 			decision.Status = "approved"
@@ -166,6 +236,7 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 		}
 		if request.Status == "approved" {
 			version.ApprovedSpaceID = skill.SpaceID
+			s.recordFirstApprovalLocked(skill, version, "local", request.ID, localProgress(request), now)
 		}
 		if request.Status == "pending" {
 			version.ApprovedSpaceID = ""
@@ -181,8 +252,9 @@ func (s *MemoryStore) ReviewVersion(_ context.Context, skillID, versionID, revie
 				s.localApprovals[versionID][j] = *request
 			}
 		}
-		version.LocalApproval = localProgress(request)
+		version.LocalApproval = nil
 		s.versions[skillID][i] = version
+		version.LocalApproval = localProgress(request)
 		return version, nil
 	}
 	return Version{}, ErrNotFound

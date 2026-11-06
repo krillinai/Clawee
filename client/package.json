@@ -30,6 +30,7 @@
     "desktop:preflight:release": "node scripts/desktop-local-preflight.mjs --release",
     "desktop:tag:check": "node scripts/desktop-tag-check.mjs",
     "desktop:notary:setup": "pnpm --filter @clawee/desktop notary:setup",
+    "desktop:notary:resume": "pnpm --filter @clawee/desktop notary:resume",
     "desktop:release:doctor": "pnpm --filter @clawee/desktop release:doctor",
     "desktop:test": "pnpm --filter @clawee/desktop test"
   },

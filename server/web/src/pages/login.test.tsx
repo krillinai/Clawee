@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authMethods, login } from "@/lib/auth-api";
+import { APIError } from "@/lib/api";
 import { ThemeProvider } from "@/components/theme-provider";
 
 import { dingtalkStartURL, LoginPage, oauthErrorMessage } from "./login";
@@ -17,6 +18,15 @@ const loginMock = vi.mocked(login);
 const authMethodsMock = vi.mocked(authMethods);
 
 describe("LoginPage", () => {
+  it("以独立手机号字段提交密码登录", async () => {
+    const queryClient = new QueryClient();
+    render(<ThemeProvider><QueryClientProvider client={queryClient}><MemoryRouter><LoginPage /></MemoryRouter></QueryClientProvider></ThemeProvider>);
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "13800000000" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(loginMock).toHaveBeenCalledWith({ phone: "13800000000", password: "password123" }));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     loginMock.mockResolvedValue({
@@ -47,11 +57,23 @@ describe("LoginPage", () => {
       </ThemeProvider>
     );
 
-    fireEvent.change(screen.getByLabelText("邮箱地址"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "admin@example.com" } });
     fireEvent.change(screen.getByLabelText("密码"), { target: { value: "passw0rd!" } });
     fireEvent.submit(screen.getByRole("button", { name: "登录" }).closest("form")!);
 
     expect(await screen.findByText("管理后台首页")).toBeInTheDocument();
+  });
+
+  it("distinguishes server failures from invalid credentials", async () => {
+    loginMock.mockRejectedValueOnce(new APIError("认证服务错误", 500, "internal_error"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ThemeProvider><QueryClientProvider client={queryClient}><MemoryRouter><LoginPage /></MemoryRouter></QueryClientProvider></ThemeProvider>);
+
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "passw0rd!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "登录" }).closest("form")!);
+
+    expect(await screen.findByText("登录服务暂时不可用，请检查服务端数据库连接")).toBeInTheDocument();
   });
 
   it("returns to the requested admin page after re-login", async () => {
@@ -70,7 +92,7 @@ describe("LoginPage", () => {
       </ThemeProvider>
     );
 
-    fireEvent.change(screen.getByLabelText("邮箱地址"), { target: { value: "admin@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "admin@example.com" } });
     fireEvent.change(screen.getByLabelText("密码"), { target: { value: "passw0rd!" } });
     fireEvent.submit(screen.getByRole("button", { name: "登录" }).closest("form")!);
 

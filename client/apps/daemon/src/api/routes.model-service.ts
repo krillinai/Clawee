@@ -24,6 +24,55 @@ export async function registerModelServiceRoutes(
 ): Promise<void> {
   server.get('/runtime/model-service', async () => input.runtime.status());
 
+  server.get('/runtime/model-service/api-key', async (_request, reply) => {
+    try {
+      await input.sessionManager.requireAccessToken();
+    } catch {
+      return reply.code(401).send(apiError('enterprise_session_required', 'enterprise session is required'));
+    }
+    reply.header('Cache-Control', 'no-store');
+    try {
+      return { apiKey: await input.runtime.readApiKey() };
+    } catch {
+      return reply.code(503).send(apiError('MODEL_SERVICE_SECURE_STORAGE_UNAVAILABLE', '本机密钥读取失败，请稍后重试'));
+    }
+  });
+
+  server.post<{ Body: ConfigureModelServiceRequest | undefined }>(
+    '/runtime/model-service/check', async (request, reply) => {
+      try {
+        await input.sessionManager.requireAccessToken();
+      } catch {
+        return reply.code(401).send(apiError('enterprise_session_required', 'enterprise session is required'));
+      }
+      reply.header('Cache-Control', 'no-store');
+      try {
+        return await input.runtime.check(request.body);
+      } catch (error) {
+        if (!(error instanceof ModelServiceConfigurationError)) throw error;
+        return reply.code(statusCode(error)).send(apiError(error.code, error.message));
+      }
+    }
+  );
+
+  server.post('/runtime/model-service/check-runtime', async (_request, reply) => {
+    try {
+      await input.sessionManager.requireAccessToken();
+    } catch {
+      return reply.code(401).send(apiError('enterprise_session_required', 'enterprise session is required'));
+    }
+    reply.header('Cache-Control', 'no-store');
+    if (input.runtime.checkRuntime === undefined) {
+      return reply.code(503).send(apiError('MODEL_SERVICE_DIAGNOSTIC_UNAVAILABLE', 'Runtime 诊断当前不可用'));
+    }
+    try {
+      return await input.runtime.checkRuntime();
+    } catch (error) {
+      if (!(error instanceof ModelServiceConfigurationError)) throw error;
+      return reply.code(statusCode(error)).send(apiError(error.code, error.message));
+    }
+  });
+
   server.post('/runtime/model-service/retry', async (_request, reply) => {
     let accessToken: string;
     try {

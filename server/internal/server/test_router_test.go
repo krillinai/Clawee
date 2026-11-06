@@ -137,6 +137,18 @@ func newTestRouter(t *testing.T, opts server.Options) http.Handler {
 	}
 }
 
+func TestEnterpriseManagedDoesNotExposePlatformModelRoutes(t *testing.T) {
+	router := newTestRouter(t, server.Options{ModelAccessMode: server.ModelAccessEnterpriseManaged})
+	for _, path := range []string{"/v1/models", "/api/v1/app/model-usage", "/api/v1/admin/model-proxy/audits", "/api/v1/admin/model-proxy/groups"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("enterprise route %s status = %d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func testAdminUserID(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	authenticated, ok := handler.(authenticatedTestHandler)

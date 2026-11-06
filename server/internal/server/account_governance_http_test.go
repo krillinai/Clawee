@@ -72,3 +72,15 @@ func TestAccountGovernanceRouteMapsStateConflict(t *testing.T) {
 		t.Fatalf("error = %#v", errorBody)
 	}
 }
+
+func TestAccountMergeRejectsPersonalSpaceOwnershipChange(t *testing.T) {
+	store := &governanceHTTPStore{err: accountgovernance.ErrPersonalSpaceConflict}
+	router := newTestRouter(t, server.Options{AccountGovernanceService: accountgovernance.NewService(store)})
+	body := doJSON(t, router, http.MethodPost, "/api/v1/admin/accounts/merge", `{
+		"source_user_id":"user-source","target_user_id":"user-target","reason":"duplicate account"
+	}`, nil, http.StatusConflict)
+	errorBody := body["error"].(map[string]any)
+	if errorBody["code"] != "state_conflict" || errorBody["message"] != accountgovernance.ErrPersonalSpaceConflict.Error() {
+		t.Fatalf("error = %#v", errorBody)
+	}
+}

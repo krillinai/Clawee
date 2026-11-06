@@ -23,7 +23,7 @@ export function buildReleaseManifest(input) {
   if (!/^[0-9a-f]{40}$/.test(input.commit)) {
     throw new Error(`Release commit must be a full Git SHA: ${input.commit}`);
   }
-  if (!/^sha256:[0-9a-f]{64}$/.test(input.imageDigest)) {
+  if (!input.desktopOnly && !/^sha256:[0-9a-f]{64}$/.test(input.imageDigest)) {
     throw new Error(`Invalid image digest: ${input.imageDigest}`);
   }
   const generatedAt = input.generatedAt === undefined
@@ -63,10 +63,9 @@ export function buildReleaseManifest(input) {
       macosSigning: 'developer-id-notarized',
       windowsSigning: 'unsigned'
     },
-    serverImage: {
-      name: input.image,
-      digest: input.imageDigest
-    },
+    ...(input.desktopOnly ? { components: ['desktop'] } : {
+      serverImage: { name: input.image, digest: input.imageDigest }
+    }),
     artifacts
   };
 
@@ -132,7 +131,7 @@ function runCli() {
       'Usage: node scripts/build-release-manifest.mjs',
       '  --artifacts <directory> --output <directory>',
       '  --version <version> --tag <tag> --commit <sha>',
-      '  --image <name> --image-digest <sha256:digest>',
+      '  --desktop-only | --image <name> --image-digest <sha256:digest>',
       '  [--generated-at <ISO timestamp>]'
     ].join('\n'));
     return;
@@ -143,8 +142,9 @@ function runCli() {
     version: requiredOption(args, '--version'),
     tag: requiredOption(args, '--tag'),
     commit: requiredOption(args, '--commit'),
-    image: requiredOption(args, '--image'),
-    imageDigest: requiredOption(args, '--image-digest'),
+    desktopOnly: args.includes('--desktop-only'),
+    image: args.includes('--desktop-only') ? undefined : requiredOption(args, '--image'),
+    imageDigest: args.includes('--desktop-only') ? undefined : requiredOption(args, '--image-digest'),
     generatedAt: readOption(args, '--generated-at')
   });
   console.log(JSON.stringify({

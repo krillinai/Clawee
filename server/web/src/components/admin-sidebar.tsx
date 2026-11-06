@@ -2,6 +2,7 @@ import "@/styles/admin-font.css";
 
 import {
   Boxes,
+  Bot,
   Bug,
   BookOpenText,
   CheckSquare,
@@ -19,7 +20,6 @@ import {
   Radio,
   Server,
   Shield,
-  UserRound,
   Users,
   type LucideIcon
 } from "lucide-react";
@@ -29,8 +29,6 @@ import { NavLink, useLocation } from "react-router-dom";
 import { AccountPane } from "@/components/account-pane";
 import { AdminBrand } from "@/components/admin-brand";
 import { FeedbackCollector } from "@/components/feedback-collector";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -46,6 +44,7 @@ import {
 } from "@/components/ui/sidebar";
 import { hasAdminPermission, type Account } from "@/lib/auth-api";
 import { appIconPaths } from "@/lib/app-icons";
+import type { AdminFeature } from "@/lib/admin-feature-api";
 import { permissions } from "@/lib/rbac-api";
 import { useAdminFeatures } from "@/hooks/useAdminFeatures";
 import { cn } from "@/lib/utils";
@@ -59,25 +58,33 @@ type AdminNavItem = {
   permissions?: readonly string[];
 };
 
+type AdminNavGroup = {
+  label: string;
+  feature?: AdminFeature;
+  items: AdminNavItem[];
+};
+
 const overviewNavItem: AdminNavItem = {
   label: "总览",
   href: "/admin",
   icon: LayoutDashboard
 };
 
-const navGroups: { label: string; items: AdminNavItem[] }[] = [
+const navGroups: AdminNavGroup[] = [
   {
     label: "智能体活动",
     items: [
       { label: "智能体管理", href: "/admin/mcp/agents", icon: KeyRound, permissions: [permissions.agentRead, permissions.mcpGrantRead] },
-      { label: "智能体活动", href: "/admin/activity", icon: Radio, permission: permissions.activityRead }
+      { label: "智能体活动", href: "/admin/activity", icon: Radio, permission: permissions.activityRead },
+      { label: "智能体提示词", href: "/admin/agent-prompt-policy", icon: Bot, permission: permissions.agentManage }
     ]
   },
   {
     label: "工作台",
     items: [
-      { label: "工作流模板", href: "/admin/workflow-templates", icon: Workflow, permission: permissions.workflowTemplateManage },
-      { label: "工作流实例", href: "/admin/workflow-instances", icon: ListChecks, permission: permissions.workflowInstanceRead }
+      { label: "流程模板", href: "/admin/workflow-templates", icon: Workflow, permission: permissions.workflowTemplateManage },
+      { label: "流程任务", href: "/admin/workflow-instances", icon: ListChecks, permission: permissions.workflowInstanceRead },
+      { label: "审批管理", href: "/admin/approvals", icon: CheckSquare, permissions: [permissions.skillRead, permissions.workflowInstanceRead] }
     ]
   },
   {
@@ -95,6 +102,15 @@ const navGroups: { label: string; items: AdminNavItem[] }[] = [
       { label: "能力目录", href: "/admin/mcp/capabilities", icon: Boxes, permission: permissions.mcpCapabilityRead },
       { label: "门禁队列", href: "/admin/mcp/gates", icon: CheckSquare, permission: permissions.mcpGateRead },
       { label: "代理审计", href: "/admin/mcp/audits", icon: FileSearch, permission: permissions.mcpAuditRead }
+    ]
+  },
+  {
+    label: "模型网关",
+    feature: "model_gateway",
+    items: [
+      { label: "上游账号", href: "/admin/model-gateway/accounts", icon: Server, permission: permissions.mcpUpstreamRead },
+      { label: "模型组", href: "/admin/model-gateway/groups", icon: Boxes, permission: permissions.mcpUpstreamRead },
+      { label: "全部日志", href: "/admin/model-gateway/logs", icon: FileSearch, permission: permissions.mcpAuditRead }
     ]
   },
   {
@@ -122,11 +138,14 @@ export function AdminSidebar({ account }: { account?: Account }) {
     .map((group) => ({
       ...group,
       items: group.items.filter((item) =>
-        (item.href !== "/admin/feedback" || features.isEnabled("feedback")) && (!account || (item.permissions
+        (item.href !== "/admin/feedback" || features.isEnabled("feedback")) &&
+        (item.href !== "/admin/agent-prompt-policy" || features.isEnabled("agent_management")) &&
+        (!account || (item.permissions
           ? item.permissions.some((permission) => hasAdminPermission(account, permission))
           : Boolean(item.permission && hasAdminPermission(account, item.permission))))
       )
     }))
+    .filter((group) => !group.feature || features.isEnabled(group.feature))
     .filter((group) => group.items.length > 0);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() =>
     navGroups.find((group) =>
@@ -225,25 +244,12 @@ export function AdminSidebar({ account }: { account?: Account }) {
         </nav>
       </SidebarContent>
 
-      <SidebarFooter className="p-3 pb-2">
-        <div className="flex items-center gap-2">
-          <Button asChild className="min-w-0 flex-1 justify-start overflow-hidden" size="sm" variant="ghost">
-            <NavLink to="/app/agents">
-              <UserRound aria-hidden="true" data-icon="inline-start" />
-              <span className="truncate">进入用户中心</span>
-            </NavLink>
-          </Button>
-          <ThemeSwitcher compact />
-        </div>
-      </SidebarFooter>
       <SidebarFooter className="p-4 pt-2">
-        <Button asChild className="w-full justify-start" size="sm" variant="ghost">
-          <NavLink to="/downloads">
-            <Download aria-hidden="true" data-icon="inline-start" />
-            下载客户端
-          </NavLink>
-        </Button>
-        <AccountPane account={account} accountActions={account ? <FeedbackCollector /> : undefined} collapseLogout showThemeSwitcher={false} />
+        <AccountPane
+          account={account}
+          accountActions={account ? <FeedbackCollector showLabel /> : undefined}
+          switchTo="app"
+        />
       </SidebarFooter>
     </Sidebar>
   );

@@ -135,7 +135,7 @@ test('100 个任务只加载摘要，并按需加载单个任务会话历史', a
     taskThreadIds
   );
   expect(taskHistoryRequestsAfterSelection).toEqual([
-    `/threads/${selectedSchedule.threadId}/history?limit=50`
+    `/threads/${selectedSchedule.threadId}/history?limit=10`
   ]);
   expect(taskHistoryRequestsAfterSelection.length).toBeLessThanOrEqual(
     MAX_TASK_HISTORY_REQUESTS_AFTER_SELECTION
@@ -300,8 +300,16 @@ function taskHistoryRequests(
 }
 
 async function openSidebar(page: Page): Promise<void> {
+  const mobile = await page.evaluate(() => (
+    window.matchMedia('(max-width: 920px)').matches
+  ));
+  if (!mobile) return;
+  const sidebar = page.getByLabel('Clawee 导航');
+  if (await sidebar.getAttribute('data-mobile-open') === 'true') return;
   const trigger = page.getByRole('button', { name: '打开导航' });
-  if (await trigger.isVisible()) await trigger.click();
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(sidebar).toHaveAttribute('data-mobile-open', 'true');
 }
 
 async function closeMobileSidebar(page: Page): Promise<void> {

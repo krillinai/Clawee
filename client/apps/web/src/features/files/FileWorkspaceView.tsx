@@ -1,13 +1,16 @@
 import type {
   ThreadResponse,
+  OfficePreview,
   WorkspaceDirectoryResponse,
   WorkspaceFileContentResponse,
   WorkspaceFileMeta,
   WorkspaceFileRevealRequest,
-  WorkspaceFileSaveRequest
+  WorkspaceFileSaveRequest,
+  WorkspaceOfficePreviewResponse
 } from '@clawee/protocol';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { beginPaneResize } from '../../components/layout/pane-resize-2026-07-29.js';
 import { ApiClientError } from '../../runtime/errors.js';
 import { defaultModeForMeta, FileEditorPane, isPreviewable, type FileEditorMode } from './FileEditorPane.js';
@@ -23,8 +26,10 @@ export type WorkspaceFileService = {
   listDirectory(threadId: string, path: string): Promise<WorkspaceDirectoryResponse>;
   getMeta(threadId: string, path: string): Promise<WorkspaceFileMeta>;
   openText(threadId: string, path: string): Promise<WorkspaceFileContentResponse>;
+  openOfficePreview(threadId: string, path: string): Promise<WorkspaceOfficePreviewResponse>;
   saveText(input: WorkspaceFileSaveRequest): Promise<{ meta: WorkspaceFileMeta; saved: true }>;
   openBlob(threadId: string, path: string): Promise<{ objectUrl: string; mime: string; size: number }>;
+  download(threadId: string, path: string): Promise<{ objectUrl: string; fileName: string }>;
   revokeBlob(objectUrl: string): void;
   reveal(input: WorkspaceFileRevealRequest): Promise<unknown>;
 };
@@ -34,6 +39,7 @@ type FileWorkspaceViewProps = {
   selectedPath?: string;
   conversationPaths?: string[];
   workspaceFileService?: WorkspaceFileService | null;
+  canOpenFile?: boolean;
   onClose(): void;
   onSelectPath?(path: string): void;
   onOpenExternal?(url: string): void;
@@ -58,19 +64,23 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
   const [savedContent, setSavedContent] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [objectUrl, setObjectUrl] = useState<string>();
+  const [officePreview, setOfficePreview] = useState<OfficePreview>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string>();
   const [saveError, setSaveError] = useState<string>();
   const [conflictOpen, setConflictOpen] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(true);
   const [treeWidth, setTreeWidth] = useState(280);
   const [fileMode, setFileMode] = useState<FileEditorMode>('preview');
+  const { confirm, confirmDialog } = useConfirmDialog();
   const objectUrlRef = useRef<string>();
   const workspaceBodyRef = useRef<HTMLDivElement | null>(null);
   const loadedPathsRef = useRef(new Set<string>());
   const openRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
+  const downloadInFlightRef = useRef(false);
   const selectedPathRef = useRef(props.selectedPath);
   selectedPathRef.current = props.selectedPath;
   const conversationPathsRef = useRef(props.conversationPaths ?? []);
@@ -151,6 +161,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     setMeta(undefined);
     setSavedContent('');
     setDraftContent('');
+    setOfficePreview(undefined);
     setLoadError(undefined);
     setSaveError(undefined);
     setConflictOpen(false);
@@ -293,7 +304,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
       return;
     }
 
-    if (!options?.skipDirtyConfirm && dirty && !window.confirm('当前文件有未保存修改，确定放弃并切换吗？')) {
+    if (!options?.skipDirtyConfirm && dirty && !(await confirm({ title: '放弃未保存的修改', confirmLabel: '放弃修改', destructive: true, description: '当前文件有未保存修改，确定放弃并切换吗？' }))) {
       return;
     }
 
@@ -308,15 +319,19 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     setMeta(undefined);
     setSavedContent('');
     setDraftContent('');
+    setOfficePreview(undefined);
 
+    let requestedMeta: WorkspaceFileMeta | undefined;
     try {
       const nextMeta = options?.knownMeta ?? await service.getMeta(thread.id, path);
+      requestedMeta = nextMeta;
       if (!mountedRef.current || requestId !== openRequestIdRef.current) {
         return;
       }
 
       let nextContent = '';
       let nextObjectUrl: string | undefined;
+      let nextOfficePreview: OfficePreview | undefined;
 
       if (isTextMeta(nextMeta) && nextMeta.previewable) {
         const response = await service.openText(thread.id, path);
@@ -324,6 +339,10 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
           return;
         }
         nextContent = response.content;
+      } else if (nextMeta.kind === 'office' && nextMeta.previewable) {
+        const response = await service.openOfficePreview(thread.id, path);
+        if (!mountedRef.current || requestId !== openRequestIdRef.current) return;
+        nextOfficePreview = response.preview;
       } else if (isBlobMeta(nextMeta) && nextMeta.previewable) {
         const blob = await service.openBlob(thread.id, path);
         if (!mountedRef.current || requestId !== openRequestIdRef.current) {
@@ -334,6 +353,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
       }
 
       replaceObjectUrl(nextObjectUrl);
+      setOfficePreview(nextOfficePreview);
       setActivePath(path);
       setFileMode(workspaceModeForMeta(nextMeta));
       setMeta(nextMeta);
@@ -344,6 +364,11 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     } catch (error) {
       if (!mountedRef.current || requestId !== openRequestIdRef.current) {
         return;
+      }
+      if (requestedMeta?.kind === 'office') {
+        setActivePath(path);
+        setMeta(requestedMeta);
+        setFileMode('preview');
       }
       setLoadError(humanizeError(error, '无法打开文件'));
     } finally {
@@ -476,6 +501,47 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     }
   }
 
+  async function handleDownload() {
+    if (!thread || !service || !activePath || downloadInFlightRef.current) {
+      return;
+    }
+
+    const requestId = openRequestIdRef.current;
+    downloadInFlightRef.current = true;
+    setDownloading(true);
+    setWorkspaceMessage(undefined);
+    try {
+      const download = await service.download(thread.id, activePath);
+      if (!mountedRef.current || requestId !== openRequestIdRef.current) {
+        service.revokeBlob(download.objectUrl);
+        return;
+      }
+
+      const anchor = document.createElement('a');
+      anchor.href = download.objectUrl;
+      anchor.download = download.fileName;
+      anchor.hidden = true;
+      try {
+        document.body.appendChild(anchor);
+        anchor.click();
+      } finally {
+        window.setTimeout(() => {
+          anchor.remove();
+          service.revokeBlob(download.objectUrl);
+        }, 60_000);
+      }
+    } catch (error) {
+      if (mountedRef.current && requestId === openRequestIdRef.current) {
+        setWorkspaceMessage(humanizeError(error, '无法下载文件'));
+      }
+    } finally {
+      downloadInFlightRef.current = false;
+      if (mountedRef.current) {
+        setDownloading(false);
+      }
+    }
+  }
+
   async function handleOpenFile() {
     if (!thread || !service || !activePath) {
       return;
@@ -489,8 +555,8 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
     }
   }
 
-  function handleBack() {
-    if (dirty && !window.confirm('当前文件有未保存修改，确定关闭文件工作区吗？')) {
+  async function handleBack() {
+    if (dirty && !(await confirm({ title: '放弃未保存的修改', confirmLabel: '放弃修改', destructive: true, description: '当前文件有未保存修改，确定关闭文件工作区吗？' }))) {
       return;
     }
 
@@ -561,11 +627,13 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
         canToggleMode={effectiveMeta !== undefined && effectiveMeta.editable && isPreviewable(effectiveMeta)}
         canSave={effectiveMeta !== undefined && effectiveMeta.editable}
         saveDisabled={saving || !dirty || effectiveMeta?.readonly}
+        downloading={downloading}
         onModeChange={setFileMode}
         onSave={() => void handleSave(false)}
-        onOpenFile={() => void handleOpenFile()}
+        onDownload={() => void handleDownload()}
+        onOpenFile={props.canOpenFile ? () => void handleOpenFile() : undefined}
         onToggleTree={() => setTreeCollapsed(previous => !previous)}
-        onClose={handleBack}
+        onClose={() => void handleBack()}
       />
 
       <div
@@ -576,6 +644,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
       >
         <div className="file-workspace-editor">
           {threadReadonly ? <div className="file-workspace-notice">当前会话为只读模式，不能保存文件</div> : null}
+          {dirty ? <div className="file-workspace-notice">下载的是已保存的源文件，不包含未保存修改</div> : null}
           {workspaceMessage ? <div className="file-workspace-notice">{workspaceMessage}</div> : null}
           {conflictOpen ? (
             <div className="file-workspace-conflict" role="alert">
@@ -598,6 +667,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
             meta={effectiveMeta}
             content={draftContent}
             objectUrl={objectUrl}
+            officePreview={officePreview}
             htmlPreviewResources={htmlPreviewResources}
             dirty={dirty}
             saving={saving}
@@ -637,6 +707,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
           </>
         )}
       </div>
+      {confirmDialog}
     </section>
   );
 
@@ -653,7 +724,7 @@ export function FileWorkspaceView(props: FileWorkspaceViewProps) {
   function renderEmptyWorkspace(message: string) {
     return (
       <section className="file-workspace-view is-empty">
-        <FileTopBar onClose={handleBack} />
+        <FileTopBar onClose={() => void handleBack()} />
         <section className="file-workspace-empty">
           <p>{message}</p>
         </section>
@@ -685,11 +756,12 @@ function resolveDirectoryFilePath(
   nodes: WorkspaceDirectoryResponse['nodes']
 ): string {
   const normalizedRequestedPath = requestedPath.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (normalizedRequestedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedRequestedPath)) {
+  if (normalizedRequestedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedRequestedPath) || normalizedRequestedPath.split('/').includes('..')) {
     return normalizedRequestedPath;
   }
   const exactMatch = nodes.find(node => node.type === 'file' && node.path === normalizedRequestedPath);
   if (exactMatch !== undefined) return exactMatch.path;
+  if (/[/\\]/.test(requestedPath)) return normalizedRequestedPath;
 
   const requestedName = normalizedRequestedPath.split('/').at(-1);
   if (requestedName === undefined || requestedName.length === 0) return normalizedRequestedPath;

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -121,7 +122,7 @@ func TestResolveMemberUsesFourStepFlowAndCachesAppToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if member != (Member{UnionID: "union-1", UserID: "staff-1", Name: "成员", Email: "member@example.com", AvatarURL: "https://img.dingtalk.com/avatar.jpg"}) {
+		if !reflect.DeepEqual(member, Member{UnionID: "union-1", UserID: "staff-1", Name: "成员", Email: "member@example.com", AvatarURL: "https://img.dingtalk.com/avatar.jpg"}) {
 			t.Fatalf("member = %#v", member)
 		}
 	}

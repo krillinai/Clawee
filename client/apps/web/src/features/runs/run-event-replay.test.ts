@@ -1,328 +1,132 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { TimelineItem } from '../../components/timeline/timeline-model.js';
-import {
-  createRunReplayDeduper,
-  mergeTimelineHistoryWithCache
-} from './run-event-replay.js';
+import { createRunReplayDeduper, mergeTimelineHistoryWithCache } from './run-event-replay.js';
 
-describe('run event replay deduper', () => {
-  it('deduplicates replay items against only the latest conversation turn', () => {
-    const deduper = createRunReplayDeduper([
-      assistant('old_assistant', '相同内容'),
-      user('latest_user', '继续'),
-      assistant('latest_assistant', '最新回复')
-    ]);
+const user = (id: string, runId: string, text = '继续'): Extract<TimelineItem, { kind: 'user_message' }> => ({ kind: 'user_message', id, runId, text, source: 'runtime' });
+const body = (id: string, runId: string, text = '好的'): Extract<TimelineItem, { kind: 'assistant_message' }> => ({ kind: 'assistant_message', id, runId, text, source: 'runtime' });
+const tool = (id: string, runId: string, phase: string): TimelineItem => ({ kind: 'tool_step', id, runId, rawEventId: 'call', name: 'test', content: JSON.stringify({ type: phase }), source: 'runtime' });
 
-    expect(deduper.shouldAppend(assistant('replay_same_as_old', '相同内容'))).toBe(true);
-    expect(deduper.shouldAppend(assistant('replay_latest', '最新回复'))).toBe(false);
-  });
-
-  it('consumes matching history counts without dropping valid repeated replay content', () => {
-    const deduper = createRunReplayDeduper([
-      user('user_1', '开始'),
-      assistant('history_assistant', '重复内容')
-    ]);
-
-    expect(deduper.shouldAppend(assistant('replay_1', '重复内容'))).toBe(false);
-    expect(deduper.shouldAppend(assistant('replay_2', '重复内容'))).toBe(true);
-  });
-
-  it('rejects an item whose stable id is already present', () => {
-    const deduper = createRunReplayDeduper([
-      user('user_1', '开始'),
-      assistant('shared_id', '回复')
-    ]);
-
-    expect(deduper.shouldAppend(assistant('shared_id', '回复'))).toBe(false);
-  });
-
-  it('deduplicates a live schedule trigger against refreshed public history', () => {
-    const deduper = createRunReplayDeduper([
-      scheduleTrigger('history_schedule', 'run_schedule')
-    ]);
-
-    expect(deduper.shouldAppend(scheduleTrigger('evt_schedule', 'run_schedule'))).toBe(false);
-  });
-
-  it('drops a completed cached run atomically when history already contains its turn', () => {
-    const history = [
-      user('history_user', '武汉天气如何'),
-      assistant('history_assistant', '武汉今天约 36°C。', 'history_turn'),
-      done('history_done', 'history_turn')
-    ];
-    const cached = [
-      user('runtime_user', '武汉天气如何', 'run_weather'),
-      status('runtime_running', 'run_weather', 'running'),
-      reasoning('runtime_reasoning', 'run_weather', '先查询天气。'),
-      assistant('runtime_assistant', '武汉今天约 36°C。', 'run_weather'),
-      status('runtime_finalizing', 'run_weather', 'finalizing'),
-      done('runtime_done', 'run_weather')
-    ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual(history);
-  });
-
-  it('keeps an active cached process until its terminal event arrives', () => {
-    const history = [
-      user('history_user', '武汉天气如何'),
-      assistant('history_assistant', '武汉今天约 36°C。', 'history_turn')
-    ];
-    const cached = [
-      user('runtime_user', '武汉天气如何', 'run_weather'),
-      status('runtime_running', 'run_weather', 'running'),
-      assistant('runtime_assistant', '武汉今天约 36°C。', 'run_weather')
-    ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
-      ...history,
-      status('runtime_running', 'run_weather', 'running')
-    ]);
-  });
-
-  it('does not append an optimistic user message below the response when history text differs', () => {
-    const history = [
-      user('history_user', '武汉天气如何', 'run_weather'),
-      assistant('history_assistant', '武汉今天约 36°C。', 'run_weather')
-    ];
-    const cached = [
-      user('runtime_user', '武汉天气如何（用户原文）', 'run_weather'),
-      assistant('runtime_assistant', '武汉今天约 36°C。', 'run_weather')
-    ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual(history);
-  });
-
-  it('does not append an in-flight optimistic user message with attachments below history', () => {
-    const attachment = {
-      id: 'attachment-pdf',
-      fileName: '报告.pdf',
-      mime: 'application/pdf',
-      size: 4,
-      sha256: 'b'.repeat(64),
-      storageKey: 'bb/attachment-report.bin',
-      status: 'committed' as const,
-      createdAt: '2026-09-17T04:00:00.000Z',
-      updatedAt: '2026-09-17T04:00:00.000Z'
-    };
-    const history = [
-      {
-        ...user('history_user', '解析这个 PDF 并生成 HTML', 'run_pdf'),
-        attachments: [attachment]
-      },
-      assistant('history_assistant', '已生成 index.html。', 'run_pdf')
-    ];
+describe('运行重放和历史窗口协调', () => {
+  it.each(['latest', 'older', 'search'] as const)('%s 历史同步修正中断时的轮次交错，并保留实时正文和消息 ID', mode => {
     const cached: TimelineItem[] = [
-      {
-        ...user('runtime_user', '解析这个 PDF 并生成 HTML（用户原文）'),
-        attachments: [attachment]
-      },
-      status('runtime_queued', undefined, 'queued')
+      user('old-user', 'a'), body('old-intro', 'a', '旧任务说明'),
+      { ...user('next-user', 'b'), attachmentPreviewUrls: { image: 'blob:preview' } },
+      tool('late-tool', 'a', 'tool_result'),
+      { ...body('late-body', 'a', '旧任务收尾'), eventSeq: 3, messageState: 'complete' },
+      { kind: 'done', id: 'old-done', runId: 'a', status: 'canceled', content: '{}', source: 'runtime' },
+      { ...body('live-body', 'b', '新任务实时输出'), eventSeq: 5, messageState: 'streaming' }
     ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
-      ...history,
-      status('runtime_queued', undefined, 'queued')
-    ]);
+    const history: TimelineItem[] = [
+      user('history-old-user', 'a'), cached[1]!, cached[3]!,
+      { ...body('late-body', 'a', '旧快照'), eventSeq: 2 }, cached[5]!,
+      user('history-next-user', 'b'), { ...body('live-body', 'b', '过期的新任务快照'), eventSeq: 4 }
+    ];
+    const merged = mergeTimelineHistoryWithCache(history, cached, mode);
+    expect(merged.map(item => item.id)).toEqual(['old-user', 'old-intro', 'late-tool', 'late-body', 'old-done', 'next-user', 'live-body']);
+    expect(merged[3]).toMatchObject({ text: '旧任务收尾', eventSeq: 3 });
+    expect(merged[5]).toMatchObject({ attachmentPreviewUrls: { image: 'blob:preview' } });
+    expect(merged[6]).toMatchObject({ text: '新任务实时输出', eventSeq: 5, messageState: 'streaming' });
+    expect(mergeTimelineHistoryWithCache(history, merged, mode)).toEqual(merged);
+    expect(cached[2]?.id).toBe('next-user');
   });
 
-  it('does not append an in-flight optimistic user message when history text differs only by whitespace', () => {
-    const history = [
-      user('history_user', '武汉天气如何'),
-      assistant('history_assistant', '武汉今天约 36°C。')
-    ];
-    const cached: TimelineItem[] = [
-      user('runtime_user', '武汉天气如何  '),
-      status('runtime_queued', undefined, 'queued')
-    ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
-      ...history,
-      status('runtime_queued', undefined, 'queued')
-    ]);
+  it('首次加载大量工具历史时不反复解析工具结果', () => {
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      ...tool(`tool-${index}`, 'r', 'tool_result'), rawEventId: `call-${index}`
+    }));
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      expect(mergeTimelineHistoryWithCache(history, [])).toEqual(history);
+      expect(parse.mock.calls.length).toBeLessThan(history.length * 3);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
-  it('keeps failed cached diagnostics even when history contains a failed turn', () => {
-    const history = [
-      user('history_user', '检查项目'),
-      failedDone('history_done', 'history_turn')
-    ];
-    const cached = [
-      user('runtime_user', '检查项目', 'run_failed'),
-      status('runtime_running', 'run_failed', 'running'),
-      diagnostic('runtime_error', 'run_failed', '项目目录不存在'),
-      failedDone('runtime_done', 'run_failed')
-    ];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
-      ...history,
-      status('runtime_running', 'run_failed', 'running'),
-      diagnostic('runtime_error', 'run_failed', '项目目录不存在'),
-      failedDone('runtime_done', 'run_failed')
-    ]);
+  it('重访同一历史页时每个大型工具结果只解析常数次', () => {
+    const history = Array.from({ length: 40 }, (_, index): TimelineItem => ({
+      kind: 'tool_step', id: `tool-${index}`, runId: 'r', rawEventId: `call-${index}`,
+      name: 'test', content: JSON.stringify({ type: 'tool_result', output: 'x'.repeat(32_768) }), source: 'runtime'
+    }));
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      expect(mergeTimelineHistoryWithCache(history, history.map(item => ({ ...item })))).toHaveLength(history.length);
+      expect(parse.mock.calls.length).toBeLessThan(history.length * 4);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
-  it('preserves cached attachment previews when refreshed history replaces the user item', () => {
-    const history = [user('history_user', 'describe this image')];
-    const attachment = {
-      id: 'attachment-image',
-      fileName: 'screen.png',
-      mime: 'image/png',
-      size: 4,
-      sha256: 'a'.repeat(64),
-      storageKey: 'aa/attachment-image.bin',
-      threadId: 'thread-image',
-      runId: 'run_image',
-      status: 'committed' as const,
-      createdAt: '2026-08-21T11:57:36.000Z',
-      updatedAt: '2026-08-21T11:57:36.000Z'
-    };
-    const cached: TimelineItem[] = [{
-      ...user('runtime_user', 'describe this image', 'run_image'),
-      attachments: [attachment],
-      attachmentPreviewUrls: {
-        'attachment-image': 'blob:screen.png'
-      }
-    }];
-
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([{
-      ...history[0],
-      attachments: [attachment],
-      attachmentPreviewUrls: {
-        'attachment-image': 'blob:screen.png'
-      }
-    }]);
+  it('无共同锚点时只按轮次边界插入，排队的新输入不能拆开旧轮次', () => {
+    const cached = [{ ...user('a', 'a'), timestamp: '2026-10-16T00:00:00Z' },
+      { ...body('aa', 'a'), timestamp: '2026-10-16T00:00:03Z' }];
+    const latest = [{ ...user('b', 'b'), timestamp: '2026-10-16T00:00:02Z' },
+      { ...body('bb', 'b'), timestamp: '2026-10-16T00:00:04Z' }];
+    expect(mergeTimelineHistoryWithCache(latest, cached).map(item => item.id)).toEqual(['a', 'aa', 'b', 'bb']);
+  });
+  it('按指定运行去重，后台运行不使用列表末轮作为窗口', () => {
+    const deduper = createRunReplayDeduper([user('ua', 'a'), body('aa', 'a'), user('ub', 'b'), body('ab', 'b')], 'a');
+    expect(deduper.shouldAppend(body('replay-a', 'a'))).toBe(false);
+    expect(deduper.shouldAppend(body('new-c', 'c'))).toBe(true);
+    expect(deduper.shouldAppend(body('new-a', 'a'))).toBe(true);
   });
 
-  it('matches cached attachment previews by run id before repeated message text', () => {
-    const attachment = {
-      id: 'attachment-old',
-      fileName: 'old.png',
-      mime: 'image/png',
-      size: 4,
-      sha256: 'a'.repeat(64),
-      storageKey: 'aa/attachment-old.bin',
-      threadId: 'thread-image',
-      runId: 'run_old',
-      status: 'committed' as const,
-      createdAt: '2026-08-20T11:57:36.000Z',
-      updatedAt: '2026-08-20T11:57:36.000Z'
-    };
-    const history = [
-      user('history_new', 'describe this image', 'run_new'),
-      user('history_old', 'describe this image', 'run_old')
-    ];
-    const cached: TimelineItem[] = [{
-      ...user('runtime_old', 'describe this image', 'run_old'),
-      attachments: [attachment],
-      attachmentPreviewUrls: {
-        'attachment-old': 'blob:old.png'
-      }
-    }];
+  it('旧历史内容兜底按出现次数消费，明确 item ID 不按正文匹配', () => {
+    const deduper = createRunReplayDeduper([body('a', 'r'), { ...body('b', 'r'), rawEventId: 'stable' }], 'r');
+    expect(deduper.shouldAppend(body('old-1', 'r'))).toBe(false);
+    expect(deduper.shouldAppend(body('old-2', 'r'))).toBe(true);
+    expect(deduper.shouldAppend({ ...body('r:stable', 'r'), rawEventId: 'stable' })).toBe(false);
+  });
 
-    expect(mergeTimelineHistoryWithCache(history, cached)).toEqual([
-      history[0],
-      {
-        ...history[1],
-        attachments: [attachment],
-        attachmentPreviewUrls: {
-          'attachment-old': 'blob:old.png'
-        }
-      }
-    ]);
+  it('终态回放进入应用函数补齐失败原因，不按成功状态去重', () => {
+    const done: TimelineItem = { kind: 'done', id: 'done', runId: 'r', status: 'failed', content: '{}', source: 'runtime' };
+    expect(createRunReplayDeduper([done], 'r').shouldAppend({ ...done, terminationReason: 'stream_error' })).toBe(true);
+  });
+
+  it('最新页保留前缀、当前流式尾部和逐项额外过程信息', () => {
+    const cached = [user('old', 'a'), body('old-body', 'a'), user('new', 'b'), tool('tool', 'b', 'tool_use'), body('live', 'b')];
+    const merged = mergeTimelineHistoryWithCache([user('history-new', 'b'), body('live', 'b', '完成快照')], cached, 'latest');
+    expect(merged.map(item => item.id)).toEqual(['old', 'old-body', 'new', 'tool', 'live']);
+    expect(merged.at(-1)).toMatchObject({ text: '完成快照' });
+    expect(mergeTimelineHistoryWithCache([user('history-new', 'b'), body('live', 'b', '完成快照')], merged)).toEqual(merged);
+  });
+
+  it('旧页前插时不改动当前流式尾部', () => {
+    const cached = [user('new', 'b'), body('live', 'b')];
+    const older = [user('old', 'a'), body('old-body', 'a'), user('new', 'b')];
+    expect(mergeTimelineHistoryWithCache(older, cached, 'older').map(item => item.id)).toEqual(['old', 'old-body', 'new', 'live']);
+  });
+
+  it('同文、同秒但不同 run 的正文与工具均保留', () => {
+    const cached = [user('a', 'a'), body('ba', 'a'), tool('ta', 'a', 'tool_use')];
+    const incoming = [user('b', 'b'), body('bb', 'b'), tool('tb', 'b', 'tool_use')];
+    expect(mergeTimelineHistoryWithCache(incoming, cached)).toHaveLength(6);
+  });
+
+  it('工具 use/result 的阶段身份不同', () => {
+    expect(mergeTimelineHistoryWithCache([tool('result', 'r', 'tool_result')], [tool('use', 'r', 'tool_use')])).toHaveLength(2);
+  });
+
+  it('缺少身份和时间的相同文本保留，不能猜测对应轮次', () => {
+    const cached = [{ ...user('optimistic', 'r'), runId: undefined }];
+    expect(mergeTimelineHistoryWithCache([user('history', 'other')], cached)).toHaveLength(2);
+  });
+
+  it('用户项按 run 校正内容但保留已挂载 ID 和附件预览', () => {
+    const cached: TimelineItem = { ...user('optimistic', 'r'), attachmentPreviewUrls: { image: 'blob:preview' } } as TimelineItem;
+    const merged = mergeTimelineHistoryWithCache([user('history', 'r', '规范化输入')], [cached]);
+    expect(merged).toMatchObject([{ id: 'optimistic', text: '规范化输入', attachmentPreviewUrls: { image: 'blob:preview' }, historyIds: ['history'] }]);
+  });
+
+  it('重复输入的附件预览只匹配同一个 run', () => {
+    const cached: TimelineItem = { ...user('a', 'a'), attachmentPreviewUrls: { image: 'blob:a' } } as TimelineItem;
+    const merged = mergeTimelineHistoryWithCache([user('b', 'b'), user('history-a', 'a')], [cached]);
+    expect(merged[0]).not.toHaveProperty('attachmentPreviewUrls');
+    expect(merged[1]).toMatchObject({ id: 'a', attachmentPreviewUrls: { image: 'blob:a' } });
+  });
+
+  it('缓存中尚未持久化的用户输入仍位于同 run 过程之前', () => {
+    const cached = [user('u', 'r'), tool('tool', 'r', 'tool_use')];
+    expect(mergeTimelineHistoryWithCache([tool('tool', 'r', 'tool_use')], cached).map(item => item.id)).toEqual(['u', 'tool']);
   });
 });
-
-function user(
-  id: string,
-  text: string,
-  runId?: string
-): Extract<TimelineItem, { kind: 'user_message' }> {
-  return {
-    kind: 'user_message',
-    id,
-    text,
-    ...(runId === undefined ? {} : { runId }),
-    source: 'runtime'
-  };
-}
-
-function assistant(id: string, text: string, runId = 'run_1'): TimelineItem {
-  return {
-    kind: 'assistant_message',
-    id,
-    runId,
-    text,
-    source: 'runtime'
-  };
-}
-
-function scheduleTrigger(id: string, runId: string): TimelineItem {
-  return {
-    kind: 'schedule_trigger',
-    id,
-    runId,
-    prompt: '生成每日项目摘要',
-    triggeredAt: '2026-07-14T14:05:00.000Z',
-    source: 'runtime'
-  };
-}
-
-function status(id: string, runId: string | undefined, label: string): TimelineItem {
-  return {
-    kind: 'run_status',
-    id,
-    runId,
-    label,
-    source: 'runtime'
-  };
-}
-
-function reasoning(id: string, runId: string, text: string): TimelineItem {
-  return {
-    kind: 'reasoning_summary',
-    id,
-    runId,
-    text,
-    source: 'runtime'
-  };
-}
-
-function done(id: string, runId: string): TimelineItem {
-  return {
-    kind: 'done',
-    id,
-    runId,
-    status: 'succeeded',
-    terminationReason: 'completed',
-    content: '{"type":"done","status":"succeeded","terminationReason":"completed"}',
-    source: 'runtime'
-  };
-}
-
-function failedDone(id: string, runId: string): TimelineItem {
-  return {
-    kind: 'done',
-    id,
-    runId,
-    status: 'failed',
-    terminationReason: 'stream_error',
-    content: '{"type":"done","status":"failed","terminationReason":"stream_error"}',
-    source: 'runtime'
-  };
-}
-
-function diagnostic(
-  id: string,
-  runId: string,
-  message: string
-): TimelineItem {
-  return {
-    kind: 'diagnostic',
-    id,
-    runId,
-    severity: 'error',
-    message,
-    content: message,
-    source: 'runtime'
-  };
-}

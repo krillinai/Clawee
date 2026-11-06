@@ -19,6 +19,52 @@ afterEach(() => {
 });
 
 describe('runtime storage', () => {
+  it('升级旧数据库时补充审核元数据列并保留普通会话', () => {
+    const database = createTestDatabase();
+    createThreadRepository(database).insertThread({
+      id: 'legacy-thread', title: '已有会话', cwd: tempDir, canonicalCwd: tempDir,
+      workspaceMode: 'external', profile: 'default', sandbox: 'read-only', status: 'active'
+    });
+    database.exec('ALTER TABLE threads DROP COLUMN skill_review_json');
+    database.close();
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    expect(columnNames(db, 'threads')).toContain('skill_review_json');
+    expect(createThreadRepository(db).getThread('legacy-thread')).toMatchObject({
+      title: '已有会话', purpose: 'conversation', skill_review_json: null
+    });
+  });
+
+  it('loads history payloads selectively while retaining deduplicated event identities', () => {
+    const database = createTestDatabase();
+    const runs = createRunRepository(database);
+    runs.insertRun(makeRunInput());
+    runs.insertRun(makeRunInput({ id: 'other-run' }));
+    const insert = database.prepare(`
+      INSERT INTO run_events (id, run_id, seq, type, payload_json, raw_event_id, turn_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const displayed = ['schedule_trigger', 'assistant_message', 'reasoning_summary',
+      'tool_use', 'tool_result', 'file_change', 'error', 'diagnostic', 'done'];
+    displayed.forEach((type, index) => insert.run(
+      `display-${index}`, 'run_default', index + 1, type, JSON.stringify({ type }), `item-${index}`, 'turn-display'
+    ));
+    database.transaction(() => {
+      for (let index = 0; index < 1_000; index += 1) {
+        insert.run(`noise-${index}`, 'run_default', index + 10,
+          ['unknown_event', 'usage', 'status'][index % 3], 'not-json', 'identity-only', 'turn-noise');
+      }
+    })();
+    insert.run('other-event', 'other-run', 1, 'assistant_message', '{}', 'other-item', 'other-turn');
+
+    const history = runs.listRunHistoryEvents('run_default');
+
+    expect(history.events.map(event => event.type)).toEqual(displayed);
+    expect(history.events[0]).toMatchObject({ runId: 'run_default', seq: 1, rawEventId: 'item-0', turnId: 'turn-display' });
+    expect(history.identities).toContainEqual({ runId: 'run_default', rawEventId: 'identity-only', turnId: 'turn-noise' });
+    expect(history.identities).toHaveLength(displayed.length + 1);
+    expect(database.prepare('SELECT count(*) AS count FROM run_events').get()).toEqual({ count: 1_010 });
+  });
+
   it('creates schema and persists a run', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-storage-'));
     db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
@@ -30,6 +76,8 @@ describe('runtime storage', () => {
       internalStatus: 'created',
       createdBy: 'api',
       publicPrompt: '公开任务输入',
+      initiatorUserId: 'user_1',
+      initiatorAgentId: 'agent_1',
       triggeredAt: '2026-07-14T14:01:00.000Z',
       profile: 'default',
       cwd: tempDir,
@@ -48,10 +96,23 @@ describe('runtime storage', () => {
     expect(loaded?.submission_mode).toBe('enqueue');
     expect(loaded?.public_prompt).toBe('公开任务输入');
     expect(loaded?.triggered_at).toBe('2026-07-14T14:01:00.000Z');
+    expect(loaded?.initiator_user_id).toBe('user_1');
+    expect(loaded?.initiator_agent_id).toBe('agent_1');
+    runs.insertRunEvent({ id: 'event-origin', runId: 'run_1', seq: 1, ts: '2026-10-16T01:02:03.456Z',
+      type: 'assistant_message', rawEventId: 'body', turnId: 'turn-1', normalizerVersion: 2,
+      payload: { type: 'assistant_message', text: '部分正文', delivery: 'delta', format: 'plain_text' } });
     expect(columnNames(db, 'runs')).toEqual(expect.arrayContaining([
       'public_prompt',
       'triggered_at'
     ]));
+    db.close();
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    expect(createRunRepository(db).getRun('run_1')).toMatchObject({
+      initiator_user_id: 'user_1', initiator_agent_id: 'agent_1'
+    });
+    expect(createRunRepository(db).listRunEvents('run_1')).toMatchObject([
+      { turnId: 'turn-1', rawEventId: 'body', normalizerVersion: 2, ts: '2026-10-16T01:02:03.456Z', seq: 1 }
+    ]);
   });
 
   it('creates tables and enforces unique event sequence per run', () => {
@@ -1032,7 +1093,12 @@ it('migrates legacy storage and preserves existing thread operations', () => {
   const runs = createRunRepository(db);
   const threads = createThreadRepository(db);
 
-  expect(columnNames(db, 'runs')).toEqual(expect.arrayContaining(['resume_mode', 'queue_state', 'timeout_ms']));
+  expect(columnNames(db, 'runs')).toEqual(expect.arrayContaining([
+    'resume_mode', 'queue_state', 'timeout_ms', 'initiator_user_id', 'initiator_agent_id'
+  ]));
+  expect(runs.getRun('legacy_run_1')).toMatchObject({
+    initiator_user_id: null, initiator_agent_id: null
+  });
   expect(columnNames(db, 'threads')).toEqual(expect.arrayContaining([
     'title',
     'archived_at',

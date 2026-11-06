@@ -1,11 +1,13 @@
-import type { AgentEventEnvelope } from '@clawee/protocol';
+import type { AgentEventEnvelope, ModelResponseError } from '@clawee/protocol';
+import { describeRuntimeResponseError } from '../codex/runtime-response-error.js';
 
-export const normalizerVersion = 1;
+export const normalizerVersion = 2;
 
 export type NormalizeInput = {
   runId: string;
   seq: number;
   raw: unknown;
+  modelResponse?: ModelResponseError;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -274,7 +276,27 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
     stringValue(item?.id)
     ?? firstStringValue(params ?? {}, ['itemId', 'turnId', 'threadId'])
     ?? fallbackEventId(input);
-  const base = baseEnvelope(input);
+  const turn = isRecord(params?.turn) ? params.turn : undefined;
+  const turnId = firstStringValue(params ?? {}, ['turnId']) ?? firstStringValue(turn ?? {}, ['id']);
+  const base = { ...baseEnvelope(input), ...(turnId === undefined ? {} : { turnId }) };
+
+  if (method === 'item/agentMessage/delta' && firstStringValue(params ?? {}, ['itemId']) !== undefined
+    && typeof params?.delta === 'string' && params.delta.length > 0) {
+    return {
+      ...base, type: 'assistant_message', rawEventId: params.itemId as string,
+      payload: { type: 'assistant_message', text: params.delta, format: 'plain_text', delivery: 'delta' }
+    };
+  }
+
+  const reasoningDelta = method === 'item/reasoning/summaryTextDelta' ? stringValue(params?.delta)
+    : method === 'item/reasoning/summaryPartAdded' && (numberValue(params?.summaryIndex) ?? 0) > 0 ? '\n\n' : undefined;
+  if (reasoningDelta !== undefined && reasoningDelta.length > 0
+    && firstStringValue(params ?? {}, ['itemId']) !== undefined) {
+    return {
+      ...base, type: 'reasoning_summary', rawEventId: params!.itemId as string,
+      payload: { type: 'reasoning_summary', text: reasoningDelta, format: 'plain_text', delivery: 'delta' }
+    };
+  }
 
   if (method === 'turn/started') {
     return {
@@ -285,7 +307,7 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
     };
   }
 
-  if (method === 'turn/completed') {
+  if (method === 'turn/completed' && !(isRecord(params?.turn) && params.turn.status === 'failed')) {
     return {
       ...base,
       type: 'status',
@@ -376,9 +398,9 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
       };
     }
     if (status === 'completed' || status === 'failed') {
-      const failed = status === 'failed';
       const result = isRecord(item?.result) ? item.result : undefined;
       const error = isRecord(item?.error) ? item.error : undefined;
+      const failed = status === 'failed' || result?.isError === true;
       return {
         ...base,
         type: 'tool_result',
@@ -387,7 +409,7 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
           type: 'tool_result',
           toolCallId,
           output: failed
-            ? stringValue(error?.message) ?? 'MCP tool call failed'
+            ? extractMcpErrorMessage(error, result)
             : extractMcpTextContent(result?.content),
           response: result?.structuredContent,
           isError: failed,
@@ -459,16 +481,16 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
         type: 'diagnostic',
         code: 'CODEX_WARNING',
         severity: 'warning',
-        message: firstStringValue(params ?? {}, ['message']) ?? 'Codex warning',
+        message: firstStringValue(params ?? {}, ['message', 'summary']) ?? 'Codex warning',
         details: { raw: params }
       }
     };
   }
 
-  if (method === 'error') {
-    const message = appServerErrorMessage(params);
-    const reconnectProgress = message.match(/Reconnecting\.\.\.\s*(\d+\/\d+)/i)?.[1];
-    if (reconnectProgress !== undefined || params?.willRetry === true) {
+  if (method === 'error' || (method === 'turn/completed' && isRecord(params?.turn) && params.turn.status === 'failed')) {
+    const modelResponse = input.modelResponse ?? describeRuntimeResponseError(method === 'error' ? params ?? {}
+      : { error: isRecord(params?.turn) ? params.turn.error : undefined, willRetry: false });
+    if (modelResponse.retrying) {
       return {
         ...base,
         type: 'diagnostic',
@@ -477,10 +499,8 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
           type: 'diagnostic',
           code: 'CODEX_STREAM_RETRYING',
           severity: 'warning',
-          message: reconnectProgress === undefined
-            ? 'Codex 响应连接中断，正在自动重连'
-            : `Codex 响应连接中断，正在自动重连（${reconnectProgress}）`,
-          details: { raw: params }
+          message: `${modelResponse.reason}，正在重试${modelResponse.retryAttempt === undefined ? '' : `（${modelResponse.retryAttempt}/${modelResponse.retryLimit}）`}`,
+          modelResponse
         }
       };
     }
@@ -491,8 +511,8 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
       payload: {
         type: 'error',
         code: 'CODEX_STREAM_ERROR',
-        message,
-        details: { raw: params }
+        message: modelResponse.reason,
+        modelResponse
       }
     };
   }
@@ -507,17 +527,6 @@ export function normalizeAppServerEvent(input: NormalizeInput): AgentEventEnvelo
       ...(method === undefined ? {} : { codexType: method })
     }
   };
-}
-
-function appServerErrorMessage(
-  params: JsonRecord | undefined
-): string {
-  const direct = firstStringValue(params ?? {}, ['message']);
-  if (direct !== undefined) return direct;
-  const error = isRecord(params?.error) ? params.error : undefined;
-  return firstStringValue(error ?? {}, ['message', 'additionalDetails'])
-    ?? firstStringValue(params ?? {}, ['additionalDetails'])
-    ?? 'Codex app-server error';
 }
 
 function extractAppServerFileChanges(
@@ -541,6 +550,21 @@ function normalizeAppServerFileChangeStatus(
   if (value === 'completed') return 'completed';
   if (value === 'failed' || value === 'declined') return 'failed';
   return 'unknown';
+}
+
+function extractMcpErrorMessage(error: JsonRecord | undefined, result: JsonRecord | undefined): string {
+  const message = firstStringValue(error ?? {}, ['message']);
+  if (message !== undefined) return message;
+
+  const structured = isRecord(result?.structuredContent) ? result.structuredContent : {};
+  const structuredMessage = firstStringValue(structured, ['message']);
+  if (structuredMessage !== undefined) {
+    const code = firstStringValue(structured, ['code']);
+    return code === undefined ? structuredMessage : `${structuredMessage}（${code}）`;
+  }
+
+  const text = extractMcpTextContent(result?.content);
+  return text.trim().length > 0 ? text : '工具调用失败，未返回具体原因';
 }
 
 function extractMcpTextContent(value: unknown): string {

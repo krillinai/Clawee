@@ -135,6 +135,7 @@ export function migrate(db: Database.Database): void {
       reasoning TEXT,
       status TEXT NOT NULL,
       purpose TEXT NOT NULL DEFAULT 'conversation',
+      agent_prompt_policy_json TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       archived_at TEXT,
@@ -454,6 +455,8 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, 'threads', 'archived_at', 'archived_at TEXT');
   ensureColumn(db, 'threads', 'pinned_at', 'pinned_at TEXT');
   ensureColumn(db, 'threads', 'purpose', "purpose TEXT NOT NULL DEFAULT 'conversation'");
+  ensureColumn(db, 'threads', 'skill_review_json', 'skill_review_json TEXT');
+  ensureColumn(db, 'threads', 'agent_prompt_policy_json', 'agent_prompt_policy_json TEXT');
   ensureColumn(
     db,
     'threads',
@@ -493,11 +496,54 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, 'runs', 'timeout_ms', 'timeout_ms INTEGER');
   ensureColumn(db, 'runs', 'public_prompt', 'public_prompt TEXT');
   ensureColumn(db, 'runs', 'triggered_at', 'triggered_at TEXT');
+  ensureColumn(db, 'runs', 'shared_drive_state_json', 'shared_drive_state_json TEXT');
+  ensureColumn(db, 'runs', 'initiator_user_id', 'initiator_user_id TEXT');
+  ensureColumn(db, 'runs', 'initiator_agent_id', 'initiator_agent_id TEXT');
   ensureColumn(db, 'enterprise_workflow_runs', 'user_id', "user_id TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'enterprise_workflow_runs', 'gateway_origin', "gateway_origin TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'enterprise_workflow_runs', 'agent_id', "agent_id TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'enterprise_workflow_runs', 'attachments_json', "attachments_json TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'enterprise_workflow_runs', 'thread_id', "thread_id TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'enterprise_workflow_runs', 'delivery_json', "delivery_json TEXT NOT NULL DEFAULT '{}'");
+  db.exec("UPDATE enterprise_workflow_runs SET thread_id=COALESCE((SELECT thread_id FROM runs WHERE id=run_id),'') WHERE thread_id=''");
   ensureColumn(db, 'attachments', 'run_id', 'run_id TEXT');
   ensureColumn(db, 'codex_session_sources', 'head_size', 'head_size INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'codex_session_sources', 'head_hash', "head_hash TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'schedules', 'thread_id', 'thread_id TEXT');
+  ensureColumn(db, 'schedules', 'action', "action TEXT NOT NULL DEFAULT 'agent_run'");
+  ensureColumn(db, 'run_events', 'turn_id', 'turn_id TEXT');
+  ensureColumn(db, 'run_events', 'normalizer_version', 'normalizer_version INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'schedules', 'workflow_json', 'workflow_json TEXT');
+  ensureColumn(db, 'schedules', 'owner_origin', 'owner_origin TEXT');
+  ensureColumn(db, 'schedules', 'owner_subject_id', 'owner_subject_id TEXT');
+  ensureColumn(db, 'schedules', 'owner_agent_id', 'owner_agent_id TEXT');
+  ensureColumn(db, 'schedules', 'last_workflow_instance_id', 'last_workflow_instance_id TEXT');
+  ensureColumn(db, 'schedules', 'create_fingerprint', 'create_fingerprint TEXT');
+  ensureColumn(db, 'schedule_operations', 'trigger_id', 'trigger_id TEXT');
+  ensureColumn(db, 'schedule_operations', 'workflow_instance_id', 'workflow_instance_id TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_prompt_policy_cache (
+      gateway_origin TEXT PRIMARY KEY,
+      version INTEGER NOT NULL DEFAULT 0,
+      server_agent_prompt TEXT NOT NULL DEFAULT '',
+      clawee_agent_prompt TEXT NOT NULL DEFAULT '',
+      fetched_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS workflow_schedule_triggers (
+      id TEXT PRIMARY KEY,
+      schedule_id TEXT NOT NULL REFERENCES schedules(id),
+      scheduled_at TEXT,
+      workflow_json TEXT NOT NULL,
+      owner_origin TEXT NOT NULL,
+      owner_subject_id TEXT NOT NULL,
+      owner_agent_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      workflow_instance_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(schedule_id, scheduled_at)
+    );
+  `);
   ensureColumn(db, 'schedule_operations', 'actor_type', 'actor_type TEXT');
   ensureColumn(db, 'schedule_operations', 'actor_run_id', 'actor_run_id TEXT');
   db.prepare(`

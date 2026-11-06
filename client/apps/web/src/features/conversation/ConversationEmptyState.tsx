@@ -1,26 +1,13 @@
-import { BarChart3, Megaphone, Sparkles, TrendingUp } from 'lucide-react';
+import { Blocks, BookOpen, GitBranch, LayoutDashboard } from 'lucide-react';
 
 const starterActions = [
-  { kind: 'dashboard', label: '数据分析', icon: BarChart3 },
-  {
-    kind: 'skill',
-    label: '脚本选题生成',
-    skillName: 'content-strategy',
-    icon: TrendingUp
-  },
-  {
-    kind: 'skill',
-    label: '广告素材审核',
-    skillName: 'ad-creative',
-    icon: Sparkles
-  },
-  {
-    kind: 'skill',
-    label: '视频发布',
-    skillName: 'marketing-video',
-    icon: Megaphone
-  }
+  { view: 'dashboard', label: '工作台', icon: LayoutDashboard },
+  { view: 'workflow', label: '工作流', icon: GitBranch },
+  { view: 'plugins', label: '企业Skills', icon: Blocks },
+  { view: 'knowledge', label: '企业知识库', icon: BookOpen }
 ] as const;
+
+export type ConversationStarterView = typeof starterActions[number]['view'];
 
 export function ConversationEmptyState(props: { nickname?: string; now?: Date }) {
   const nickname = props.nickname?.trim() || undefined;
@@ -40,31 +27,19 @@ export function ConversationEmptyState(props: { nickname?: string; now?: Date })
 }
 
 export function ConversationStarterTags(props: {
-  busySkillName?: string;
-  error?: string;
-  onOpenDashboard(): void;
-  onLoadSkill(skillName: string): void;
+  onOpenView(view: ConversationStarterView): void;
 }) {
-  const busyAction = starterActions.find(action => (
-    action.kind === 'skill' && action.skillName === props.busySkillName
-  ));
-
   return (
     <div className="conversation-starter-actions">
       <div className="conversation-starter-tags" aria-label="常用场景">
         {starterActions.map((action) => {
           const Icon = action.icon;
-          const busy = action.kind === 'skill' && action.skillName === props.busySkillName;
           return (
             <button
               className="conversation-starter-tag"
               type="button"
               key={action.label}
-              disabled={props.busySkillName !== undefined}
-              aria-busy={busy || undefined}
-              onClick={action.kind === 'dashboard'
-                ? props.onOpenDashboard
-                : () => props.onLoadSkill(action.skillName)}
+              onClick={() => props.onOpenView(action.view)}
             >
               <Icon size={14} strokeWidth={1.7} aria-hidden="true" />
               {action.label}
@@ -72,15 +47,6 @@ export function ConversationStarterTags(props: {
           );
         })}
       </div>
-      {busyAction !== undefined ? (
-        <p className="conversation-starter-feedback" role="status">
-          正在加载{busyAction.label} Skill
-        </p>
-      ) : props.error !== undefined ? (
-        <p className="conversation-starter-feedback is-error" role="alert">
-          {props.error}
-        </p>
-      ) : null}
     </div>
   );
 }

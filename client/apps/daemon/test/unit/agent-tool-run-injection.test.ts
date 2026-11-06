@@ -8,6 +8,64 @@ import {
 import type { RuntimeThread } from '../../src/threads/types.js';
 
 describe('agent tool run injection', () => {
+  it('仅为符合条件的用户运行注入技能工具，并随进程运行切换权限', () => {
+    const tokens = createAgentCapabilityTokenStore();
+    let signedIn = true;
+    const config = {
+      capabilities: tokens,
+      getBaseUrl: () => 'http://127.0.0.1:43123',
+      scheduleToolsEnabled: false,
+      skillToolsEnabled: (value: RuntimeThread) => signedIn && value.purpose === 'conversation'
+    };
+    const injector = createAgentScheduleRunInjector(config);
+    const injection = injector.prepare({ runId: 'user', thread: thread(), createdBy: 'api' });
+    expect(injection?.mcpServers[0]?.enabledTools).toEqual(['clawee_skill_list_spaces', 'clawee_skill_upload']);
+    expect(injector.prepare({ runId: 'automatic', thread: thread(), createdBy: 'schedule' })).toBeUndefined();
+    const process = createAgentScheduleProcessInjector(config).create()!;
+    process.activate({ runId: 'first', thread: thread(), createdBy: 'api' });
+    expect(tokens.authorize(process.env.CLAWEE_AGENT_CAPABILITY_TOKEN, { scope: 'skill:upload' }).runId).toBe('first');
+    process.deactivate('first');
+    signedIn = false;
+    expect(process.activate({ runId: 'next', thread: thread(), createdBy: 'api' }).manifestKey).toBe('[]');
+    expectCapabilityCode(() => tokens.authorize(process.env.CLAWEE_AGENT_CAPABILITY_TOKEN, { scope: 'skill:upload' }), 'CAPABILITY_SCOPE_FORBIDDEN');
+    process.close();
+    tokens.close();
+  });
+
+  it('keeps ordinary process runs authenticated without exposing workflow tools', () => {
+    const tokens = createAgentCapabilityTokenStore();
+    const injection = createAgentScheduleProcessInjector({
+      capabilities: tokens,
+      getBaseUrl: () => 'http://127.0.0.1:43123',
+      scheduleToolsEnabled: false,
+      workflowToolsEnabled: runId => runId === 'workflow-run'
+    }).create()!;
+    const token = injection.env.CLAWEE_AGENT_CAPABILITY_TOKEN;
+    expect(injection.activate({ runId: 'ordinary', thread: thread(), createdBy: 'api' }).manifestKey).toBe('[]');
+    expect(tokens.inspect(token).scopes).toEqual([]);
+    expectCapabilityCode(() => tokens.authorize(token, { scope: 'workflow:read' }), 'CAPABILITY_SCOPE_FORBIDDEN');
+    injection.deactivate('ordinary');
+    expect(injection.activate({ runId: 'workflow-run', thread: thread(), createdBy: 'api' }).manifestKey).toContain('clawee_workflow_read_file');
+    expect(tokens.authorize(token, { scope: 'workflow:upload' }).runId).toBe('workflow-run');
+    expectCapabilityCode(() => tokens.authorize(token, { scope: 'schedule:create' }), 'CAPABILITY_SCOPE_FORBIDDEN');
+    injection.close();
+    tokens.close();
+  });
+
+  it('only injects workflow tools into linked runs when schedule tools are disabled', () => {
+    const tokens = createAgentCapabilityTokenStore();
+    const injector = createAgentScheduleRunInjector({
+      capabilities: tokens,
+      getBaseUrl: () => 'http://127.0.0.1:43123',
+      scheduleToolsEnabled: false,
+      workflowToolsEnabled: runId => runId === 'workflow-run'
+    });
+    expect(injector.prepare({ runId: 'ordinary', thread: thread(), createdBy: 'api' })).toBeUndefined();
+    const injection = injector.prepare({ runId: 'workflow-run', thread: thread(), createdBy: 'api' });
+    expect(injection?.mcpServers[0]?.enabledTools).toEqual(['clawee_workflow_upload_file', 'clawee_workflow_read_file']);
+    tokens.close();
+  });
+
   it('grants all schedule capabilities to a user run in a conversation thread', () => {
     const tokens = createAgentCapabilityTokenStore();
     const injector = createAgentScheduleRunInjector({

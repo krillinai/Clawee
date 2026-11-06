@@ -62,13 +62,13 @@ describe('enterprise skill manager', () => {
       {
         expected: 'invalid',
         input: { remote: remoteSkill(), local: localSkill('invalid') },
-        actions: [],
+        actions: ['update'],
         integrity: 'unknown'
       },
       {
         expected: 'installed_unknown_source',
         input: { remote: remoteSkill(), local: localSkill() },
-        actions: ['use'],
+        actions: ['update', 'use'],
         integrity: 'unknown'
       },
       {
@@ -78,7 +78,7 @@ describe('enterprise skill manager', () => {
           local: localSkill(),
           publicRecordExists: true
         },
-        actions: [],
+        actions: ['update', 'use'],
         integrity: 'unknown'
       },
       {
@@ -130,7 +130,7 @@ describe('enterprise skill manager', () => {
     })).toMatchObject({
       status: 'update_available',
       integrity: 'local_changed',
-      actions: ['use']
+      actions: ['update', 'use']
     });
   });
 
@@ -246,23 +246,47 @@ describe('enterprise skill manager', () => {
     expect(installSkill).not.toHaveBeenCalled();
   });
 
-  it('blocks an update when the local tree changed during download', async () => {
-    const installSkill = vi.fn();
-    const records = createEnterpriseRecords(enterpriseRecord());
+  it.each(['valid', 'invalid'] as const)('replaces a %s same-name skill without an enterprise source record', async status => {
+    const installSkill = vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }));
+    const digest = vi.fn(async () => 'b'.repeat(64));
+    const skillManager = createSkillManager(createTransaction({ getSkill: vi.fn(() => localSkill(status)), installSkill }));
     const manager = createManager({
-      records,
-      digest: vi.fn(async () => 'd'.repeat(64)),
-      skillManager: createSkillManager(createTransaction({
-        getSkill: vi.fn(() => localSkill()),
-        installSkill
-      }))
+      digest,
+      skillManager
     });
 
-    await expect(manager.updateSkill('skill_1')).rejects.toMatchObject({
-      code: 'ENTERPRISE_SKILL_LOCAL_CHANGED'
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({
+      skill: { status: 'installed', integrity: 'verified' },
+      operation: { operation: 'overwrite' }
     });
-    expect(installSkill).not.toHaveBeenCalled();
-    expect(records.upsertRecord).not.toHaveBeenCalled();
+    expect(installSkill).toHaveBeenCalledWith(expect.objectContaining({ overwrite: true }));
+    expect(digest).toHaveBeenCalledOnce();
+  });
+
+  it('replaces a same-name skill owned by another enterprise record', async () => {
+    const installSkill = vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }));
+    const skillManager = createSkillManager(createTransaction({ getSkill: vi.fn(() => localSkill()), installSkill }));
+    const records = createEnterpriseRecords({ ...enterpriseRecord(), skillId: 'skill_old' });
+    const manager = createManager({ skillManager, records });
+
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({ skill: { status: 'installed' } });
+    expect(records.upsertRecord).toHaveBeenCalledWith(expect.objectContaining({ skillId: 'skill_1', name: 'code-review' }));
+  });
+
+  it('replaces a same-name skill previously installed from the public market', async () => {
+    const publicRecords = createPublicRecords();
+    vi.mocked(publicRecords.getRecord).mockReturnValue({
+      skillId: 'code-review', repository: 'owner/repo', skillPath: '.',
+      commit: 'a'.repeat(40), marketRevision: 1,
+      installedAt: '2026-07-30T09:00:00.000Z', updatedAt: '2026-07-30T09:00:00.000Z'
+    });
+    const skillManager = createSkillManager(createTransaction({
+      getSkill: vi.fn(() => localSkill()),
+      installSkill: vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }))
+    }));
+    const manager = createManager({ skillManager, publicRecords });
+
+    await expect(manager.updateSkill('skill_1')).resolves.toMatchObject({ skill: { status: 'installed' } });
   });
 
   it('downloads and replaces an installed skill on explicit update even at the same version', async () => {
@@ -346,10 +370,182 @@ describe('enterprise skill manager', () => {
   });
 });
 
+describe('enterprise skill auto-sync', () => {
+  it('skips synchronization when signed out', async () => {
+    const sessionManager = createSessionManager();
+    vi.spyOn(sessionManager, 'getSnapshot').mockReturnValue({ status: 'signed_out', transportSecurity: 'secure_https' });
+    const client = createHttpClient();
+    expect(await createManager({ sessionManager, client }).syncSkills()).toBe(false);
+    expect(client.listSkills).not.toHaveBeenCalled();
+    expect(sessionManager.requireAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('installs missing skills with the current token and skips subsequent identical versions', async () => {
+    const client = createHttpClient();
+    const sessionManager = createSessionManager();
+    vi.mocked(sessionManager.requireAccessToken).mockResolvedValue('current-identity-token');
+    let installed = false;
+    const transaction = createTransaction({
+      getSkill: vi.fn(() => installed ? localSkill() : undefined),
+      installSkill: vi.fn(async () => {
+        installed = true;
+        return { skill: localSkill(), operation: operation('install') };
+      })
+    });
+    const manager = createManager({ client, sessionManager, skillManager: createSkillManager(transaction) });
+    expect(await manager.syncSkills()).toBe(true);
+    expect(await manager.syncSkills()).toBe(false);
+    expect(transaction.installSkill).toHaveBeenCalledOnce();
+    expect(client.listSkills).toHaveBeenCalledWith('current-identity-token');
+    expect(client.downloadSkillPackage).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'current-identity-token' }));
+  });
+
+  it('compares version IDs rather than display versions or package hashes', async () => {
+    const client = createHttpClient();
+    vi.mocked(client.listSkills).mockResolvedValue([remoteSkill({ versionId: 'version_2' })]);
+    vi.mocked(client.getSkillDetail).mockResolvedValue({ ...remoteDetail(), versionId: 'version_2' });
+    const transaction = createTransaction({
+      getSkill: vi.fn(() => localSkill()),
+      installSkill: vi.fn(async () => ({ skill: localSkill(), operation: operation('overwrite') }))
+    });
+    const records = createEnterpriseRecords(enterpriseRecord());
+    const manager = createManager({ client, records, skillManager: createSkillManager(transaction) });
+    expect(await manager.syncSkills()).toBe(true);
+    expect(transaction.installSkill).toHaveBeenCalledWith(expect.objectContaining({ overwrite: true }));
+    expect(records.upsertRecord).toHaveBeenCalledWith(expect.objectContaining({ versionId: 'version_2' }));
+  });
+
+  it('does not download an already installed identical version', async () => {
+    const client = createHttpClient();
+    const transaction = createTransaction({ getSkill: vi.fn(() => localSkill()) });
+    const manager = createManager({ client, records: createEnterpriseRecords(enterpriseRecord()), skillManager: createSkillManager(transaction) });
+    expect(await manager.syncSkills()).toBe(false);
+    expect(client.getSkillDetail).not.toHaveBeenCalled();
+    expect(client.downloadSkillPackage).not.toHaveBeenCalled();
+  });
+
+  it.each(['personal', 'public', 'foreign', 'renamed'] as const)('preserves a conflicting %s skill', async source => {
+    const client = createHttpClient();
+    const transaction = createTransaction({ getSkill: vi.fn(() => localSkill()) });
+    const records = createEnterpriseRecords(source === 'personal' ? undefined : {
+      ...enterpriseRecord(),
+      ...(source === 'foreign' ? { skillId: 'other-skill' } : {}),
+      ...(source === 'renamed' ? { name: 'old-name' } : {})
+    });
+    const publicRecords = createPublicRecords();
+    if (source === 'public') {
+      vi.mocked(publicRecords.getRecord).mockReturnValue({} as NonNullable<ReturnType<typeof publicRecords.getRecord>>);
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await createManager({ client, records, publicRecords, skillManager: createSkillManager(transaction) }).syncSkills()).toBe(false);
+    expect(transaction.installSkill).not.toHaveBeenCalled();
+    expect(client.downloadSkillPackage).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('Enterprise skill auto-sync failed [ENTERPRISE_SKILL_SOURCE_CONFLICT]');
+  });
+
+  it('rechecks source ownership inside the write lock during automatic updates', async () => {
+    const client = createHttpClient();
+    vi.mocked(client.listSkills).mockResolvedValue([remoteSkill({ versionId: 'version_2' })]);
+    const publicRecords = createPublicRecords();
+    vi.mocked(publicRecords.getRecord)
+      .mockReturnValueOnce(undefined)
+      .mockReturnValue({} as NonNullable<ReturnType<typeof publicRecords.getRecord>>);
+    const transaction = createTransaction({ getSkill: vi.fn(() => localSkill()) });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const manager = createManager({ client, publicRecords, records: createEnterpriseRecords(enterpriseRecord()), skillManager: createSkillManager(transaction) });
+    expect(await manager.syncSkills()).toBe(false);
+    expect(transaction.installSkill).not.toHaveBeenCalled();
+  });
+
+  it('continues after one skill fails and logs no raw error or credentials', async () => {
+    const client = createHttpClient();
+    vi.mocked(client.listSkills).mockResolvedValue([remoteSkill({ skillId: 'unavailable' }), remoteSkill()]);
+    vi.mocked(client.getSkillDetail).mockRejectedValueOnce(new Error('secret-token')).mockResolvedValue(remoteDetail());
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await createManager({ client }).syncSkills()).toBe(true);
+    expect(client.getSkillDetail).toHaveBeenCalledTimes(2);
+    expect(client.downloadSkillPackage).toHaveBeenCalledOnce();
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-token');
+  });
+
+  it('does not uninstall cached skills missing from the authorized catalog', async () => {
+    const client = createHttpClient();
+    vi.mocked(client.listSkills).mockResolvedValue([]);
+    const transaction = createTransaction({ getSkill: vi.fn(() => localSkill()) });
+    expect(await createManager({ client, records: createEnterpriseRecords(enterpriseRecord()), skillManager: createSkillManager(transaction) }).syncSkills()).toBe(false);
+    expect(transaction.deleteSkill).not.toHaveBeenCalled();
+  });
+
+  it('coalesces simultaneous synchronizations', async () => {
+    const client = createHttpClient();
+    let complete!: (skills: EnterpriseRemoteSkill[]) => void;
+    vi.mocked(client.listSkills).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    const manager = createManager({ client });
+    const first = manager.syncSkills();
+    const second = manager.syncSkills();
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(client.listSkills).toHaveBeenCalledOnce());
+    complete([remoteSkill()]);
+    expect(await first).toBe(true);
+    expect(client.downloadSkillPackage).toHaveBeenCalledOnce();
+  });
+
+  it('stops using a catalog from an identity that has signed out or changed', async () => {
+    const client = createHttpClient();
+    const sessionManager = createSessionManager();
+    vi.mocked(client.listSkills).mockImplementation(async () => {
+      vi.spyOn(sessionManager, 'getSnapshot').mockReturnValue({ status: 'signed_out', transportSecurity: 'secure_https' });
+      return [remoteSkill()];
+    });
+    expect(await createManager({ client, sessionManager }).syncSkills()).toBe(false);
+    expect(client.getSkillDetail).not.toHaveBeenCalled();
+  });
+
+  it('synchronizes the new identity after an older identity finishes its pending check', async () => {
+    const client = createHttpClient();
+    const sessionManager = createSessionManager();
+    let complete!: (skills: EnterpriseRemoteSkill[]) => void;
+    vi.mocked(client.listSkills).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const manager = createManager({ client, sessionManager });
+    const first = manager.syncSkills();
+    await vi.waitFor(() => expect(client.listSkills).toHaveBeenCalledOnce());
+    const original = sessionManager.getSnapshot();
+    vi.spyOn(sessionManager, 'getSnapshot').mockReturnValue({ ...original, account: { ...original.account!, subjectId: 'new-account' } });
+    vi.mocked(sessionManager.requireAccessToken).mockResolvedValue('new-identity-token');
+    const second = manager.syncSkills();
+    complete([remoteSkill()]);
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(client.listSkills).toHaveBeenLastCalledWith('new-identity-token');
+    expect(client.downloadSkillPackage).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'new-identity-token' }));
+  });
+
+  it('treats catalog failures as non-blocking synchronization failures', async () => {
+    const client = createHttpClient();
+    vi.mocked(client.listSkills).mockRejectedValue(new Error('secret-token'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await expect(createManager({ client }).syncSkills()).resolves.toBe(false);
+  });
+
+  it('does not install a downloaded package after the current identity changes', async () => {
+    const client = createHttpClient();
+    const sessionManager = createSessionManager();
+    vi.mocked(client.downloadSkillPackage).mockImplementation(async () => {
+      vi.spyOn(sessionManager, 'getSnapshot').mockReturnValue({ status: 'signed_out', transportSecurity: 'secure_https' });
+      return { bytes: 10, sha256: 'a'.repeat(64) };
+    });
+    const transaction = createTransaction();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await createManager({ client, sessionManager, skillManager: createSkillManager(transaction) }).syncSkills()).toBe(false);
+    expect(transaction.installSkill).not.toHaveBeenCalled();
+  });
+});
+
 function createManager(overrides: {
   client?: EnterpriseHttpClient;
   sessionManager?: EnterpriseSessionManager;
   records?: EnterpriseInstallRecordRepository;
+  publicRecords?: SkillMarketRecordRepository;
   skillManager?: SkillManager;
   sleep?: (milliseconds: number) => Promise<void>;
   digest?: (path: string) => Promise<string>;
@@ -363,7 +559,7 @@ function createManager(overrides: {
     skillManager:
       overrides.skillManager ??
       createSkillManager(createTransaction()),
-    publicRecords: createPublicRecords(),
+    publicRecords: overrides.publicRecords ?? createPublicRecords(),
     records: overrides.records ?? createEnterpriseRecords(),
     sleep: overrides.sleep,
     computeContentDigest: overrides.digest ?? vi.fn(async () => 'b'.repeat(64)),
@@ -390,6 +586,7 @@ function createSessionManager(): EnterpriseSessionManager {
       transportSecurity: 'secure_https'
     }),
     refresh: vi.fn(),
+    renew: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
@@ -443,7 +640,7 @@ function createSkillManager(transaction: SkillWriteTransaction): SkillManager {
       skills: [],
       diagnostics: []
     })),
-    getSkill: vi.fn(),
+    getSkill: vi.fn(id => transaction.getSkill(id)),
     withWriteTransaction: vi.fn(async operationCallback => operationCallback(transaction)),
     installSkill: transaction.installSkill,
     deleteSkill: transaction.deleteSkill,

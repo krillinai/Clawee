@@ -12,10 +12,10 @@ import (
 )
 
 func mountFeedbackCollectionRoutes(admin *gin.RouterGroup, opts Options) {
-	allowed := func() bool { return opts.ExternalFeedbackAllowed == nil || *opts.ExternalFeedbackAllowed }
+	allowed := func() bool { return opts.FeedbackService != nil }
 	group := admin.Group("/feedback", requireAdminAccess(opts.RBACService))
 	group.GET("/collection-policy", func(c *gin.Context) {
-		feedbackResponse(c, gin.H{"external_feedback_allowed": allowed()}, nil, 200)
+		feedbackResponse(c, gin.H{"enabled": allowed()}, nil, 200)
 	})
 	group.POST("/collect", func(c *gin.Context) {
 		if !allowed() {
@@ -71,7 +71,7 @@ func mountFeedbackCollectionRoutes(admin *gin.RouterGroup, opts Options) {
 			}
 			screenshots = append(screenshots, feedback.ConsoleScreenshot{ContentType: file.Header.Get("Content-Type"), Data: data})
 		}
-		out, err := feedback.SubmitConsoleFeedback(c.Request.Context(), input, screenshots, nil, allowed)
+		out, err := opts.FeedbackService.SubmitConsoleFeedback(c.Request.Context(), input, screenshots, feedbackClientIP(c.Request, opts.FeedbackTrustedProxies))
 		feedbackResponse(c, out, err, 200)
 	})
 }

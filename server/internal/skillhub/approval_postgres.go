@@ -9,6 +9,10 @@ import (
 )
 
 func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider, template string, userIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
+	return s.SetSpaceApprovalSubjects(ctx, spaceID, provider, template, userIDs, nil, confirmed, operator, now)
+}
+
+func (s *PostgresStore) SetSpaceApprovalSubjects(ctx context.Context, spaceID, provider, template string, userIDs, roleIDs []string, confirmed bool, operator string, now time.Time) (int64, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
@@ -21,6 +25,9 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 	if provider == "local" {
 		template = ""
 	} else {
+		if len(roleIDs) != 0 {
+			return 0, ErrInvalidRequest
+		}
 		userIDs = nil
 	}
 	rows, err := tx.Query(ctx, `SELECT user_id FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1 ORDER BY user_id`, spaceID)
@@ -41,16 +48,28 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 	if err != nil {
 		return 0, err
 	}
-	if oldProvider == provider && oldTemplate == template && sameIDSet(oldIDs, userIDs) {
+	var oldRoleIDs []string
+	if err = tx.QueryRow(ctx, `SELECT ARRAY(SELECT role_id FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1 ORDER BY role_id)`, spaceID).Scan(&oldRoleIDs); err != nil {
+		return 0, err
+	}
+	if oldProvider == provider && oldTemplate == template && sameIDSet(oldIDs, userIDs) && sameIDSet(oldRoleIDs, roleIDs) {
 		return 0, nil
 	}
 	for _, id := range userIDs {
 		var allowed bool
-		err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM data_resource_grants WHERE resource_type='skill_space' AND resource_id=$2 AND action='read' AND user_id=$1) FROM accounts WHERE user_id=$1 FOR SHARE`, id, spaceID).Scan(&allowed)
+		err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM effective_data_resource_permissions WHERE resource_type='skill_space' AND resource_id=$2 AND action='read' AND user_id=$1) FROM accounts WHERE user_id=$1 FOR SHARE`, id, spaceID).Scan(&allowed)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !allowed {
 			return 0, ErrMemberNotFound
 		}
 		if err != nil {
+			return 0, err
+		}
+	}
+	for _, id := range roleIDs {
+		var found string
+		if err = tx.QueryRow(ctx, `SELECT role_id FROM rbac_roles WHERE role_id=$1 FOR SHARE`, id).Scan(&found); errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrInvalidRequest
+		} else if err != nil {
 			return 0, err
 		}
 	}
@@ -99,6 +118,14 @@ func (s *PostgresStore) SetSpaceApprovers(ctx context.Context, spaceID, provider
 			return 0, err
 		}
 	}
+	if _, err = tx.Exec(ctx, `DELETE FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1`, spaceID); err != nil {
+		return 0, err
+	}
+	for _, id := range roleIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO approval_config_roles(scope_type,scope_id,role_id) VALUES('skill_space',$1,$2)`, spaceID, id); err != nil {
+			return 0, err
+		}
+	}
 	if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status='pending',approved_space_id=NULL,reviewed_by=NULL,reviewed_at=NULL,review_comment='' WHERE version_id=ANY($1)`, ids); err != nil {
 		return 0, err
 	}
@@ -134,7 +161,11 @@ func sameIDSet(oldIDs, newIDs []string) bool {
 	return true
 }
 
-func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, now time.Time) (Version, error) {
+func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, reviewer string, approve bool, comment string, input ReviewInput, now time.Time) (Version, error) {
+	if err := validateReview(approve, comment, input); err != nil {
+		return Version{}, err
+	}
+	input.Scores = cloneScores(input.Scores)
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return Version{}, err
@@ -159,7 +190,7 @@ func (s *PostgresStore) ReviewVersion(ctx context.Context, skillID, versionID, r
 		return Version{}, ErrConflict
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR SHARE`, reviewer).Scan(&active); err != nil || !active {
+	if err = tx.QueryRow(ctx, `SELECT status='active' AND EXISTS(SELECT 1 FROM effective_data_resource_permissions WHERE user_id=$1 AND resource_type='skill_space' AND resource_id=$2 AND action='read') FROM accounts WHERE user_id=$1 FOR SHARE`, reviewer, spaceID).Scan(&active); err != nil || !active {
 		return Version{}, ErrReviewForbidden
 	}
 	var version Version
@@ -169,11 +200,11 @@ v.uploaded_by_user_id,v.uploaded_by_agent_id,v.skill_name,v.approval_status,COAL
 FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id WHERE v.skill_id=$1 AND v.version_id=$2 FOR UPDATE OF v`, skillID, versionID), &version); err != nil {
 		return Version{}, mapNotFound(err)
 	}
-	var requestID string
-	err = tx.QueryRow(ctx, `SELECT id FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='pending' FOR UPDATE`, versionID, spaceID, version.PackageSHA256).Scan(&requestID)
+	var requestID, standard string
+	err = tx.QueryRow(ctx, `SELECT id,COALESCE(scoring_standard_version,'') FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='pending' FOR UPDATE`, versionID, spaceID, version.PackageSHA256).Scan(&requestID, &standard)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var exists bool
-		if lookupErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND status<>'invalidated')`, versionID).Scan(&exists); lookupErr != nil {
+		if lookupErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND (status<>'invalidated' OR id=$2))`, versionID, input.RequestID).Scan(&exists); lookupErr != nil {
 			return Version{}, lookupErr
 		}
 		if !exists {
@@ -184,16 +215,39 @@ FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id W
 	if err != nil {
 		return Version{}, err
 	}
+	if requestID != input.RequestID || standard != "" && standard != manualScoringStandard {
+		return Version{}, ErrConflict
+	}
+	var member bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_request_approvers WHERE request_id=$1 AND user_id=$2)`, requestID, reviewer).Scan(&member); err != nil {
+		return Version{}, err
+	}
+	if !member {
+		return Version{}, ErrReviewForbidden
+	}
+	attempts, err := readAIAttempts(ctx, tx, requestID, now)
+	if err != nil {
+		return Version{}, err
+	}
+	if version.Source == nil && !aiAllowsHuman(attempts, now) {
+		return Version{}, ErrAIReviewRequired
+	}
 	decision := "rejected"
 	if approve {
 		decision = "approved"
 	}
-	tag, err := tx.Exec(ctx, `UPDATE approval_request_approvers SET status=$3,comment=$4,decided_at=$5 WHERE request_id=$1 AND user_id=$2 AND status='pending'`, requestID, reviewer, decision, comment, now)
+	values := scoreValues(input.Scores)
+	tag, err := tx.Exec(ctx, `UPDATE approval_request_approvers SET status=$3,comment=$4,decided_at=$5,scenario_value=$6,result_effectiveness=$7,ease_of_use=$8,reuse_value=$9 WHERE request_id=$1 AND user_id=$2 AND status='pending'`, requestID, reviewer, decision, comment, now, values[0], values[1], values[2], values[3])
 	if err != nil {
 		return Version{}, err
 	}
 	if tag.RowsAffected() == 0 {
 		return Version{}, ErrConflict
+	}
+	if standard == "" && hasScores(input.Scores) {
+		if _, err = tx.Exec(ctx, `UPDATE approval_requests SET scoring_standard_version=$2 WHERE id=$1`, requestID, manualScoringStandard); err != nil {
+			return Version{}, err
+		}
 	}
 	var remaining int
 	if err = tx.QueryRow(ctx, `SELECT count(*) FROM approval_request_approvers WHERE request_id=$1 AND status='pending'`, requestID).Scan(&remaining); err != nil {
@@ -216,6 +270,11 @@ FROM skill_versions v LEFT JOIN skill_sources src ON src.source_id=v.source_id W
 	version.LocalApproval, err = readLocalProgress(ctx, tx, versionID, spaceID, version.PackageSHA256)
 	if err != nil {
 		return Version{}, err
+	}
+	if status == "approved" {
+		if err = recordFirstApproval(ctx, tx, skillID, versionID, "local", requestID, version.LocalApproval, now); err != nil {
+			return Version{}, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return Version{}, err

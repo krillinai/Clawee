@@ -1,29 +1,29 @@
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface-page: #0c0d0f;
-  --surface-sidebar: #111214;
-  --surface-input: #18191c;
-  --surface-popover: #242529;
+  --surface-page: #0a0a0a;
+  --surface-sidebar: #111111;
+  --surface-input: #181818;
+  --surface-popover: rgba(24, 24, 24, 0.88);
   --bg: var(--surface-page);
   --conversation-bg: var(--surface-page);
   --sidebar: var(--surface-sidebar);
-  --sidebar-hover: #18191c;
-  --surface: #18191c;
-  --surface-2: #1f2023;
-  --surface-3: #282a2e;
+  --sidebar-hover: #1c1c1c;
+  --surface: #141414;
+  --surface-2: #181818;
+  --surface-3: #202020;
   --popover: var(--surface-popover);
-  --border: rgba(245, 245, 246, 0.1);
-  --border-hairline: rgba(245, 245, 246, 0.08);
-  --border-strong: rgba(245, 245, 246, 0.3);
-  --text: #f4f4f5;
-  --muted: rgba(244, 244, 245, 0.7);
-  --subtle: rgba(244, 244, 245, 0.46);
-  --accent: #d7d7da;
-  --accent-strong: #f0f0f1;
-  --accent-soft: rgba(244, 244, 245, 0.1);
-  --accent-glow: rgba(244, 244, 245, 0.18);
-  --on-accent: #171719;
+  --border: rgba(229, 229, 229, 0.1);
+  --border-hairline: rgba(229, 229, 229, 0.08);
+  --border-strong: rgba(229, 229, 229, 0.3);
+  --text: #e5e5e5;
+  --muted: rgba(229, 229, 229, 0.68);
+  --subtle: rgba(229, 229, 229, 0.46);
+  --accent: #fade1f;
+  --accent-strong: #ffe45c;
+  --accent-soft: rgba(250, 222, 31, 0.11);
+  --accent-glow: rgba(250, 222, 31, 0.16);
+  --on-accent: #171717;
   --danger: #d4d4d7;
   --danger-soft: rgba(244, 244, 245, 0.08);
   --warning: #bcbcc1;
@@ -34,13 +34,14 @@
   --status-connected-soft: rgba(52, 211, 153, 0.18);
   --status-disconnected: #f87171;
   --status-disconnected-soft: rgba(248, 113, 113, 0.18);
+  --status-unread: #60a5fa;
   --shadow-base: #050506;
   --shadow: 0 22px 60px rgba(5, 5, 6, 0.42);
   --shadow-popover: 0 12px 32px rgba(5, 5, 6, 0.34);
   --shadow-dialog: 0 24px 64px rgba(5, 5, 6, 0.44);
   --control-disabled: linear-gradient(180deg, #414348, #292b2f);
   --control-disabled-text: rgba(244, 244, 245, 0.48);
-  --ambient-glow: rgba(244, 244, 245, 0.11);
+  --ambient-glow: rgba(250, 222, 31, 0.08);
   --scrim: rgba(5, 5, 6, 0.7);
   --logo-filter: grayscale(1) contrast(1.08) brightness(1.08);
   --radius-sm: 4px;
@@ -62,6 +63,10 @@
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-display: Georgia, "Times New Roman", ui-serif, serif;
   --font-mono: "SF Mono", "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --page-title-size: 22px;
+  --page-body-size: 13px;
+  --page-meta-size: 12px;
+  --page-caption-size: 11px;
 }
 
 :root[data-theme="light"] {
@@ -89,16 +94,17 @@
   --accent-soft: rgba(24, 24, 27, 0.08);
   --accent-glow: rgba(24, 24, 27, 0.14);
   --on-accent: #f7f7f8;
-  --danger: #3f3f46;
-  --danger-soft: rgba(24, 24, 27, 0.06);
-  --warning: #525256;
-  --warning-soft: rgba(24, 24, 27, 0.055);
-  --success: #27272a;
-  --success-soft: rgba(24, 24, 27, 0.07);
+  --danger: #b42318;
+  --danger-soft: rgba(180, 35, 24, 0.1);
+  --warning: #a15c00;
+  --warning-soft: rgba(161, 92, 0, 0.1);
+  --success: #15803d;
+  --success-soft: rgba(21, 128, 61, 0.1);
   --status-connected: #16a34a;
   --status-connected-soft: rgba(22, 163, 74, 0.14);
   --status-disconnected: #dc2626;
   --status-disconnected-soft: rgba(220, 38, 38, 0.12);
+  --status-unread: #2563eb;
   --shadow-base: #18181b;
   --shadow: 0 18px 48px rgba(24, 24, 27, 0.12);
   --shadow-popover: 0 12px 28px rgba(24, 24, 27, 0.14);
@@ -199,6 +205,20 @@
   --accent-soft: color-mix(in srgb, var(--custom-accent-value) 14%, transparent);
   --accent-glow: color-mix(in srgb, var(--custom-accent-value) 20%, transparent);
   --on-accent: var(--custom-on-accent);
+}
+
+:root[data-accent="brand"] {
+  --accent: var(--brand-dark-accent);
+  --accent-strong: color-mix(in srgb, var(--accent) 88%, var(--text));
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 20%, transparent);
+  --on-accent: var(--brand-dark-on-accent);
+}
+
+:root[data-theme="light"][data-accent="brand"] {
+  --accent: var(--brand-light-accent);
+  --accent-soft: var(--brand-light-soft);
+  --on-accent: var(--brand-light-on-accent);
 }
 
 :root[data-platform="win32"] {

@@ -2,9 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertNoMultiAgentTools,
+  assertAgentMessageStream,
   assertNoUsageRequest,
   collectModelToolNames
 } from '../../scripts/codex-runtime/app-server-release-contract.mjs';
+
+test('requires shared item identity and complete text across actual Runtime notifications', () => {
+  const delta = text => ({ method: 'item/agentMessage/delta', params: { threadId: 'thread', turnId: 'turn', itemId: 'item', delta: text } });
+  const done = { method: 'item/completed', params: { threadId: 'thread', item: { id: 'item', type: 'agentMessage', text: 'done' } } };
+  assert.doesNotThrow(() => assertAgentMessageStream([delta('do'), delta('ne'), done], 'thread'));
+  assert.throws(() => assertAgentMessageStream([delta('do'), delta('wrong'), done], 'thread'), /AGENT_MESSAGE_STREAM_MISMATCH/);
+  assert.throws(() => assertAgentMessageStream([delta('do'), { ...delta('ne'), params: { ...delta('ne').params, itemId: 'other' } }, done], 'thread'), /AGENT_MESSAGE_STREAM_MISMATCH/);
+});
 
 test('collects nested and plain model tool names', () => {
   assert.deepEqual(collectModelToolNames([

@@ -23,6 +23,9 @@ const (
 	StatusRevoked    = "revoked"
 	StatusExpired    = "expired"
 
+	AccountTokenScopeMCPCall   = "mcp:call"
+	AccountTokenScopeModelCall = "model:call"
+
 	CapabilityTool     = "tool"
 	CapabilityResource = "resource"
 	CapabilityPrompt   = "prompt"
@@ -173,6 +176,7 @@ type Capability struct {
 type AccountGrant struct {
 	ID           string
 	UserID       string
+	RoleID       string
 	CapabilityID string
 	GrantType    string
 	DataScope    JSONMap
@@ -193,6 +197,7 @@ type CapabilityFilter struct {
 
 type GrantFilter struct {
 	UserID       string
+	RoleID       string
 	CapabilityID string
 	GrantType    string
 }
@@ -395,6 +400,180 @@ type ProxyAuditFilter struct {
 	CreatedFrom      time.Time
 	CreatedTo        time.Time
 	ErrorOnly        bool
+}
+
+type ModelProxyAuditStatus string
+
+const (
+	ModelProxyAuditStarted               ModelProxyAuditStatus = "started"
+	ModelProxyAuditSucceeded             ModelProxyAuditStatus = "succeeded"
+	ModelProxyAuditFailed                ModelProxyAuditStatus = "failed"
+	ModelProxyAuditClientDisconnected    ModelProxyAuditStatus = "client_disconnected"
+	ModelProxyAuditRejectedAPIKey        ModelProxyAuditStatus = "rejected_api_key"
+	ModelProxyAuditRejectedScope         ModelProxyAuditStatus = "rejected_scope"
+	ModelProxyAuditRejectedAccount       ModelProxyAuditStatus = "rejected_account"
+	ModelProxyAuditRejectedConfiguration ModelProxyAuditStatus = "rejected_configuration"
+)
+
+type ModelProxyUsageStatus string
+
+const (
+	ModelProxyUsageComplete    ModelProxyUsageStatus = "complete"
+	ModelProxyUsagePartial     ModelProxyUsageStatus = "partial"
+	ModelProxyUsageUnavailable ModelProxyUsageStatus = "unavailable"
+)
+
+type ModelProxyUsageSource string
+
+const (
+	ModelProxyUsageSourceUpstream    ModelProxyUsageSource = "upstream"
+	ModelProxyUsageSourceEstimated   ModelProxyUsageSource = "estimated"
+	ModelProxyUsageSourceUnavailable ModelProxyUsageSource = "unavailable"
+)
+
+type ModelProxyAuditRecord struct {
+	AuditID             string
+	RequestID           string
+	UserID              string
+	UserNameSnapshot    string
+	APIKeyID            string
+	APIKeyFingerprint   string
+	Endpoint            string
+	Method              string
+	Model               string
+	RequestedModel      string
+	UpstreamModel       string
+	ResponseModel       string
+	RequestType         string
+	Status              ModelProxyAuditStatus
+	GatewayStatus       int
+	UpstreamStatus      int
+	ErrorCode           string
+	ErrorMessage        string
+	InputTokens         int64
+	OutputTokens        int64
+	TotalTokens         int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	ReasoningTokens     int64
+	UsageAvailable      bool
+	UsageStatus         ModelProxyUsageStatus
+	UsageSource         ModelProxyUsageSource
+	RequestHeaders      JSONMap
+	RequestBody         JSONMap
+	ResponseHeaders     JSONMap
+	ResponseBody        JSONMap
+	RequestBytes        int64
+	ResponseBytes       int64
+	ResponseChunks      int64
+	Truncated           bool
+	DurationMS          int64
+	FirstByteMS         int64
+	CreatedAt           time.Time
+	CompletedAt         time.Time
+}
+
+type ModelProxyAuditFinalize struct {
+	AuditID             string
+	Status              ModelProxyAuditStatus
+	Model               string
+	RequestedModel      string
+	UpstreamModel       string
+	ResponseModel       string
+	GatewayStatus       int
+	UpstreamStatus      int
+	ErrorCode           string
+	ErrorMessage        string
+	InputTokens         int64
+	OutputTokens        int64
+	TotalTokens         int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	ReasoningTokens     int64
+	UsageAvailable      bool
+	UsageStatus         ModelProxyUsageStatus
+	UsageSource         ModelProxyUsageSource
+	ResponseHeaders     JSONMap
+	ResponseBody        JSONMap
+	ResponseBytes       int64
+	ResponseChunks      int64
+	Truncated           bool
+	DurationMS          int64
+	FirstByteMS         int64
+	CompletedAt         time.Time
+}
+
+type ModelProxyAuditFilter struct {
+	Limit           int
+	CursorCreatedAt time.Time
+	CursorID        string
+	UserID          string
+	Model           string
+	Endpoint        string
+	Status          ModelProxyAuditStatus
+	UsageStatus     ModelProxyUsageStatus
+	UsageSource     ModelProxyUsageSource
+	ErrorOnly       bool
+	CreatedFrom     time.Time
+	CreatedTo       time.Time
+}
+
+type ModelProxyAuditPage struct {
+	Items         []ModelProxyAuditRecord
+	NextCreatedAt time.Time
+	NextID        string
+}
+
+type ModelProxyAuditSummaryFilter struct {
+	UserID      string
+	Model       string
+	Endpoint    string
+	Status      ModelProxyAuditStatus
+	UsageStatus ModelProxyUsageStatus
+	UsageSource ModelProxyUsageSource
+	ErrorOnly   bool
+	CreatedFrom time.Time
+	CreatedTo   time.Time
+}
+
+type ModelProxyAuditSummary struct {
+	UserID                string
+	UserNameSnapshot      string
+	Model                 string
+	RequestCount          int64
+	SucceededCount        int64
+	UsageCompleteCount    int64
+	UsagePartialCount     int64
+	UsageUnavailableCount int64
+	UsageCoverageRate     float64
+	InputTokens           int64
+	OutputTokens          int64
+	TotalTokens           int64
+	CacheReadTokens       int64
+	CacheCreationTokens   int64
+	ReasoningTokens       int64
+	UsageCount            int64
+	SuccessRate           float64
+}
+
+func ModelProxyAuditUsageStatus(record ModelProxyAuditRecord) ModelProxyUsageStatus {
+	if record.UsageStatus != "" {
+		return record.UsageStatus
+	}
+	if record.UsageAvailable {
+		return ModelProxyUsageComplete
+	}
+	return ModelProxyUsageUnavailable
+}
+
+func ModelProxyAuditUsageSource(record ModelProxyAuditRecord) ModelProxyUsageSource {
+	if record.UsageSource != "" {
+		return record.UsageSource
+	}
+	if record.UsageAvailable {
+		return ModelProxyUsageSourceUpstream
+	}
+	return ModelProxyUsageSourceUnavailable
 }
 
 type ListAuditRecord struct {

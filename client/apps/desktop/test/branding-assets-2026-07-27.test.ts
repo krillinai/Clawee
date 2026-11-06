@@ -73,7 +73,7 @@ describe('品牌资源', () => {
     expect(trayManager).toContain("if (process.platform === 'darwin') icon.setTemplateImage(true);");
     expect(trayManager).toContain('height: size');
 
-    const desktopMain = readFileSync(resolve(desktopRoot, 'src/main/main.ts'), 'utf8');
+    const desktopMain = readFileSync(resolve(desktopRoot, 'src/main/desktop-main.ts'), 'utf8');
     expect(desktopMain).toContain("app.dock?.setIcon(join(resourceRoot, 'icon.png'));");
   });
 

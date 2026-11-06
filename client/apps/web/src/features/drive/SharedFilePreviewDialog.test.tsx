@@ -39,6 +39,25 @@ describe('共享文件预览', () => {
     expect(readPreview.mock.calls[0]?.[1]?.aborted).toBe(true);
   });
 
+  it('按 Markdown 渲染 .md 文件', async () => {
+    const readPreview = vi.fn(async () => new Response('# 使用说明\n\n- 第一步', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }));
+    render(<SharedFilePreviewDialog file={{ ...file, fileName: 'guide.md' }} readPreview={readPreview} canDownload onDownload={vi.fn()} onClose={vi.fn()} />);
+    expect(await screen.findByRole('heading', { name: '使用说明' })).toBeInTheDocument();
+    expect(screen.getByRole('listitem')).toHaveTextContent('第一步');
+  });
+
+  it('格式化 .json，字符串里的换行按真实换行显示，解析失败时保留原文', async () => {
+    const readPreview = vi.fn(async () => new Response(JSON.stringify({ text: '第一段\n说"好"', count: 2 }), { headers: { 'Content-Type': 'text/plain' } }));
+    const view = render(<SharedFilePreviewDialog file={{ ...file, fileName: 'data.json' }} readPreview={readPreview} canDownload onDownload={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(view.baseElement.querySelector('pre')?.textContent).toBe('{\n  "text": "第一段\n    说"好"",\n  "count": 2\n}'));
+    view.unmount();
+
+    const broken = vi.fn(async () => new Response('{"a":', { headers: { 'Content-Type': 'text/plain' } }));
+    render(<SharedFilePreviewDialog file={{ ...file, fileName: 'data.json' }} readPreview={broken} canDownload onDownload={vi.fn()} onClose={vi.fn()} />);
+    expect(await screen.findByText('JSON 解析失败，以下保留原始内容。')).toBeInTheDocument();
+    expect(screen.getByText('{"a":')).toBeInTheDocument();
+  });
+
   it.each([413, 415])('预览被拒绝时保留下载操作（%s）', async status => {
     const readPreview = vi.fn(async () => { throw new ApiClientError({ status, code: 'ERROR', message: 'error' }); });
     const onDownload = vi.fn();

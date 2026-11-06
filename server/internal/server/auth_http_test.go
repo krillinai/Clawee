@@ -71,6 +71,40 @@ func TestFirstRegisterIsAdminAndCanAccessAdminAPI(t *testing.T) {
 	}
 }
 
+func TestAuthMeReportsModelGatewayAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode server.ModelAccessMode
+		want bool
+	}{
+		{name: "平台托管", mode: server.ModelAccessPlatformManaged, want: true},
+		{name: "企业托管", mode: server.ModelAccessEnterpriseManaged, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newTestRouter(t, server.Options{ModelAccessMode: tc.mode})
+			cookies := register(t, router, `{"email":"model-mode@example.com","password":"passw0rd!"}`)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+			req.AddCookie(frontendCookie(t, cookies))
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("me status = %d body=%s", rec.Code, rec.Body.String())
+			}
+			var response struct {
+				Data struct {
+					ModelGatewayEnabled bool `json:"model_gateway_enabled"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Data.ModelGatewayEnabled != tc.want {
+				t.Fatalf("model_gateway_enabled = %v, want %v", response.Data.ModelGatewayEnabled, tc.want)
+			}
+		})
+	}
+}
+
 func TestClaweeAccountScopedAgentSurvivesAccountSwitch(t *testing.T) {
 	ctx := context.Background()
 	accountStore := accounts.NewMemoryStore()
@@ -1376,6 +1410,7 @@ func TestNormalUserCanRotateAndCopyOwnAgentToken(t *testing.T) {
 		t.Fatalf("rotate authorization_header = %#v", rotateResp["authorization_header"])
 	}
 	assertNoSensitiveTokenFields(t, rotateResp["token"].(map[string]any))
+	assertModelTokenScopes(t, rotateResp["token"].(map[string]any))
 	if _, err := proxyStore.GetAccountTokenByHash(ctx, mcpgateway.HashToken(oldPlaintext)); err == nil {
 		oldToken, getErr := proxyStore.GetAccountTokenByHash(ctx, mcpgateway.HashToken(oldPlaintext))
 		if getErr != nil {
@@ -1540,5 +1575,13 @@ func assertNoSensitiveTokenFields(t *testing.T, token map[string]any) {
 		if _, ok := token[key]; ok {
 			t.Fatalf("token metadata leaked %s: %#v", key, token)
 		}
+	}
+}
+
+func assertModelTokenScopes(t *testing.T, token map[string]any) {
+	t.Helper()
+	scopes, ok := token["token_scopes"].([]any)
+	if !ok || len(scopes) != 2 || scopes[0] != mcpgateway.AccountTokenScopeMCPCall || scopes[1] != mcpgateway.AccountTokenScopeModelCall {
+		t.Fatalf("token scopes = %#v, want [%q, %q]", token["token_scopes"], mcpgateway.AccountTokenScopeMCPCall, mcpgateway.AccountTokenScopeModelCall)
 	}
 }

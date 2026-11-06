@@ -18,15 +18,27 @@ function assertExternal(input) {
     throw new Error('运维配置目录必须位于源码仓库之外');
   }
 }
+function spawnCorepack(argv, options) {
+  if (process.platform !== 'win32') return spawnSync('corepack', argv, options);
+  const locations = spawnSync('where.exe', ['corepack'], { encoding: 'utf8' });
+  if (locations.error) throw locations.error;
+  const cli = (locations.stdout ?? '').trim().split(/\r?\n/)
+    .filter(Boolean)
+    .map(shim => resolve(dirname(shim), 'node_modules/corepack/dist/corepack.js'))
+    .find(existsSync);
+  if (!cli) throw new Error('未找到 Corepack JavaScript 入口，请安装 Node.js 24 和 Corepack');
+  return spawnSync(process.execPath, [cli, ...argv], options);
+}
 function run(program, argv, directory) {
   const shims = mkdtempSync(resolve(tmpdir(), 'clawee-corepack-'));
   let result;
   try {
-    const enabled = spawnSync('corepack', ['enable', '--install-directory', shims, 'pnpm'], { stdio: 'inherit' });
+    const enabled = spawnCorepack(['enable', '--install-directory', shims, 'pnpm'], { stdio: 'inherit' });
     if (enabled.error) throw enabled.error;
     if (enabled.status !== 0) throw new Error('无法准备 Corepack pnpm 入口');
     // 子脚本中的 pnpm 也必须遵守当前组件的 packageManager，不能落到全局版本。
-    result = spawnSync(program, argv, {
+    const launch = program === 'corepack' ? spawnCorepack : (args, options) => spawnSync(program, args, options);
+    result = launch(argv, {
       cwd: resolve(root, directory), stdio: 'inherit',
       env: { ...process.env, PATH: shims + delimiter + (process.env.PATH ?? '') }
     });

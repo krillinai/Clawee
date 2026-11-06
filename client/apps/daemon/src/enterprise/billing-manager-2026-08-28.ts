@@ -7,7 +7,7 @@ import type {
 } from '@clawee/protocol';
 import { createHash } from 'node:crypto';
 import type { EnterpriseHttpClient } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 
@@ -160,6 +160,7 @@ function billingStatusCode(
 function diagnosticDetails(
   error: EnterpriseHttpError
 ): Record<string, unknown> | undefined {
+  if (error.details?.failureKind) return enterpriseHttpErrorDetails(error);
   if (error.requestId === undefined) return undefined;
   return { requestId: redactRequestId(error.requestId) };
 }

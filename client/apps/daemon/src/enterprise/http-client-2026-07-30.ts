@@ -2,6 +2,7 @@ import type {
   EnterpriseAccountSummary,
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
+  EnterpriseActivityRuntimeResponse,
   EnterpriseActivityStatisticsResponse,
   EnterpriseBilibiliDashboardRange,
   EnterpriseBilibiliDashboardResponse,
@@ -11,18 +12,34 @@ import type {
   EnterpriseSkillUploadResponse,
   EnterpriseLoginRequest,
   EnterprisePlatformBrandingResponse,
+  EnterprisePlatformBrandingImageKind,
   EnterpriseQrLoginStartRequest,
   EnterpriseQrLoginStartResponse,
   EnterpriseQrProvider,
   EnterpriseRechargeOrderPageResponse,
   EnterpriseRechargeSessionResponse,
   EnterpriseRegisterRequest,
-  RuntimeErrorCode
+  SkillContributionQuery,
+  SkillContributionResponse,
+  SkillContributionCSV,
+  RuntimeErrorCode,
+  EnterpriseWorkflowArtifact
 } from '@clawee/protocol';
+import { httpFailureDetails, httpFailureMessage, safeIncidentIdentifier } from '@clawee/protocol';
 import { createHash } from 'node:crypto';
 import { openAsBlob } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { z } from 'zod';
+import {
+  skillAIReviewTaskSchema,
+  skillAIReviewClaimSchema,
+  type SkillAIReviewTask,
+  type SkillAIReviewClaim,
+  type SkillAIReviewResult
+} from './skill-ai-review-schema.js';
+import { workflowArtifactSchema, workflowResponseSchema } from './workflow-schema.js';
+import { approvalResponseSchema } from './approvals-schema.js';
+import { contributionResponseSchema } from './skill-contributions-schema.js';
 import {
   ENTERPRISE_DOCUMENT_UPLOAD_TIMEOUT_MS,
   ENTERPRISE_DOWNLOAD_TIMEOUT_MS,
@@ -39,11 +56,15 @@ import type {
 const accountSchema = z.object({
   account_id: z.string().min(1).optional(),
   user_id: z.string().min(1).optional(),
-  email: z.string().min(1),
+  email: z.string(),
+  phone: z.string().regex(/^1[3-9]\d{9}$/).or(z.literal('')).optional(),
   name: z.string(),
   status: z.string(),
   avatar_url: z.string().min(1).optional()
 }).superRefine((account, context) => {
+  if (!account.email && !account.phone) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'An account login identifier is required' });
+  }
   if (account.account_id === undefined && account.user_id === undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -74,6 +95,13 @@ const loginResponseSchema = z.object({
     expires_at: z.string().datetime({ offset: true })
   })
 });
+const sessionRenewalResponseSchema = z.object({
+  data: z.object({
+    access_token: z.string().min(1),
+    token_type: z.literal('Bearer'),
+    expires_at: z.string().datetime({ offset: true })
+  })
+});
 const modelConfigurationSchema = z.object({
   data: z.discriminatedUnion('mode', [
     z.object({
@@ -98,8 +126,11 @@ const sidebarMenuLabelSchema = z.string().refine(value =>
 const platformBrandingSchema = z.object({
   data: z.object({
     admin_url: z.union([z.literal(''), z.string().url().refine(value => /^https?:\/\//.test(value))]).optional(),
+    accent_color: z.union([z.literal(''), z.string().regex(/^#[\da-f]{6}$/i)]).optional(),
     sidebar_logo_configured: z.boolean(),
     sidebar_compact_logo_configured: z.boolean(),
+    sidebar_logo_dark_configured: z.boolean().optional(),
+    sidebar_compact_logo_dark_configured: z.boolean().optional(),
     sidebar_menu_labels: z.object({
       skills: sidebarMenuLabelSchema.optional(),
       knowledge: sidebarMenuLabelSchema.optional(),
@@ -221,6 +252,7 @@ const bilibiliSourcesResponseSchema = z.object({
 });
 const meResponseSchema = z.object({
   data: z.object({
+    session_id: z.string().min(1).optional(),
     account: accountSchema,
     agent: agentSchema,
     applications: z.object({
@@ -298,6 +330,20 @@ const remoteSkillSchema = z.object({
 const skillListResponseSchema = z.object({
   data: z.array(remoteSkillSchema)
 });
+const cloudSkillListResponseSchema = z.object({
+  data: z.object({
+    agent_email: z.string().email(),
+    agent_name: z.string().min(1),
+    prompt_template: z.string().min(1),
+    skills: z.array(remoteSkillSchema.pick({
+      skill_id: true,
+      name: true,
+      description: true,
+      version: true,
+      updated_at: true
+    }))
+  })
+});
 const skillSpaceListResponseSchema = z.object({
   data: z.array(z.object({
     space_id: z.string().min(1),
@@ -308,6 +354,7 @@ const skillSpaceListResponseSchema = z.object({
 });
 const skillUploadResponseSchema = z.object({
   data: z.object({
+    approval_request_id: z.string().min(1).optional(),
     skill: z.object({ skill_id: z.string().min(1), space_id: z.string().min(1), name: z.string().min(1) }),
     version: z.object({ version: z.string().min(1) })
   })
@@ -362,6 +409,8 @@ const sharedSpacePermissionsSchema = z.object({
   write: z.boolean().optional()
 });
 const remoteSharedSpaceSchema = z.object({
+  personal_owner_user_id: z.string().optional(),
+  workflow_template_name: z.string().optional(),
   space_id: z.string().min(1),
   name: z.string().min(1),
   description: z.string(),
@@ -431,6 +480,27 @@ const activityUsageDistributionSchema = z.object({
   invocation_count: z.number().int().nonnegative(),
   share: z.number().min(0).max(1)
 });
+const activityRuntimePayloadSchema = z.object({
+  schema_version: z.literal('office.v1'),
+  scope: z.literal('organization'),
+  server_time: z.string().datetime({ offset: true }),
+  summary: z.object({
+    total_agents: z.number().int().nonnegative(),
+    online_agents: z.number().int().nonnegative(),
+    working_agents: z.number().int().nonnegative(),
+    blocked_agents: z.number().int().nonnegative(),
+    error_agents: z.number().int().nonnegative()
+  }),
+  agents: z.array(z.object({
+    collector_id: z.string().min(1), agent_id: z.string().min(1), status: z.string().min(1),
+    current_task: z.string().optional(), last_seen_at: z.string().datetime({ offset: true })
+  }))
+});
+const activityRuntimeResponseSchema = z.union([
+  activityRuntimePayloadSchema,
+  z.object({ data: activityRuntimePayloadSchema })
+]);
+
 const activityStatisticsResponseSchema = z.object({
   data: z.object({
     range: z.enum(['today', '7d', '30d']),
@@ -443,7 +513,24 @@ const activityStatisticsResponseSchema = z.object({
       active_employees: z.number().int().nonnegative(),
       active_agents: z.number().int().nonnegative(),
       completed_turns: z.number().int().nonnegative(),
-      mcp_distribution: z.array(activityUsageDistributionSchema)
+      platform_activity: z.object({
+        active_users: z.number().int().nonnegative(),
+        total_users: z.number().int().nonnegative(),
+        rate: z.number().min(0).max(1)
+      }).optional(),
+      mcp_distribution: z.array(activityUsageDistributionSchema),
+      skill_usage: z.array(z.object({
+        skill_id: z.string(), skill_name: z.string(), skill_key: z.string(), source: z.string(),
+        requested_runs: z.number().int().nonnegative(),
+        observed_runs: z.number().int().nonnegative(),
+        implicit_runs: z.number().int().nonnegative()
+      })).optional(),
+      skill_usage_totals: z.object({
+        requested_skill_runs: z.number().int().nonnegative(),
+        observed_skill_runs: z.number().int().nonnegative(),
+        explicit_skill_runs: z.number().int().nonnegative(),
+        implicit_skill_runs: z.number().int().nonnegative()
+      }).optional()
     }),
     trend: z.object({
       granularity: z.enum(['hour', 'day']),
@@ -473,6 +560,8 @@ const activityStatisticsResponseSchema = z.object({
       status: z.string().min(1),
       session_count: z.number().int().nonnegative(),
       turn_count: z.number().int().nonnegative(),
+      employee_id: z.string().optional(),
+      employee_name: z.string().optional(),
       last_activity_at: z.string().min(1).optional()
     })),
     data_status: z.union([
@@ -650,6 +739,21 @@ const activityDetailResponseSchema = z.union([
   activityDetailPayloadSchema,
   z.object({ data: activityDetailPayloadSchema })
 ]);
+const activityAgentUsageResponseSchema = z.object({ data: z.object({
+  collector_id: z.string().min(1), agent_id: z.string().min(1),
+  range: z.enum(['today', '7d', '30d']), timezone: z.string().min(1),
+  start_date: z.string().min(1), end_date: z.string().min(1), generated_at: z.string().min(1),
+  session_count: z.number().int().nonnegative(), turn_count: z.number().int().nonnegative(),
+  completed_turns: z.number().int().nonnegative(), tool_call_count: z.number().int().nonnegative(),
+  granularity: z.enum(['hour', 'day']),
+  points: z.array(z.object({ bucket_start: z.string().min(1),
+    session_count: z.number().int().nonnegative(), turn_count: z.number().int().nonnegative(),
+    completed_turns: z.number().int().nonnegative(), tool_call_count: z.number().int().nonnegative() })),
+  mcp_distribution: z.array(activityUsageDistributionSchema),
+  mcp_status: z.enum(['available', 'unlinked']),
+  skill_usage: activityStatisticsResponseSchema.shape.data.shape.organization.shape.skill_usage.unwrap(),
+  skill_usage_totals: activityStatisticsResponseSchema.shape.data.shape.organization.shape.skill_usage_totals.unwrap()
+}) });
 export type EnterpriseRemoteSkill = {
   skillId: string;
   name: string;
@@ -715,6 +819,14 @@ export type EnterpriseRemoteSkillDetail = EnterpriseRemoteSkill & {
   changelog?: string;
 };
 
+export type EnterpriseRemoteCloudSkill = Pick<EnterpriseRemoteSkill, 'skillId' | 'name' | 'description' | 'version' | 'updatedAt'>;
+export type EnterpriseCloudSkillList = {
+  agentEmail: string;
+  agentName: string;
+  promptTemplate: string;
+  skills: EnterpriseRemoteCloudSkill[];
+};
+
 export type EnterpriseRemoteKnowledgeBase = {
   knowledgeBaseId: string;
   name: string;
@@ -742,6 +854,8 @@ export type EnterpriseRemoteKnowledgeDocument = {
 };
 
 export type EnterpriseRemoteSharedSpace = {
+  personalOwnerUserId?: string;
+  workflowTemplateName?: string;
   spaceId: string;
   name: string;
   description: string;
@@ -841,6 +955,7 @@ export type EnterpriseQrLoginPollResult = {
 };
 
 export type EnterpriseMeResult = {
+  sessionId?: string;
   adminAllowed?: boolean;
   externalFeedbackAllowed?: boolean;
   account: EnterpriseAccountSummary;
@@ -854,6 +969,13 @@ export type EnterpriseDownloadInput = {
   accessToken: string;
   skillId: string;
   versionId: string;
+  expectedSha256: string;
+  destinationPath: string;
+};
+
+export type EnterpriseApprovalDownloadInput = {
+  accessToken: string;
+  requestId: string;
   expectedSha256: string;
   destinationPath: string;
 };
@@ -880,7 +1002,8 @@ export type EnterpriseSharedFilePreview = {
 
 export type EnterpriseSharedFileUploadInput = {
   accessToken: string;
-  spaceId: string;
+  spaceId?: string;
+  forUserId?: string;
   logicalPath: string;
   expectedRevision?: number;
   filePath: string;
@@ -890,7 +1013,21 @@ export type EnterpriseSharedFileUploadInput = {
 };
 
 export type EnterpriseHttpClient = {
+  getAgentPromptPolicy?(accessToken: string): Promise<{
+    version: number;
+    serverAgentPrompt: string;
+    claweeAgentPrompt: string;
+    updatedAt: string;
+  }>;
+  listSkillAIReviewTasks?(accessToken: string): Promise<{ tasks: SkillAIReviewTask[] }>;
+  getSkillAIReviewRule?(accessToken: string): Promise<{ text: string; version: string } | null>;
+  claimSkillAIReviewTask?(accessToken: string, requestId: string, attemptId: string, rule?: { review_skill_version: string; review_skill_sha256: string; error_code?: string }): Promise<SkillAIReviewClaim>;
+  submitSkillAIReviewResult?(accessToken: string, requestId: string, result: SkillAIReviewResult): Promise<void>;
   workflowRequest?(accessToken: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ data: unknown; meta?: unknown }>;
+  approvalRequest?(accessToken: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown>;
+  uploadWorkflowFile?(request: {
+    accessToken: string; taskId: string; idempotencyKey: string; fileName: string; filePath: string; sizeBytes: number; sha256: string; contentType: string;
+  }): Promise<EnterpriseWorkflowArtifact>;
   register(input: EnterpriseRegisterRequest, agentId: string): Promise<void>;
   login(input: EnterpriseLoginRequest, agentId: string): Promise<EnterpriseLoginResult>;
   prepareDingTalkAuthorization?(
@@ -908,6 +1045,7 @@ export type EnterpriseHttpClient = {
     agentId: string
   ): Promise<EnterpriseQrLoginPollResult>;
   getMe(accessToken: string): Promise<EnterpriseMeResult>;
+  renewSession?(accessToken: string): Promise<{ accessToken: string; expiresAt: string }>;
   logout(accessToken: string): Promise<void>;
   reportAgentActivity?(
     accessToken: string,
@@ -921,7 +1059,7 @@ export type EnterpriseHttpClient = {
   ): Promise<EnterprisePlatformBranding>;
   getPlatformBrandingImage?(
     accessToken: string,
-    kind: 'sidebar-logo' | 'sidebar-compact-logo'
+    kind: EnterprisePlatformBrandingImageKind
   ): Promise<EnterprisePlatformBrandingImage>;
   revealAccountMcpToken(accessToken: string): Promise<EnterpriseAccountMcpToken>;
   getMcpCatalog(accessToken: string): Promise<EnterpriseRemoteMcpCatalog>;
@@ -975,14 +1113,19 @@ export type EnterpriseHttpClient = {
     input: EnterpriseSharedFileUploadInput
   ): Promise<EnterpriseRemoteSharedFileMutation>;
   hasAgentActivityGrant?(accessToken: string): Promise<boolean>;
+  hasSkillContributionGrant?(accessToken: string): Promise<boolean>;
+  getSkillContributions?(accessToken: string, endpoint: 'summary' | 'records' | 'detail', query: SkillContributionQuery | { skill_id?: string; version_id?: string }): Promise<SkillContributionResponse>;
+  exportSkillContributions?(accessToken: string, query: SkillContributionQuery): Promise<SkillContributionCSV>;
   getActivityStatistics?(
     accessToken: string,
     range: EnterpriseActivityRange
   ): Promise<EnterpriseActivityStatisticsResponse>;
+  getActivityRuntime?(accessToken: string): Promise<EnterpriseActivityRuntimeResponse>;
   getActivityDetail?(
     accessToken: string,
     collectorId: string,
-    agentId: string
+    agentId: string,
+    range?: EnterpriseActivityRange
   ): Promise<EnterpriseActivityDetailResponse>;
   getBillingOverview?(
     accessToken: string,
@@ -1000,6 +1143,7 @@ export type EnterpriseHttpClient = {
     page: number
   ): Promise<EnterpriseRechargeOrderPageResponse>;
   listSkills(accessToken: string): Promise<EnterpriseRemoteSkill[]>;
+  getCloudSkills?(accessToken: string): Promise<EnterpriseCloudSkillList>;
   listSkillSpaces(accessToken: string): Promise<EnterpriseSkillSpaceListResponse>;
   uploadSkillVersion(input: {
     skillId?: string;
@@ -1021,6 +1165,9 @@ export type EnterpriseHttpClient = {
   downloadSkillPackage(
     input: EnterpriseDownloadInput
   ): Promise<{ bytes: number; sha256: string }>;
+  downloadApprovalPackage?(
+    input: EnterpriseApprovalDownloadInput
+  ): Promise<{ bytes: number; sha256: string }>;
 };
 
 export type EnterpriseDingTalkHttpClient = EnterpriseHttpClient & Required<Pick<
@@ -1028,6 +1175,7 @@ export type EnterpriseDingTalkHttpClient = EnterpriseHttpClient & Required<Pick<
   'prepareDingTalkAuthorization' | 'exchangeDingTalkAuthorizationCode'
   | 'hasAgentActivityGrant'
   | 'getActivityStatistics'
+  | 'getActivityRuntime'
   | 'getActivityDetail' | 'getModelConfiguration'
 >>;
 
@@ -1041,16 +1189,23 @@ export class EnterpriseHttpError extends Error {
     readonly requestId?: string,
     readonly details?: Record<string, unknown>
   ) {
-    super(`${code}: enterprise HTTP ${stage} failed`);
+    super(details ? httpFailureMessage(details) || `${code}: enterprise HTTP ${stage} failed` : `${code}: enterprise HTTP ${stage} failed`);
     this.name = 'EnterpriseHttpError';
   }
 }
 
-/** 仅返回安全的传输元数据，不包含请求体或令牌。 */
+/** 返回安全的传输元数据及 Skill 包校验说明，不包含请求体或令牌。 */
 export function enterpriseHttpErrorDetails(
   error: EnterpriseHttpError
 ): Record<string, unknown> {
   return {
+    ...(error.details?.failureKind ? httpFailureDetails(undefined, error.details) : {}),
+    ...(error.code === 'ENTERPRISE_SKILL_PACKAGE_INVALID' && typeof error.details?.packageValidationMessage === 'string'
+      ? { packageValidationMessage: error.details.packageValidationMessage }
+      : {}),
+    ...(error.code === 'ENTERPRISE_SKILL_SOURCE_CONFLICT' && typeof error.details?.upstreamMessage === 'string'
+      ? { upstreamMessage: error.details.upstreamMessage }
+      : {}),
     stage: error.stage,
     ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }),
     ...(error.upstreamCode === undefined ? {} : { upstreamCode: error.upstreamCode }),
@@ -1071,7 +1226,7 @@ export function createEnterpriseHttpClient(input: {
   maxSharedFileBytes?: number;
 } = {}): EnterpriseDingTalkHttpClient {
   const { origin } = resolveEnterpriseOrigin(input.origin);
-  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const transportFetch = input.fetch ?? globalThis.fetch;
   const jsonTimeoutMs = input.jsonTimeoutMs ?? ENTERPRISE_JSON_TIMEOUT_MS;
   const retryDelayMs = input.retryDelayMs ?? 250;
   const downloadTimeoutMs =
@@ -1086,12 +1241,67 @@ export function createEnterpriseHttpClient(input: {
   const maxSharedFileBytes =
     input.maxSharedFileBytes ?? ENTERPRISE_SHARED_FILE_MAX_BYTES;
 
+  const responseContexts = new WeakMap<Response, Record<string, unknown>>();
+  async function fetchImpl(url: URL, init: RequestInit, context: {
+    timeoutMs: number; startedAt?: number; attempts?: number; maxAttempts?: number;
+  }): Promise<Response> {
+    const metadata = {
+      requestMethod: init.method ?? 'GET', requestUrl: `${url.origin}${url.pathname}`,
+      ...context, startedAt: context.startedAt ?? Date.now(),
+      attempts: context.attempts ?? 1, maxAttempts: context.maxAttempts ?? 1
+    };
+    try {
+      const response = await transportFetch(url, init);
+      responseContexts.set(response, metadata);
+      return response;
+    } catch (error) {
+      throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request', undefined, undefined, undefined, undefined,
+        httpFailureDetails(init.signal?.aborted ? init.signal.reason : error, {
+          ...metadata, stage: 'request', durationMs: Math.max(0, Date.now() - metadata.startedAt)
+        }));
+    }
+  }
+
+  function responseDetails(response: Response, error: unknown, failureKind: 'response' | 'decode' | 'network') {
+    const context = responseContexts.get(response) ?? {};
+    return httpFailureDetails(error, {
+      ...context, ...(failureKind === 'network' ? {} : { failureKind }), stage: failureKind === 'response' ? 'response' : 'decode', statusCode: response.status,
+      durationMs: Math.max(0, Date.now() - Number(context.startedAt ?? Date.now()))
+    });
+  }
+
+  async function responseError(response: Response, domain?: EnterpriseHttpDomain): Promise<EnterpriseHttpError> {
+    const error = await createResponseError(response, domain);
+    return new EnterpriseHttpError(error.code, error.stage, error.statusCode, error.upstreamCode, error.retryAfterMs, error.requestId,
+      { ...responseDetails(response, undefined, 'response'), ...error.details });
+  }
+
+  async function readResponseJson(response: Response): Promise<unknown> {
+    try { return await response.json(); }
+    catch (error) {
+      throw new EnterpriseHttpError(
+        error instanceof SyntaxError ? 'ENTERPRISE_PROTOCOL_ERROR' : 'ENTERPRISE_SERVICE_UNAVAILABLE',
+        'decode',
+        error instanceof SyntaxError ? response.status : undefined, undefined, undefined, undefined,
+        responseDetails(response, error, error instanceof SyntaxError ? 'decode' : 'network')
+      );
+    }
+  }
+
+  async function readResponseChunk(reader: ReadableStreamDefaultReader<Uint8Array>, response: Response) {
+    try { return await reader.read(); }
+    catch (error) {
+      throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'download', undefined, undefined, undefined, undefined,
+        { ...responseDetails(response, error, 'network'), stage: 'download' });
+    }
+  }
+
   async function requestJson<T>(request: {
     method: 'GET' | 'POST';
     path: string;
     body?: unknown;
     accessToken?: string;
-    schema: z.ZodType<T>;
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>;
     domain?: EnterpriseHttpDomain;
     retryTransportFailure?: boolean;
     emptyBody?: boolean;
@@ -1099,6 +1309,7 @@ export function createEnterpriseHttpClient(input: {
     timeoutMs?: number;
   }): Promise<T> {
     let response!: Response;
+    const startedAt = Date.now();
     const maxAttempts = request.retryTransportFailure === true ? 2 : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
@@ -1110,34 +1321,22 @@ export function createEnterpriseHttpClient(input: {
           },
           method: request.method,
           signal: AbortSignal.timeout(request.timeoutMs ?? jsonTimeoutMs)
-        });
+        }, { timeoutMs: request.timeoutMs ?? jsonTimeoutMs, startedAt, attempts: attempt + 1, maxAttempts });
         break;
-      } catch {
+      } catch (error) {
         if (attempt + 1 < maxAttempts) {
           await waitForRetry(retryDelayMs);
           continue;
         }
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_SERVICE_UNAVAILABLE',
-          'request'
-        );
+        throw error;
       }
     }
 
     if (!response.ok) {
-      throw await createResponseError(response, request.domain);
+      throw await responseError(response, request.domain);
     }
 
-    let value: unknown;
-    try {
-      value = await response.json();
-    } catch {
-      throw new EnterpriseHttpError(
-        'ENTERPRISE_PROTOCOL_ERROR',
-        'decode',
-        response.status
-      );
-    }
+    const value = await readResponseJson(response);
 
     const parsed = request.schema.safeParse(value);
     if (!parsed.success) {
@@ -1158,23 +1357,15 @@ export function createEnterpriseHttpClient(input: {
     domain?: EnterpriseHttpDomain;
     timeoutMs?: number;
   }): Promise<void> {
-    let response: Response;
-    try {
-      response = await fetchImpl(new URL(request.path, origin), {
-        body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        headers: jsonHeaders(request.accessToken, request.body !== undefined),
-        method: request.method,
-        signal: AbortSignal.timeout(request.timeoutMs ?? jsonTimeoutMs)
-      });
-    } catch {
-      throw new EnterpriseHttpError(
-        'ENTERPRISE_SERVICE_UNAVAILABLE',
-        'request'
-      );
-    }
+    const response = await fetchImpl(new URL(request.path, origin), {
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+      headers: jsonHeaders(request.accessToken, request.body !== undefined),
+      method: request.method,
+      signal: AbortSignal.timeout(request.timeoutMs ?? jsonTimeoutMs)
+    }, { timeoutMs: request.timeoutMs ?? jsonTimeoutMs });
 
     if (!response.ok) {
-      throw await createResponseError(response, request.domain);
+      throw await responseError(response, request.domain);
     }
   }
 
@@ -1186,20 +1377,15 @@ export function createEnterpriseHttpClient(input: {
     maxBytes: number,
     allowGeneratedSvg = false
   ): Promise<EnterpriseSkillParticipantAvatarImage> {
-    let response: Response;
-    try {
-      response = await fetchImpl(
-        new URL(path, origin),
-        {
-          headers: jsonHeaders(accessToken, false),
-          method: 'GET',
-          signal: AbortSignal.timeout(jsonTimeoutMs)
-        }
-      );
-    } catch {
-      throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
-    }
-    if (!response.ok) throw await createResponseError(response);
+    const response = await fetchImpl(
+      new URL(path, origin),
+      {
+        headers: jsonHeaders(accessToken, false),
+        method: 'GET',
+        signal: AbortSignal.timeout(jsonTimeoutMs)
+      }, { timeoutMs: jsonTimeoutMs }
+    );
+    if (!response.ok) throw await responseError(response);
     const contentType = response.headers.get('content-type')?.split(';', 1)[0];
     if (contentType !== 'image/png' && contentType !== 'image/jpeg' && !(allowGeneratedSvg && contentType === 'image/svg+xml')) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
@@ -1208,7 +1394,12 @@ export function createEnterpriseHttpClient(input: {
     if (declaredSize !== undefined && (declaredSize === 0 || declaredSize > maxBytes)) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
     }
-    const content = new Uint8Array(await response.arrayBuffer());
+    let content: Uint8Array;
+    try { content = new Uint8Array(await response.arrayBuffer()); }
+    catch (error) {
+      throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'download', undefined, undefined, undefined, undefined,
+        { ...responseDetails(response, error, 'network'), stage: 'download' });
+    }
     if (content.byteLength === 0 || content.byteLength > maxBytes) {
       throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', response.status);
     }
@@ -1216,19 +1407,65 @@ export function createEnterpriseHttpClient(input: {
   }
 
   return {
+    getSkillAIReviewRule(accessToken) {
+      return requestJson({
+        accessToken, method: 'GET', path: '/api/v1/app/skill-ai-review-rule',
+        schema: z.object({ data: z.object({ text: z.string().min(1).max(1024 * 1024), version: z.string().min(1).max(128) }).strict().nullable() })
+      }).then(response => response.data);
+    },
+    listSkillAIReviewTasks(accessToken) {
+      return requestJson({
+        accessToken, method: 'GET', path: '/api/v1/app/skill-ai-review-tasks',
+        schema: z.object({ data: z.object({ tasks: z.array(skillAIReviewTaskSchema) }).strict() })
+      }).then(response => response.data);
+    },
+    claimSkillAIReviewTask(accessToken, requestId, attemptId, rule) {
+      return requestJson({
+        accessToken, method: 'POST',
+        path: `/api/v1/app/skill-ai-review-tasks/${encodeURIComponent(requestId)}/claim`,
+        body: { attempt_id: attemptId, ...rule },
+        schema: z.object({ data: skillAIReviewClaimSchema })
+      }).then(response => response.data);
+    },
+    async submitSkillAIReviewResult(accessToken, requestId, result) {
+      await requestJson({
+        accessToken, method: 'POST',
+        path: `/api/v1/app/skill-ai-review-tasks/${encodeURIComponent(requestId)}/result`,
+        body: result, schema: z.object({ data: z.unknown() }).refine(response => Object.hasOwn(response, 'data'))
+      });
+    },
+    approvalRequest(accessToken, method, path, body) {
+      if (!/^\/api\/v1\/app\/approvals(?:\?|\/|$)/.test(path)) throw new Error('Invalid approval path');
+      return requestJson({ accessToken, method, path, body, schema: approvalResponseSchema(method, path) });
+    },
     workflowRequest(accessToken, method, path, body) {
       if (!path.startsWith('/api/v1/app/workflow-')) {
         throw new Error('Invalid workflow path');
       }
       return requestJson({
         accessToken, method, path, body,
-        schema: z.object({ data: z.unknown(), meta: z.unknown().optional() })
+        schema: workflowResponseSchema(method, path)
       }).then(response => ({ data: response.data, meta: response.meta }));
+    },
+    async uploadWorkflowFile(request) {
+      const file = await openAsBlob(request.filePath, { type: request.contentType });
+      if (file.size !== request.sizeBytes) throw new EnterpriseHttpError('ENTERPRISE_SHARED_FILE_LENGTH_MISMATCH', 'upload');
+      const query = new URLSearchParams({ file_name: request.fileName, idempotency_key: request.idempotencyKey });
+      const response = await fetchImpl(new URL(`/api/v1/app/workflow-tasks/${encodeURIComponent(request.taskId)}/files?${query}`, origin), {
+        method: 'POST', body: file,
+        headers: { Accept: 'application/json', Authorization: `Bearer ${request.accessToken}`, 'Content-Length': String(request.sizeBytes), 'Content-Type': request.contentType, 'X-Content-SHA256': request.sha256 },
+        signal: AbortSignal.timeout(sharedFileTransferTimeoutMs)
+      }, { timeoutMs: sharedFileTransferTimeoutMs });
+      if (!response.ok) throw await responseError(response, 'shared-file');
+      const raw = await readResponseJson(response);
+      const parsed = z.object({ data: workflowArtifactSchema }).safeParse(raw);
+      if (!parsed.success) throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode');
+      return parsed.data.data;
     },
     async register(request, agentId) {
       await requestWithoutResult({
         body: {
-          email: request.email,
+          ...(request.phone === undefined ? { email: request.email } : { phone: request.phone }),
           ...(request.name === undefined ? {} : { name: request.name }),
           password: request.password,
           client_id: 'clawee-agent',
@@ -1243,7 +1480,7 @@ export function createEnterpriseHttpClient(input: {
     async login(request, agentId) {
       const response = await requestJson({
         body: {
-          email: request.email,
+          ...(request.phone === undefined ? { email: request.email } : { phone: request.phone }),
           password: request.password,
           client_id: 'clawee-agent',
           agent_id: agentId,
@@ -1371,6 +1608,16 @@ export function createEnterpriseHttpClient(input: {
       };
     },
 
+    async renewSession(accessToken) {
+      const response = await requestJson({
+        accessToken,
+        method: 'POST',
+        path: '/api/v1/auth/session/renew',
+        schema: sessionRenewalResponseSchema
+      });
+      return { accessToken: response.data.access_token, expiresAt: response.data.expires_at };
+    },
+
     async getMe(accessToken) {
       const response = await requestJson({
         accessToken,
@@ -1380,6 +1627,7 @@ export function createEnterpriseHttpClient(input: {
         schema: meResponseSchema
       });
       return {
+        ...(response.data.session_id === undefined ? {} : { sessionId: response.data.session_id }),
         account: accountSummary(response.data.account),
         agentId: response.data.agent.agent_id,
         status: response.data.account.status,
@@ -1388,6 +1636,28 @@ export function createEnterpriseHttpClient(input: {
         externalFeedbackAllowed: response.data.external_feedback_allowed,
         activityReportingEnabled:
           response.data.agent_activity_reporting_enabled
+      };
+    },
+
+    async getAgentPromptPolicy(accessToken) {
+      const response = await requestJson({
+        accessToken,
+        method: 'GET',
+        path: '/api/v1/app/agent-prompt-policy',
+        schema: z.object({
+          data: z.object({
+            version: z.number().int().nonnegative(),
+            server_agent_prompt: z.string(),
+            clawee_agent_prompt: z.string(),
+            updated_at: z.string().datetime({ offset: true })
+          }).strict()
+        }).strict()
+      });
+      return {
+        version: response.data.version,
+        serverAgentPrompt: response.data.server_agent_prompt,
+        claweeAgentPrompt: response.data.clawee_agent_prompt,
+        updatedAt: response.data.updated_at
       };
     },
 
@@ -1439,8 +1709,11 @@ export function createEnterpriseHttpClient(input: {
       });
       return {
         ...(response.data.admin_url ? { adminUrl: response.data.admin_url } : {}),
+        ...(response.data.accent_color ? { accentColor: response.data.accent_color } : {}),
         sidebarLogoConfigured: response.data.sidebar_logo_configured,
         sidebarCompactLogoConfigured: response.data.sidebar_compact_logo_configured,
+        sidebarLogoDarkConfigured: response.data.sidebar_logo_dark_configured ?? false,
+        sidebarCompactLogoDarkConfigured: response.data.sidebar_compact_logo_dark_configured ?? false,
         ...(response.data.sidebar_menu_labels === undefined
           ? {}
           : { sidebarMenuLabels: response.data.sidebar_menu_labels })
@@ -1518,7 +1791,8 @@ export function createEnterpriseHttpClient(input: {
         path: '/api/v1/app/skills/versions', formBody,
         timeoutMs: documentUploadTimeoutMs, schema: skillUploadResponseSchema
       });
-      return { skillId: response.data.skill.skill_id, spaceId: response.data.skill.space_id, name: response.data.skill.name, version: response.data.version.version };
+      return { skillId: response.data.skill.skill_id, spaceId: response.data.skill.space_id, name: response.data.skill.name, version: response.data.version.version,
+        ...(response.data.approval_request_id ? { approvalRequestId: response.data.approval_request_id, approvalURL: new URL(`/app/approvals/skill/${encodeURIComponent(response.data.approval_request_id)}`, origin).href } : {}) };
     },
 
     async listSkills(accessToken) {
@@ -1530,6 +1804,28 @@ export function createEnterpriseHttpClient(input: {
         schema: skillListResponseSchema
       });
       return response.data.map(mapRemoteSkill);
+    },
+
+    async getCloudSkills(accessToken) {
+      const response = await requestJson({
+        accessToken,
+        domain: 'skill',
+        method: 'GET',
+        path: '/api/v1/app/cloud-skills',
+        schema: cloudSkillListResponseSchema
+      });
+      return {
+        agentEmail: response.data.agent_email,
+        agentName: response.data.agent_name,
+        promptTemplate: response.data.prompt_template,
+        skills: response.data.skills.map(skill => ({
+          skillId: skill.skill_id,
+          name: skill.name,
+          ...(skill.description === undefined ? {} : { description: skill.description }),
+          version: skill.version,
+          updatedAt: skill.updated_at
+        }))
+      };
     },
 
     async getSkillDetail(accessToken, skillId) {
@@ -1593,41 +1889,24 @@ export function createEnterpriseHttpClient(input: {
       form.append('knowledge_base_id', request.knowledgeBaseId);
       form.append('file', file, request.fileName);
 
-      let response: Response;
-      try {
-        response = await fetchImpl(
-          new URL('/api/v1/app/knowledge-bases/documents', origin),
-          {
-            body: form,
-            headers: {
-              Accept: 'application/json',
-              Authorization: `Bearer ${request.accessToken}`
-            },
-            method: 'POST',
-            signal: AbortSignal.timeout(documentUploadTimeoutMs)
-          }
-        );
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_SERVICE_UNAVAILABLE',
-          'request'
-        );
-      }
+      const response = await fetchImpl(
+        new URL('/api/v1/app/knowledge-bases/documents', origin),
+        {
+          body: form,
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${request.accessToken}`
+          },
+          method: 'POST',
+          signal: AbortSignal.timeout(documentUploadTimeoutMs)
+        }, { timeoutMs: documentUploadTimeoutMs }
+      );
 
       if (!response.ok) {
-        throw await createResponseError(response, 'knowledge');
+        throw await responseError(response, 'knowledge');
       }
 
-      let value: unknown;
-      try {
-        value = await response.json();
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_PROTOCOL_ERROR',
-          'decode',
-          response.status
-        );
-      }
+      const value = await readResponseJson(response);
       const parsed = knowledgeDocumentUploadResponseSchema.safeParse(value);
       if (!parsed.success) {
         throw new EnterpriseHttpError(
@@ -1704,12 +1983,12 @@ export function createEnterpriseHttpClient(input: {
         response = await fetchImpl(new URL(`/api/v1/app/shared-files/content?${query}`, origin), {
           headers: { Authorization: `Bearer ${accessToken}` },
           signal: requestSignal
-        });
-      } catch {
+        }, { timeoutMs: 30_000 });
+      } catch (error) {
         signal?.throwIfAborted();
-        throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
+        throw error;
       }
-      if (!response.ok) throw await createResponseError(response, 'shared-file');
+      if (!response.ok) throw await responseError(response, 'shared-file');
       const contentType = response.headers.get('content-type') ?? '';
       const mime = contentType.split(';', 1)[0] ?? '';
       if (!['text/plain', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime) || !response.body) {
@@ -1722,7 +2001,7 @@ export function createEnterpriseHttpClient(input: {
       let bytes = 0;
       try {
         while (true) {
-          const result = await reader.read();
+          const result = await readResponseChunk(reader, response);
           if (result.done) break;
           bytes += result.value.byteLength;
           if (bytes > limit) {
@@ -1733,10 +2012,9 @@ export function createEnterpriseHttpClient(input: {
         return { content: Buffer.concat(chunks), contentType };
       } catch (error) {
         signal?.throwIfAborted();
-        if (requestSignal.aborted) {
-          throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request');
-        }
-        throw error;
+        if (error instanceof EnterpriseHttpError) throw error;
+        throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'download', undefined, undefined, undefined, undefined,
+          { ...responseDetails(response, error, 'network'), stage: 'download' });
       } finally {
         await reader.cancel().catch(() => undefined);
         reader.releaseLock();
@@ -1745,28 +2023,20 @@ export function createEnterpriseHttpClient(input: {
 
     async downloadSharedFileContent(request) {
       const query = new URLSearchParams({ file_id: request.fileId });
-      let response: Response;
-      try {
-        response = await fetchImpl(
-          new URL(`/api/v1/app/shared-files/content?${query.toString()}`, origin),
-          {
-            headers: {
-              Accept: 'application/octet-stream',
-              Authorization: `Bearer ${request.accessToken}`
-            },
-            method: 'GET',
-            signal: AbortSignal.timeout(sharedFileTransferTimeoutMs)
-          }
-        );
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_SERVICE_UNAVAILABLE',
-          'request'
-        );
-      }
+      const response = await fetchImpl(
+        new URL(`/api/v1/app/shared-files/content?${query.toString()}`, origin),
+        {
+          headers: {
+            Accept: 'application/octet-stream',
+            Authorization: `Bearer ${request.accessToken}`
+          },
+          method: 'GET',
+          signal: AbortSignal.timeout(sharedFileTransferTimeoutMs)
+        }, { timeoutMs: sharedFileTransferTimeoutMs }
+      );
 
       if (!response.ok) {
-        throw await createResponseError(response, 'shared-file');
+        throw await responseError(response, 'shared-file');
       }
       const declaredLength = requireContentLength(
         response.headers.get('content-length')
@@ -1800,7 +2070,7 @@ export function createEnterpriseHttpClient(input: {
       try {
         handle = await open(request.destinationPath, 'wx', 0o600);
         while (true) {
-          const result = await reader.read();
+          const result = await readResponseChunk(reader, response);
           if (result.done) break;
           bytes += result.value.byteLength;
           if (bytes > maxSharedFileBytes || bytes > declaredLength) {
@@ -1862,50 +2132,34 @@ export function createEnterpriseHttpClient(input: {
         );
       }
       const query = new URLSearchParams({
-        space_id: request.spaceId,
+        ...(request.spaceId ? { space_id: request.spaceId } : {}),
         logical_path: request.logicalPath
       });
+      if (request.forUserId !== undefined) query.set('for_user_id', request.forUserId);
       if (request.expectedRevision !== undefined) {
         query.set('expected_revision', String(request.expectedRevision));
       }
 
-      let response: Response;
-      try {
-        response = await fetchImpl(
-          new URL(`/api/v1/app/shared-files/content?${query.toString()}`, origin),
-          {
-            body: file,
-            headers: {
-              Accept: 'application/json',
-              Authorization: `Bearer ${request.accessToken}`,
-              'Content-Length': String(request.sizeBytes),
-              'Content-Type': request.contentType,
-              'X-Content-SHA256': request.sha256
-            },
-            method: 'POST',
-            signal: AbortSignal.timeout(sharedFileTransferTimeoutMs)
-          }
-        );
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_SERVICE_UNAVAILABLE',
-          'request'
-        );
-      }
+      const response = await fetchImpl(
+        new URL(`/api/v1/app/shared-files/content?${query.toString()}`, origin),
+        {
+          body: file,
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${request.accessToken}`,
+            'Content-Length': String(request.sizeBytes),
+            'Content-Type': request.contentType,
+            'X-Content-SHA256': request.sha256
+          },
+          method: 'POST',
+          signal: AbortSignal.timeout(sharedFileTransferTimeoutMs)
+        }, { timeoutMs: sharedFileTransferTimeoutMs }
+      );
       if (!response.ok) {
-        throw await createResponseError(response, 'shared-file');
+        throw await responseError(response, 'shared-file');
       }
 
-      let value: unknown;
-      try {
-        value = await response.json();
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_PROTOCOL_ERROR',
-          'decode',
-          response.status
-        );
-      }
+      const value = await readResponseJson(response);
       const parsed = sharedFileMutationResponseSchema.safeParse(value);
       if (!parsed.success) {
         throw new EnterpriseHttpError(
@@ -1928,6 +2182,42 @@ export function createEnterpriseHttpClient(input: {
       return response.data.some(view => (
         view.view_id === 'agent_activity' && view.actions.includes('read')
       ));
+    },
+
+    async hasSkillContributionGrant(accessToken) {
+      const response = await requestJson({ accessToken, domain: 'activity', method: 'GET', path: '/api/v1/app/data-views', schema: activityDataViewsResponseSchema });
+      return response.data.some(view => view.view_id === 'skill_contributions' && view.actions.includes('read'));
+    },
+
+    async getSkillContributions(accessToken, endpoint, query) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+      const response = await requestJson({ accessToken, domain: 'activity', method: 'GET', path: `/api/v1/app/skill-contributions/${endpoint}?${params}`, schema: contributionResponseSchema(endpoint) });
+      return response.data as SkillContributionResponse;
+    },
+
+    async exportSkillContributions(accessToken, query) {
+      const response = await fetchImpl(new URL('/api/v1/app/skill-contributions/export', origin), {
+        method: 'POST', headers: jsonHeaders(accessToken, true), body: JSON.stringify(query), signal: AbortSignal.timeout(downloadTimeoutMs)
+      }, { timeoutMs: downloadTimeoutMs });
+      if (!response.ok) throw await responseError(response, 'activity');
+      if (!response.headers.get('content-type')?.startsWith('text/csv') || response.body === null) throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode');
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const chunk = await readResponseChunk(reader, response);
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          if (size > 32 * 1024 * 1024) { await reader.cancel(); throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'download'); }
+          chunks.push(chunk.value);
+        }
+      } finally { reader.releaseLock(); }
+      const content = '\uFEFF' + new TextDecoder().decode(Buffer.concat(chunks));
+      const rowCount = Number(response.headers.get('x-result-count'));
+      if (!Number.isInteger(rowCount) || rowCount < 0 || rowCount > 10000) throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode');
+      return { content, filename: 'skill-contributions.csv', rowCount };
     },
 
     async getActivityStatistics(accessToken, range) {
@@ -1957,7 +2247,28 @@ export function createEnterpriseHttpClient(input: {
       return statistics;
     },
 
-    async getActivityDetail(accessToken, collectorId, agentId) {
+    async getActivityRuntime(accessToken) {
+      const response = await requestJson({
+        accessToken, domain: 'activity', method: 'GET',
+        path: '/api/v1/app/activity/runtime',
+        schema: activityRuntimeResponseSchema
+      });
+      const runtime = 'data' in response ? response.data : response;
+      return {
+        schemaVersion: runtime.schema_version, scope: runtime.scope, serverTime: runtime.server_time,
+        summary: {
+          totalAgents: runtime.summary.total_agents, onlineAgents: runtime.summary.online_agents,
+          workingAgents: runtime.summary.working_agents, blockedAgents: runtime.summary.blocked_agents,
+          errorAgents: runtime.summary.error_agents
+        },
+        agents: runtime.agents.map(agent => ({
+          collectorId: agent.collector_id, agentId: agent.agent_id, status: agent.status,
+          ...optionalField('currentTask', agent.current_task), lastSeenAt: agent.last_seen_at
+        }))
+      };
+    },
+
+    async getActivityDetail(accessToken, collectorId, agentId, range) {
       const query = new URLSearchParams({
         collector_id: collectorId,
         agent_id: agentId
@@ -1981,6 +2292,44 @@ export function createEnterpriseHttpClient(input: {
           'decode',
           200
         );
+      }
+      if (range !== undefined) {
+        query.set('range', range);
+        try {
+          const { data: usage } = await requestJson({
+            accessToken, domain: 'activity', method: 'GET',
+            path: `/api/v1/app/activity/agent-usage?${query.toString()}`,
+            schema: activityAgentUsageResponseSchema
+          });
+          if (usage.collector_id !== collectorId || usage.agent_id !== agentId || usage.range !== range
+            || usage.granularity !== (range === 'today' ? 'hour' : 'day')) {
+            throw new EnterpriseHttpError('ENTERPRISE_PROTOCOL_ERROR', 'decode', 200);
+          }
+          detail.usage = {
+            collectorId, agentId, range, timezone: usage.timezone, startDate: usage.start_date,
+            endDate: usage.end_date, generatedAt: usage.generated_at,
+            sessionCount: usage.session_count, turnCount: usage.turn_count,
+            completedTurns: usage.completed_turns, toolCallCount: usage.tool_call_count,
+            granularity: usage.granularity,
+            points: usage.points.map(point => ({ bucketStart: point.bucket_start,
+              sessionCount: point.session_count, turnCount: point.turn_count,
+              completedTurns: point.completed_turns, toolCallCount: point.tool_call_count })),
+            mcpDistribution: usage.mcp_distribution.map(item => ({ id: item.id, label: item.label,
+              invocationCount: item.invocation_count, share: item.share })),
+            mcpStatus: usage.mcp_status,
+            skillUsage: usage.skill_usage.map(item => ({ skillId: item.skill_id, skillName: item.skill_name,
+              skillKey: item.skill_key, source: item.source, requestedRuns: item.requested_runs,
+              observedRuns: item.observed_runs, implicitRuns: item.implicit_runs })),
+            skillUsageTotals: { requestedSkillRuns: usage.skill_usage_totals.requested_skill_runs,
+              observedSkillRuns: usage.skill_usage_totals.observed_skill_runs,
+              explicitSkillRuns: usage.skill_usage_totals.explicit_skill_runs,
+              implicitSkillRuns: usage.skill_usage_totals.implicit_skill_runs }
+          };
+        } catch (error) {
+          // Older gateways and temporarily unavailable statistics must not hide execution history.
+          if (!(error instanceof EnterpriseHttpError)
+            || (error.stage !== 'request' && ![404, 502, 503, 504].includes(error.statusCode ?? 0))) throw error;
+        }
       }
       return detail;
     },
@@ -2170,33 +2519,49 @@ export function createEnterpriseHttpClient(input: {
       };
     },
 
-    async downloadSkillPackage(request) {
+    downloadSkillPackage(request) {
       const query = new URLSearchParams({
         skill_id: request.skillId,
         version_id: request.versionId
       });
-      let response: Response;
-      try {
-        response = await fetchImpl(
-          new URL(`/api/v1/app/skills/package?${query.toString()}`, origin),
-          {
-            headers: {
-              Accept: 'application/zip',
-              Authorization: `Bearer ${request.accessToken}`
-            },
-            method: 'GET',
-            signal: AbortSignal.timeout(downloadTimeoutMs)
-          }
-        );
-      } catch {
-        throw new EnterpriseHttpError(
-          'ENTERPRISE_SERVICE_UNAVAILABLE',
-          'request'
-        );
-      }
+      return downloadPackage({
+        accessToken: request.accessToken,
+        expectedSha256: request.expectedSha256,
+        destinationPath: request.destinationPath,
+        path: `/api/v1/app/skills/package?${query.toString()}`
+      });
+    },
+
+    downloadApprovalPackage(request) {
+      return downloadPackage({
+        accessToken: request.accessToken,
+        expectedSha256: request.expectedSha256,
+        destinationPath: request.destinationPath,
+        path: `/api/v1/app/approvals/skill/${encodeURIComponent(request.requestId)}/package`
+      });
+    }
+  };
+
+  async function downloadPackage(request: {
+    accessToken: string;
+    expectedSha256: string;
+    destinationPath: string;
+    path: string;
+  }): Promise<{ bytes: number; sha256: string }> {
+      const response = await fetchImpl(
+        new URL(request.path, origin),
+        {
+          headers: {
+            Accept: 'application/zip',
+            Authorization: `Bearer ${request.accessToken}`
+          },
+          method: 'GET',
+          signal: AbortSignal.timeout(downloadTimeoutMs)
+        }, { timeoutMs: downloadTimeoutMs }
+      );
 
       if (!response.ok) {
-        throw await createResponseError(response, 'skill');
+        throw await responseError(response, 'skill');
       }
 
       const declaredLength = parseContentLength(response.headers.get('content-length'));
@@ -2222,7 +2587,7 @@ export function createEnterpriseHttpClient(input: {
       try {
         handle = await open(request.destinationPath, 'wx', 0o600);
         while (true) {
-          const result = await reader.read();
+          const result = await readResponseChunk(reader, response);
           if (result.done) break;
           bytes += result.value.byteLength;
           if (bytes > maxPackageBytes) {
@@ -2258,8 +2623,7 @@ export function createEnterpriseHttpClient(input: {
       } finally {
         reader.releaseLock();
       }
-    }
-  };
+  }
 }
 
 function jsonHeaders(
@@ -2279,6 +2643,7 @@ function accountSummary(account: z.infer<typeof accountSchema>): EnterpriseAccou
   return {
     subjectId: account.account_id ?? account.user_id!,
     email: account.email,
+    ...(account.phone ? { phone: account.phone } : {}),
     name: account.name,
     ...(account.avatar_url === undefined ? {} : { avatarUrl: account.avatar_url })
   };
@@ -2381,6 +2746,8 @@ function mapRemoteSharedSpace(
   space: z.infer<typeof remoteSharedSpaceSchema>
 ): EnterpriseRemoteSharedSpace {
   return {
+    ...(space.personal_owner_user_id ? { personalOwnerUserId: space.personal_owner_user_id } : {}),
+    ...(space.workflow_template_name ? { workflowTemplateName: space.workflow_template_name } : {}),
     spaceId: space.space_id,
     name: space.name,
     description: space.description,
@@ -2460,12 +2827,33 @@ function mapActivityStatistics(
       activeEmployees: statistics.organization.active_employees,
       activeAgents: statistics.organization.active_agents,
       completedTurns: statistics.organization.completed_turns,
+      ...(statistics.organization.platform_activity === undefined ? {} : {
+        platformActivity: {
+          activeUsers: statistics.organization.platform_activity.active_users,
+          totalUsers: statistics.organization.platform_activity.total_users,
+          rate: statistics.organization.platform_activity.rate
+        }
+      }),
       mcpDistribution: statistics.organization.mcp_distribution.map(item => ({
         id: item.id,
         label: item.label,
         invocationCount: item.invocation_count,
         share: item.share
-      }))
+      })),
+      ...(statistics.organization.skill_usage === undefined ? {} : {
+        skillUsage: statistics.organization.skill_usage.map(item => ({
+          skillId: item.skill_id, skillName: item.skill_name, skillKey: item.skill_key, source: item.source,
+          requestedRuns: item.requested_runs, observedRuns: item.observed_runs, implicitRuns: item.implicit_runs
+        }))
+      }),
+      ...(statistics.organization.skill_usage_totals === undefined ? {} : {
+        skillUsageTotals: {
+          requestedSkillRuns: statistics.organization.skill_usage_totals.requested_skill_runs,
+          observedSkillRuns: statistics.organization.skill_usage_totals.observed_skill_runs,
+          explicitSkillRuns: statistics.organization.skill_usage_totals.explicit_skill_runs,
+          implicitSkillRuns: statistics.organization.skill_usage_totals.implicit_skill_runs
+        }
+      })
     },
     trend: {
       granularity: statistics.trend.granularity,
@@ -2494,6 +2882,8 @@ function mapActivityStatistics(
       agentId: agent.agent_id,
       name: agent.name,
       status: agent.status,
+      ...optionalField('employeeId', agent.employee_id),
+      ...optionalField('employeeName', agent.employee_name),
       sessionCount: agent.session_count,
       turnCount: agent.turn_count,
       ...(agent.last_activity_at === undefined
@@ -2687,21 +3077,46 @@ async function createResponseError(
   domain: EnterpriseHttpDomain = 'general'
 ): Promise<EnterpriseHttpError> {
   let upstreamCode: string | undefined;
-  let requestId = response.headers.get('x-request-id') ?? undefined;
+  let requestId = safeIncidentIdentifier(response.headers.get('x-request-id'));
+  let responseReadError: unknown;
   let details: Record<string, unknown> | undefined;
   try {
     const value: unknown = await response.json();
-    if (isPlainObject(value) && isPlainObject(value.error)) {
-      if (typeof value.error.code === 'string') upstreamCode = value.error.code;
-      if (typeof value.error.request_id === 'string') {
-        requestId = value.error.request_id;
+    if (isPlainObject(value)) {
+      let upstreamMessage: string | undefined;
+      if (isPlainObject(value.error)) {
+        if (typeof value.error.code === 'string') upstreamCode = value.error.code;
+        if (typeof value.error.request_id === 'string') {
+          requestId = safeIncidentIdentifier(value.error.request_id) ?? requestId;
+        }
+        if (typeof value.error.message === 'string') upstreamMessage = value.error.message;
+        details = domain === 'activity' || domain === 'billing' || domain === 'business-data'
+          ? undefined
+          : mapUpstreamErrorDetails(upstreamCode, value.error.details);
+      } else if (
+        domain === 'skill-upload'
+        && typeof value.code === 'string'
+        && typeof value.error === 'string'
+      ) {
+        upstreamCode = value.code;
+        upstreamMessage = value.error;
       }
-      details = domain === 'activity' || domain === 'billing' || domain === 'business-data'
-        ? undefined
-        : mapUpstreamErrorDetails(upstreamCode, value.error.details);
+      const mappedCode = mapResponseCode(response.status, upstreamCode, domain);
+      if (domain === 'skill-upload'
+        && mappedCode === 'ENTERPRISE_SKILL_PACKAGE_INVALID'
+        && upstreamMessage !== undefined) {
+        const message = upstreamMessage.trim();
+        if (message) details = { ...details, packageValidationMessage: message };
+      }
+      if (domain === 'skill-upload'
+        && mappedCode === 'ENTERPRISE_SKILL_SOURCE_CONFLICT'
+        && upstreamMessage !== undefined) {
+        const message = upstreamMessage.trim();
+        if (message) details = { ...details, upstreamMessage: message };
+      }
     }
-  } catch {
-    // Error bodies are intentionally discarded.
+  } catch (error) {
+    responseReadError = error;
   }
 
   return new EnterpriseHttpError(
@@ -2711,7 +3126,7 @@ async function createResponseError(
     upstreamCode,
     parseRetryAfter(response.headers.get('retry-after')),
     requestId,
-    details
+    { ...details, ...httpFailureDetails(responseReadError, { failureKind: 'response', stage: 'response', statusCode: response.status, upstreamCode, requestId }) }
   );
 }
 

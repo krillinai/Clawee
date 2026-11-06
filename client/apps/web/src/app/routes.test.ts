@@ -25,6 +25,9 @@ describe('app routes', () => {
     expect(parseRoute('#/schedules')).toEqual({ view: 'schedules' });
     expect(parseRoute('#/tasks')).toEqual({ view: 'tasks' });
     expect(parseRoute('#/dashboard')).toEqual({ view: 'dashboard' });
+    expect(parseRoute('#/approvals')).toEqual({ view: 'enterprise-approvals' });
+    expect(formatRoute({ view: 'enterprise-approvals' })).toBe('#/approvals');
+    expect(parseRoute('#/skill-contributions')).toEqual({ view: 'skill-contributions' });
     expect(parseRoute('#/plugins')).toEqual({ view: 'plugins' });
     expect(parseRoute('#/connections')).toEqual({ view: 'connections' });
     expect(parseRoute('#/knowledge')).toEqual({ view: 'knowledge' });
@@ -94,6 +97,7 @@ describe('app routes', () => {
     expect(formatRoute({ view: 'schedules' })).toBe('#/schedules');
     expect(formatRoute({ view: 'tasks' })).toBe('#/tasks');
     expect(formatRoute({ view: 'dashboard' })).toBe('#/dashboard');
+    expect(formatRoute({ view: 'skill-contributions' })).toBe('#/skill-contributions');
     expect(formatRoute({ view: 'plugins' })).toBe('#/plugins');
     expect(formatRoute({ view: 'connections' })).toBe('#/connections');
     expect(formatRoute({ view: 'knowledge' })).toBe('#/knowledge');

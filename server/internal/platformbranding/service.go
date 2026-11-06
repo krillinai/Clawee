@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +22,8 @@ type Service struct {
 	clock func() time.Time
 }
 
+var accentColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
 func NewService(store Store) *Service {
 	if store == nil {
 		store = NewMemoryStore()
@@ -33,14 +36,28 @@ func (s *Service) Get(ctx context.Context) (Configuration, error) {
 }
 
 func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration, error) {
-	if !validAction(input.SidebarLogoAction) || !validAction(input.SidebarCompactLogoAction) {
-		return Configuration{}, ErrInvalidAction
+	// 旧客户端省略深色版字段时保留已有配置。
+	if input.SidebarLogoDarkAction == "" {
+		input.SidebarLogoDarkAction = ActionKeep
 	}
-	if err := validateActionImage(input.SidebarLogoAction, input.SidebarLogo); err != nil {
-		return Configuration{}, err
+	if input.SidebarCompactLogoDarkAction == "" {
+		input.SidebarCompactLogoDarkAction = ActionKeep
 	}
-	if err := validateActionImage(input.SidebarCompactLogoAction, input.SidebarCompactLogo); err != nil {
-		return Configuration{}, err
+	for _, logo := range []struct {
+		action  Action
+		content []byte
+	}{
+		{input.SidebarLogoAction, input.SidebarLogo},
+		{input.SidebarCompactLogoAction, input.SidebarCompactLogo},
+		{input.SidebarLogoDarkAction, input.SidebarLogoDark},
+		{input.SidebarCompactLogoDarkAction, input.SidebarCompactLogoDark},
+	} {
+		if !validAction(logo.action) {
+			return Configuration{}, ErrInvalidAction
+		}
+		if err := validateActionImage(logo.action, logo.content); err != nil {
+			return Configuration{}, err
+		}
 	}
 	input.UpdatedAt = s.clock().UTC()
 	labels := make(map[string]*string, len(input.SidebarMenuLabels))
@@ -75,6 +92,13 @@ func (s *Service) Update(ctx context.Context, input UpdateInput) (Configuration,
 			}
 		}
 		input.AdminURL = &value
+	}
+	if input.AccentColor != nil {
+		value := strings.ToLower(strings.TrimSpace(*input.AccentColor))
+		if value != "" && !accentColorPattern.MatchString(value) {
+			return Configuration{}, ErrInvalidAccentColor
+		}
+		input.AccentColor = &value
 	}
 	return s.store.Update(ctx, input)
 }

@@ -3,6 +3,20 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createEnterpriseService } from './enterprise-service-2026-07-30.js';
 
 describe('enterprise service', () => {
+  it('通过本地服务读取和保存多个服务器地址，兼容单地址保存', async () => {
+    const get = vi.fn(async (_path: string) => ({}));
+    const post = vi.fn(async (_path: string, _body?: unknown) => ({}));
+    const service = createEnterpriseService(createClient({ get, post }));
+    await service.getGateway();
+    await service.setGateway('https://current.example', ['https://current.example', 'https://other.example']);
+    expect(get).toHaveBeenCalledWith('/enterprise/gateway');
+    expect(post).toHaveBeenLastCalledWith('/enterprise/gateway', {
+      gateway: 'https://current.example', gateways: ['https://current.example', 'https://other.example']
+    });
+    await service.setGateway('https://current.example');
+    expect(post).toHaveBeenLastCalledWith('/enterprise/gateway', { gateway: 'https://current.example' });
+  });
+
   it('requests authenticated preview bytes with cancellation', async () => {
     const rawGet = vi.fn(async () => new Response('content'));
     const service = createEnterpriseService(createClient({ rawGet }));
@@ -40,6 +54,10 @@ describe('enterprise service', () => {
 
     expect(get).toHaveBeenCalledWith('/enterprise/platform-branding');
     expect(rawGet).toHaveBeenCalledWith('/enterprise/platform-branding/sidebar-logo');
+    for (const kind of ['sidebar-logo-dark', 'sidebar-compact-logo-dark'] as const) {
+      await expect(service.getPlatformBrandingImage(kind)).resolves.toBe(response);
+      expect(rawGet).toHaveBeenLastCalledWith(`/enterprise/platform-branding/${kind}`);
+    }
   });
 
   it('posts only account fields to exact enterprise runtime routes', async () => {
@@ -49,6 +67,7 @@ describe('enterprise service', () => {
 
     await service.getSession();
     await service.refreshSession();
+    await service.renewSession();
     await service.prepareDingTalkLogin();
     await service.login({ email: 'member@example.com', password: 'secret' });
     await service.register({
@@ -62,6 +81,7 @@ describe('enterprise service', () => {
 
     expect(get).toHaveBeenCalledWith('/enterprise/session');
     expect(post).toHaveBeenCalledWith('/enterprise/session/refresh');
+    expect(post).toHaveBeenCalledWith('/enterprise/session/renew');
     expect(post).toHaveBeenCalledWith('/enterprise/dingtalk/login/prepare');
     expect(post).toHaveBeenCalledWith('/enterprise/login', {
       email: 'member@example.com',
@@ -106,6 +126,7 @@ describe('enterprise service', () => {
 
     await service.listMcpConnections();
     await service.refreshMcpConnections();
+    await service.checkMcpHealth('demo-agent');
     await service.updateMcpPreference('crm/华东', {
       installed: true,
       enabled: false
@@ -113,6 +134,7 @@ describe('enterprise service', () => {
 
     expect(get).toHaveBeenCalledWith('/enterprise/mcp');
     expect(post).toHaveBeenCalledWith('/enterprise/mcp/refresh');
+    expect(post).toHaveBeenCalledWith('/enterprise/mcp/upstreams/demo-agent/health');
     expect(patch).toHaveBeenCalledWith(
       '/enterprise/mcp/upstreams/crm%2F%E5%8D%8E%E4%B8%9C/preference',
       { installed: true, enabled: false }

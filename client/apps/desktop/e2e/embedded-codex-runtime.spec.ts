@@ -1,11 +1,16 @@
 import {
   existsSync,
+  mkdirSync,
   realpathSync,
   readFileSync,
-  readdirSync
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { readIncidentEnterpriseKey, readIncidentGatewayOrigin } from '../src/main/desktop-incidents.js';
 import {
   expect,
   test,
@@ -26,6 +31,7 @@ import {
   CONTROLLED_HANG_PROMPT,
   collectControlledModelToolNames,
   controlledModelRequestContainsText,
+  findControlledCommandOutput,
   findControlledFunctionCallOutput,
   forbiddenMultiAgentToolNames
 } from './controlled-model-server.js';
@@ -42,20 +48,427 @@ import {
 } from './embedded-runtime-fixture.js';
 import {
   closePackagedApp,
+  createPackagedIncidentReceiver,
+  launchSecondInstance,
   waitForProcessExit,
   type PackagedApp
 } from './packaged-app.js';
+import { readProcessTree } from './desktop-e2e-evidence.js';
+import {
+  createWorkspaceDownloadArtifacts,
+  expectWorkspaceDownload,
+  observeWorkspaceFileRequests
+} from '../../web/e2e/support/workspace-download.js';
+
+test('关闭 Cookie 加密后可升级启动，重启保留登录和界面存储', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    fixture.writeControlledRuntimeConfig();
+    mkdirSync(fixture.userData, { recursive: true });
+    writeFileSync(join(fixture.userData, 'Cookies'), 'legacy-cookie-store');
+    app = await fixture.launch();
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    await app.page.evaluate(() => localStorage.setItem('cookie-migration-test', 'retained'));
+    await app.page.context().addCookies([{
+      name: 'cookie-migration-test', value: 'retained',
+      url: 'https://clawee-cookie.example.invalid',
+      expires: Math.floor(Date.now() / 1_000) + 3_600
+    }]);
+    await closePackagedApp(app);
+
+    app = await fixture.relaunch(app);
+    await waitForEmbeddedRuntimeReady(app.page);
+    await expect.poll(async () => (
+      await runtimeRequest<{ status: string }>(app!.page, 'GET', '/enterprise/session')
+    ).body.status).toBe('signed_in');
+    expect(await app.page.evaluate(() => localStorage.getItem('cookie-migration-test'))).toBe('retained');
+    expect(await app.page.context().cookies('https://clawee-cookie.example.invalid'))
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        name: 'cookie-migration-test', value: 'retained'
+      })]));
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
+
+test('打包 App 连续刷新八次后仍能加载项目和模型目录长连接', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    const project = await runtimeRequest(app.page, 'POST', '/projects', {
+      cwd: fixture.workspace, name: '刷新连接回归', sandbox: 'read-only'
+    });
+    expect(project.status).toBe(201);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const catalogStream = app.page.waitForResponse(response => (
+        new URL(response.url()).pathname.endsWith('/codex/models/events')
+      ), { timeout: 10_000 });
+      await app.page.reload({ waitUntil: 'domcontentloaded' });
+      expect((await catalogStream).status()).toBe(200);
+      await expect(app.page.getByRole('button', { name: '刷新连接回归', exact: true })).toBeVisible();
+      const health = await app.page.evaluate(async () => {
+        const response = await fetch('/.clawee/runtime/healthz', {
+          signal: AbortSignal.timeout(3_000)
+        });
+        return { status: response.status, body: await response.json() };
+      });
+      expect(health).toMatchObject({ status: 200, body: { ok: true } });
+    }
+    await fixture.captureEvidence('repeated-reload-connections', { reloads: 8 });
+  } finally {
+    if (app !== undefined) await closePackagedApp(app);
+    await fixture.dispose();
+  }
+});
+
+test('打包 App 接受 50 MiB 附件并拒绝超过上限的请求', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    expect((await waitForAvailabilityProbe(app.page)).status).toBe('succeeded');
+    await expect(app.page.getByRole('button', { name: '选择模型 clawee-e2e-model', exact: true })).toBeEnabled();
+    await app.page.getByRole('button', { name: '添加上下文', exact: true }).click();
+    await expect(app.page.getByRole('menuitem', { name: '添加文件夹', exact: true })).toBeEnabled();
+    await app.page.keyboard.press('Escape');
+    const results = await app.page.evaluate(async () => {
+      const uploads: Array<{ status: number; body: unknown }> = [];
+      const maxBytes = 50 * 1024 * 1024;
+      for (const size of [maxBytes, maxBytes + 1]) {
+        const query = new URLSearchParams({
+          draftId: 'attachment-limit-e2e', fileName: 'large.txt', mime: 'text/plain'
+        });
+        const response = await fetch(`/.clawee/runtime/attachments?${query}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' },
+          body: new Uint8Array(size).fill(65)
+        });
+        uploads.push({ status: response.status, body: await response.json() });
+      }
+      return uploads;
+    });
+    expect(results[0]).toMatchObject({ status: 201, body: { attachment: { size: 50 * 1024 * 1024 } } });
+    expect(results[1]).toMatchObject({ status: 413, body: { error: { code: 'RUNTIME_PAYLOAD_TOO_LARGE' } } });
+    await fixture.captureEvidence('attachment-size-limit', { results });
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
+
+test('实际内嵌 Runtime 的模型错误在客户端和自动上报中保留同一原因', async () => {
+  const fixture = await createEmbeddedRuntimeFixture({ responseMode: 'task-failure' });
+  const receiver = await createPackagedIncidentReceiver(fixture.userData, { enabled: true });
+  const configPath = join(fixture.root, 'enterprise', 'config.toml');
+  const enterpriseKey = readIncidentEnterpriseKey(configPath);
+  mkdirSync(fixture.userData, { recursive: true });
+  writeFileSync(join(fixture.userData, 'auto-incidents.json'), JSON.stringify({ installationId: randomUUID(), enterpriseKey,
+    enabled: true, notified: true, noticeVersion: 2, routingVersion: 2, noticeOrigin: readIncidentGatewayOrigin(configPath), records: [],
+    policy: { enterprise_key: enterpriseKey, allowed: true, expires_at: new Date(Date.now() + 3_600_000).toISOString() }
+  }), { mode: 0o600 });
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    const project = await runtimeRequest<{ project: { id: string } }>(app.page, 'POST', '/projects', { cwd: fixture.workspace, name: '模型错误排查', sandbox: 'read-only' });
+    expect(project.status).toBe(201);
+    const thread = await runtimeRequest<{ thread: { id: string } }>(app.page, 'POST', '/threads', { projectId: project.body.project.id, title: '模型错误排查', sandbox: 'read-only' });
+    expect(thread.status).toBe(201);
+    const threadUrl = new URL(app.page.url());
+    threadUrl.hash = `/thread/${thread.body.thread.id}`;
+    await app.page.goto(threadUrl.toString());
+    await app.page.reload({ waitUntil: 'domcontentloaded' });
+    await app.page.getByRole('textbox', { name: '输入任务' }).fill('测试模型接口错误');
+    const runResponse = app.page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/runs'));
+    await app.page.getByRole('button', { name: '发送', exact: true }).click();
+    const run = await (await runResponse).json() as RunResponse;
+    expect((await waitForRunTerminal(app.page, run.id)).status).toBe('failed');
+    const status = app.page.locator('.model-response-diagnostic');
+    await expect(status).toHaveCount(1);
+    await expect(status).toContainText('HTTP 503');
+    await expect(status).toContainText('本次任务失败');
+    await expect.poll(() => receiver.snapshots.some(snapshot => snapshot.run_id === run.id && snapshot.task_outcome === 'failed')).toBe(true);
+    const snapshots = receiver.snapshots.filter(snapshot => snapshot.run_id === run.id);
+    const last = snapshots.at(-1)!;
+    expect(last).toMatchObject({ layer: 'codex_model', http_status: 503, task_outcome: 'failed', outcome: 'failed' });
+    expect(last.first_diagnostics).toBeTruthy();
+    expect(new Set(snapshots.map(snapshot => snapshot.incident_id)).size).toBe(1);
+    await expect.poll(() => receiver.logs.some(log => log.incident_id === last.incident_id)).toBe(true);
+    await fixture.captureEvidence('model-error-incident', { snapshots });
+  } finally {
+    if (app) await closePackagedApp(app);
+    await receiver.close();
+    await fixture.dispose();
+  }
+});
+
+test('打包 App 上传旧版 Office 附件并将文字交给内嵌 Codex', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    expect((await waitForAvailabilityProbe(app.page)).status).toBe('succeeded');
+    const project = await runtimeRequest<{ project: { id: string } }>(app.page, 'POST', '/projects', {
+      cwd: fixture.workspace, name: '旧版 Office 附件', sandbox: 'read-only'
+    });
+    expect(project.status).toBe(201);
+    const thread = await runtimeRequest<{ thread: { id: string } }>(app.page, 'POST', '/threads', {
+      projectId: project.body.project.id, title: '旧版 Office 附件', sandbox: 'read-only'
+    });
+    expect(thread.status).toBe(201);
+    const files = [
+      ['doc', 'application/msword'], ['xls', 'application/vnd.ms-excel'], ['ppt', 'application/vnd.ms-powerpoint']
+    ].map(([format, mime]) => ({
+      fileName: `simple.${format}`, mime: mime!,
+      bytes: Array.from(readFileSync(new URL(`../../daemon/test/fixtures/legacy-office/simple.${format}`, import.meta.url)))
+    }));
+    const draftId = 'legacy-office-e2e';
+    const uploads = await app.page.evaluate(async ({ files, draftId }) => {
+      const results: Array<{ status: number; attachment?: { id: string } }> = [];
+      for (const file of files) {
+        const query = new URLSearchParams({ draftId, fileName: file.fileName, mime: file.mime });
+        const response = await fetch(`/.clawee/runtime/attachments?${query}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(file.bytes)
+        });
+        results.push({ ...await response.json(), status: response.status });
+      }
+      return results;
+    }, { files, draftId });
+    expect(uploads.map(upload => upload.status)).toEqual([201, 201, 201]);
+    const baseline = fixture.modelServer.requests.length;
+    const run = await runtimeRequest<RunResponse>(app.page, 'POST', '/runs', {
+      threadId: thread.body.thread.id, prompt: '读取这三个旧版 Office 附件的内容', draftId,
+      attachmentIds: uploads.map(upload => upload.attachment!.id)
+    });
+    expect(run.status).toBe(202);
+    expect((await waitForRunTerminal(app.page, run.body.id)).status).toBe('succeeded');
+    const requests = fixture.modelServer.requests.slice(baseline);
+    for (const text of ['This is a simple file created with Word 97-SR2.', 'replaceMe', 'This is a test title']) {
+      expect(requests.some(request => controlledModelRequestContainsText(request, text))).toBe(true);
+    }
+    await fixture.captureEvidence('legacy-office-attachments', { fileNames: files.map(file => file.fileName) });
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
+
+test('Runtime 启动失败时损坏更新记录自动重建，实际桌面仍可检查更新', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  const manifest = join(fixture.resourcesRoot, 'deployment', 'codex-runtime.json');
+  const hidden = `${manifest}.update-recovery-test`;
+  const journal = join(fixture.userData, 'customer-update-state.json');
+  let app: PackagedApp | undefined;
+  try {
+    mkdirSync(fixture.userData, { recursive: true });
+    writeFileSync(journal, '损坏的更新记录');
+    renameSync(manifest, hidden);
+    app = await fixture.launch();
+    await expect.poll(() => app!.page.evaluate(async () => {
+      const desktop = (window as Window & { claweeDesktop: { readBootstrapState(): Promise<{ phase: string }> } }).claweeDesktop;
+      return (await desktop.readBootstrapState()).phase;
+    })).toBe('failed');
+    const result = await app.page.evaluate(async () => {
+      const desktop = (window as Window & { claweeDesktop: {
+        checkForUpdates(): Promise<{ ok: boolean }>;
+        readUpdateState(): Promise<{ supported: boolean; status: string; errorCode?: string }>;
+      } }).claweeDesktop;
+      return { check: await desktop.checkForUpdates(), state: await desktop.readUpdateState() };
+    });
+    expect(result.check).toMatchObject({ ok: true });
+    expect(result.state).toMatchObject({ supported: true, status: 'idle' });
+    expect(result.state.errorCode).toBeUndefined();
+    const backups = readdirSync(fixture.userData).filter(name => name.startsWith('customer-update-state.json.corrupt-'));
+    expect(backups).toHaveLength(1);
+    expect(readFileSync(join(fixture.userData, backups[0]!), 'utf8')).toBe('损坏的更新记录');
+    expect(JSON.parse(readFileSync(journal, 'utf8'))).toEqual({ schemaVersion: 1, records: [] });
+    await fixture.captureEvidence('failed-runtime-update-recovery', result);
+  } finally {
+    if (app) await closePackagedApp(app);
+    if (existsSync(hidden)) renameSync(hidden, manifest);
+    await fixture.dispose();
+  }
+});
+
+for (const policy of ['unknown', 'fresh', 'allowed', 'expired', 'denied', 'disabled', 'invalid_config'] as const) {
+test(`未登录Runtime启动失败的实际上报门禁：${policy}`, async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  const receiver = await createPackagedIncidentReceiver(fixture.userData, policy === 'fresh' ? { enabled: true } : undefined);
+  const manifest = join(fixture.resourcesRoot, 'deployment', 'codex-runtime.json');
+  const hidden = `${manifest}.incident-test`;
+  const queue = join(fixture.userData, 'auto-incidents.json');
+  const configPath = join(fixture.root, 'enterprise', 'config.toml');
+  const enterpriseKey = readIncidentEnterpriseKey(configPath);
+  let app: PackagedApp | undefined;
+  try {
+    mkdirSync(fixture.userData, { recursive: true });
+    writeFileSync(queue, JSON.stringify({ installationId: randomUUID(), enterpriseKey, enabled: policy !== 'disabled', notified: true, noticeVersion: 2, routingVersion: 2, noticeOrigin: readIncidentGatewayOrigin(configPath), records: [],
+      ...(['unknown', 'fresh'].includes(policy) ? {} : { policy: { enterprise_key: enterpriseKey, allowed: policy !== 'denied' && policy !== 'invalid_config',
+        expires_at: new Date(Date.now() + (policy === 'expired' ? -60_000 : 3_600_000)).toISOString() } })
+    }), { mode: 0o600 });
+    if (policy === 'invalid_config') writeFileSync(configPath, 'gateway = 123\n');
+    renameSync(manifest, hidden);
+    app = await fixture.launch();
+    await expect.poll(() => app!.page.evaluate(async () => {
+      const desktop = (window as Window & { claweeDesktop: { readBootstrapState(): Promise<{ phase: string }> } }).claweeDesktop;
+      return (await desktop.readBootstrapState()).phase;
+    })).toBe('failed');
+    const shouldCollect = !['denied', 'invalid_config'].includes(policy);
+    await expect.poll(() => {
+      const state = JSON.parse(readFileSync(queue, 'utf8')) as { records: Array<{ snapshot: { source: string; outcome: string }; acknowledged: number }> };
+      return state.records.filter(record => record.snapshot.source === 'desktop' && record.snapshot.outcome === 'failed').length;
+    }).toBe(shouldCollect ? 1 : 0);
+    if (policy === 'allowed' || policy === 'fresh' || policy === 'disabled') {
+      await expect.poll(() => JSON.parse(readFileSync(queue, 'utf8')).records[0]?.acknowledged).toBeGreaterThan(0);
+      await expect.poll(() => JSON.parse(readFileSync(queue, 'utf8')).records[0]?.logsAcknowledged).toBe(true);
+      expect(receiver.requestCount).toBe(2);
+      expect(receiver.logs).toHaveLength(1);
+      expect(receiver.logs[0]!.content).toContain('desktop-main.log');
+      expect(receiver.snapshots[0]).toMatchObject({ source: 'desktop', layer: 'desktop_bootstrap', outcome: 'failed' });
+    } else {
+      await app.page.waitForTimeout(250);
+      expect(receiver.requestCount).toBe(0);
+    }
+    const state = JSON.parse(readFileSync(queue, 'utf8')) as { records: Array<{ snapshot: { run_id?: string; thread_id?: string; layer: string } }> };
+    expect(state.records.every(record => record.snapshot.layer === 'desktop_bootstrap' && !record.snapshot.run_id && !record.snapshot.thread_id)).toBe(true);
+    await closePackagedApp(app); app = undefined;
+    expect(receiver.requestCount).toBe(policy === 'allowed' || policy === 'fresh' || policy === 'disabled' ? 2 : 0);
+  } finally {
+    if (existsSync(hidden)) renameSync(hidden, manifest);
+    if (app) await closePackagedApp(app);
+    await receiver.close();
+    await fixture.dispose();
+  }
+});
+}
+
+test('Windows 更新未完成时等待资源写入，多次打开后自动进入新版工作台', async () => {
+  test.skip(process.platform !== 'win32');
+  const fixture = await createEmbeddedRuntimeFixture();
+  const statePath = `${fixture.packageRoot}.clawee-update.json`;
+  const deployment = join(fixture.resourcesRoot, 'deployment');
+  const pendingDeployment = `${deployment}.installing`;
+  let app: PackagedApp | undefined;
+  try {
+    renameSync(deployment, pendingDeployment);
+    writeFileSync(statePath, JSON.stringify({ schemaVersion: 1, state: 'installing', installerPid: process.pid, targetVersion: fixture.appVersion }));
+    app = await fixture.launch();
+    await expect(app.page.getByRole('heading', { name: 'Clawee 正在完成更新' })).toBeVisible();
+    const startupLog = join(fixture.userData, 'logs', 'desktop-main.log');
+    await expect.poll(() => existsSync(startupLog)).toBe(true);
+    expect(readFileSync(startupLog, 'utf8')).not.toContain('Clawee Desktop starting');
+    await launchSecondInstance(app, ['clawee://tasks']);
+    await launchSecondInstance(app, ['--updated']);
+    await expect(app.page.getByRole('heading', { name: 'Clawee 正在完成更新' })).toBeVisible();
+    await app.page.screenshot({ path: test.info().outputPath('update-waiting.png') });
+    const workspacePage = app.browser.contexts()[0]!.waitForEvent('page');
+    renameSync(pendingDeployment, deployment);
+    writeFileSync(statePath, JSON.stringify({ schemaVersion: 1, state: 'complete', installerPid: process.pid, targetVersion: fixture.appVersion, elapsedMs: 3000 }));
+    app.page = await workspacePage;
+    await waitForEmbeddedRuntimeReady(app.page);
+    await expect.poll(() => app!.page.url()).toContain('#/tasks');
+    const log = readFileSync(startupLog, 'utf8');
+    expect(log).toContain('Windows update installation completed');
+    expect(log).toContain('Desktop workspace ready');
+    expect(log).not.toContain('CODEX_RUNTIME_MANIFEST_MISSING');
+    await fixture.captureEvidence('windows-update-waiting', { version: fixture.appVersion });
+  } finally {
+    if (existsSync(pendingDeployment)) renameSync(pendingDeployment, deployment);
+    rmSync(statePath, { force: true });
+    if (app !== undefined) await closePackagedApp(app);
+    await fixture.dispose();
+  }
+});
+
+test('打包 Electron 从只读服务工作区真实下载文本和普通二进制原文件', async ({}, testInfo) => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  const artifacts = createWorkspaceDownloadArtifacts().filter(artifact => (
+    artifact.kind === 'text' || artifact.kind === 'binary'
+  ));
+  try {
+    for (const artifact of artifacts) {
+      const sourcePath = join(fixture.workspace, artifact.path);
+      mkdirSync(dirname(sourcePath), { recursive: true });
+      writeFileSync(sourcePath, artifact.bytes);
+    }
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    await ensureEmbeddedWorkspaceSignedIn(app.page);
+    const requests = observeWorkspaceFileRequests(app.page);
+    const project = await runtimeRequest<{ project: { id: string } }>(
+      app.page, 'POST', '/projects', {
+        cwd: fixture.workspace,
+        name: '成果下载回归',
+        sandbox: 'read-only'
+      }
+    );
+    expect(project.status).toBe(201);
+    const thread = await runtimeRequest<{ thread: { id: string } }>(
+      app.page, 'POST', '/threads', {
+        projectId: project.body.project.id,
+        title: '成果下载回归',
+        sandbox: 'read-only'
+      }
+    );
+    expect(thread.status).toBe(201);
+
+    for (const artifact of artifacts) {
+      await app.page.evaluate(({ threadId, path }) => {
+        window.location.hash = `#/files?${new URLSearchParams({ threadId, path })}`;
+      }, { threadId: thread.body.thread.id, path: artifact.path });
+      await app.page.reload({ waitUntil: 'domcontentloaded' });
+      await ensureEmbeddedWorkspaceSignedIn(app.page);
+      await expect(app.page.getByRole('button', { name: '打开文件', exact: true })).toBeVisible();
+      if (artifact.kind === 'binary') {
+        await expect(app.page.getByText('暂不支持预览此文件', { exact: true })).toBeVisible();
+      }
+      await expectWorkspaceDownload({
+        page: app.page,
+        threadId: thread.body.thread.id,
+        workspace: fixture.workspace,
+        artifact,
+        saveDirectory: testInfo.outputPath('Electron 下载副本'),
+        requireBearer: false
+      });
+    }
+
+    expect(requests.filter(request => request.pathname.endsWith('/download'))).toHaveLength(artifacts.length);
+    expect(requests.filter(request => request.pathname.endsWith('/reveal'))).toEqual([]);
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
 
 test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进程', async () => {
   const fixture = await createEmbeddedRuntimeFixture();
   let app: PackagedApp | undefined;
-  const measurements: Array<{ mode: string; durationMs: number }> = [];
+  const measurements: Array<{
+    mode: string;
+    durationMs: number;
+    exited: boolean;
+    quitRequestError?: string;
+  }> = [];
   try {
     app = await fixture.launch();
     for (const mode of ['unconfigured', 'idle', 'running']) {
       if (app === undefined) throw new Error('退出回归 App 未启动');
       await waitForEmbeddedRuntimeReady(app.page);
-      if (mode !== 'unconfigured') await ensureEmbeddedWorkspaceSignedIn(app.page);
+      if (mode !== 'unconfigured') {
+        await ensureEmbeddedWorkspaceSignedIn(app.page);
+        expect((await waitForAvailabilityProbe(app.page)).status).toBe('succeeded');
+      }
       let runId: string | undefined;
       if (mode === 'running') {
         const project = await runtimeRequest<{ project: { id: string } }>(
@@ -84,21 +497,41 @@ test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进
       const daemonPid = entries.reverse().find(entry => entry.message === 'Daemon Utility Process ready')
         ?.details.pid as number;
       expect(daemonPid).toBeGreaterThan(0);
-      const runtimePids = process.platform === 'win32' ? [] : execFileSync(
-        'ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' }
-      ).trim().split('\n').map(line => line.trim().split(/\s+/).map(Number))
-        .filter(([, parentPid]) => parentPid === daemonPid).map(([pid]) => pid!);
+      const runtimePids = (await readProcessTree([daemonPid]))
+        .filter(processRecord => processRecord.pid !== daemonPid)
+        .map(processRecord => processRecord.pid);
       const previousApp = app;
       const startedAt = Date.now();
       const exited = waitForProcessExit(app.process, 5_500);
-      await app.page.evaluate(() => { void window.claweeDesktop?.quit(); }).catch(() => undefined);
-      expect(await exited).toBe(true);
+      let quitRequestError: string | undefined;
+      await app.page.evaluate(() => {
+        if (window.claweeDesktop === undefined) throw new Error('Desktop Bridge 未就绪');
+        void window.claweeDesktop.quit();
+      }).catch(error => { quitRequestError = String(error); });
+      const processExited = await exited;
       const durationMs = Date.now() - startedAt;
-      measurements.push({ mode, durationMs });
+      measurements.push({ mode, durationMs, exited: processExited, quitRequestError });
+      writeDesktopE2EReport('clawee-desktop-shutdown-e2e.json', {
+        generatedAt: new Date().toISOString(), measurements,
+        result: processExited ? 'RUNNING' : 'FAIL'
+      });
+      if (!processExited) {
+        await fixture.captureEvidence(`shutdown-${mode}`, {
+          mode, durationMs, daemonPid, runtimePids, quitRequestError,
+          mainPid: app.process.pid
+        });
+      }
+      expect(processExited).toBe(true);
       expect(durationMs).toBeLessThan(mode === 'unconfigured' ? 2_000 : 5_500);
       for (const pid of [daemonPid, ...runtimePids]) {
         await expect.poll(() => {
-          try { process.kill(pid, 0); return false; } catch { return true; }
+          try {
+            process.kill(pid, 0);
+            return false;
+          } catch (error) {
+            return typeof error === 'object' && error !== null && 'code' in error
+              && error.code === 'ESRCH';
+          }
         }).toBe(true);
       }
       await app.browser.close().catch(() => undefined);
@@ -112,6 +545,37 @@ test('打包 App 在空闲和任务执行中及时退出且不遗留 Runtime 进
     writeDesktopE2EReport('clawee-desktop-shutdown-e2e.json', {
       generatedAt: new Date().toISOString(), measurements, result: 'PASS'
     });
+  } finally {
+    if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
+    await fixture.dispose();
+  }
+});
+
+test('强制结束桌面主进程后 daemon 自退出且数据目录可以安全重开', async () => {
+  const fixture = await createEmbeddedRuntimeFixture();
+  let app: PackagedApp | undefined;
+  try {
+    app = await fixture.launch();
+    await waitForEmbeddedRuntimeReady(app.page);
+    const daemonPid = Number(readFileSync(join(fixture.dataDir, 'clawee-runtime.lock'), 'utf8').trim());
+    expect(daemonPid).toBeGreaterThan(0);
+    const previousApp = app;
+    const exited = waitForProcessExit(app.process, 5_000);
+    app.process.kill('SIGKILL');
+    expect(await exited).toBe(true);
+    await expect.poll(() => {
+      try {
+        process.kill(daemonPid, 0);
+        return false;
+      } catch (error) {
+        return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH';
+      }
+    }, { timeout: 20_000 }).toBe(true);
+    await app.browser.close().catch(() => undefined);
+    app = await fixture.relaunch(previousApp);
+    await waitForEmbeddedRuntimeReady(app.page);
+    expect(Number(readFileSync(join(fixture.dataDir, 'clawee-runtime.lock'), 'utf8').trim()))
+      .not.toBe(daemonPid);
   } finally {
     if (app !== undefined) await closePackagedApp(app).catch(() => undefined);
     await fixture.dispose();
@@ -232,23 +696,21 @@ test('packaged App ignores external Codex sessions and starts with an isolated R
       name: '配置 Codex 模型服务'
     })).toHaveCount(0);
     await expect(app.page.locator('.clawee-shell')).toHaveCount(0);
-    const blockedStatus = await runtimeRequest<{
-      error: { code: string };
+    const initialRuntimeStatus = await runtimeRequest<{
+      availabilityProbe: { status: string };
     }>(app.page, 'GET', '/codex/status');
-    expect(blockedStatus).toEqual({
-      status: 428,
-      body: {
-        error: {
-          code: 'MODEL_SERVICE_CONFIGURATION_REQUIRED',
-          message: '请先配置并验证 Codex 模型服务'
-        }
-      }
+    expect(initialRuntimeStatus).toMatchObject({
+      status: 200,
+      body: { availabilityProbe: { status: 'skipped' } }
     });
     expect((await runtimeRequest(
       app.page,
       'GET',
       '/projects'
-    )).status).toBe(428);
+    )).status).toBe(200);
+    expect(await runtimeRequest(app.page, 'POST', '/runs', { prompt: '未就绪模型任务' })).toMatchObject({
+      status: 428, body: { error: { code: 'MODEL_SERVICE_CONFIGURATION_REQUIRED' } }
+    });
     expect(fixture.modelServer.requests).toHaveLength(0);
 
     const bootstrapState = await app.page.evaluate(
@@ -278,7 +740,7 @@ test('packaged App ignores external Codex sessions and starts with an isolated R
     expect(findMigrationJournal(fixture.dataDir)).toBe(false);
 
     await ensureEmbeddedWorkspaceSignedIn(app.page);
-    await app.page.getByRole('button', { name: '设置' }).click();
+    await app.page.getByRole('button', { name: '设置', exact: true }).click();
     await app.page.getByRole('button', { name: '关于 Clawee' }).click();
     await expect(app.page.locator('.settings-row').filter({ hasText: 'Clawee 版本' }).locator('strong'))
       .toHaveText(fixture.appVersion);
@@ -559,18 +1021,24 @@ test('packaged embedded Runtime executes tools, persists output, cancels a hangi
     });
 
     await expect.poll(() => (
-      findControlledFunctionCallOutput(
-        fixture.modelServer.requests.slice(requestBaseline),
-        CONTROLLED_EXEC_COMMAND_CALL_ID
+      findControlledCommandOutput(
+        fixture.modelServer.requests.slice(requestBaseline)
       ) !== undefined
     )).toBe(true);
-    const toolOutput = findControlledFunctionCallOutput(
-      fixture.modelServer.requests.slice(requestBaseline),
-      CONTROLLED_EXEC_COMMAND_CALL_ID
+    const toolOutput = findControlledCommandOutput(
+      fixture.modelServer.requests.slice(requestBaseline)
     );
     expect(JSON.stringify(toolOutput)).toContain(
       CONTROLLED_EXEC_COMMAND_OUTPUT
     );
+    if (collectControlledModelToolNames(
+      fixture.modelServer.requests.slice(requestBaseline)
+    ).includes('exec_command')) {
+      expect(JSON.stringify(findControlledFunctionCallOutput(
+        fixture.modelServer.requests.slice(requestBaseline),
+        CONTROLLED_EXEC_COMMAND_CALL_ID
+      ))).toContain('Process running with session ID');
+    }
     const toolOutputPath = join(
       fixture.workspace,
       'clawee-tool-loop.txt'
@@ -611,6 +1079,7 @@ test('packaged embedded Runtime executes tools, persists output, cancels a hangi
       item => (
         item.type === 'tool_result'
         && item.name === 'command_execution'
+        && item.output.includes(CONTROLLED_EXEC_COMMAND_OUTPUT)
       )
     );
     expect(persistedToolResult?.type === 'tool_result'

@@ -3,6 +3,7 @@ package sharedfiles
 import "context"
 
 type Store interface {
+	EnsurePersonalSpace(context.Context, Space) (SpaceSummary, error)
 	CreateSpace(context.Context, Space) (SpaceSummary, error)
 	UpdateSpace(context.Context, Space) (SpaceSummary, error)
 	GetSpaceSummary(context.Context, string) (SpaceSummary, error)

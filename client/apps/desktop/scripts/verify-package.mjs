@@ -21,10 +21,12 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   readEnterpriseGatewayPackageConfig
 } from './enterprise-package-contract.mjs';
+import { assertCustomerUpdateMarker, assertUpdateRuntimeDependencies } from './customer-update-contract.mjs';
 import {
   assertCodexRuntimePackage
 } from './codex-runtime-package-contract.mjs';
@@ -35,6 +37,7 @@ import {
   findDirectoryDifference,
   inspectDirectory
 } from './directory-integrity.mjs';
+import { validateArtifactTicket } from './macos-notarization.mjs';
 import {
   windowsPowerShellEnvironment,
   windowsSignatureVerificationCommand
@@ -109,6 +112,7 @@ assertExists(packageRoot);
 assertExists(executable);
 assertExists(appAsar);
 assertExists(join(daemonDir, 'dist', 'main.js'));
+assertExists(join(daemonDir, 'resources', 'server-agent', 'AGENTS.md'));
 assertExists(join(
   daemonDir,
   'node_modules',
@@ -120,6 +124,7 @@ assertExists(join(
 for (const dependency of ['which', 'path-key', 'shebang-command']) {
   assertExists(join(daemonDir, 'node_modules', dependency, 'package.json'));
 }
+createRequire(join(daemonDir, 'package.json'))('exceljs');
 assertExists(join(
   daemonDir,
   'node_modules',
@@ -146,6 +151,8 @@ assertAsarContents();
 assertBrandingContents();
 assertDaemonContents();
 assertEnterpriseGatewayConfig();
+assertCustomerUpdateMarker(resourcesDir, manifest);
+assertUpdateRuntimeDependencies(resourcesDir);
 await assertWebContents();
 const codexRuntime = await assertCodexRuntimeContents();
 assertNoLocalData();
@@ -153,7 +160,7 @@ assertSize('app.asar', appAsar, 80 * 1024 * 1024);
 assertSize('Daemon resources', daemonDir, 250 * 1024 * 1024);
 assertSize('Desktop package', packageRoot, 1024 * 1024 * 1024);
 await assertFuseConfiguration();
-verifyMacPackageMetadata();
+await verifyMacPackageMetadata();
 verifyWindowsPackageMetadata();
 
 console.log(JSON.stringify({
@@ -480,7 +487,7 @@ async function assertFuseConfiguration() {
   }
   const expected = [
     [FuseV1Options.RunAsNode, FUSE_DISABLED, 'RunAsNode'],
-    [FuseV1Options.EnableCookieEncryption, FUSE_ENABLED, 'CookieEncryption'],
+    [FuseV1Options.EnableCookieEncryption, FUSE_DISABLED, 'CookieEncryption'],
     [
       FuseV1Options.EnableNodeOptionsEnvironmentVariable,
       FUSE_DISABLED,
@@ -507,7 +514,7 @@ async function assertFuseConfiguration() {
   }
 }
 
-function verifyMacPackageMetadata() {
+async function verifyMacPackageMetadata() {
   if (process.platform !== 'darwin') return;
   const signature = spawnSync('codesign', [
     '--verify',
@@ -526,11 +533,7 @@ function verifyMacPackageMetadata() {
   }
   if (process.env.CLAWEE_REQUIRE_DISTRIBUTABLE_MAC === '1') {
     verifyDistributableMacSignature();
-    runMacVerification(
-      'macOS notarization ticket',
-      'xcrun',
-      ['stapler', 'validate', packageRoot]
-    );
+    await validateArtifactTicket(packageRoot);
     runMacVerification(
       'macOS Gatekeeper assessment',
       'spctl',

@@ -33,6 +33,9 @@ type BootstrapApi = {
   exportDiagnostics(): Promise<unknown>;
   exportEmergencyFeedback(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<{ ok: boolean; message?: string }>;
   quit(): Promise<void>;
+  readUpdateState?(): Promise<import('@clawee/protocol').DesktopUpdateState>;
+  subscribeUpdateState?(listener: (state: import('@clawee/protocol').DesktopUpdateState) => void): () => void;
+  openExternal(url: string): Promise<void>;
 };
 
 declare global {
@@ -87,14 +90,60 @@ const labels: Record<BootstrapState['phase'], [string, string]> = {
 
 void api.readBootstrapState().then(render);
 api.subscribeBootstrapState(render);
+const renderUpdate = (state: import('@clawee/protocol').DesktopUpdateState) => {
+  element('update-recovery').hidden = state.status !== 'paused' && state.recovery !== 'failed';
+  element('update-recovery-detail').textContent = `更新未完成，自动安装已暂停。${state.errorCode ?? ''} ${state.recoveryCode ?? ''}。可以导出诊断，重新检测或使用官方安装包修复。`;
+};
+void api.readUpdateState?.().then(renderUpdate);
+api.subscribeUpdateState?.(renderUpdate);
+element('update-installer').addEventListener('click', () => void api.openExternal('https://github.com/krillinai/Clawee/releases'));
 
 element('retry').addEventListener('click', () => void api.retryBootstrap());
 element('diagnostics').addEventListener('click', () => void api.exportDiagnostics());
-element('emergency-feedback').addEventListener('click', () => void (async () => {
+let feedbackSubmitting = false;
+element('emergency-feedback-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (feedbackSubmitting) return;
+  void exportFeedback();
+});
+
+async function exportFeedback(): Promise<void> {
   const result = element('feedback-result');
-  try { const description = (element('feedback-description') as HTMLTextAreaElement).value; const files = Array.from((element('feedback-screenshots') as HTMLInputElement).files ?? []); if (files.length > 5 || files.some(file => file.size > 10 * 1024 * 1024)) throw new Error('问题截图超限'); const screenshots = await Promise.all(files.map(async file => ({ content_type: file.type, data: new Uint8Array(await file.arrayBuffer()) }))); const exported = await api.exportEmergencyFeedback(description, screenshots); result.textContent = exported.ok ? '已导出部分资料，未发送到中心。' : exported.message ?? '导出未完成'; }
-  catch { result.textContent = '导出失败，请检查描述与截图。'; }
-})());
+  const button = element('emergency-feedback') as HTMLButtonElement;
+  const descriptionInput = element('feedback-description') as HTMLTextAreaElement;
+  const screenshotInput = element('feedback-screenshots') as HTMLInputElement;
+  feedbackSubmitting = true;
+  button.disabled = true;
+  descriptionInput.readOnly = true;
+  screenshotInput.disabled = true;
+  button.textContent = '正在导出';
+  result.textContent = '';
+  result.dataset.failed = 'false';
+  try {
+    const description = descriptionInput.value.trim();
+    if (!description) throw new Error('请填写问题描述。');
+    const files = Array.from(screenshotInput.files ?? []);
+    if (files.length > 5 || files.some(file => file.size > 10 * 1024 * 1024)) {
+      throw new Error('最多添加 5 张截图，每张不超过 10 MiB。');
+    }
+    const screenshots = await Promise.all(files.map(async file => ({
+      content_type: file.type,
+      data: new Uint8Array(await file.arrayBuffer())
+    })));
+    const exported = await api!.exportEmergencyFeedback(description, screenshots);
+    result.textContent = exported.ok ? '已导出部分资料，未发送到中心。' : exported.message ?? '导出未完成';
+    result.dataset.failed = !exported.ok && exported.message !== '已取消导出' ? 'true' : 'false';
+  } catch (error) {
+    result.textContent = error instanceof Error ? error.message : '导出失败，请重试。';
+    result.dataset.failed = 'true';
+  } finally {
+    feedbackSubmitting = false;
+    button.disabled = false;
+    descriptionInput.readOnly = false;
+    screenshotInput.disabled = false;
+    button.textContent = '导出本地应急反馈';
+  }
+}
 element('quit').addEventListener('click', () => void api.quit());
 element('reload-workspace').addEventListener('click', () => void api.reloadWorkspace());
 element('restart-runtime').addEventListener('click', () => void api.restartRuntime());

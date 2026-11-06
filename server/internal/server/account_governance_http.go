@@ -75,6 +75,7 @@ func accountGovernanceError(c *gin.Context, err error) {
 		errors.Is(err, accountgovernance.ErrAgentOwnerInconsistent),
 		errors.Is(err, accountgovernance.ErrIdentityConflict),
 		errors.Is(err, accountgovernance.ErrAccountGrantConflict),
+		errors.Is(err, accountgovernance.ErrPersonalSpaceConflict),
 		errors.Is(err, accountgovernance.ErrPendingGate):
 		status, code, message = http.StatusConflict, "state_conflict", err.Error()
 	}

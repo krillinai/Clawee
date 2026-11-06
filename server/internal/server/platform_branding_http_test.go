@@ -80,10 +80,61 @@ func TestPlatformBrandingAdminPermissionAndClientRead(t *testing.T) {
 
 	doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", userCookies, http.StatusOK)
 	doJSON(t, router, http.MethodGet, "/api/v1/admin/platform-branding", "", userCookies, http.StatusForbidden)
+	for _, kind := range []string{"sidebar-logo-dark", "sidebar-compact-logo-dark"} {
+		doRequest(t, router, http.MethodGet, "/api/v1/admin/platform-branding/"+kind, nil, "", userCookies, http.StatusForbidden)
+		doRequest(t, router, http.MethodGet, "/api/v1/app/platform-branding/"+kind, nil, "", userCookies, http.StatusNotFound)
+	}
 	brandingMultipartRequest(t, router, map[string]string{
 		"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep",
 		"sidebar_menu_labels": `{"skills":"技能"}`,
 	}, nil, userCookies, http.StatusForbidden)
+}
+
+func TestPlatformBrandingDarkLogosHTTP(t *testing.T) {
+	service := platformbranding.NewService(nil)
+	router := newTestRouter(t, server.Options{PlatformBrandingService: service})
+	light := testPNG(t, 12, 8)
+	dark := testPNG(t, 8, 12)
+	fields := map[string]string{
+		"sidebar_logo_action": "replace", "sidebar_compact_logo_action": "replace",
+		"sidebar_logo_dark_action": "replace", "sidebar_compact_logo_dark_action": "replace",
+	}
+	brandingMultipartRequest(t, router, fields, map[string][]byte{
+		"sidebar_logo": light, "sidebar_compact_logo": light,
+		"sidebar_logo_dark": dark, "sidebar_compact_logo_dark": dark,
+	}, nil, http.StatusOK)
+	app := doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", nil, http.StatusOK)
+	admin := doJSON(t, router, http.MethodGet, "/api/v1/admin/platform-branding", "", nil, http.StatusOK)
+	for _, field := range []string{"sidebar_logo_dark", "sidebar_compact_logo_dark"} {
+		if !nestedBool(t, app, "data", field+"_configured") || nestedString(t, admin, "data", field+"_url") == "" {
+			t.Fatalf("missing dark configuration: app=%#v admin=%#v", app, admin)
+		}
+	}
+	for _, prefix := range []string{"/api/v1/app", "/api/v1/admin"} {
+		for _, kind := range []string{"sidebar-logo-dark", "sidebar-compact-logo-dark"} {
+			response := doRequest(t, router, http.MethodGet, prefix+"/platform-branding/"+kind, nil, "", nil, http.StatusOK)
+			if !bytes.Equal(response.Body.Bytes(), dark) || response.Header().Get("Content-Type") != "image/png" || response.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("invalid dark image response: %s", kind)
+			}
+		}
+	}
+	// 旧管理端省略深色字段不能清除已保存的深色图片。
+	brandingMultipartRequest(t, router, map[string]string{
+		"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep",
+	}, nil, nil, http.StatusOK)
+	fields["sidebar_logo_action"], fields["sidebar_compact_logo_action"] = "keep", "keep"
+	brandingMultipartRequest(t, router, fields, map[string][]byte{
+		"sidebar_logo_dark": dark, "sidebar_compact_logo_dark": []byte("invalid"),
+	}, nil, http.StatusBadRequest)
+	current, err := service.Get(context.Background())
+	if err != nil || current.SidebarLogoDark == nil || current.SidebarCompactLogoDark == nil {
+		t.Fatalf("dark configuration changed: %#v, %v", current, err)
+	}
+	fields["sidebar_logo_dark_action"], fields["sidebar_compact_logo_dark_action"] = "reset", "keep"
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	doRequest(t, router, http.MethodGet, "/api/v1/app/platform-branding/sidebar-logo-dark", nil, "", nil, http.StatusNotFound)
+	doRequest(t, router, http.MethodGet, "/api/v1/app/platform-branding/sidebar-compact-logo-dark", nil, "", nil, http.StatusOK)
+	doRequest(t, router, http.MethodGet, "/api/v1/app/platform-branding/sidebar-logo", nil, "", nil, http.StatusOK)
 }
 
 func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
@@ -113,6 +164,25 @@ func TestPlatformBrandingMenuLabelsHTTP(t *testing.T) {
 	current, _ = service.Get(context.Background())
 	if current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Knowledge != "知识库" {
 		t.Fatalf("reset labels=%#v", current.SidebarMenuLabels)
+	}
+}
+
+func TestPlatformBrandingAccentColorHTTP(t *testing.T) {
+	service := platformbranding.NewService(nil)
+	router := newTestRouter(t, server.Options{PlatformBrandingService: service})
+	fields := map[string]string{"sidebar_logo_action": "keep", "sidebar_compact_logo_action": "keep", "accent_color": "#F2E9EA"}
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	app := doJSON(t, router, http.MethodGet, "/api/v1/app/platform-branding", "", nil, http.StatusOK)
+	if nestedString(t, app, "data", "accent_color") != "#f2e9ea" {
+		t.Fatalf("客户端未收到品牌高亮色: %#v", app)
+	}
+	fields["accent_color"] = "invalid"
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusBadRequest)
+	fields["accent_color"] = ""
+	brandingMultipartRequest(t, router, fields, nil, nil, http.StatusOK)
+	current, _ := service.Get(context.Background())
+	if current.AccentColor != "" {
+		t.Fatalf("未恢复默认颜色: %#v", current)
 	}
 }
 

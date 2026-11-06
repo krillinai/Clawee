@@ -109,7 +109,7 @@ test('restored conversations wait for history before entering the empty layout',
   await expect(page.getByRole('status', { name: '正在加载会话历史' })).toBeVisible();
   await expect(page.locator('.conversation-page')).not.toHaveClass(/is-empty/);
   await expect(page.getByText('需要帮你做点什么')).toHaveCount(0);
-  await expect(page.getByText('数据分析')).toHaveCount(0);
+  await expect(page.getByLabel('常用场景')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /选择项目/ })).toHaveCount(0);
 
   releaseHistory?.();
@@ -117,7 +117,7 @@ test('restored conversations wait for history before entering the empty layout',
   await expect(page.getByRole('status', { name: '正在加载会话历史' })).toHaveCount(0);
   await expect(page.locator('.conversation-page')).toHaveClass(/is-empty/);
   await expect(page.getByText('需要帮你做点什么')).toBeVisible();
-  await expect(page.getByText('数据分析')).toBeVisible();
+  await expect(page.getByLabel('常用场景')).toBeVisible();
   await expect(page.getByRole('button', { name: /选择项目/ })).toBeVisible();
 });
 

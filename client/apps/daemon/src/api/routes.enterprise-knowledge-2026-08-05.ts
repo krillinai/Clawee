@@ -97,7 +97,7 @@ function sendKnowledgeError(reply: FastifyReply, error: unknown) {
   if (error instanceof EnterpriseKnowledgeManagerError) {
     return reply
       .code(error.statusCode)
-      .send(apiError(error.code, knowledgeErrorMessage(error.code)));
+      .send(apiError(error.code, knowledgeErrorMessage(error.code), error.details));
   }
   throw error;
 }

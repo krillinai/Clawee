@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import {
   Folder,
   FolderOpen,
@@ -22,6 +23,13 @@ export function CreateProjectDialog(props: {
   const [selectingDirectory, setSelectingDirectory] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalBehavior(dialogRef, {
+    open: props.open,
+    onClose: props.onClose,
+    closeDisabled: submitting || selectingDirectory,
+    initialFocusRef: inputRef
+  });
 
   useEffect(() => {
     if (!props.open) return;
@@ -54,6 +62,7 @@ export function CreateProjectDialog(props: {
       }}
     >
       <section
+        ref={dialogRef}
         className="composer-project-name-dialog"
         role="dialog"
         aria-modal="true"

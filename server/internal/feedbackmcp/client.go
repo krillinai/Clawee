@@ -46,7 +46,7 @@ func (c *Client) ListTools(context.Context, mcpgateway.UpstreamServer, string) (
 }
 func stringArg(args mcpgateway.JSONMap, k string) string { v, _ := args[k].(string); return v }
 func (c *Client) CallTool(ctx context.Context, req mcpgateway.UpstreamCallRequest) (mcpgateway.UpstreamCallResult, error) {
-	actor := feedback.Actor{UserID: req.Caller.UserID, AgentID: req.Caller.AgentID, TokenID: req.Caller.TokenID, RequestID: req.TraceID}
+	actor := feedback.Actor{UserID: req.Caller.UserID, AgentID: req.Caller.AgentID, TokenID: req.Caller.TokenID, RequestID: req.TraceID, ManualOnly: true}
 	args := req.Arguments
 	id := stringArg(args, "report_id")
 	raw, _ := json.Marshal(args)

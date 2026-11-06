@@ -35,8 +35,19 @@ describe('codex app-server runner', () => {
 
     await process.result;
 
-    expect(readDeveloperInstructions(readAppServerRequests(tempDir), method))
+    const developerInstructions = readDeveloperInstructions(
+      readAppServerRequests(tempDir),
+      method
+    );
+    expect(developerInstructions)
       .toContain(SERVER_SKILL_CONFIDENTIALITY_INSTRUCTION);
+    expect(developerInstructions).not.toContain(
+      '调用企业连接器提供的 `clawee_submit_task` 时，默认省略 `project_name` 和 `project_id`'
+    );
+    expect(developerInstructions)
+      .toContain('`project_name` 只能填写当前 Clawee 项目的准确显示名称');
+    expect(developerInstructions)
+      .toContain('无法确认准确项目名称时省略 `project_name`');
   });
 
   it.each([undefined, false])(
@@ -56,10 +67,14 @@ describe('codex app-server runner', () => {
 
       await process.result;
 
-      expect(readDeveloperInstructions(
+      const developerInstructions = readDeveloperInstructions(
         readAppServerRequests(tempDir),
         'thread/start'
-      )).not.toContain(SERVER_SKILL_CONFIDENTIALITY_INSTRUCTION);
+      );
+      expect(developerInstructions).not.toContain(SERVER_SKILL_CONFIDENTIALITY_INSTRUCTION);
+      expect(developerInstructions).toContain(
+        '调用企业连接器提供的 `clawee_submit_task` 时，默认省略 `project_name` 和 `project_id`'
+      );
     }
   );
 
@@ -526,7 +541,7 @@ function expectEnterpriseKnowledgeRoutingInstructions(
     '企业知识库路由规则的优先级高于 Skills 中对通用“知识库”一词的解释。'
   );
   expect(instructions).toContain(
-    '例如展示名“Rose同学”对应 enterprise_rose。'
+    '例如展示名“企业助手”对应 enterprise_assistant。'
   );
   expect(instructions).toContain(
     '唯一匹配且工具能力符合请求时，必须优先调用该 MCP'

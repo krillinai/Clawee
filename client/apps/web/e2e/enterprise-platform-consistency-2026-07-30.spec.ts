@@ -58,7 +58,7 @@ test('未勾选协议时 Browser/Desktop 登录均先确认再提交', async ({
 
       const submit = page.locator('.enterprise-email-submit');
       await expect(submit).toBeDisabled();
-      await page.getByLabel('邮箱').fill('member@example.com');
+      await page.getByLabel('邮箱或手机号').fill('member@example.com');
       await expect(submit).toBeDisabled();
       await page.getByLabel('密码').fill('password-123');
       await expect(submit).toBeEnabled();
@@ -1047,8 +1047,8 @@ async function runPlatform(input: {
     await expect(page.getByRole('heading', { name: 'Enterprise Member' })).toBeVisible();
 
     await page.setViewportSize({ width: 1800, height: 1200 });
-    await page.getByRole('button', { name: '数据看板', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '数据看板' })).toBeVisible();
+    await page.getByRole('button', { name: '工作台', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '工作台' })).toBeVisible();
     await expect(page.getByText('已采集 24 个稿件', { exact: true }))
       .toBeVisible();
     await expectFullWidthTabLayout(page, {
@@ -1065,20 +1065,22 @@ async function runPlatform(input: {
     await page.getByRole('button', {
       name: '打开哔哩哔哩运营详情看板'
     }).click();
-    await expect(page.getByRole('heading', { name: '哔哩哔哩运营' }))
+    await expect(page.getByRole('heading', { name: '哔哩哔哩数据洞察' }))
       .toBeVisible();
-    await expect(page.getByText('企业新品内容复盘', { exact: true }))
+    await expect(page.getByRole('table', { name: '哔哩哔哩稿件表现明细' })
+      .getByText('企业新品内容复盘', { exact: true }))
       .toBeVisible();
     checkpoints.bilibiliDashboard = await captureCheckpoint(page, [
-      '.clawee-sidebar-pane',
       '.clawee-main-pane',
+      '.workbench-module-layout',
+      '.workbench-module-workspace',
       '.dashboard-detail-page',
       '.dashboard-detail-metrics',
-      '.dashboard-detail-table'
+      '.dashboard-content-table'
     ]);
-    await page.getByRole('button', { name: '返回数据看板' }).click();
+    await page.getByRole('button', { name: '返回工作台' }).click();
 
-    await page.getByRole('button', { name: 'Agent动态', exact: true }).click();
+    await page.getByRole('button', { name: '打开Agent动态模块' }).click();
     await expect(page.getByRole('heading', { name: 'Agent动态' })).toBeVisible();
     await expect(page.getByTestId('total-tokens')).toHaveText('18,396,247');
     const tokenRanking = page.getByRole('table', { name: 'Token 使用排行' });
@@ -1092,7 +1094,6 @@ async function runPlatform(input: {
       contentSelector: '.activity-page__inner'
     });
     checkpoints.activity = await captureCheckpoint(page, [
-      '.clawee-sidebar-pane',
       '.clawee-main-pane',
       '.activity-page',
       '.activity-metrics',
@@ -1104,12 +1105,13 @@ async function runPlatform(input: {
     await expect(page.getByText('1.8 秒', { exact: true })).toBeVisible();
     await expect(page.getByText(/private tool input/i)).toHaveCount(0);
     checkpoints.activityDetail = await captureCheckpoint(page, [
-      '.clawee-sidebar-pane',
       '.clawee-main-pane',
       '.activity-page',
       '.activity-detail-header',
       '.activity-detail-grid'
     ]);
+    await page.getByRole('button', { name: '返回 Agent动态' }).click();
+    await page.getByRole('button', { name: '返回工作台' }).click();
 
     await page.getByRole('button', { name: '连接器', exact: true }).click();
     await expect(page.getByRole('heading', { name: '连接器' })).toBeVisible();
@@ -1170,7 +1172,7 @@ async function runPlatform(input: {
     await expect(page.getByRole('heading', { name: '共享网盘' })).toBeVisible();
     await expect(page.getByText('design.md', { exact: true })).toBeVisible();
     await expect(page.getByText('当前项目：企业项目')).toBeVisible();
-    await expect(page.getByRole('button', { name: '上传文件' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '上传文件' })).toBeEnabled();
     await page.getByRole('button', {
       name: '保存 design.md 到当前项目'
     }).click();
@@ -1316,7 +1318,7 @@ async function runPlatform(input: {
 }
 
 async function loginWithEmail(page: Page): Promise<void> {
-  await page.getByLabel('邮箱').fill('member@example.com');
+  await page.getByLabel('邮箱或手机号').fill('member@example.com');
   await page.getByLabel('密码').fill('password-123');
   await page.getByRole('checkbox').check();
   await page.locator('.enterprise-email-submit').click();
@@ -1573,15 +1575,20 @@ function requestInventory(requests: FakeEnterpriseRequest[]): string[] {
 }
 
 function commonRequestInventory(requests: FakeEnterpriseRequest[]): string[] {
-  return requestInventory(requests.filter(
-    request => !request.path.startsWith('/projects/directory-selection')
+  const inventory = requestInventory(requests.filter(request => (
+    !request.path.startsWith('/projects/directory-selection')
+    && !request.path.startsWith('/desktop-update/')
+  )));
+  // 并发加载和会话轮询可重复读取；写入次数仍必须一致。
+  return inventory.filter((request, index) => (
+    !request.startsWith('GET ') || inventory.indexOf(request) === index
   ));
 }
 
 function businessRequestSequence(requests: FakeEnterpriseRequest[]): string[] {
   return requests
     .filter(request => (
-      request.path.startsWith('/enterprise/')
+      (request.method !== 'GET' && request.path.startsWith('/enterprise/'))
       || (request.method === 'POST' && request.path === '/threads')
     ))
     .map(request => (

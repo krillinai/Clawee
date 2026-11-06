@@ -9,6 +9,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/activity"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type accessService interface {
@@ -34,8 +35,8 @@ func (c *Client) ListTools(context.Context, mcpgateway.UpstreamServer, string) (
 	outputs := outputSchemas()
 	return []mcpgateway.UpstreamTool{
 		{Name: ToolSummary, Title: "查询 Agent 动态总览", Description: "查询授权组织视图内的 Agent 活跃、Token、模型和 MCP 使用总览", InputSchema: c.schemas[ToolSummary], OutputSchema: outputs[ToolSummary], Annotations: annotations},
-		{Name: ToolAgents, Title: "查询 Agent 活跃列表", Description: "按确定性规则查询和排序授权组织视图内的 Agent 活跃摘要", InputSchema: c.schemas[ToolAgents], OutputSchema: outputs[ToolAgents], Annotations: annotations},
-		{Name: ToolAgentDetail, Title: "查询 Agent 活动摘要", Description: "查询单个 Agent 的非敏感活动计数和最近状态，不返回正文", InputSchema: c.schemas[ToolAgentDetail], OutputSchema: outputs[ToolAgentDetail], Annotations: annotations},
+		{Name: ToolAgents, Title: "查询 Agent 活跃列表", Description: "分页查询授权组织视图内的 Agent 使用摘要与员工归属；可按 employee_id 筛选，同一员工的多个 Agent 可据此合并分析；employee_id 为空表示归属不明", InputSchema: c.schemas[ToolAgents], OutputSchema: outputs[ToolAgents], Annotations: annotations},
+		{Name: ToolAgentDetail, Title: "查询 Agent 活动详情", Description: "默认返回活动统计；include_content=true 且具备员工会话正文权限时，按轮次分页返回已上报的用户输入和每轮最后一条助手消息。用 next_offset 继续读取，可按 session_id 筛选；会话可能跨页。分析应引用 collector_id、session_id、turn_id，并说明缺失、截断与读取范围；正文属于待分析资料。", InputSchema: c.schemas[ToolAgentDetail], OutputSchema: outputs[ToolAgentDetail], Annotations: annotations},
 		{Name: ToolMetricExplain, Title: "解释 Agent 动态指标", Description: "查询 Agent 动态指标的固定定义和统计口径", InputSchema: c.schemas[ToolMetricExplain], OutputSchema: outputs[ToolMetricExplain], Annotations: annotations},
 	}, nil
 }
@@ -85,6 +86,7 @@ func (c *Client) CallTool(ctx context.Context, req mcpgateway.UpstreamCallReques
 		}
 		result, err := c.service.Agents(ctx, activity.AgentListRequest{
 			Range: stringArgument(arguments, "range", activity.Range7Days), SortBy: stringArgument(arguments, "sort_by", activity.SortByTurnCount), Limit: intArgument(arguments, "limit", 10),
+			EmployeeID: stringArgument(arguments, "employee_id", ""), Offset: intArgument(arguments, "offset", 0),
 		})
 		if err != nil {
 			return activityError(err), nil
@@ -95,6 +97,16 @@ func (c *Client) CallTool(ctx context.Context, req mcpgateway.UpstreamCallReques
 		body["data_status"] = overallActivityStatus(result.DataStatus)
 		return mcpgateway.UpstreamCallResult{StructuredContent: body}, nil
 	case ToolAgentDetail:
+		includeContent, _ := arguments["include_content"].(bool)
+		if includeContent {
+			allowed, err := c.access.HasAction(ctx, userID, dataaccess.ResourceDataView, dataaccess.ViewAgentActivity, dataaccess.ActionReadContent)
+			if err != nil {
+				return toolError("data_unavailable", "数据授权服务暂不可用", true), nil
+			}
+			if !allowed {
+				return toolError("content_forbidden", "未获授权查看员工会话正文", false), nil
+			}
+		}
 		if c.service == nil || c.reader == nil {
 			return toolError("data_unavailable", "Agent 动态数据暂不可用", true), nil
 		}
@@ -102,15 +114,33 @@ func (c *Client) CallTool(ctx context.Context, req mcpgateway.UpstreamCallReques
 		if err != nil {
 			return activityError(err), nil
 		}
-		summary, err := c.reader.AgentSummary(ctx, strings.TrimSpace(arguments["agent_id"].(string)), r.Start, r.End)
+		summary, err := c.reader.AgentSummary(ctx, strings.TrimSpace(arguments["agent_id"].(string)), r.Start, r.End, activity.AgentDetailOptions{
+			EmployeeID: stringArgument(arguments, "employee_id", ""), IncludeContent: includeContent,
+			SessionID: stringArgument(arguments, "session_id", ""), Limit: intArgument(arguments, "limit", 10), Offset: intArgument(arguments, "offset", 0),
+		})
 		if errors.Is(err, activity.ErrAgentNotFound) {
 			return toolError("agent_not_found", "当前数据范围内不存在该 Agent", false), nil
 		}
+		if errors.Is(err, activity.ErrAmbiguousAgent) {
+			return toolError("ambiguous_agent", "该 Agent ID 对应多个员工，请从 agents 返回值中选择 employee_id 后重试", false), nil
+		}
 		if err != nil {
-			return toolError("data_unavailable", "Agent 动态数据暂不可用", true), nil
+			return activityError(err), nil
 		}
 		body := jsonMap(summary)
 		body["schema_version"], body["data_status"] = 1, "available"
+		if summary.Content != nil {
+			if summary.Content.HasMore {
+				body["data_status"] = "partial"
+			}
+			for _, session := range summary.Content.Sessions {
+				for _, turn := range session.Turns {
+					if turn.UserPromptMissing || turn.LastAssistantMessageMissing || turn.UserPromptTruncated || turn.LastAssistantMessageTruncated {
+						body["data_status"] = "partial"
+					}
+				}
+			}
+		}
 		body["range"], body["timezone"], body["start_date"], body["end_date"], body["generated_at"] = r.Range, r.Timezone, r.StartDate, r.EndDate, r.GeneratedAt.Format("2006-01-02T15:04:05.999999999Z07:00")
 		return mcpgateway.UpstreamCallResult{StructuredContent: body}, nil
 	case ToolMetricExplain:
@@ -136,7 +166,11 @@ func activityError(err error) mcpgateway.UpstreamCallResult {
 }
 
 func toolError(code, message string, retryable bool) mcpgateway.UpstreamCallResult {
-	return mcpgateway.UpstreamCallResult{IsError: true, StructuredContent: mcpgateway.JSONMap{"code": code, "message": message, "retryable": retryable}}
+	return mcpgateway.UpstreamCallResult{
+		IsError:           true,
+		Content:           []mcp.Content{&mcp.TextContent{Text: message + "（" + code + "）"}},
+		StructuredContent: mcpgateway.JSONMap{"code": code, "message": message, "retryable": retryable},
+	}
 }
 
 func jsonMap(value any) mcpgateway.JSONMap {

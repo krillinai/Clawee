@@ -32,6 +32,10 @@ describe('enterprise activity runtime API', () => {
     expect(unauthorized.statusCode).toBe(401);
     expect(manager.getCapability).not.toHaveBeenCalled();
 
+    const unauthorizedRuntime = await server.inject({ method: 'GET', url: '/enterprise/activity/runtime' });
+    expect(unauthorizedRuntime.statusCode).toBe(401);
+    expect(manager.getRuntime).not.toHaveBeenCalled();
+
     const capability = await authGet('/enterprise/activity/capability');
     expect(capability.statusCode).toBe(200);
     expect(capability.json()).toEqual({
@@ -45,6 +49,11 @@ describe('enterprise activity runtime API', () => {
     expect(statistics.statusCode).toBe(200);
     expect(statistics.json()).toEqual(statisticsFixture());
     expect(manager.getStatistics).toHaveBeenCalledWith('7d');
+
+    const runtime = await authGet('/enterprise/activity/runtime');
+    expect(runtime.statusCode).toBe(200);
+    expect(runtime.json()).toMatchObject({ scope: 'organization', agents: [] });
+    expect(manager.getRuntime).toHaveBeenCalledOnce();
 
     const detail = await authGet(
       '/enterprise/activity/detail'
@@ -70,6 +79,7 @@ describe('enterprise activity runtime API', () => {
       '/enterprise/activity/statistics',
       '/enterprise/activity/statistics?range=week',
       '/enterprise/activity/statistics?range=7d&extra=value',
+      '/enterprise/activity/runtime?range=7d',
       '/enterprise/activity/detail?range=7d&collectorId=collector-1',
       '/enterprise/activity/detail?range=7d&collectorId=&agentId=agent-1',
       '/enterprise/activity/detail'
@@ -144,6 +154,11 @@ function createManager(
       refreshedAt: '2026-08-18T08:00:00.000Z'
     })),
     getStatistics: vi.fn(async () => statisticsFixture()),
+    getRuntime: vi.fn(async () => ({
+      schemaVersion: 'office.v1' as const, scope: 'organization' as const, serverTime: '2026-08-18T08:00:00Z',
+      summary: { totalAgents: 0, onlineAgents: 0, workingAgents: 0, blockedAgents: 0, errorAgents: 0 },
+      agents: []
+    })),
     getDetail: vi.fn(async () => detailFixture()),
     clear: vi.fn(),
     ...overrides

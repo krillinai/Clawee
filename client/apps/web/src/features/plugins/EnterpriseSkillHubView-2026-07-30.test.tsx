@@ -119,24 +119,24 @@ describe('EnterpriseSkillHubView', () => {
     renderHub({
       skills: [
         createSkill('not-installed', 'not_installed', 'not_applicable', ['install']),
-        createSkill('invalid', 'invalid', 'unknown', []),
-        createSkill('unknown-source', 'installed_unknown_source', 'unknown', ['use']),
-        createSkill('name-conflict', 'name_conflict', 'unknown', []),
+        createSkill('invalid', 'invalid', 'unknown', ['update']),
+        createSkill('unknown-source', 'installed_unknown_source', 'unknown', ['update', 'use']),
+        createSkill('name-conflict', 'name_conflict', 'unknown', ['update', 'use']),
         createSkill('installed', 'installed', 'verified', ['update', 'use']),
         createSkill('update-ready', 'update_available', 'verified', ['update', 'use']),
         createSkill('unpublished', 'unpublished', 'verified', ['use']),
-        createSkill('local-changed', 'update_available', 'local_changed', ['use'])
+        createSkill('local-changed', 'update_available', 'local_changed', ['update', 'use'])
       ]
     });
 
     expectRow('not-installed', ['安装']);
-    expectRow('invalid', []);
-    expectRow('unknown-source', ['使用']);
-    expectRow('name-conflict', []);
+    expectRow('invalid', ['更新']);
+    expectRow('unknown-source', ['更新', '使用']);
+    expectRow('name-conflict', ['更新', '使用']);
     expectRow('installed', ['更新', '使用']);
     expectRow('update-ready', ['更新', '使用']);
     expectRow('unpublished', ['使用']);
-    expectRow('local-changed', ['使用']);
+    expectRow('local-changed', ['更新', '使用']);
     const installed = screen.getByTestId('enterprise-skill-installed');
     const useButton = within(installed).getByRole('button', { name: '使用' });
     expect(useButton).toHaveTextContent('使用');
@@ -152,6 +152,7 @@ describe('EnterpriseSkillHubView', () => {
 
     const row = screen.getByTestId('enterprise-skill-update-ready');
     await userEvent.setup().click(within(row).getByRole('button', { name: '更新' }));
+    await userEvent.setup().click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' })).getByRole('button', { name: '覆盖更新' }));
 
     expect(onUpdate).toHaveBeenCalledWith('update-ready');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -166,9 +167,38 @@ describe('EnterpriseSkillHubView', () => {
 
     const row = screen.getByTestId('enterprise-skill-installed');
     await userEvent.setup().click(within(row).getByRole('button', { name: '更新' }));
+    await userEvent.setup().click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' })).getByRole('button', { name: '覆盖更新' }));
 
     expect(onUpdate).toHaveBeenCalledWith('installed');
     expect(screen.getByRole('button', { name: /可更新 0/ })).toBeInTheDocument();
+  });
+
+  it('requires confirmation before replacing a same-name skill from any source', async () => {
+    const onUpdate = vi.fn();
+    renderHub({
+      skills: [createSkill('local-changed', 'installed_unknown_source', 'unknown', ['update', 'use'])],
+      onUpdate
+    });
+
+    const update = within(screen.getByTestId('enterprise-skill-local-changed')).getByRole('button', { name: '更新' });
+    await userEvent.setup().click(update);
+    await userEvent.setup().click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' })).getByRole('button', { name: '取消' }));
+    expect(onUpdate).not.toHaveBeenCalled();
+    await userEvent.setup().click(update);
+    await userEvent.setup().click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' })).getByRole('button', { name: '覆盖更新' }));
+    expect(onUpdate).toHaveBeenCalledWith('local-changed');
+  });
+
+  it('also confirms a locally changed skill from its detail', async () => {
+    const onUpdate = vi.fn();
+    const skill = createSkill('local-changed', 'installed', 'local_changed', ['update', 'use']);
+    renderHub({ skills: [skill], onLoadDetail: async () => ({ ...skill }), onUpdate });
+
+    await userEvent.setup().click(screen.getByRole('button', { name: '查看 local-changed 详情' }));
+    const dialog = await screen.findByRole('dialog', { name: 'local-changed 详情' });
+    await userEvent.setup().click(within(dialog).getByRole('button', { name: '更新' }));
+    await userEvent.setup().click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' })).getByRole('button', { name: '覆盖更新' }));
+    expect(onUpdate).toHaveBeenCalledWith('local-changed');
   });
 
   it('loads detail on demand and restores trigger focus', async () => {
@@ -208,7 +238,7 @@ describe('EnterpriseSkillHubView', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('shows mock enterprise skills without a redundant login gate', () => {
+  it('shows mock enterprise skills without a redundant login gate or demo usage count', () => {
     const view = renderHub({
       session: {
         status: 'signed_out',
@@ -220,7 +250,7 @@ describe('EnterpriseSkillHubView', () => {
     expect(screen.getByText('品牌合规审查')).toBeInTheDocument();
     expect(screen.getByLabelText('林晓')).toHaveClass('skill-market-avatar');
     expect(screen.getByText('林晓')).toBeInTheDocument();
-    expect(screen.getByText('使用 1,284 次')).toBeInTheDocument();
+    expect(screen.getAllByText('使用 0 次')).toHaveLength(6);
     expect(screen.getByRole('searchbox', { name: '搜索企业 Skill' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加技能' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '刷新企业 Skill' })).not.toBeInTheDocument();
@@ -242,6 +272,13 @@ describe('EnterpriseSkillHubView', () => {
     }));
     expect(screen.getByText('企业Skills暂时不可用')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新企业状态' })).toBeInTheDocument();
+  });
+
+  it('renders usage supplied by the activity statistics', () => {
+    const skill = createSkill('codex-image-api', 'installed', 'verified', ['use']);
+    renderHub({ skills: [skill], skillUsage: { [skill.skillId]: 2 } });
+
+    expect(screen.getByText('使用 2 次')).toBeInTheDocument();
   });
 
   it('shows an employee avatar without a redundant uploader line', () => {

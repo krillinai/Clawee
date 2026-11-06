@@ -42,15 +42,66 @@ describe('project manager', () => {
     expect(first).toMatchObject({
       id: 'project_default_1',
       name: '默认项目',
-      cwd: join(managedProjectRoot, 'Default Project'),
+      cwd: join(managedProjectRoot, 'DefaultProject'),
       directoryState: 'available'
     });
     expect(repeated).toEqual(first);
-    expect(existsSync(join(managedProjectRoot, 'Default Project'))).toBe(true);
+    expect(existsSync(join(managedProjectRoot, 'DefaultProject'))).toBe(true);
+    expect(existsSync(join(managedProjectRoot, 'Default Project'))).toBe(false);
     expect(manager.listProjects('all')).toEqual([first]);
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM projects').get()
     ).toEqual({ count: 1 });
+  });
+
+  it.each([false, true])('复用旧默认目录及已注册项目，不迁移文件（新目录已存在：%s）', newDirectoryExists => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-legacy-default-project-'));
+    const managedProjectRoot = join(tempDir, 'Documents', 'Clawee');
+    const legacyCwd = join(managedProjectRoot, 'Default Project');
+    mkdirSync(legacyCwd, { recursive: true });
+    writeFileSync(join(legacyCwd, 'report.txt'), 'legacy artifact');
+    if (newDirectoryExists) mkdirSync(join(managedProjectRoot, 'DefaultProject'));
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const manager = createProjectManager({ db, homeDir: tempDir });
+    const legacy = manager.createProject({ cwd: legacyCwd, name: '我的默认项目' });
+
+    db.close();
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const reopened = createProjectManager({ db, homeDir: tempDir });
+
+    expect(reopened.ensureDefaultProject()).toEqual(legacy);
+    expect(reopened.ensureDefaultProject()).toEqual(legacy);
+    expect(reopened.listProjects('all')).toEqual([legacy]);
+    expect(existsSync(join(legacyCwd, 'report.txt'))).toBe(true);
+    expect(existsSync(join(managedProjectRoot, 'DefaultProject'))).toBe(newDirectoryExists);
+  });
+
+  it('旧默认目录尚未注册时继续使用旧目录', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-legacy-default-directory-'));
+    const managedProjectRoot = join(tempDir, 'Documents', 'Clawee');
+    const legacyCwd = join(managedProjectRoot, 'Default Project');
+    mkdirSync(legacyCwd, { recursive: true });
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const manager = createProjectManager({ db, homeDir: tempDir });
+
+    expect(manager.ensureDefaultProject().cwd).toBe(legacyCwd);
+    expect(existsSync(join(managedProjectRoot, 'DefaultProject'))).toBe(false);
+  });
+
+  it('旧默认目录暂时缺失时保留已有项目记录及路径', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-missing-default-directory-'));
+    const managedProjectRoot = join(tempDir, 'Documents', 'Clawee');
+    const legacyCwd = join(managedProjectRoot, 'Default Project');
+    mkdirSync(legacyCwd, { recursive: true });
+    db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+    const manager = createProjectManager({ db, homeDir: tempDir });
+    const legacy = manager.createProject({ cwd: legacyCwd, name: '默认项目' });
+    rmSync(legacyCwd, { recursive: true });
+
+    expect(manager.ensureDefaultProject()).toEqual(legacy);
+    expect(manager.listProjects('all')).toEqual([legacy]);
+    expect(existsSync(legacyCwd)).toBe(true);
+    expect(existsSync(join(managedProjectRoot, 'DefaultProject'))).toBe(false);
   });
 
   it('creates named projects inside the managed Clawee directory', () => {

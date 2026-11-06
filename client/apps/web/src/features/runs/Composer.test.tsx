@@ -42,7 +42,6 @@ const defaultProps = {
   permission: 'danger-full-access' as const,
   profile: 'default',
   model: null,
-  reasoning: null,
   onSelectProject: vi.fn(),
   onSubmit: vi.fn()
 };
@@ -79,6 +78,14 @@ const codexModels: CodexModelResponse[] = [
     isDefault: false
   }
 ];
+
+const textOnlyModel: CodexModelResponse = {
+  ...codexModels[1]!,
+  id: 'gpt-5.5-text',
+  model: 'gpt-5.5-text',
+  displayName: 'GPT-5.5 Text',
+  inputModalities: ['text']
+};
 
 describe('Composer', () => {
   afterEach(() => {
@@ -281,11 +288,12 @@ describe('Composer', () => {
       .toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('menuitemradio', { name: /GPT-5.5/ }))
       .toBeInTheDocument();
+    expect(screen.queryByText('推理强度')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(codexModels.length);
     await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.5/ }));
-    await user.click(screen.getByRole('menuitemradio', { name: /^超高 / }));
     expect(onModelConfigChange).toHaveBeenLastCalledWith({
       model: 'gpt-5.5',
-      reasoning: 'xhigh'
+      reasoning: 'medium'
     });
 
     const textbox = screen.getByRole('textbox', { name: '输入任务' });
@@ -296,7 +304,7 @@ describe('Composer', () => {
       permission: 'danger-full-access',
       profile: 'default',
       model: 'gpt-5.5',
-      reasoning: 'xhigh'
+      reasoning: 'medium'
     }, []);
     expect(textbox).toHaveValue('');
     await waitFor(() => expect(textbox).toHaveFocus());
@@ -330,7 +338,7 @@ describe('Composer', () => {
     expect(screen.queryByText('跟随 Codex 配置')).not.toBeInTheDocument();
   });
 
-  it('collapses model and reasoning sections independently with a long model list', async () => {
+  it('长模型列表打开后定位到当前模型，并支持键盘选择', async () => {
     const user = userEvent.setup();
     const onModelConfigChange = vi.fn();
     const models = Array.from({ length: 12 }, (_, index): CodexModelResponse => ({
@@ -340,27 +348,27 @@ describe('Composer', () => {
       displayName: `模型 ${index + 1}`,
       isDefault: index === 0
     }));
-    render(<Composer {...defaultProps} models={models} onModelConfigChange={onModelConfigChange} />);
+    render(<Composer {...defaultProps} model="model-11" models={models} onModelConfigChange={onModelConfigChange} />);
 
-    await user.click(screen.getByRole('button', { name: '选择模型 模型 1' }));
-    const modelSection = screen.getByRole('button', { name: '模型' });
-    const reasoningSection = screen.getByRole('button', { name: '推理强度' });
-    expect(modelSection).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getAllByRole('menuitemradio')).toHaveLength(17);
+    await user.click(screen.getByRole('button', { name: '选择模型 模型 11' }));
+    expect(screen.queryByRole('button', { name: '推理强度' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '模型' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(12);
+    const selectedOption = screen.getByRole('menuitemradio', { name: '模型 11 支持图片' });
+    expect(selectedOption).toHaveFocus();
 
-    await user.click(modelSection);
-    expect(modelSection).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('menuitemradio', { name: /模型 12/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('menuitemradio', { name: /默认/ })).toBeInTheDocument();
-
-    await user.click(reasoningSection);
-    expect(reasoningSection).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0);
-
-    await user.click(modelSection);
-    await user.click(screen.getByRole('menuitemradio', { name: /模型 12/ }));
-    expect(onModelConfigChange).toHaveBeenCalledWith({ model: 'model-12', reasoning: null });
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(onModelConfigChange).toHaveBeenCalledWith({ model: 'model-12', reasoning: 'medium' });
     expect(screen.getByRole('button', { name: '选择模型 模型 12' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择模型 模型 12' })).toHaveFocus());
+
+    await user.keyboard('{Enter}{Home}');
+    expect(screen.getByRole('menuitemradio', { name: /模型 1 默认/ })).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('menuitemradio', { name: '模型 12 支持图片' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu', { name: '模型' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择模型 模型 12' })).toHaveFocus();
   });
 
   it('replaces a removed persisted model with the current default model', async () => {
@@ -378,20 +386,57 @@ describe('Composer', () => {
       .toBeInTheDocument();
     expect(onModelConfigChange).toHaveBeenCalledWith({
       model: 'gpt-5.6-sol',
-      reasoning: null
+      reasoning: 'medium'
     });
+  });
+
+  it('默认模型被隐藏后，实际提交剩余列表中的第一项', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onModelConfigChange = vi.fn();
+    render(
+      <Composer
+        {...defaultProps}
+        models={codexModels.map(model => ({ ...model, isDefault: false }))}
+        onModelConfigChange={onModelConfigChange}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(onModelConfigChange).toHaveBeenCalledWith({ model: 'gpt-5.6-sol', reasoning: 'medium' });
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), 'hello');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('hello', expect.objectContaining({ model: 'gpt-5.6-sol' }), []);
+  });
+
+  it('全部模型被隐藏后，不把已选模型作为不可用条目补回列表', async () => {
+    const user = userEvent.setup();
+    render(<Composer {...defaultProps} model="gpt-5.4" models={[]} />);
+
+    await user.click(screen.getByRole('button', { name: /选择模型/ }));
+
+    const menu = screen.getByRole('menu', { name: '模型' });
+    expect(within(menu).getByText('暂无可用模型')).toBeInTheDocument();
+    expect(within(menu).queryByText(/gpt-5.4/)).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitemradio')).not.toBeInTheDocument();
+  });
+
+  it('switches to each model’s own reasoning preference', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<Composer {...defaultProps} models={codexModels}
+      modelReasoningPreferences={{ 'gpt-5.6-sol': 'xhigh', 'gpt-5.5': 'low' }} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.6 Sol' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.5/ }));
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), 'hello');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit).toHaveBeenCalledWith('hello', expect.objectContaining({ model: 'gpt-5.5', reasoning: 'low' }), []);
   });
 
   it('prevents selecting a text-only model after an image is attached', async () => {
     const user = userEvent.setup();
     mockObjectUrls();
-    const textOnlyModel: CodexModelResponse = {
-      ...codexModels[1]!,
-      id: 'gpt-5.5-text',
-      model: 'gpt-5.5-text',
-      displayName: 'GPT-5.5 Text',
-      inputModalities: ['text']
-    };
     render(
       <Composer
         {...defaultProps}
@@ -411,7 +456,242 @@ describe('Composer', () => {
     expect(screen.getByRole('menuitemradio', { name: /GPT-5.5 Text/ }))
       .toBeDisabled();
     expect(screen.getByRole('menuitemradio', { name: /GPT-5.5 Text/ }))
-      .toHaveTextContent('当前任务包含图片，无法选择');
+      .toHaveAccessibleDescription('当前任务包含图片，无法选择');
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitemradio', { name: /GPT-5.6 Sol/ })).toHaveFocus();
+  });
+
+  it('模型图片能力统一显示文字，并保留原有默认标签', async () => {
+    const user = userEvent.setup();
+    render(<Composer {...defaultProps} models={[codexModels[0]!, textOnlyModel]} />);
+
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.6 Sol' }));
+
+    const imageModel = screen.getByRole('menuitemradio', { name: /GPT-5.6 Sol/ });
+    expect(within(imageModel).getByText('支持图片')).toBeInTheDocument();
+    expect(within(imageModel).getByText('默认')).toBeInTheDocument();
+    expect(imageModel.querySelector('.lucide-image')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('menuitemradio', { name: /GPT-5.5 Text/ }))
+      .getByText('仅文本')).toBeInTheDocument();
+  });
+
+  it('图片不兼容时说明发送受限原因，切换模型后自动上传并恢复发送', async () => {
+    const user = userEvent.setup();
+    let completeUpload!: (value: ReturnType<typeof attachment>) => void;
+    const onUploadAttachment = vi.fn(() => new Promise<ReturnType<typeof attachment>>(resolve => {
+      completeUpload = resolve;
+    }));
+    const onSubmit = vi.fn();
+    mockObjectUrls();
+    render(<Composer {...defaultProps} models={[codexModels[0]!, textOnlyModel]}
+      model={textOnlyModel.model} imageInputSupported
+      onUploadAttachment={onUploadAttachment} onSubmit={onSubmit} />);
+    const textbox = screen.getByRole('textbox', { name: '输入任务' });
+    await user.type(textbox, '解释图片');
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+
+    const reason = 'GPT-5.5 Text 不支持图片输入，请切换到支持图片的模型或移除图片后发送';
+    const sendButton = screen.getByRole('button', { name: '发送' });
+    expect(sendButton).toBeDisabled();
+    expect(sendButton).toHaveAttribute('title', reason);
+    expect(sendButton).toHaveAccessibleDescription(reason);
+    expect(screen.getByRole('status')).toHaveTextContent(reason);
+    const sendArea = screen.getByRole('group', { name: '发送受限' });
+    expect(sendArea).toHaveAttribute('title', reason);
+    expect(sendArea).toHaveAttribute('tabindex', '0');
+    expect(sendArea).toHaveAccessibleDescription(reason);
+    await user.click(textbox);
+    await user.keyboard('{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.5 Text' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.6 Sol/ }));
+
+    expect(sendButton).toBeDisabled();
+    expect(screen.getByRole('status', { name: '正在上传 screen.png' })).toBeInTheDocument();
+    expect(sendButton).toHaveAccessibleDescription('附件正在上传，请稍候再发送');
+    expect(screen.queryByText('GPT-5.5 Text 不支持图片输入')).not.toBeInTheDocument();
+    expect(onUploadAttachment).toHaveBeenCalledTimes(1);
+    await user.click(textbox);
+    await user.keyboard('{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await act(async () => completeUpload(attachment()));
+
+    await waitFor(() => expect(sendButton).toBeEnabled());
+    expect(onUploadAttachment).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('group', { name: '发送受限' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await user.click(sendButton);
+    expect(onSubmit).toHaveBeenCalledWith('解释图片', expect.objectContaining({ model: 'gpt-5.6-sol' }),
+      [expect.objectContaining({ attachment: attachment() })]);
+  });
+
+  it('运行时恢复图片能力后自动上传全部待上传图片，并等待全部完成', async () => {
+    const user = userEvent.setup();
+    const uploads = new Map<string, (value: ReturnType<typeof attachment>) => void>();
+    const onUploadAttachment = vi.fn((file: File) => new Promise<ReturnType<typeof attachment>>(resolve => {
+      uploads.set(file.name, resolve);
+    }));
+    mockObjectUrls();
+    const props = { ...defaultProps, models: [...codexModels, textOnlyModel],
+      initialPrompt: '比较图片', onUploadAttachment };
+    const { rerender } = render(<StrictMode><Composer {...props} model={textOnlyModel.model}
+      imageInputSupported={false} /></StrictMode>);
+    await user.upload(screen.getByLabelText('选择文件'), [
+      new File(['png'], 'first.png', { type: 'image/png' }),
+      new File(['png'], 'second.png', { type: 'image/png' })
+    ]);
+
+    rerender(<StrictMode><Composer {...props} model="gpt-5.6-sol" imageInputSupported={false} /></StrictMode>);
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+    rerender(<StrictMode><Composer {...props} model="gpt-5.6-sol" imageInputSupported /></StrictMode>);
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+
+    rerender(<StrictMode><Composer {...props} model="gpt-5.5" imageInputSupported /></StrictMode>);
+    await act(async () => uploads.get('first.png')!(attachment('first.png')));
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(screen.getByRole('status', { name: '正在上传 second.png' })).toBeInTheDocument();
+    await act(async () => uploads.get('second.png')!(attachment('second.png')));
+
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
+    expect(onUploadAttachment).toHaveBeenCalledTimes(2);
+  });
+
+  it('模型切换被拒绝时不自动上传图片', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn(async () => attachment());
+    let rejectModelChange!: (accepted: boolean) => void;
+    const onModelConfigChange = vi.fn(() => new Promise<boolean>(resolve => {
+      rejectModelChange = resolve;
+    }));
+    mockObjectUrls();
+    render(<Composer {...defaultProps} models={[codexModels[0]!, textOnlyModel]}
+      model={textOnlyModel.model} initialPrompt="解释图片" imageInputSupported
+      onModelConfigChange={onModelConfigChange} onUploadAttachment={onUploadAttachment} />);
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.5 Text' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.6 Sol/ }));
+
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+    await act(async () => rejectModelChange(false));
+    expect(screen.getByRole('button', { name: '选择模型 GPT-5.5 Text' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+  });
+
+  it('自动上传失败后保留原因和手动重试入口，切换模型不会反复重试', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn()
+      .mockRejectedValueOnce(new Error('网络中断'))
+      .mockResolvedValue(attachment());
+    mockObjectUrls();
+    const props = { ...defaultProps, models: [...codexModels, textOnlyModel],
+      initialPrompt: '解释图片', imageInputSupported: true, onUploadAttachment };
+    const { rerender } = render(<Composer {...props} model={textOnlyModel.model} />);
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+    rerender(<Composer {...props} model="gpt-5.6-sol" />);
+
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole('alert')).toHaveTextContent('网络中断');
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发送' }))
+      .toHaveAccessibleDescription('附件未上传成功，请重试或移除附件后发送');
+    rerender(<Composer {...props} model={textOnlyModel.model} />);
+    rerender(<Composer {...props} model="gpt-5.5" />);
+    expect(onUploadAttachment).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: '重试上传 screen.png' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    expect(onUploadAttachment).toHaveBeenCalledTimes(2);
+  });
+
+  it('移除不兼容图片后恢复纯文本发送', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn();
+    mockObjectUrls();
+    render(<Composer {...defaultProps} models={[textOnlyModel]} model={textOnlyModel.model}
+      initialPrompt="解释图片" imageInputSupported onUploadAttachment={onUploadAttachment} />);
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '移除附件 screen.png' }));
+
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+  });
+
+  it('已上传图片随模型和运行时能力重新校验，恢复支持后不重复上传', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn(async () => attachment());
+    const onSubmit = vi.fn();
+    mockObjectUrls();
+    const props = { ...defaultProps, models: [codexModels[0]!, textOnlyModel],
+      initialPrompt: '解释图片', imageInputSupported: true, onUploadAttachment, onSubmit };
+    const { rerender } = render(<Composer {...props} model="gpt-5.6-sol" />);
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+
+    rerender(<Composer {...props} model={textOnlyModel.model} />);
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('GPT-5.5 Text 不支持图片输入');
+    fireEvent.submit(screen.getByRole('button', { name: '发送' }).closest('form')!);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    rerender(<Composer {...props} model="gpt-5.6-sol" imageInputSupported={false}
+      imageInputUnsupportedReason="当前版本不支持图片输入" />);
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('当前版本不支持图片输入');
+
+    rerender(<Composer {...props} model="gpt-5.6-sol" />);
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(onUploadAttachment).toHaveBeenCalledTimes(1);
+  });
+
+  it('普通文档附件不会限制选择仅文本模型及发送', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    mockObjectUrls();
+    render(<Composer {...defaultProps} models={[codexModels[0]!, textOnlyModel]}
+      initialPrompt="总结文档" onSubmit={onSubmit}
+      onUploadAttachment={async () => ({ ...attachment('notes.md'), mime: 'text/markdown' })} />);
+    await user.upload(screen.getByLabelText('选择文件'), new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.6 Sol' }));
+
+    const option = screen.getByRole('menuitemradio', { name: /GPT-5.5 Text/ });
+    expect(option).toBeEnabled();
+    await user.click(option);
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit).toHaveBeenCalledWith('总结文档', expect.objectContaining({ model: textOnlyModel.model }),
+      [expect.objectContaining({ attachment: expect.objectContaining({ fileName: 'notes.md' }) })]);
+  });
+
+  it('图片不兼容时仍可停止正在执行的任务', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    mockObjectUrls();
+    render(<Composer {...defaultProps} models={[textOnlyModel]} model={textOnlyModel.model}
+      initialPrompt="解释图片" running onCancel={onCancel} imageInputSupported
+      onUploadAttachment={async () => attachment()} />);
+    await user.upload(screen.getByLabelText('选择文件'),
+      new File(['png'], 'screen.png', { type: 'image/png' }));
+
+    const stopButton = screen.getByRole('button', { name: '停止任务' });
+    expect(stopButton).toBeEnabled();
+    expect(stopButton).toHaveAttribute('title', '停止任务');
+    expect(screen.queryByRole('group', { name: '发送受限' })).not.toBeInTheDocument();
+    await user.click(stopButton);
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it('shows only two permission levels and keeps request approval when full access is canceled', async () => {
@@ -940,15 +1220,28 @@ describe('Composer', () => {
     expect(onSubmit).toHaveBeenCalledWith('只选三条', expect.any(Object), []);
   });
 
-  it('shows the first workflow requirement as read-only before execution', async () => {
+  it('allows adjusting the first workflow requirement before execution', async () => {
+    const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(<Composer {...defaultProps} initialPrompt="发起时的任务要求" onSubmit={onSubmit} workflowDraft={{ instruction: '节点预设', input: '发起时的任务要求', firstNode: true }} />);
     const requirement = screen.getByRole('textbox', { name: '任务要求' });
     expect(requirement).toHaveValue('发起时的任务要求');
-    expect(requirement).toHaveAttribute('readonly');
+    expect(requirement).not.toHaveAttribute('readonly');
     expect(screen.queryByText('上一步输入')).not.toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: '发送' }));
-    expect(onSubmit).toHaveBeenCalledWith('发起时的任务要求', expect.any(Object), []);
+    await user.type(requirement, '，补充课程范围');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit).toHaveBeenCalledWith('发起时的任务要求，补充课程范围', expect.any(Object), []);
+  });
+
+  it('allows attachments on the first workflow requirement', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn(async (file: File) => attachment(file.name));
+    mockObjectUrls();
+    render(<Composer {...defaultProps} workflowDraft={{ instruction: '节点预设', input: '发起时的任务要求', firstNode: true }} onUploadAttachment={onUploadAttachment} />);
+    await user.click(screen.getByRole('button', { name: '添加上下文' }));
+    expect(screen.getByRole('menuitem', { name: /添加文件/ })).toBeEnabled();
+    await user.upload(screen.getByLabelText('选择文件'), new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledWith(expect.any(File)));
   });
 
   it('auto-sizes the textbox to its content and resets after submit', async () => {
@@ -1087,6 +1380,68 @@ describe('Composer', () => {
     await user.type(textbox, 'a');
 
     expect(textbox).toHaveAttribute('placeholder', '');
+  });
+
+  it('adds, deduplicates and removes local directory references without switching projects', async () => {
+    const user = userEvent.setup();
+    const directory = 'C:\\资料\\项目文件';
+    const onSelectContextDirectory = vi.fn()
+      .mockResolvedValueOnce(directory)
+      .mockResolvedValueOnce(directory)
+      .mockResolvedValueOnce('C:\\资料\\临时文件');
+    const onSelectProject = vi.fn();
+    const onSubmit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<Composer {...defaultProps} onSelectProject={onSelectProject}
+      onSelectContextDirectory={onSelectContextDirectory} onSubmit={onSubmit} />);
+
+    for (let i = 0; i < 3; i += 1) {
+      await user.click(screen.getByRole('button', { name: '添加上下文' }));
+      await user.click(screen.getByRole('menuitem', { name: '添加文件夹' }));
+    }
+    expect(screen.getAllByRole('button', { name: '移除文件夹 项目文件' })).toHaveLength(1);
+    expect(screen.getByTitle(directory)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '移除文件夹 临时文件' }));
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), '总结相关文件');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(
+      `总结相关文件\n\n参考文件夹（本机路径）：\n${JSON.stringify([directory], null, 2)}`,
+      expect.objectContaining({ permission: 'danger-full-access' }), []
+    ));
+    expect(screen.getByRole('button', { name: '移除文件夹 项目文件' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '移除文件夹 项目文件' })).not.toBeInTheDocument());
+    expect(onSelectProject).not.toHaveBeenCalled();
+  });
+
+  it('handles directory selection cancellation, errors and retry without submitting while selecting', async () => {
+    const user = userEvent.setup();
+    let finishSelection!: (path: string | null) => void;
+    const onSelectContextDirectory = vi.fn()
+      .mockImplementationOnce(() => new Promise<string | null>(resolve => { finishSelection = resolve; }))
+      .mockRejectedValueOnce(new Error('选择窗口打开失败'))
+      .mockResolvedValueOnce('/资料/会议记录');
+    render(<Composer {...defaultProps} onSelectContextDirectory={onSelectContextDirectory} />);
+    await user.type(screen.getByRole('textbox', { name: '输入任务' }), '整理记录');
+    await user.click(screen.getByRole('button', { name: '添加上下文' }));
+    await user.click(screen.getByRole('menuitem', { name: '添加文件夹' }));
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    await act(async () => finishSelection(null));
+    expect(screen.queryByRole('button', { name: /移除文件夹/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '添加上下文' }));
+    await user.click(screen.getByRole('menuitem', { name: '添加文件夹' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('选择窗口打开失败');
+    await user.click(screen.getByRole('button', { name: '添加上下文' }));
+    await user.click(screen.getByRole('menuitem', { name: '添加文件夹' }));
+    expect(screen.getByRole('button', { name: '移除文件夹 会议记录' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('hides directory selection when the host has no local directory capability', async () => {
+    const user = userEvent.setup();
+    render(<Composer {...defaultProps} />);
+    await user.click(screen.getByRole('button', { name: '添加上下文' }));
+    expect(screen.queryByRole('menuitem', { name: '添加文件夹' })).not.toBeInTheDocument();
   });
 
   it('uploads a selected image, blocks submit while uploading, and submits attachment metadata', async () => {
@@ -1310,6 +1665,25 @@ describe('Composer', () => {
     expect(document.querySelector('script')).toBeNull();
   });
 
+  it('uploads legacy Office files with generic Windows MIME types', async () => {
+    const user = userEvent.setup();
+    const onUploadAttachment = vi.fn(async (file: File) => ({ ...attachment(file.name), id: file.name }));
+    mockObjectUrls();
+    render(<Composer {...defaultProps} onUploadAttachment={onUploadAttachment} />);
+    const files = [
+      new File(['doc'], 'report.doc', { type: 'application/octet-stream' }),
+      new File(['xls'], 'report.xls', { type: '' }),
+      new File(['ppt'], 'report.ppt', { type: 'application/octet-stream' })
+    ];
+    await user.upload(screen.getByLabelText('选择文件'), files);
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledTimes(3));
+    for (const file of files) {
+      expect(onUploadAttachment).toHaveBeenCalledWith(file);
+      expect(screen.getByTitle(file.name)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('不支持此文件类型')).not.toBeInTheDocument();
+  });
+
   it('keeps document input available when Codex image input is unsupported', async () => {
     const user = userEvent.setup();
     const onUploadAttachment = vi.fn(async (file: File) => attachment(file.name));
@@ -1364,6 +1738,43 @@ describe('Composer', () => {
     await user.type(textbox, '生成季度汇报');
     rerender(<Composer {...defaultProps} onDraftApplied={onDraftApplied} />);
     expect(textbox).toHaveValue('$frontend-slides 生成季度汇报');
+  });
+
+  it('将多行引用追加到现有正文，支持继续编辑、重复引用和发送失败后重试', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const onDraftApplied = vi.fn();
+    const { rerender } = render(<Composer {...defaultProps} onSubmit={onSubmit} onDraftApplied={onDraftApplied} />);
+    const textbox = screen.getByRole('textbox', { name: '输入任务' });
+    await user.type(textbox, '已有问题');
+    rerender(<Composer {...defaultProps} onSubmit={onSubmit} onDraftApplied={onDraftApplied}
+      draftRequest={{ id: 1, text: '第一行\n\nconst value = 1;', quote: true }} />);
+    const quoted = '已有问题\n\n引用回复：\n> 第一行\n> \n> const value = 1;\n\n';
+    await waitFor(() => { expect(textbox).toHaveValue(quoted); expect(textbox).toHaveFocus(); });
+    await user.type(textbox, '请解释');
+    rerender(<Composer {...defaultProps} onSubmit={onSubmit} onDraftApplied={onDraftApplied}
+      draftRequest={{ id: 2, text: '另一段', quote: true }} />);
+    const combined = `${quoted}请解释\n\n引用回复：\n> 另一段\n\n`;
+    await waitFor(() => expect(textbox).toHaveValue(combined));
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit.mock.calls[0]?.[0]).toBe(combined.trim());
+    expect(textbox).toHaveValue(combined);
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(onSubmit.mock.calls[1]?.[0]).toBe(combined.trim());
+    await waitFor(() => expect(textbox).toHaveValue(''));
+  });
+
+  it('StrictMode 和回调更新不会重复追加同一段引用', async () => {
+    const request = { id: 1, text: '选中的原文', quote: true };
+    const { rerender } = render(<StrictMode><Composer {...defaultProps} initialPrompt="已有草稿"
+      draftRequest={request} onDraftApplied={() => {}} /></StrictMode>);
+    rerender(<StrictMode><Composer {...defaultProps} initialPrompt="已有草稿"
+      draftRequest={request} onDraftApplied={() => {}} /></StrictMode>);
+    const textbox = screen.getByRole('textbox', { name: '输入任务' }) as HTMLTextAreaElement;
+    const expected = '已有草稿\n\n引用回复：\n> 选中的原文\n\n';
+    await waitFor(() => { expect(textbox).toHaveValue(expected); expect(textbox).toHaveFocus(); });
+    expect(textbox.selectionStart).toBe(expected.length);
+    expect(textbox.selectionEnd).toBe(expected.length);
   });
 
   it('selects an external Skill while preserving the visible draft', async () => {
@@ -1849,6 +2260,43 @@ describe('Composer', () => {
       .toBe('232px');
   });
 
+  it('fits the model menu horizontally inside a narrow panel and updates on resize', async () => {
+    let boundaryLeft = 1020;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function getRect(this: HTMLElement) {
+        const left = this.dataset.modelMenuBoundary === 'true' ? boundaryLeft : 1260;
+        const width = this.classList.contains('composer-model-menu')
+          ? Math.min(280, Number.parseFloat(this.style.getPropertyValue('--composer-model-menu-available-width')) || 280)
+          : this.dataset.modelMenuBoundary === 'true' ? 1440 - boundaryLeft : 100;
+        return {
+          x: left, y: 430, width, height: 100,
+          top: 430, right: left + width, bottom: 530, left,
+          toJSON: () => ({})
+        };
+      });
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1440);
+    render(
+      <div data-model-menu-boundary="true" style={{ overflow: 'hidden' }}>
+        <Composer {...defaultProps} models={codexModels} />
+      </div>
+    );
+
+    await userEvent.setup().click(screen.getByRole('button', { name: '选择模型 GPT-5.6 Sol' }));
+    const menu = screen.getByRole('menu', { name: '模型' });
+    expect(menu.style.getPropertyValue('--composer-model-menu-available-width')).toBe('396px');
+    expect(menu.style.getPropertyValue('--composer-model-menu-offset')).toBe('-180px');
+
+    boundaryLeft = 1120;
+    fireEvent(window, new Event('resize'));
+    expect(menu.style.getPropertyValue('--composer-model-menu-available-width')).toBe('296px');
+    expect(menu.style.getPropertyValue('--composer-model-menu-offset')).toBe('-128px');
+
+    boundaryLeft = 1200;
+    fireEvent(window, new Event('resize'));
+    expect(menu.style.getPropertyValue('--composer-model-menu-available-width')).toBe('216px');
+    expect(menu.style.getPropertyValue('--composer-model-menu-offset')).toBe('-48px');
+  });
+
   it('renders queued messages above the input and forwards Steer and delete actions', async () => {
     const user = userEvent.setup();
     const onSteerQueuedRun = vi.fn();
@@ -1878,6 +2326,23 @@ describe('Composer', () => {
 
     expect(onSteerQueuedRun).toHaveBeenCalledWith('run-queued');
     expect(onCancelQueuedRun).toHaveBeenCalledWith('run-queued');
+  });
+
+  it('shows why a run is waiting', () => {
+    render(
+      <Composer
+        {...defaultProps}
+        queuedItems={[
+          { runId: 'run-thread', text: '后续任务', queuePosition: 1, queueReason: 'thread_active' },
+          { runId: 'run-capacity', text: '并行任务', queuePosition: 2, queueReason: 'capacity' },
+          { runId: 'run-finalizing', text: '上一轮收尾后继续', queuePosition: 3, queueReason: 'thread_finalizing' }
+        ]}
+      />
+    );
+
+    expect(screen.getByText('等待本会话任务完成 · 第 1 位')).toBeInTheDocument();
+    expect(screen.getByText('等待其他会话完成 · 第 2 位')).toBeInTheDocument();
+    expect(screen.getByText('上一轮正在收尾 · 第 3 位')).toBeInTheDocument();
   });
 
   it('closes the slash command list on outside pointer presses', async () => {

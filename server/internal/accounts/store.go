@@ -13,6 +13,7 @@ var (
 	ErrAccountAvatarNotFound            = errors.New("account avatar not found")
 	ErrSessionNotFound                  = errors.New("account session not found")
 	ErrEmailExists                      = errors.New("account email already exists")
+	ErrPhoneExists                      = errors.New("account phone already exists")
 	ErrAccountAgentExists               = errors.New("agent already belongs to another account")
 	ErrAccountNotActive                 = errors.New("account is not active")
 	ErrAccountIdentityNotFound          = errors.New("account identity not found")
@@ -35,10 +36,14 @@ type Store interface {
 	SaveAccountAvatarIfMissing(context.Context, string, AccountAvatar) error
 	GetAccount(context.Context, string) (Account, error)
 	GetAccountByEmail(context.Context, string) (Account, error)
+	GetAccountByPhone(context.Context, string) (Account, error)
+	UpdateExternalAccountProfile(context.Context, string, string, string, time.Time) (Account, error)
 	ListAccounts(context.Context) ([]Account, error)
 	CountAccounts(context.Context) (int, error)
 	SaveSession(context.Context, Session) error
 	GetSessionByHash(context.Context, string) (Session, error)
+	GetSessionByID(context.Context, string) (Session, error)
+	ExtendSession(context.Context, string, time.Time, time.Time) (Session, error)
 	DeleteSession(context.Context, string) error
 	DeleteSessionsForUser(context.Context, string) error
 	SaveAccountAgent(context.Context, AccountAgent) error
@@ -64,6 +69,7 @@ type MemoryStore struct {
 	externalIdentityMu sync.Mutex
 	accounts           map[string]Account
 	emailToUserID      map[string]string
+	phoneToUserID      map[string]string
 	sessions           map[string]Session
 	accountAgents      map[string][]AccountAgent
 	identities         map[string]AccountIdentity
@@ -76,6 +82,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		accounts:      map[string]Account{},
 		emailToUserID: map[string]string{},
+		phoneToUserID: map[string]string{},
 		sessions:      map[string]Session{},
 		accountAgents: map[string][]AccountAgent{},
 		identities:    map[string]AccountIdentity{},
@@ -109,14 +116,25 @@ func (s *MemoryStore) SaveAccount(ctx context.Context, account Account) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existingUserID, ok := s.emailToUserID[account.Email]; ok && existingUserID != account.UserID {
+	if existingUserID, ok := s.emailToUserID[account.Email]; account.Email != "" && ok && existingUserID != account.UserID {
 		return ErrEmailExists
+	}
+	if existingUserID, ok := s.phoneToUserID[account.Phone]; account.Phone != "" && ok && existingUserID != account.UserID {
+		return ErrPhoneExists
 	}
 	if existing, ok := s.accounts[account.UserID]; ok && existing.Email != account.Email {
 		delete(s.emailToUserID, existing.Email)
 	}
+	if existing, ok := s.accounts[account.UserID]; ok && existing.Phone != account.Phone {
+		delete(s.phoneToUserID, existing.Phone)
+	}
 	s.accounts[account.UserID] = account
-	s.emailToUserID[account.Email] = account.UserID
+	if account.Email != "" {
+		s.emailToUserID[account.Email] = account.UserID
+	}
+	if account.Phone != "" {
+		s.phoneToUserID[account.Phone] = account.UserID
+	}
 	return nil
 }
 
@@ -132,6 +150,7 @@ func (s *MemoryStore) DeleteAccount(ctx context.Context, userID string) error {
 	}
 	delete(s.accounts, userID)
 	delete(s.emailToUserID, account.Email)
+	delete(s.phoneToUserID, account.Phone)
 	for sessionID, session := range s.sessions {
 		if session.UserID == userID {
 			delete(s.sessions, sessionID)
@@ -275,6 +294,39 @@ func (s *MemoryStore) GetSessionByHash(ctx context.Context, tokenHash string) (S
 		}
 	}
 	return Session{}, ErrSessionNotFound
+}
+
+func (s *MemoryStore) GetSessionByID(ctx context.Context, sessionID string) (Session, error) {
+	if err := ctx.Err(); err != nil {
+		return Session{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return Session{}, ErrSessionNotFound
+	}
+	return session, nil
+}
+
+func (s *MemoryStore) ExtendSession(ctx context.Context, sessionID string, now, expiresAt time.Time) (Session, error) {
+	if err := ctx.Err(); err != nil {
+		return Session{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if !ok || !session.ExpiresAt.After(now) {
+		return Session{}, ErrSessionNotFound
+	}
+	if expiresAt.After(session.ExpiresAt) {
+		session.ExpiresAt = expiresAt
+	}
+	if session.LastSeenAt == nil || now.After(*session.LastSeenAt) {
+		session.LastSeenAt = &now
+	}
+	s.sessions[sessionID] = session
+	return session, nil
 }
 
 func (s *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error {
@@ -465,6 +517,9 @@ func (s *MemoryStore) UpdateAccountIdentityVerification(ctx context.Context, ide
 		return ErrAccountIdentityNotFound
 	}
 	existing.ExternalUserID = identity.ExternalUserID
+	if identity.EnterpriseUserID != "" {
+		existing.EnterpriseUserID = identity.EnterpriseUserID
+	}
 	existing.VerifiedAt = identity.VerifiedAt
 	existing.UpdatedAt = identity.UpdatedAt
 	s.identities[key] = existing

@@ -4,21 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"image"
 	"image/png"
-	"io"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 )
-
-type consoleTestTransport func(*http.Request) (*http.Response, error)
-
-func (fn consoleTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
 
 func consoleTestInput() ConsoleInput {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -33,10 +26,10 @@ func TestConsoleFeedbackSnapshotAndRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m Manifest
-	_ = json.Unmarshal(in.Manifest, &m)
-	if m.Completeness != "partial" || len(m.MissingItems) != 5 || len(m.Artifacts) != 3 || in.Consent.ConfirmedAt != input.ConfirmedAt {
-		t.Fatalf("incorrect snapshot: %#v", m)
+	var manifest Manifest
+	_ = json.Unmarshal(in.Manifest, &manifest)
+	if manifest.Completeness != "partial" || len(manifest.MissingItems) != 5 || len(manifest.Artifacts) != 3 || in.Consent.ConfirmedAt != input.ConfirmedAt {
+		t.Fatalf("incorrect snapshot: %#v", manifest)
 	}
 	all := in.Description + string(bytes.Join(materials, nil))
 	for _, secret := range []string{"sk-testsecretvalue", "private123", "token123", "bearer-secret", "private.example", "?token=", "/Users/alice"} {
@@ -44,8 +37,8 @@ func TestConsoleFeedbackSnapshotAndRedaction(t *testing.T) {
 			t.Fatalf("secret was not redacted: %s", secret)
 		}
 	}
-	for index, a := range m.Artifacts {
-		if a.SHA256 != Hash(materials[index]) || a.Size != int64(len(materials[index])) || a.PartIndex != 1 {
+	for index, artifact := range manifest.Artifacts {
+		if artifact.SHA256 != Hash(materials[index]) || artifact.Size != int64(len(materials[index])) || artifact.PartIndex != 1 {
 			t.Fatal("material/manifest mismatch")
 		}
 	}
@@ -55,7 +48,9 @@ func TestConsoleFeedbackSnapshotAndRedaction(t *testing.T) {
 	}
 }
 
-func TestConsoleFeedbackRejectsInvalidInputBeforeNetworking(t *testing.T) {
+func TestConsoleFeedbackRejectsInvalidInputBeforeStorage(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store, nil, nil, 0)
 	mutations := []func(*ConsoleInput){
 		func(in *ConsoleInput) { in.Confirmed = false },
 		func(in *ConsoleInput) { in.AcceptPartial = false },
@@ -66,115 +61,41 @@ func TestConsoleFeedbackRejectsInvalidInputBeforeNetworking(t *testing.T) {
 		func(in *ConsoleInput) { in.ConfirmedAt = "invalid" },
 		func(in *ConsoleInput) { in.Errors = make([]ConsoleError, 51) },
 	}
-	client := &http.Client{Transport: consoleTestTransport(func(*http.Request) (*http.Response, error) {
-		t.Fatal("invalid input must not be sent")
-		return nil, nil
-	})}
 	for _, mutate := range mutations {
 		input := consoleTestInput()
 		mutate(&input)
-		if _, err := SubmitConsoleFeedback(context.Background(), input, nil, client, nil); err == nil {
+		if _, err := service.SubmitConsoleFeedback(context.Background(), input, nil, "test"); err == nil {
 			t.Fatal("invalid input accepted")
 		}
 	}
 	for _, screenshot := range []ConsoleScreenshot{{ContentType: "image/svg+xml", Data: []byte("<svg/>")}, {ContentType: "image/png", Data: []byte("<html/>")}} {
-		if _, err := SubmitConsoleFeedback(context.Background(), consoleTestInput(), []ConsoleScreenshot{screenshot}, client, nil); err == nil {
+		if _, err := service.SubmitConsoleFeedback(context.Background(), consoleTestInput(), []ConsoleScreenshot{screenshot}, "test"); err == nil {
 			t.Fatal("invalid image accepted")
 		}
 	}
-}
-
-func TestConsoleFeedbackRetryUsesExistingCentreProtocol(t *testing.T) {
-	for _, lostAt := range []string{"create", "upload", "submit"} {
-		t.Run(lostAt, func(t *testing.T) {
-			store := NewMemoryStore()
-			storage, _ := sharedfiles.NewFileSystemStorage(t.TempDir())
-			centre := NewService(store, storage, nil, 0)
-			first := true
-			creations := 0
-			uploads := 0
-			submits := 0
-			var firstBody []byte
-			client := &http.Client{Transport: consoleTestTransport(func(req *http.Request) (*http.Response, error) {
-				if req.URL.Scheme != "https" || req.URL.Host != "gateway.clawee.work" || req.Header.Get("Cookie") != "" || req.Header.Get("X-Feedback-Deployment-Token") != "" {
-					t.Fatal("unsafe centre target or credentials")
-				}
-				var data any
-				var err error
-				stage := ""
-				path := strings.TrimPrefix(req.URL.Path, "/api/v1/feedback/")
-				if path == "reports" {
-					stage = "create"
-					creations++
-					body, _ := io.ReadAll(req.Body)
-					if firstBody == nil {
-						firstBody = body
-					} else if !bytes.Equal(firstBody, body) {
-						t.Fatal("retry changed authorised snapshot")
-					}
-					var in CreateInput
-					_ = json.Unmarshal(body, &in)
-					data, _, err = centre.Create(req.Context(), in, "test", "")
-				} else {
-					parts := strings.Split(path, "/")
-					credential := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
-					if req.Method == http.MethodPut {
-						stage = "upload"
-						uploads++
-						_, err = centre.Upload(req.Context(), parts[1], parts[3], credential, req.Header.Get("Content-Type"), req.Header.Get("X-Content-SHA256"), req.ContentLength, req.Body)
-						data = map[string]bool{"received": err == nil}
-					} else if parts[2] == "submit" {
-						stage = "submit"
-						submits++
-						var body struct {
-							Hash    string `json:"manifest_sha256"`
-							Partial bool   `json:"accept_partial"`
-						}
-						_ = json.NewDecoder(req.Body).Decode(&body)
-						data, err = centre.Submit(req.Context(), parts[1], credential, body.Hash, body.Partial)
-					} else {
-						t.Fatalf("unexpected path: %s", path)
-					}
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if stage == lostAt && first {
-					first = false
-					return nil, errors.New("response lost")
-				}
-				body, _ := json.Marshal(map[string]any{"data": data})
-				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body)), Request: req}, nil
-			})}
-			input := consoleTestInput()
-			var imageData bytes.Buffer
-			_ = png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 1, 1)))
-			images := []ConsoleScreenshot{{ContentType: "image/png", Data: imageData.Bytes()}}
-			if _, err := SubmitConsoleFeedback(context.Background(), input, images, client, nil); err == nil {
-				t.Fatal("first lost response must fail")
-			}
-			receipt, err := SubmitConsoleFeedback(context.Background(), input, images, client, nil)
-			if err != nil || receipt.UploadState != "ready" || receipt.SecurityState != "normal" || creations != 2 || uploads != 4 || submits != 1 {
-				t.Fatalf("retry failed: %#v %v counts %d %d %d", receipt, err, creations, uploads, submits)
-			}
-			if len(store.reports) != 1 {
-				t.Fatal("retry created duplicate report")
-			}
-		})
+	if len(store.reports) != 0 {
+		t.Fatal("invalid input was stored")
 	}
 }
 
-func TestConsoleFeedbackPolicyChangePausesFurtherRequests(t *testing.T) {
-	allowed := true
-	requests := 0
-	client := &http.Client{Transport: consoleTestTransport(func(req *http.Request) (*http.Response, error) {
-		requests++
-		allowed = false
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":{"report_id":"fb_test0001","upload_token":"upload-only","upload_state":"uploading"}}`)), Header: http.Header{}}, nil
-	})}
-	_, err := SubmitConsoleFeedback(context.Background(), consoleTestInput(), nil, client, func() bool { return allowed })
-	status, code := HTTPError(err)
-	if requests != 1 || status != 403 || code != "feedback_policy_disabled" {
-		t.Fatalf("policy not respected: requests=%d err=%v", requests, err)
+func TestConsoleFeedbackUsesLocalServiceAndIsIdempotent(t *testing.T) {
+	store := NewMemoryStore()
+	storage, _ := sharedfiles.NewFileSystemStorage(t.TempDir())
+	service := NewService(store, storage, nil, 0)
+	var imageData bytes.Buffer
+	_ = png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	input := consoleTestInput()
+	images := []ConsoleScreenshot{{ContentType: "image/png", Data: imageData.Bytes()}}
+	first, err := service.SubmitConsoleFeedback(context.Background(), input, images, "test")
+	if err != nil || first.UploadState != "ready" || first.SecurityState != "normal" {
+		t.Fatalf("local submission failed: %#v %v", first, err)
+	}
+	second, err := service.SubmitConsoleFeedback(context.Background(), input, images, "test")
+	if err != nil || second != first || len(store.reports) != 1 {
+		t.Fatalf("retry was not idempotent: %#v %v", second, err)
+	}
+	report, err := store.Get(first.ReportID)
+	if err != nil || len(report.Artifacts) != 4 {
+		t.Fatalf("local materials missing: %#v %v", report, err)
 	}
 }

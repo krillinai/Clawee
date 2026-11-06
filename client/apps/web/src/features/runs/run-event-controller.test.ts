@@ -4,8 +4,89 @@ import type { SubscribeRunEventsInput } from '../../runtime/sse.js';
 import { createRunEventController } from './run-event-controller.js';
 
 describe('run event controller', () => {
+  it('终态 EOF 等待输出协调，完成后不再退避重连', async () => {
+    vi.useFakeTimers();
+    const subscribe = vi.fn(async (input: SubscribeRunEventsInput) => { input.onEvent(createEvent(1)); });
+    let resolve!: (value: boolean) => void;
+    const onStreamEnd = vi.fn(() => new Promise<boolean>(done => { resolve = done; }));
+    const onError = vi.fn();
+    const controller = createRunEventController({ subscribe, reconnectDelays: [500] });
+    controller.start({ runId: 'run_1', baseUrl: 'http://localhost', onEvent: () => {}, onStateChange: () => {}, onError, onStreamEnd });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onStreamEnd).toHaveBeenCalledWith(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    resolve(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    controller.stop();
+  });
+
+  it('EOF 协调结果在替换控制器后失效', async () => {
+    let finish!: (value: boolean) => void;
+    const onError = vi.fn();
+    const controller = createRunEventController({ subscribe: async input => {
+      if (input.runId === 'run_2') await new Promise<void>(resolve => input.signal?.addEventListener('abort', () => resolve()));
+    } });
+    controller.start({ runId: 'run_1', baseUrl: 'http://localhost', onEvent: () => {}, onStateChange: () => {}, onError,
+      onStreamEnd: () => new Promise<boolean>(resolve => { finish = resolve; }) });
+    await Promise.resolve(); await Promise.resolve();
+    const states = vi.fn();
+    controller.start({ runId: 'run_2', baseUrl: 'http://localhost', onEvent: () => {}, onStateChange: states, onError });
+    finish(true);
+    await Promise.resolve(); await Promise.resolve();
+    expect(states.mock.calls).toEqual([['connecting']]);
+    expect(onError).not.toHaveBeenCalled();
+    controller.stop();
+  });
+
+  const originalBridge = window.claweeDesktop;
   afterEach(() => {
+    window.claweeDesktop = originalBridge;
     vi.useRealTimers();
+  });
+
+  it('断流耗时与恢复真实记录一次，正常done不产生新故障', async () => {
+    vi.useFakeTimers();
+    const reportIncident = vi.fn(async () => {});
+    window.claweeDesktop = { reportIncident } as unknown as typeof window.claweeDesktop;
+    const subscriptions: SubscribeRunEventsInput[] = [];
+    const controller = createRunEventController({
+      reconnectDelays: [500],
+      subscribe: async input => {
+        subscriptions.push(input);
+        if (subscriptions.length === 1) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          throw new Error('private stream error');
+        }
+        input.onEvent(createEvent(1));
+        input.onEvent(createEvent(2));
+        input.onEvent(createDoneEvent(3));
+      }
+    });
+    controller.start({ baseUrl: 'http://localhost', runId: 'run_1', onEvent: () => {}, onStateChange: () => {}, onError: () => {} });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(reportIncident).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'error', duration_ms: 250, run_id: 'run_1' }));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(reportIncident).toHaveBeenLastCalledWith(expect.objectContaining({ event_type: 'recovered', duration_ms: 500 }));
+    expect(reportIncident).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(reportIncident.mock.calls)).not.toContain('private');
+    controller.stop();
+  });
+
+  it('主动停止后抛出的SSE错误不报告', async () => {
+    const reportIncident = vi.fn(async () => {});
+    window.claweeDesktop = { reportIncident } as unknown as typeof window.claweeDesktop;
+    const controller = createRunEventController({ subscribe: async input => {
+      await new Promise<void>(resolve => input.signal?.addEventListener('abort', () => resolve(), { once: true }));
+      throw new Error('intentional close');
+    } });
+    controller.start({ baseUrl: 'http://localhost', runId: 'run_1', onEvent: () => {}, onStateChange: () => {}, onError: () => {} });
+    controller.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reportIncident).not.toHaveBeenCalled();
   });
 
   it('reconnects from the latest sequence and ignores duplicate events', async () => {

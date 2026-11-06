@@ -102,7 +102,8 @@ export function createTaskService(options: {
     LEFT JOIN threads t ON t.id = r.thread_id
     LEFT JOIN schedules s
       ON r.created_by = 'schedule' AND s.id = r.source_id
-    WHERE (
+    WHERE t.enterprise_subject_id IS NULL
+      AND (
       @cursorCreatedAt IS NULL
       OR r.created_at < @cursorCreatedAt
       OR (r.created_at = @cursorCreatedAt AND r.id < @cursorId)
@@ -151,7 +152,7 @@ export function createTaskService(options: {
     LEFT JOIN threads t ON t.id = r.thread_id
     LEFT JOIN schedules s
       ON r.created_by = 'schedule' AND s.id = r.source_id
-    WHERE r.id = @runId
+    WHERE r.id = @runId AND t.enterprise_subject_id IS NULL
   `);
 
   return {
@@ -225,6 +226,8 @@ function mapTask(
     cwd: row.cwd,
     profile: row.profile,
     createdBy: row.created_by,
+    ...(row.initiator_user_id === null ? {} : { initiatorUserId: row.initiator_user_id }),
+    ...(row.initiator_agent_id === null ? {} : { initiatorAgentId: row.initiator_agent_id }),
     submissionMode: row.submission_mode,
     ...(runtimeRun?.queuePosition === undefined
       ? {}

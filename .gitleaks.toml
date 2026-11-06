@@ -23,3 +23,16 @@ description = "MCP progress token 数值校验表达式"
 condition = "AND"
 paths = ['''server/internal/mcpgateway/upstream_client\.go$''']
 regexes = ['''^maxInt64Exclusive$''']
+
+[[rules]]
+id = "jwt"
+
+[[rules.allowlists]]
+description = "凭据过滤测试的固定假 JWT，载荷为 sub=test，签名为字面量 signature"
+condition = "AND"
+paths = [
+  '''^client/packages/protocol/src/incidents\.test\.ts$''',
+  '''^server/internal/server/feedback_incidents_test\.go$''',
+  '''^server/internal/feedback/incidents_test\.go$'''
+]
+regexes = ['''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ0ZXN0In0\.c2lnbmF0dXJl$''']

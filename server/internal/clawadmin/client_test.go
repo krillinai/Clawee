@@ -40,6 +40,22 @@ func TestEnsureModelConfigurationUsesDeploymentCredential(t *testing.T) {
 	}
 }
 
+func TestEnsureModelConfigurationSupportsPhoneWithoutSyntheticEmail(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["account_id"] != "usr_phone" || request["account_phone"] != "13800000000" || request["account_email"] != "" {
+			t.Errorf("request = %#v, %v", request, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":0,"data":{"base_url":"https://model.example/v1","api_key":"generated-key","model":"model-test","credential_version":1}}`))
+	}))
+	defer upstream.Close()
+	client := NewClient(upstream.URL, "deployment-secret", time.Second)
+	if _, err := client.EnsureModelConfiguration(context.Background(), AccountReference{ID: "usr_phone", Name: "员工", Phone: "13800000000"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnsureModelConfigurationRejectsUpstreamFailureAndIncompleteResponse(t *testing.T) {
 	for _, response := range []string{
 		`{"error":1019,"data":null}`,

@@ -18,6 +18,7 @@ import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { assignAccountRole, listAccountRoles, listRoles, permissions, removeAccountRole } from "@/lib/rbac-api";
 import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import { cleanInputIdentifier, trimInput } from "@/lib/text";
+import { accountIdentifierInput } from "@/lib/auth-api";
 
 const accountsKey = ["accounts"] as const;
 
@@ -52,12 +53,12 @@ export function UsersPage() {
     enabled: Boolean(roleAccount)
   });
   useEffect(() => {
-    setSelectedRoleIDs((assignedRolesQuery.data ?? []).map((role) => role.roleId));
+    setSelectedRoleIDs((assignedRolesQuery.data ?? []).filter((role) => role.departmentRoleType !== "manager" && (!role.sources || role.sources.includes("manual"))).map((role) => role.roleId));
   }, [assignedRolesQuery.data]);
 
   const createMutation = useMutation({
     mutationFn: () => createAccount({
-      email: cleanInputIdentifier(createForm.email), name: trimInput(createForm.name),
+      ...accountIdentifierInput(cleanInputIdentifier(createForm.email)), name: trimInput(createForm.name),
       password: createForm.password, status: createForm.status
     }),
     onSuccess: async () => {
@@ -88,11 +89,14 @@ export function UsersPage() {
   const roleMutation = useMutation({
     mutationFn: async () => {
       if (!roleAccount) return;
-      const current = new Set((assignedRolesQuery.data ?? []).map((role) => role.roleId));
-      const selected = new Set(selectedRoleIDs);
+      if (!rolesQuery.data || !assignedRolesQuery.data) throw new Error("角色尚未加载完成，请稍后重试");
+      const manualRoles = (assignedRolesQuery.data ?? []).filter((role) => role.departmentRoleType !== "manager" && (!role.sources || role.sources.includes("manual")));
+      const current = new Set(manualRoles.map((role) => role.roleId));
+      const manualSelectedIDs = selectedRoleIDs.filter((id) => rolesQuery.data?.some((role) => role.roleId === id && role.departmentRoleType !== "manager"));
+      const selected = new Set(manualSelectedIDs);
       await Promise.all([
-        ...selectedRoleIDs.filter((roleID) => !current.has(roleID)).map((roleID) => assignAccountRole(roleAccount.userId, roleID)),
-        ...(assignedRolesQuery.data ?? []).filter((role) => !selected.has(role.roleId)).map((role) => removeAccountRole(roleAccount.userId, role.roleId))
+        ...manualSelectedIDs.filter((roleID) => !current.has(roleID)).map((roleID) => assignAccountRole(roleAccount.userId, roleID)),
+        ...manualRoles.filter((role) => !selected.has(role.roleId)).map((role) => removeAccountRole(roleAccount.userId, role.roleId))
       ]);
     },
     onSuccess: async () => {
@@ -181,7 +185,7 @@ export function UsersPage() {
           {!accountsQuery.isLoading && !accountsQuery.isError && accounts.length === 0 ? <TableStateRow colSpan={5}>暂无账号</TableStateRow> : null}
           {accounts.map((account) => (
             <TableRow key={account.userId}>
-              <TableCell><div className="flex flex-col gap-1"><strong>{account.email}</strong><span className="text-xs text-muted-foreground">{account.name || "-"}</span></div></TableCell>
+              <TableCell><div className="flex flex-col gap-1"><strong>{account.phone || account.email}</strong><span className="text-xs text-muted-foreground">{account.name || "-"}</span></div></TableCell>
               <TableCell><AccountRolesCell accountID={account.userId} canRead={canReadRoles} /></TableCell>
               <TableCell><Badge variant={account.status === "active" ? "default" : "muted"}>{account.status === "active" ? "启用" : "停用"}</Badge></TableCell>
               <TableCell>{account.agent ? <div className="flex flex-col gap-1"><span className="font-mono text-xs">{account.agent.agentId}</span><span className="text-xs text-muted-foreground">{mcpStatusLabel(account.agent.status)}</span></div> : <span className="text-muted-foreground">未绑定</span>}</TableCell>
@@ -211,7 +215,7 @@ export function UsersPage() {
       <ModalShell open={createOpen} onClose={() => setCreateOpen(false)} contextLabel="账号" title="新增账号">
         <form onSubmit={submitCreate}>
           <FieldGroup>
-            <Field><FieldLabel htmlFor="account-email">邮箱</FieldLabel><Input id="account-email" aria-label="邮箱" required type="email" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: cleanInputIdentifier(event.target.value) }))} /></Field>
+            <Field><FieldLabel htmlFor="account-email">邮箱或手机号</FieldLabel><Input id="account-email" aria-label="邮箱或手机号" required type="text" autoComplete="username" value={createForm.email} onChange={(event) => setCreateForm((current) => ({ ...current, email: cleanInputIdentifier(event.target.value) }))} /></Field>
             <Field><FieldLabel htmlFor="account-name">名称</FieldLabel><Input id="account-name" aria-label="名称" required value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} /></Field>
             <Field><FieldLabel htmlFor="account-password">初始密码</FieldLabel><Input id="account-password" aria-label="初始密码" minLength={8} required type="password" value={createForm.password} onChange={(event) => setCreateForm((current) => ({ ...current, password: event.target.value }))} /></Field>
             <Field><FieldLabel htmlFor="account-status">状态</FieldLabel><NativeSelect id="account-status" aria-label="状态" value={createForm.status} onChange={(event) => setCreateForm((current) => ({ ...current, status: event.target.value as AccountStatus }))}><option value="active">启用</option><option value="disabled">停用</option></NativeSelect></Field>
@@ -221,7 +225,7 @@ export function UsersPage() {
         </form>
       </ModalShell>
 
-      <ModalShell open={Boolean(nameAccount)} onClose={() => setNameAccount(null)} contextLabel="账号" title="修改账户昵称" subtitle={nameAccount?.email}>
+      <ModalShell open={Boolean(nameAccount)} onClose={() => setNameAccount(null)} contextLabel="账号" title="修改账户昵称" subtitle={nameAccount?.phone || nameAccount?.email}>
         <form onSubmit={submitName}>
           <FieldGroup>
             <Field><FieldLabel htmlFor="account-edit-name">昵称</FieldLabel><Input id="account-edit-name" required value={accountName} onChange={(event) => setAccountName(event.target.value)} /></Field>
@@ -231,7 +235,7 @@ export function UsersPage() {
         </form>
       </ModalShell>
 
-      <ModalShell open={Boolean(passwordAccount)} onClose={() => setPasswordAccount(null)} contextLabel="账号" title="重置密码" subtitle={passwordAccount?.email}>
+      <ModalShell open={Boolean(passwordAccount)} onClose={() => setPasswordAccount(null)} contextLabel="账号" title="重置密码" subtitle={passwordAccount?.phone || passwordAccount?.email}>
         <form onSubmit={submitPassword}>
           <FieldGroup>
             <Field><FieldLabel htmlFor="new-password">新密码</FieldLabel><Input id="new-password" aria-label="新密码" minLength={8} required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /><FieldDescription>至少 8 位，保存后该账号现有会话失效。</FieldDescription></Field>
@@ -241,21 +245,24 @@ export function UsersPage() {
         </form>
       </ModalShell>
 
-      <ModalShell open={Boolean(roleAccount)} onClose={() => setRoleAccount(null)} contextLabel="角色权限" title="管理后台角色" subtitle={roleAccount?.email}>
+      <ModalShell open={Boolean(roleAccount)} onClose={() => setRoleAccount(null)} contextLabel="角色权限" title="管理后台角色" subtitle={roleAccount?.phone || roleAccount?.email}>
         <FieldGroup data-slot="checkbox-group">
           {assignedRolesQuery.isLoading || rolesQuery.isLoading ? <span className="text-sm text-muted-foreground">角色加载中</span> : null}
-          {(rolesQuery.data ?? []).map((role) => (
+          {assignedRolesQuery.isError ? <ErrorAlert>{assignedRolesQuery.error.message}</ErrorAlert> : null}
+          {rolesQuery.isError ? <ErrorAlert>{rolesQuery.error.message}</ErrorAlert> : null}
+          {(rolesQuery.data ?? []).filter((role) => role.departmentRoleType !== "manager").map((role) => (
             <Field key={role.roleId} orientation="horizontal">
               <Checkbox id={`account-role-${role.roleId}`} checked={selectedRoleIDs.includes(role.roleId)} onCheckedChange={(checked) => setSelectedRoleIDs((current) => checked === true ? [...new Set([...current, role.roleId])] : current.filter((item) => item !== role.roleId))} />
-              <FieldContent><FieldLabel htmlFor={`account-role-${role.roleId}`}>{role.name}</FieldLabel><FieldDescription>{role.code}{role.isSystem ? " · 系统内置" : ""}</FieldDescription></FieldContent>
+              <FieldContent><FieldLabel htmlFor={`account-role-${role.roleId}`}>{role.name}</FieldLabel><FieldDescription>{role.code} · 手工授权{role.isSystem ? " · 系统内置" : ""}{assignedRolesQuery.data?.find((item) => item.roleId === role.roleId)?.sources?.includes("rose_department") ? " · 部门自动授权仍有效，取消勾选仅移除手工来源" : ""}</FieldDescription></FieldContent>
             </Field>
           ))}
+          {(assignedRolesQuery.data ?? []).filter((role) => role.departmentRoleType === "manager").map((role) => <Field key={role.roleId}><FieldContent><FieldLabel>{role.roleName}</FieldLabel><FieldDescription>部门管理员 · {role.departmentName} · 只读自动授权，成员由 ROSE 同步管理</FieldDescription></FieldContent></Field>)}
           {roleMutation.isError ? <ErrorAlert>{roleMutation.error.message}</ErrorAlert> : null}
-          <Field className="justify-end" orientation="horizontal"><Button onClick={() => setRoleAccount(null)} variant="outline">取消</Button><Button disabled={roleMutation.isPending} onClick={() => roleMutation.mutate()}>保存角色</Button></Field>
+          <Field className="justify-end" orientation="horizontal"><Button onClick={() => setRoleAccount(null)} variant="outline">取消</Button><Button disabled={roleMutation.isPending || assignedRolesQuery.isPending || rolesQuery.isPending || assignedRolesQuery.isError || rolesQuery.isError} onClick={() => roleMutation.mutate()}>保存角色</Button></Field>
         </FieldGroup>
       </ModalShell>
 
-      <ModalShell open={Boolean(mergeAccount)} onClose={() => setMergeAccount(null)} contextLabel="账号治理" title="合并账号" subtitle={mergeAccount?.email}>
+      <ModalShell open={Boolean(mergeAccount)} onClose={() => setMergeAccount(null)} contextLabel="账号治理" title="合并账号" subtitle={mergeAccount?.phone || mergeAccount?.email}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -267,7 +274,7 @@ export function UsersPage() {
               <FieldLabel htmlFor="account-merge-target">目标账号</FieldLabel>
               <NativeSelect id="account-merge-target" value={mergeTargetUserID} onChange={(event) => setMergeTargetUserID(event.target.value)}>
                 <option value="">选择启用账号</option>
-                {activeMergeTargets.map((account) => <option key={account.userId} value={account.userId}>{account.name || account.email} ({account.email})</option>)}
+                {activeMergeTargets.map((account) => <option key={account.userId} value={account.userId}>{account.name || account.phone || account.email} ({account.phone || account.email})</option>)}
               </NativeSelect>
             </Field>
             <Field>
@@ -291,6 +298,7 @@ function AccountRolesCell({ accountID, canRead }: { accountID: string; canRead: 
   const query = useQuery({ queryKey: ["rbac", "account-roles", accountID], queryFn: () => listAccountRoles(accountID), enabled: canRead });
   if (!canRead) return <span className="text-xs text-muted-foreground">-</span>;
   if (query.isLoading) return <span className="text-xs text-muted-foreground">加载中</span>;
-  if (query.isError || !query.data?.length) return <span className="text-xs text-muted-foreground">无后台角色</span>;
-  return <div className="flex flex-wrap gap-1">{query.data.map((role) => <Badge key={role.roleId} variant={role.isSystem ? "default" : "muted"}>{role.roleName}</Badge>)}</div>;
+  if (query.isError) return <span className="text-xs text-destructive">角色读取失败</span>;
+  if (!query.data?.length) return <span className="text-xs text-muted-foreground">无后台角色</span>;
+  return <div className="flex flex-wrap gap-1">{query.data.map((role) => <Badge key={role.roleId} variant={role.isSystem ? "default" : "muted"}><span>{role.roleName}</span><span>{role.sources?.includes("rose_department") ? ` · ${role.departmentRoleType === "manager" ? "部门管理员 · " : ""}${role.departmentName || "部门自动"}${role.sources.includes("manual") ? " / 手工" : ""}` : " · 手工"}</span></Badge>)}</div>;
 }

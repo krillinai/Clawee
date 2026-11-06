@@ -211,6 +211,29 @@ func TestDingTalkConfigValidate(t *testing.T) {
 	}
 }
 
+func TestEmployeeSourceConfigValidation(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		for _, source := range []string{"", "dingtalk", "demo", "unknown"} {
+			cfg := DingTalkConfig{Enabled: enabled, ClientID: "app", ClientSecret: "secret", RedirectURL: "https://gateway.test/api/v1/auth/dingtalk/callback", ProviderKey: "demo", StateTTL: "10m", RequestTimeout: "10s", EmployeeSource: source}
+			_, _, err := cfg.Validate()
+			unsupported := source != "" && source != "dingtalk"
+			if (err != nil) != unsupported {
+				t.Fatalf("enabled=%v source=%q: %v", enabled, source, err)
+			}
+		}
+	}
+}
+
+func TestLoadRejectsLegacyEmployeeDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("dingtalk:\n  rose:\n    organization_sync_enabled: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("不支持的旧员工目录配置不得被静默忽略")
+	}
+}
+
 func TestBilibiliConfigValidate(t *testing.T) {
 	if err := (BilibiliConfig{}).Validate(); err != nil {
 		t.Fatalf("disabled config error=%v", err)

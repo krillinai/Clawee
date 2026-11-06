@@ -115,7 +115,7 @@ export async function registerEnterpriseDriveRoutes(
         return reply
           .header('Cache-Control', 'no-store')
           .header('X-Content-Type-Options', 'nosniff')
-          .header('Content-Disposition', 'attachment')
+          .header('Content-Disposition', 'inline')
           .type(preview.contentType)
           .send(Buffer.from(preview.content));
       } catch (error) {
@@ -161,7 +161,7 @@ export async function registerEnterpriseDriveRoutes(
       }
       try {
         const result = await manager.uploadFile({
-          spaceId: request.params.spaceId,
+          ...(request.params.spaceId === 'default' ? {} : { spaceId: request.params.spaceId }),
           logicalPath: parsed.data.logicalPath,
           ...(expectedRevision === undefined ? {} : { expectedRevision }),
           contentType: parsed.data.contentType,

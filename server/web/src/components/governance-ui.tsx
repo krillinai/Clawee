@@ -385,6 +385,7 @@ export function DetailDrawer({
   title,
   subtitle,
   contextLabel,
+  contextDetail,
   titleAction,
   onClose,
   children
@@ -393,6 +394,7 @@ export function DetailDrawer({
   title: string;
   subtitle: string;
   contextLabel?: string;
+  contextDetail?: ReactNode;
   titleAction?: ReactNode;
   onClose: () => void;
   children: ReactNode;
@@ -418,7 +420,10 @@ export function DetailDrawer({
         side="right"
       >
         <SheetHeader className="mb-6 border-b border-border pb-5">
-          {contextLabel ? <p className="text-sm font-medium text-muted-foreground">{contextLabel}</p> : null}
+          {contextLabel || contextDetail ? <p className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-sm font-medium text-muted-foreground">
+            {contextLabel ? <span>{contextLabel}</span> : null}
+            {contextDetail ? <span className="min-w-0 break-all text-xs font-normal">{contextDetail}</span> : null}
+          </p> : null}
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <SheetTitle>{title}</SheetTitle>
             {titleAction ? <div className="flex shrink-0 items-center">{titleAction}</div> : null}
@@ -437,6 +442,8 @@ export function ModalShell({
   subtitle,
   contextLabel,
   contentClassName,
+  bodyClassName,
+  onEscapeKeyDown,
   onClose,
   children
 }: {
@@ -445,6 +452,8 @@ export function ModalShell({
   subtitle?: string;
   contextLabel?: string;
   contentClassName?: string;
+  bodyClassName?: string;
+  onEscapeKeyDown?: ComponentProps<typeof DialogContent>["onEscapeKeyDown"];
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -455,13 +464,17 @@ export function ModalShell({
         if (!nextOpen) onClose();
       }}
     >
-      <DialogContent className={cn("max-h-[92vh] max-w-[760px] overflow-auto", contentClassName)}>
+      <DialogContent
+        {...(!subtitle ? { "aria-describedby": undefined } : {})}
+        className={cn("max-h-[92vh] max-w-[760px] overflow-auto", contentClassName)}
+        onEscapeKeyDown={onEscapeKeyDown}
+      >
         <DialogHeader className="mb-1 border-b border-border pb-4">
           {contextLabel ? <p className="text-sm font-medium text-muted-foreground">{contextLabel}</p> : null}
           <DialogTitle>{title}</DialogTitle>
           {subtitle ? <DialogDescription>{subtitle}</DialogDescription> : null}
         </DialogHeader>
-        <div className="grid gap-4">{children}</div>
+        <div className={cn("grid gap-4", bodyClassName)}>{children}</div>
       </DialogContent>
     </Dialog>
   );

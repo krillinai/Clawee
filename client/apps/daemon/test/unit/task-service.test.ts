@@ -25,6 +25,21 @@ afterEach(() => {
 });
 
 describe('task service', () => {
+  it('分页前排除企业会话，按 Run 查询也不能泄露摘要', () => {
+    const fixture = setup();
+    insertRun(fixture.runs, 'public-run', 'succeeded');
+    insertRun(fixture.runs, 'enterprise-run', 'succeeded');
+    fixture.db.prepare('UPDATE threads SET enterprise_subject_id = ? WHERE id = ?').run('account-1', 'thread_1');
+    fixture.db.prepare('UPDATE runs SET thread_id = NULL, created_at = ? WHERE id = ?').run('2026-10-12T00:00:00Z', 'public-run');
+    fixture.db.prepare('UPDATE runs SET created_at = ? WHERE id = ?').run('2026-10-13T00:00:00Z', 'enterprise-run');
+    insertAssistantMessage(fixture.runs, 'enterprise-run', 1, '员工敏感贡献摘要');
+
+    expect(fixture.service.list({ limit: 1 })).toMatchObject({ tasks: [{ id: 'public-run' }], hasMore: false });
+    expect(fixture.service.getByRunId('enterprise-run')).toBeUndefined();
+    expect(fixture.runs.listRuns(1, { publicOnly: true }).map(run => run.id)).toEqual(['public-run']);
+    expect(fixture.runs.listRuns(1).map(run => run.id)).toEqual(['enterprise-run']);
+  });
+
   it('paginates runs with stable cursors and aggregates pending approvals', () => {
     const fixture = setup();
     insertRun(fixture.runs, 'run_old', 'succeeded');

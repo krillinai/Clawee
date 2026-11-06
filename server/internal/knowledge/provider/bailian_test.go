@@ -43,6 +43,15 @@ func TestProviderNameFitsBailianLimit(t *testing.T) {
 	}
 }
 
+func TestTemporaryCategoryNameFitsBailianLimit(t *testing.T) {
+	for _, value := range []string{"公司制度库", strings.Repeat("x", 100)} {
+		name := temporaryCategoryName(value)
+		if len([]rune(name)) > bailianNameLimit {
+			t.Fatalf("temporary category name = %q", name)
+		}
+	}
+}
+
 func TestBailianErrorClassification(t *testing.T) {
 	for input, want := range map[string]string{"Index.Forbidden": ErrorUnauthorized, "NOT AUTHORIZED": ErrorUnauthorized, "AccessDenied": ErrorUnauthorized, "Index.IndexNameAlreadyExists": ErrorConflict, "DataCenter.Throttling": ErrorRateLimited, "InvalidParameter": ErrorInvalidRequest, "Index.NotFound": ErrorNotFound, "Index.NotExist": ErrorNotFound, "index does not exist": ErrorNotFound} {
 		if got := classifyBailianCode(input); got != want {

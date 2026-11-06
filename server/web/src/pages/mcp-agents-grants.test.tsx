@@ -19,6 +19,7 @@ import {
   deleteMCPGrant,
   listMCPAgents,
   listMCPCapabilities,
+  listMCPGrantRoles,
   listMCPGrants,
   listMCPUpstreamServers,
   revealMCPAccountToken,
@@ -42,6 +43,7 @@ vi.mock("@/lib/mcp-admin-api", async () => {
     deleteMCPGrant: vi.fn(),
     listMCPAgents: vi.fn(),
     listMCPCapabilities: vi.fn(),
+    listMCPGrantRoles: vi.fn(),
     listMCPGrants: vi.fn(),
     listMCPUpstreamServers: vi.fn(),
     revealMCPAccountToken: vi.fn(),
@@ -70,6 +72,7 @@ const deleteMCPAgentMock = vi.mocked(deleteMCPAgent);
 const deleteMCPGrantMock = vi.mocked(deleteMCPGrant);
 const listMCPAgentsMock = vi.mocked(listMCPAgents);
 const listMCPCapabilitiesMock = vi.mocked(listMCPCapabilities);
+const listMCPGrantRolesMock = vi.mocked(listMCPGrantRoles);
 const listMCPGrantsMock = vi.mocked(listMCPGrants);
 const listMCPUpstreamServersMock = vi.mocked(listMCPUpstreamServers);
 const revealMCPAccountTokenMock = vi.mocked(revealMCPAccountToken);
@@ -196,6 +199,7 @@ describe("MCPAgentsGrantsPage", () => {
     });
     listMCPAgentsMock.mockResolvedValue(agents);
     listMCPCapabilitiesMock.mockResolvedValue(capabilities);
+    listMCPGrantRolesMock.mockResolvedValue([{ roleId: "role_sales", code: "sales", name: "销售" }]);
     listMCPUpstreamServersMock.mockResolvedValue(servers);
     listMCPGrantsMock.mockImplementation((filters = {}) =>
       Promise.resolve(filters.userId ? grants.filter((grant) => grant.userId === filters.userId) : grants)
@@ -238,7 +242,7 @@ describe("MCPAgentsGrantsPage", () => {
     renderPage(undefined, "/admin/mcp/agents/detail?agent_id=agent_sales");
 
     const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).getByRole("heading", { name: "账户级 Token 与 MCP 配置" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "账户级 Token 与接入配置" })).toBeInTheDocument();
     expect(within(drawer).getAllByText("agent_sales")).not.toHaveLength(0);
   });
 
@@ -481,10 +485,10 @@ describe("MCPAgentsGrantsPage", () => {
 
     const row = await findRowByText("agent_sales");
     fireEvent.click(within(row).getByText("agent_sales"));
-    expect(screen.queryByRole("heading", { name: "账户级 Token 与 MCP 配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "账户级 Token 与接入配置" })).not.toBeInTheDocument();
 
     fireEvent.click(within(row).getByRole("button", { name: "查看 Sales Assistant 令牌详情" }));
-    expect(await screen.findByRole("heading", { name: "账户级 Token 与 MCP 配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "账户级 Token 与接入配置" })).toBeInTheDocument();
     expect(screen.queryByText("masked_token")).not.toBeInTheDocument();
     expect(screen.getByText("token_status")).toBeInTheDocument();
     expect(revealMCPAccountTokenMock).not.toHaveBeenCalled();
@@ -558,7 +562,7 @@ describe("MCPAgentsGrantsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "提交创建" }));
 
     await waitFor(() => expect(createMCPAgentMock).toHaveBeenCalled());
-    expect(screen.queryByRole("heading", { name: "账户级 Token 与 MCP 配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "账户级 Token 与接入配置" })).not.toBeInTheDocument();
     expect(rotateMCPAccountTokenMock).not.toHaveBeenCalled();
     expect(revealMCPAccountTokenMock).not.toHaveBeenCalled();
   });
@@ -665,7 +669,7 @@ describe("MCPAgentsGrantsPage", () => {
     expect(screen.queryByRole("option", { name: /crm\.customer\.delete/ })).not.toBeInTheDocument();
   });
 
-  it("scrolls the capability picker list with the mouse wheel inside the Add Grant modal", async () => {
+  it("能力浮层挂载在授权弹窗内、表单外", async () => {
     renderPage();
 
     await selectAgent("agent_sales");
@@ -674,10 +678,8 @@ describe("MCPAgentsGrantsPage", () => {
 
     expect(await screen.findByRole("option", { name: /crm\.note\.create/ })).toBeInTheDocument();
     const list = screen.getByRole("listbox");
-    Object.defineProperty(list, "scrollTop", { configurable: true, value: 0, writable: true });
-    fireEvent.wheel(list, { deltaY: 120 });
-
-    expect(list.scrollTop).toBe(120);
+    expect(screen.getByRole("dialog", { name: "添加授权" })).toContainElement(list);
+    expect(list.closest("form")).toBeNull();
   });
 
   it("opens Add Grant from the grants drawer instead of the list action column", async () => {
@@ -835,6 +837,104 @@ describe("MCPAgentsGrantsPage", () => {
       grantType: "tool"
     }));
   });
+
+  it("按上游服务全选能力并一次提交多条角色授权", async () => {
+    renderPage();
+
+    await findRowByText("agent_sales");
+    fireEvent.click(screen.getByRole("button", { name: "按角色授权" }));
+    const dialog = await screen.findByRole("dialog", { name: "按角色授权" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: /已选择 1 个能力/ }));
+
+    const crmGroup = await screen.findByRole("checkbox", { name: "选择 CRM Main 的全部能力" });
+    expect(crmGroup).toHaveAttribute("aria-checked", "mixed");
+    fireEvent.click(crmGroup);
+
+    expect(await screen.findByRole("combobox", { name: "capability_id，已选择 2 个能力" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "选择 CRM Main 的全部能力" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("已选 2 / 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "提交授权" }));
+
+    await waitFor(() => expect(createMCPGrantMock).toHaveBeenCalledTimes(2));
+    expect(createMCPGrantMock).toHaveBeenNthCalledWith(1, expect.objectContaining({ roleId: "role_sales", capabilityId: "cap_active" }));
+    expect(createMCPGrantMock).toHaveBeenNthCalledWith(2, expect.objectContaining({ roleId: "role_sales", capabilityId: "cap_crm_note" }));
+  });
+
+  it("再次点击上游服务全选可取消该组已选能力", async () => {
+    renderPage();
+
+    await findRowByText("agent_sales");
+    fireEvent.click(screen.getByRole("button", { name: "按角色授权" }));
+    const dialog = await screen.findByRole("dialog", { name: "按角色授权" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: /已选择 1 个能力/ }));
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择 CRM Main 的全部能力" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择 CRM Main 的全部能力" }));
+
+    expect(await screen.findByRole("combobox", { name: "capability_id，未选择能力" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提交授权" })).toBeDisabled();
+  });
+
+  it("搜索时按上游服务分组的全选入口随组显隐", async () => {
+    renderPage();
+
+    await findRowByText("agent_sales");
+    fireEvent.click(screen.getByRole("button", { name: "按角色授权" }));
+    const dialog = await screen.findByRole("dialog", { name: "按角色授权" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: /已选择 1 个能力/ }));
+    expect(await screen.findByRole("checkbox", { name: "选择 CRM Main 的全部能力" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("搜索 capability_id / exposed_name"), { target: { value: "export" } });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("checkbox", { name: "选择 CRM Main 的全部能力" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("checkbox", { name: "选择 Finance Main 的全部能力" })).toBeInTheDocument();
+  });
+
+  it("按角色授权不列出该角色已授权的能力", async () => {
+    listMCPGrantsMock.mockResolvedValue([
+      ...grants,
+      {
+        id: "grant_role_001",
+        userId: "",
+        roleId: "role_sales",
+        capabilityId: "cap_active",
+        grantType: "tool",
+        dataScope: null,
+        expiresAt: null,
+        createdBy: "admin",
+        createdAt: "2026-05-26T00:00:00Z",
+        updatedAt: "2026-05-27T09:00:00Z"
+      }
+    ]);
+    renderPage();
+
+    await findRowByText("agent_sales");
+    fireEvent.click(screen.getByRole("button", { name: "按角色授权" }));
+    const dialog = await screen.findByRole("dialog", { name: "按角色授权" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: /已选择 1 个能力/ }));
+
+    expect(await screen.findByRole("option", { name: /finance\.report\.export/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /crm\.note\.create/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /crm\.customer\.search/ })).not.toBeInTheDocument();
+  });
+
+  it("添加授权弹窗同样支持按上游服务全选能力", async () => {
+    renderPage();
+
+    await selectAgent("agent_sales");
+    fireEvent.click(screen.getByRole("button", { name: "添加授权" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: /已选择 1 个能力/ }));
+
+    const crmGroup = await screen.findByRole("checkbox", { name: "选择 CRM Main 的全部能力" });
+    expect(crmGroup).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(crmGroup);
+
+    expect(await screen.findByRole("combobox", { name: "capability_id，未选择能力" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提交授权" })).toBeDisabled();
+  });
 });
 
 function renderPage(account?: Account, initialEntry = "/admin/mcp/agents", features?: Partial<Record<AdminFeature, boolean>>) {
@@ -875,7 +975,7 @@ async function openGrantsDrawer(agentId: string) {
 async function openTokenDrawer(agentId: string) {
   const row = await findRowByText(agentId);
   fireEvent.click(within(row).getByRole("button", { name: "查看 Sales Assistant 令牌详情" }));
-  await screen.findByRole("heading", { name: "账户级 Token 与 MCP 配置" });
+  await screen.findByRole("heading", { name: "账户级 Token 与接入配置" });
   await waitFor(() => expect(getMCPAccountTokenMock).toHaveBeenCalledWith("usr_1"));
 }
 
@@ -929,7 +1029,7 @@ function tokenResponse(token: string): MCPAccountTokenResponse {
       tokenExpiresAt: "2026-06-27T00:00:00Z",
       tokenLastUsedAt: null,
       tokenIssuer: "mcp-gateway",
-      tokenScopes: ["mcp:call"],
+      tokenScopes: ["mcp:call", "model:call"],
       createdAt: "2026-05-27T10:00:00Z"
     }
   };

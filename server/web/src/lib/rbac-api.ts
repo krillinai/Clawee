@@ -69,6 +69,7 @@ export const permissions = {
   knowledgeDocumentSync: "console:knowledge:document_sync",
   knowledgeDocumentDelete: "console:knowledge:document_delete",
   skillRead: "console:skill:read",
+  skillDownload: "console:skill:download",
   skillManage: "console:skill:manage",
   skillVersionUpload: "console:skill:version_upload",
   skillMove: "console:skill:move",
@@ -126,6 +127,8 @@ export type Permission = {
 };
 
 export type Role = {
+	departmentRoleType?: "default" | "manager";
+	departmentId?: string;
   roleId: string;
   code: string;
   name: string;
@@ -136,6 +139,10 @@ export type Role = {
 };
 
 export type AccountRole = {
+	sources?: ("manual" | "rose_department")[];
+	departmentRoleType?: "default" | "manager";
+	departmentId?: string;
+	departmentName?: string;
   accountId: string;
   roleId: string;
   roleCode: string;
@@ -148,6 +155,8 @@ type ListResponse<T> = { data: T[] };
 type ItemResponse<T> = { data: T };
 
 type RoleResponse = {
+	department_role_type?: "default" | "manager" | "";
+	department_id?: string;
   role_id: string;
   code: string;
   name: string;
@@ -158,6 +167,10 @@ type RoleResponse = {
 };
 
 type AccountRoleResponse = {
+	sources?: ("manual" | "rose_department")[];
+	department_role_type?: "default" | "manager" | "";
+	department_id?: string;
+	department_name?: string;
 	user_id: string;
   role_id: string;
   role_code: string;
@@ -176,7 +189,7 @@ export async function listRoles(): Promise<Role[]> {
   return (await publicApi.get<ListResponse<RoleResponse>>(`${basePath}/roles`)).data.map(mapRole);
 }
 
-export async function createRole(input: { code: string; name: string; permissionCodes: string[] }): Promise<Role> {
+export async function createRole(input: { code?: string; name: string; permissionCodes: string[] }): Promise<Role> {
   const response = await publicApi.post<ItemResponse<RoleResponse>>(`${basePath}/roles`, {
     code: input.code,
     name: input.name,
@@ -215,6 +228,8 @@ export function removeAccountRole(accountId: string, roleId: string) {
 
 function mapRole(role: RoleResponse): Role {
   return {
+		...(role.department_role_type ? {departmentRoleType: role.department_role_type} : {}),
+		...(role.department_id ? {departmentId: role.department_id} : {}),
     roleId: role.role_id,
     code: role.code,
     name: role.name,
@@ -227,6 +242,9 @@ function mapRole(role: RoleResponse): Role {
 
 function mapAccountRole(role: AccountRoleResponse): AccountRole {
   return {
+		...(role.sources ? {sources: role.sources} : {}),
+		...(role.department_role_type ? {departmentRoleType: role.department_role_type} : {}),
+		...(role.department_id ? {departmentId: role.department_id, departmentName: role.department_name} : {}),
 		accountId: role.user_id,
     roleId: role.role_id,
     roleCode: role.role_code,

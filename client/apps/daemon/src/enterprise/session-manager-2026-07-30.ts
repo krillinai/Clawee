@@ -10,6 +10,7 @@ import type {
   EnterpriseTransportSecurity,
   RuntimeErrorCode
 } from '@clawee/protocol';
+import { httpFailureDetails } from '@clawee/protocol';
 import {
   createHash,
   randomBytes,
@@ -37,8 +38,10 @@ import {
 
 export type EnterpriseSessionManager = {
   startRestore(): void;
+  waitForRestore?(): Promise<EnterpriseSessionResponse>;
   getSnapshot(): EnterpriseSessionResponse;
   refresh(): Promise<EnterpriseSessionResponse>;
+  renew(): Promise<EnterpriseSessionResponse>;
   login(input: EnterpriseLoginRequest): Promise<EnterpriseSessionResponse>;
   register(input: EnterpriseRegisterRequest): Promise<EnterpriseSessionResponse>;
   startQrLogin?(
@@ -78,6 +81,8 @@ export type EnterpriseDingTalkProviderError =
   | 'oauth_provider_denied'
   | 'oauth_state_invalid'
   | 'dingtalk_upstream_unavailable'
+  | 'employee_directory_unavailable'
+  | 'employee_phone_missing'
   | 'not_enterprise_member'
   | 'dingtalk_email_missing'
   | 'account_binding_required'
@@ -151,8 +156,9 @@ export function createEnterpriseSessionManager(input: {
   credentialReadTimeoutMs?: number;
   httpClient: EnterpriseHttpClient;
   transportSecurity: EnterpriseTransportSecurity;
-  onSignedIn?(identity: EnterpriseSignedInIdentity): void;
+  onSignedIn?(identity: EnterpriseSignedInIdentity): void | Promise<void>;
   onSignedOut?(): void;
+  onSnapshot?(snapshot: EnterpriseSessionResponse): void;
 }): EnterpriseSessionManager & EnterpriseIdentityProvider {
   let generation = 0;
   let closed = false;
@@ -163,6 +169,8 @@ export function createEnterpriseSessionManager(input: {
   let pendingDingTalkLogin: PendingDingTalkLogin | undefined;
   let pendingDingTalkTimer: ReturnType<typeof setTimeout> | undefined;
   let credentialMutation = Promise.resolve();
+  let pendingRenewal: Promise<EnterpriseSessionResponse> | undefined;
+  let restoreWork: Promise<EnterpriseSessionResponse> | undefined;
   let pendingCredentialRead:
     Promise<EnterpriseCredential | undefined> | undefined;
 
@@ -191,6 +199,7 @@ export function createEnterpriseSessionManager(input: {
   ): boolean {
     if (closed || operationGeneration !== generation) return false;
     snapshot = next;
+    input.onSnapshot?.(next);
     if (next.status === 'signed_out') input.onSignedOut?.();
     return true;
   }
@@ -537,15 +546,15 @@ export function createEnterpriseSessionManager(input: {
       expiresAt: request.credential.expiresAt,
       transportSecurity: input.transportSecurity
     };
-    const published = publish(request.operationGeneration, next);
-    if (published && request.notifySignedIn) {
-      input.onSignedIn?.({
+    if (request.operationGeneration === generation && request.notifySignedIn) {
+      await input.onSignedIn?.({
         subjectId: me.account.subjectId,
         agentId: me.agentId,
         accessToken: request.credential.accessToken,
         activityReportingEnabled: me.activityReportingEnabled === true
       });
     }
+    publish(request.operationGeneration, next);
     return next;
   }
 
@@ -607,6 +616,46 @@ export function createEnterpriseSessionManager(input: {
       persist: false,
       notifySignedIn: true
     });
+  }
+
+  async function renewSession(): Promise<EnterpriseSessionResponse> {
+    if (snapshot.status === 'service_unavailable') await refreshForGeneration(beginOperation());
+    const operationGeneration = generation;
+    const stored = await readCredential(operationGeneration);
+    if (closed || stored === undefined || snapshot.status !== 'signed_in') {
+      throw new EnterpriseSessionError('ENTERPRISE_UNAUTHORIZED', 401);
+    }
+    const renew = input.httpClient.renewSession;
+    if (renew === undefined) throw new EnterpriseSessionError('ENTERPRISE_PROTOCOL_ERROR', 502);
+    let renewed;
+    try {
+      renewed = await renew(stored.accessToken);
+    } catch (error) {
+      // 临时网络故障保留原凭据，后续用户操作可以重试。
+      if (operationGeneration === generation && error instanceof EnterpriseHttpError
+        && (error.code === 'ENTERPRISE_UNAUTHORIZED' || error.code === 'ENTERPRISE_ACCOUNT_INACTIVE'
+          || error.code === 'ENTERPRISE_FRONTEND_FORBIDDEN' || error.code === 'ENTERPRISE_AGENT_FORBIDDEN')) {
+        await clearCredential(operationGeneration, error.code === 'ENTERPRISE_ACCOUNT_INACTIVE'
+          ? 'account_inactive' : error.code === 'ENTERPRISE_FRONTEND_FORBIDDEN' ? 'frontend_forbidden'
+            : error.code === 'ENTERPRISE_UNAUTHORIZED' ? 'session_expired' : undefined);
+      }
+      if (error instanceof EnterpriseHttpError) throw sessionErrorFromHttp(error);
+      throw new EnterpriseSessionError('ENTERPRISE_PROTOCOL_ERROR', 502);
+    }
+    await mutateCredential(async () => {
+      // 登录、退出或身份校验期间的旧响应不能覆盖当前账号。
+      if (closed || operationGeneration !== generation || credential !== stored) return;
+      const next = { ...stored, ...renewed };
+      try {
+        await input.credentialStore.write(next);
+      } catch {
+        throw new EnterpriseSessionError('ENTERPRISE_SECURE_STORAGE_UNAVAILABLE', 503);
+      }
+      if (closed || operationGeneration !== generation || credential !== stored) return;
+      credential = next;
+      publish(operationGeneration, { ...snapshot, expiresAt: next.expiresAt });
+    });
+    return snapshot;
   }
 
   async function rejectUnusableCredential(request: {
@@ -689,9 +738,11 @@ export function createEnterpriseSessionManager(input: {
         throw new EnterpriseSessionError(
           'ENTERPRISE_SERVICE_UNAVAILABLE',
           503,
-          error.upstreamCode === 'dingtalk_disabled'
-            ? { reason: 'dingtalk_disabled' }
-            : undefined
+          {
+            ...enterpriseHttpErrorDetails(error),
+            ...(error.upstreamCode === 'dingtalk_disabled' ? { reason: 'dingtalk_disabled' } : {})
+          },
+          enterpriseHttpDiagnostic(error)
         );
       }
       throw new EnterpriseSessionError('ENTERPRISE_PROTOCOL_ERROR', 500);
@@ -910,14 +961,23 @@ export function createEnterpriseSessionManager(input: {
   return {
     startRestore() {
       const operationGeneration = beginOperation();
-      void refreshForGeneration(operationGeneration).catch(error => {
+      const work = refreshForGeneration(operationGeneration).catch(error => {
         if (snapshot.status === 'checking') {
           publish(operationGeneration, signedOutSnapshot());
         }
         console.warn(
           `Enterprise session restore failed [${sessionErrorCode(error)}]`
         );
+        return snapshot;
       });
+      restoreWork = work;
+      void work.finally(() => {
+        if (restoreWork === work) restoreWork = undefined;
+      }).catch(() => undefined);
+    },
+
+    waitForRestore() {
+      return restoreWork ?? Promise.resolve(snapshot);
     },
 
     getSnapshot() {
@@ -925,7 +985,18 @@ export function createEnterpriseSessionManager(input: {
     },
 
     async refresh() {
+      if (pendingRenewal !== undefined) await pendingRenewal.catch(() => undefined);
       return refreshForGeneration(beginOperation());
+    },
+
+    renew() {
+      if (pendingRenewal !== undefined) return pendingRenewal;
+      const work = renewSession();
+      pendingRenewal = work;
+      void work.finally(() => {
+        if (pendingRenewal === work) pendingRenewal = undefined;
+      }).catch(() => undefined);
+      return work;
     },
 
     prepareDingTalkLogin,
@@ -957,17 +1028,19 @@ export function createEnterpriseSessionManager(input: {
         return await authenticateNew(
           operationGeneration,
           {
-            email: request.email,
+            ...(request.phone === undefined ? { email: request.email } : { phone: request.phone }),
             password: request.password
           },
           agentId
         );
       } catch {
-        const email = request.email.trim().toLowerCase();
+        const identifier = request.phone === undefined
+          ? { email: request.email.trim().toLowerCase() }
+          : { phone: request.phone };
         throw new EnterpriseSessionError(
           'ENTERPRISE_REGISTERED_LOGIN_REQUIRED',
           409,
-          { email }
+          identifier
         );
       }
     },
@@ -1106,6 +1179,8 @@ export function createEnterpriseSessionManager(input: {
     },
 
     async requireAccessToken() {
+      // 业务请求复用正在换发的凭据，避免在到期边界继续发送旧 Token。
+      if (pendingRenewal !== undefined) await pendingRenewal.catch(() => undefined);
       const operationGeneration = generation;
       const stored = await readCredential(operationGeneration);
       if (stored === undefined || snapshot.status !== 'signed_in') {
@@ -1115,6 +1190,7 @@ export function createEnterpriseSessionManager(input: {
     },
 
     async requireIdentity() {
+      if (pendingRenewal !== undefined) await pendingRenewal.catch(() => undefined);
       const operationGeneration = beginOperation();
       const stored = await readCredential(operationGeneration);
       if (stored === undefined) {
@@ -1198,13 +1274,17 @@ function enterpriseHttpDiagnostic(
 }
 
 function dingTalkAuthErrorFields(error: unknown): {
+  [key: string]: unknown;
   errorCode: string;
   statusCode?: number;
   upstreamCode?: string;
   requestId?: string;
 } {
   if (error instanceof EnterpriseHttpError) {
+    const { stage: requestStage, ...details } = enterpriseHttpErrorDetails(error);
     return {
+      ...details,
+      requestStage,
       errorCode: error.code,
       statusCode: error.statusCode,
       upstreamCode: error.upstreamCode,
@@ -1212,7 +1292,11 @@ function dingTalkAuthErrorFields(error: unknown): {
     };
   }
   if (error instanceof EnterpriseSessionError) {
+    const { stage: requestStage, ...details } = error.details?.failureKind
+      ? httpFailureDetails(undefined, error.details) : {};
     return {
+      ...details,
+      ...(requestStage ? { requestStage } : {}),
       errorCode: error.code,
       statusCode: error.statusCode,
       upstreamCode: error.diagnostic?.upstreamCode,
@@ -1284,6 +1368,8 @@ const stableDingTalkErrors = new Set<EnterpriseDingTalkProviderError>([
   'oauth_provider_denied',
   'oauth_state_invalid',
   'dingtalk_upstream_unavailable',
+  'employee_directory_unavailable',
+  'employee_phone_missing',
   'not_enterprise_member',
   'dingtalk_email_missing',
   'account_binding_required',
@@ -1317,6 +1403,7 @@ function dingTalkReasonFromGatewayCode(
   if (
     code === 'not_enterprise_member'
     || code === 'dingtalk_email_missing'
+    || code === 'employee_phone_missing'
     || code === 'account_binding_required'
     || code === 'auto_provision_disabled'
     || code === 'system_not_initialized'

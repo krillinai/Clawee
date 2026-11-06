@@ -1,3 +1,5 @@
+import { redactIncidentCredentials } from '@clawee/protocol';
+
 const assignmentSecretPattern =
   /([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|COOKIE|AUTH)[A-Z0-9_]*)=(?!\[REDACTED\])([^\s"',}\]]+)/gi;
 const labeledSecretPattern =
@@ -10,7 +12,7 @@ const agentCapabilityPattern = /\bclwcap_[A-Za-z0-9_-]+\b/g;
 const standaloneOpenAiKeyPattern = /\bsk-[A-Za-z0-9_-]{8,}\b/g;
 
 export function redactText(input: string): string {
-  return input
+  return redactIncidentCredentials(input)
     .replace(jsonSecretPattern, '$1[REDACTED]$3')
     .replace(assignmentSecretPattern, (_match, key: string) => `${key}=[REDACTED]`)
     .replace(labeledSecretPattern, (_match, prefix: string) => `${prefix}[REDACTED]`)

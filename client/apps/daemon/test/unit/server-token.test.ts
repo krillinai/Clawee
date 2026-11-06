@@ -40,6 +40,6 @@ describe('server token', () => {
 
     expect(second).toBe(first);
     expect(readFileSync(path, 'utf8').trim()).toBe(first);
-    expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(lstatSync(path).mode & 0o777).toBe(0o600);
   });
 });

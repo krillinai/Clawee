@@ -42,14 +42,18 @@ var (
 )
 
 type Space struct {
-	SpaceID     string            `json:"space_id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	CreatedBy   string            `json:"created_by,omitempty"`
-	UpdatedBy   string            `json:"updated_by,omitempty"`
-	CreatedAt   time.Time         `json:"created_at,omitempty"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-	Permissions *SpacePermissions `json:"permissions,omitempty"`
+	PersonalOwnerUserID  string            `json:"personal_owner_user_id,omitempty"`
+	PersonalOwnerName    string            `json:"personal_owner_name,omitempty"`
+	PersonalOwnerEmail   string            `json:"personal_owner_email,omitempty"`
+	WorkflowTemplateName string            `json:"workflow_template_name,omitempty"`
+	SpaceID              string            `json:"space_id"`
+	Name                 string            `json:"name"`
+	Description          string            `json:"description"`
+	CreatedBy            string            `json:"created_by,omitempty"`
+	UpdatedBy            string            `json:"updated_by,omitempty"`
+	CreatedAt            time.Time         `json:"created_at,omitempty"`
+	UpdatedAt            time.Time         `json:"updated_at"`
+	Permissions          *SpacePermissions `json:"permissions,omitempty"`
 }
 
 type SpacePermissions struct {
@@ -241,10 +245,11 @@ type Cursor struct {
 }
 
 type SpaceFilter struct {
-	UserID string
-	Query  string
-	Limit  int
-	Cursor Cursor
+	PersonalOwnerUserID string
+	UserID              string
+	Query               string
+	Limit               int
+	Cursor              Cursor
 }
 
 type FileFilter struct {

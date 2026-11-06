@@ -1,6 +1,6 @@
 import { CalendarIcon, Check, ChevronsUpDown, Plus } from "lucide-react";
-import type { FormEvent, ReactNode, WheelEvent } from "react";
-import { useCallback, useMemo, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { firstRequestError, isForbiddenError } from "@/lib/api";
@@ -46,6 +46,7 @@ import {
   getMCPAccountToken,
   listMCPAgents,
   listMCPCapabilities,
+  listMCPGrantRoles,
   listMCPGrants,
   listMCPUpstreamServers,
   revealMCPAccountToken,
@@ -56,6 +57,7 @@ import {
   type MCPAccountTokenResponse,
   type MCPCapability,
   type MCPGrant,
+  type MCPGrantRole,
   type MCPUpstreamServer
 } from "@/lib/mcp-admin-api";
 import { cn } from "@/lib/utils";
@@ -63,7 +65,7 @@ import { listAccounts, type Account } from "@/lib/accounts-api";
 import { mergeAgentGovernanceRows } from "@/lib/agent-governance";
 import { useAdminFeatureEnabled } from "@/hooks/useAdminFeatures";
 import { APIError } from "@/lib/api";
-import { mcpStatusLabel } from "@/lib/mcp-admin-ui";
+import { formatDateTime, isDataAuthorizedTool, mcpStatusLabel } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
 import { cleanInputIdentifier, trimInput } from "@/lib/text";
 import {
@@ -85,6 +87,7 @@ const grantTypeOptions = ["tool", "resource", "prompt"] as const;
 const revokeConfirmText = "吊销后该账户下所有 Agent 都将无法访问 MCP Gateway。";
 const rotateConfirmText = "轮换后该账户的旧访问令牌将失效，所有 Agent 的 MCP 配置都需要更新。";
 const deleteGrantConfirmText = "删除后同账户所有 Agent 都将失去该工具权限。";
+const deleteRoleGrantConfirmText = "删除后该角色下的账户将失去对应的 MCP 权限。";
 const deleteAgentConfirmText = "将删除该 MCP 身份的账号绑定和登录会话；账户 Token 与账户授权保持不变。采集器上报的运行实例不会删除，操作后将显示为“未绑定 MCP 身份”。此操作无法撤销。";
 const deleteOfficeAgentConfirmText = "将清理该运行实例及其会话、轮次、活动和工具调用数据；若采集器后续再次上报，该实例会重新出现。此操作无法撤销。";
 type CreateAgentForm = {
@@ -103,6 +106,13 @@ type AddGrantForm = {
   domain: string;
   type: string;
   status: string;
+};
+
+type RoleGrantForm = {
+  roleId: string;
+  capabilityIds: string[];
+  grantType: string;
+  expiresAt: string;
 };
 
 type ConfirmState =
@@ -142,11 +152,14 @@ export function MCPAgentsGrantsPage() {
   const [tokenResult, setTokenResult] = useState<MCPAccountTokenResponse | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [addGrantOpen, setAddGrantOpen] = useState(false);
+  const [roleGrantOpen, setRoleGrantOpen] = useState(false);
   const [addGrantAgentID, setAddGrantAgentID] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [createForm, setCreateForm] = useState<CreateAgentForm>(defaultCreateAgentForm);
   const [addGrantForm, setAddGrantForm] = useState<AddGrantForm>(defaultAddGrantForm);
+  const [roleGrantForm, setRoleGrantForm] = useState<RoleGrantForm>(defaultRoleGrantForm);
   const [addGrantError, setAddGrantError] = useState<string | null>(null);
+  const [roleGrantError, setRoleGrantError] = useState<string | null>(null);
   const [bindingOfficeAgent, setBindingOfficeAgent] = useState<AgentListItem | null>(null);
   const [bindingMCPAgentID, setBindingMCPAgentID] = useState("");
   const [transferAgent, setTransferAgent] = useState<MCPAgent | null>(null);
@@ -162,6 +175,11 @@ export function MCPAgentsGrantsPage() {
     queryKey: grantsQueryKey,
     queryFn: () => listMCPGrants(),
     enabled: canReadGrants
+  });
+  const rolesQuery = useQuery({
+    queryKey: ["mcp-grant-roles"],
+    queryFn: listMCPGrantRoles,
+    enabled: canCreateGrant
   });
   const capabilitiesQuery = useQuery({
     queryKey: capabilitiesQueryKey,
@@ -186,6 +204,7 @@ export function MCPAgentsGrantsPage() {
 
   const agents = agentsQuery.data ?? [];
   const grants = grantsQuery.data ?? [];
+  const roles = rolesQuery.data ?? [];
   const capabilities = capabilitiesQuery.data ?? [];
   const servers = serversQuery.data ?? [];
   const activeAccounts = (accountsQuery.data ?? []).filter((account) => account.status === "active");
@@ -202,6 +221,7 @@ export function MCPAgentsGrantsPage() {
     [agents, linkedMCPAgentIDs]
   );
   const capabilityByID = useMemo(() => new Map(capabilities.map((item) => [item.id, item])), [capabilities]);
+  const roleByID = useMemo(() => new Map(roles.map((role) => [role.roleId, role])), [roles]);
   const serverByID = useMemo(() => new Map(servers.map((item) => [item.id, item])), [servers]);
   const grantsByUserID = useMemo(() => groupGrantsByUserID(grants), [grants]);
   const tokenDrawerAgent = agents.find((agent) => agent.agentId === tokenDrawerAgentID) ?? null;
@@ -256,6 +276,7 @@ export function MCPAgentsGrantsPage() {
         const server = serverByID.get(capability.upstreamServerId);
         return (
           capability.status === addGrantForm.status &&
+          !isDataAuthorizedTool(capability, server) &&
           !addGrantGrantedCapabilityIDs.has(capability.id) &&
           (addGrantForm.serverId === "all" || capability.upstreamServerId === addGrantForm.serverId) &&
           (addGrantForm.domain === "all" || server?.domain === addGrantForm.domain) &&
@@ -272,6 +293,21 @@ export function MCPAgentsGrantsPage() {
       serverByID
     ]
   );
+  const roleGrantGrantedCapabilityIDs = useMemo(
+    () => new Set(grants.filter((grant) => grant.roleId === roleGrantForm.roleId).map((grant) => grant.capabilityId)),
+    [grants, roleGrantForm.roleId]
+  );
+  const roleGrantCapabilities = useMemo(
+    () =>
+      capabilities.filter(
+        (capability) =>
+          capability.status === "active" &&
+          !isDataAuthorizedTool(capability, serverByID.get(capability.upstreamServerId)) &&
+          !roleGrantGrantedCapabilityIDs.has(capability.id)
+      ),
+    [capabilities, roleGrantGrantedCapabilityIDs, serverByID]
+  );
+  const roleGrants = useMemo(() => grants.filter((grant) => Boolean(grant.roleId)), [grants]);
 
   const createAgentMutation = useMutation({
     mutationFn: () =>
@@ -340,6 +376,28 @@ export function MCPAgentsGrantsPage() {
       queryClient.invalidateQueries({ queryKey: agentsQueryKey });
     },
     onError: (error) => setAddGrantError(error.message)
+  });
+
+  const createRoleGrantMutation = useMutation({
+    mutationFn: async () => {
+      const results = await Promise.allSettled(roleGrantForm.capabilityIds.map((capabilityId) => createMCPGrant({
+        roleId: roleGrantForm.roleId,
+        capabilityId,
+        grantType: roleGrantForm.grantType,
+        ...(roleGrantForm.expiresAt ? { expiresAt: roleGrantForm.expiresAt } : {})
+      })));
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected" && !isGrantAlreadyExistsError(result.reason)
+      );
+      if (failure) throw failure.reason;
+    },
+    onSuccess: () => {
+      setRoleGrantOpen(false);
+      setRoleGrantForm(defaultRoleGrantForm);
+      setRoleGrantError(null);
+      queryClient.invalidateQueries({ queryKey: grantsQueryKey });
+    },
+    onError: (error) => setRoleGrantError(error.message)
   });
 
   const deleteGrantMutation = useMutation({
@@ -439,10 +497,27 @@ export function MCPAgentsGrantsPage() {
     setAddGrantAgentID(agent.agentId);
     if (!agent.boundUserId) return;
     const grantedCapabilityIDs = new Set((grantsByUserID.get(agent.boundUserId) ?? []).map((grant) => grant.capabilityId));
-    const firstActiveCapability = firstGrantableActiveCapability(capabilities, grantedCapabilityIDs);
+    const firstActiveCapability = firstGrantableActiveCapability(capabilities.filter(capability => !isDataAuthorizedTool(capability, serverByID.get(capability.upstreamServerId))), grantedCapabilityIDs);
     setAddGrantForm({ ...defaultAddGrantForm, capabilityIds: firstActiveCapability ? [firstActiveCapability.id] : [] });
     setAddGrantError(null);
     setAddGrantOpen(true);
+  }
+
+  function openRoleGrant() {
+    createRoleGrantMutation.reset();
+    const roleId = roles[0]?.roleId ?? "";
+    const grantedCapabilityIDs = new Set(grants.filter((grant) => grant.roleId === roleId).map((grant) => grant.capabilityId));
+    const firstCapability = firstGrantableActiveCapability(
+      capabilities.filter((capability) => !isDataAuthorizedTool(capability, serverByID.get(capability.upstreamServerId))),
+      grantedCapabilityIDs
+    );
+    setRoleGrantForm({
+      ...defaultRoleGrantForm,
+      roleId,
+      capabilityIds: firstCapability ? [firstCapability.id] : []
+    });
+    setRoleGrantError(null);
+    setRoleGrantOpen(true);
   }
 
   function submitAddGrant(event: FormEvent<HTMLFormElement>) {
@@ -491,12 +566,13 @@ export function MCPAgentsGrantsPage() {
   return (
     <PageShell>
       <PageHeader
-        actions={canCreateAgent ?
-          <Button onClick={openCreateAgent} variant="primary">
+        actions={<div className="flex gap-2">
+          {canCreateGrant && canReadCapabilities ? <Button onClick={openRoleGrant} variant="secondary">按角色授权</Button> : null}
+          {canCreateAgent ? <Button onClick={openCreateAgent} variant="primary">
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
             创建智能体
-          </Button> : undefined
-        }
+          </Button> : null}
+        </div>}
         title="智能体管理"
       >
         统一查看 Collector 发现的运行实例与 MCP Gateway 治理身份。两者关联后合并为一个智能体。
@@ -566,6 +642,27 @@ export function MCPAgentsGrantsPage() {
           />
         </CardContent>
       </Card>
+
+      {canReadGrants && roleGrants.length > 0 ? <Card>
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle>角色 MCP 授权</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">角色成员自动继承这些授权，账户级授权仍可单独配置。</p>
+          </div>
+          <Badge variant="muted">{roleGrants.length} 条授权</Badge>
+        </CardHeader>
+        <CardContent className="grid gap-2">
+          {roleGrants.map((grant) => (
+            <div className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm" key={grant.id}>
+              <div className="min-w-0">
+                <div className="font-medium">{(grant.roleId ? roleByID.get(grant.roleId)?.name : "") || grant.roleId}</div>
+                <div className="truncate text-xs text-muted-foreground">{capabilityByID.get(grant.capabilityId)?.exposedName || grant.capabilityId} · {grant.grantType}{grant.expiresAt ? ` · 过期于 ${formatDateTime(grant.expiresAt)}` : ""}</div>
+              </div>
+              {canRevokeGrant ? <Button onClick={() => openConfirm({ kind: "deleteGrant", grant })} size="sm" variant="destructive">删除</Button> : null}
+            </div>
+          ))}
+        </CardContent>
+      </Card> : null}
 
       <MCPAgentTokenDrawer
         agent={tokenDrawerAgent}
@@ -707,6 +804,23 @@ export function MCPAgentsGrantsPage() {
         typeOptions={typeOptions}
       />
 
+      <RoleGrantModal
+        capabilities={roleGrantCapabilities}
+        error={roleGrantError}
+        form={roleGrantForm}
+        isPending={createRoleGrantMutation.isPending}
+        onChange={(next) => setRoleGrantForm((current) => ({ ...current, ...next }))}
+        onClose={() => setRoleGrantOpen(false)}
+        onSubmit={(event) => {
+          event.preventDefault();
+          setRoleGrantError(null);
+          createRoleGrantMutation.mutate();
+        }}
+        open={roleGrantOpen}
+        roles={roles}
+        serverByID={serverByID}
+      />
+
       <ConfirmModal
         confirmState={confirmState}
         error={
@@ -825,8 +939,10 @@ function AddGrantModal({
   const selectedCapabilityIDs = form.capabilityIds.filter((capabilityId) =>
     capabilities.some((capability) => capability.id === capabilityId)
   );
+  const [capabilityContainer, setCapabilityContainer] = useState<HTMLDivElement | null>(null);
   return (
     <ModalShell contextLabel="MCP 网关" onClose={onClose} open={open} title="添加授权">
+      <div ref={setCapabilityContainer}>
       <form className="grid gap-4" onSubmit={onSubmit}>
         <FilterRow compact>
           <FilterSelect ariaLabel="筛选授权上游服务" value={form.serverId} onChange={(value) => onChange({ serverId: value, capabilityIds: [] })}>
@@ -863,6 +979,7 @@ function AddGrantModal({
         </FilterRow>
 
         <CapabilityMultiSelect
+          container={capabilityContainer}
           capabilities={capabilities}
           selectedCapabilityIDs={selectedCapabilityIDs}
           serverByID={serverByID}
@@ -894,6 +1011,71 @@ function AddGrantModal({
           </Button>
         </div>
       </form>
+      </div>
+    </ModalShell>
+  );
+}
+
+function RoleGrantModal({
+  open,
+  form,
+  roles,
+  capabilities,
+  serverByID,
+  error,
+  isPending,
+  onChange,
+  onClose,
+  onSubmit
+}: {
+  open: boolean;
+  form: RoleGrantForm;
+  roles: MCPGrantRole[];
+  capabilities: MCPCapability[];
+  serverByID: Map<string, MCPUpstreamServer>;
+  error: string | null;
+  isPending: boolean;
+  onChange: (next: Partial<RoleGrantForm>) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedCapabilityIDs = form.capabilityIds.filter((capabilityId) => capabilities.some((capability) => capability.id === capabilityId));
+  const [capabilityContainer, setCapabilityContainer] = useState<HTMLDivElement | null>(null);
+  return (
+    <ModalShell contextLabel="MCP 网关" onClose={onClose} open={open} title="按角色授权">
+      <div ref={setCapabilityContainer}>
+        <form className="grid gap-4" onSubmit={onSubmit}>
+          <Field>
+            <FieldLabel htmlFor="mcp-role-grant-role">授权角色</FieldLabel>
+            <NativeSelect id="mcp-role-grant-role" value={form.roleId} onChange={(event) => onChange({ roleId: event.target.value, capabilityIds: [] })}>
+              <option value="">选择角色</option>
+              {roles.map((role) => <option key={role.roleId} value={role.roleId}>{role.name} ({role.code})</option>)}
+            </NativeSelect>
+          </Field>
+          <CapabilityMultiSelect
+            container={capabilityContainer}
+            capabilities={capabilities}
+            selectedCapabilityIDs={selectedCapabilityIDs}
+            serverByID={serverByID}
+            onChange={(capabilityIds) => onChange({ capabilityIds })}
+          />
+          <FormField label="grant_type">
+            <NativeSelect aria-label="grant_type" value={form.grantType} onChange={(event) => onChange({ grantType: event.target.value })}>
+              {grantTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </NativeSelect>
+          </FormField>
+          <FormField label="expires_at">
+            <GrantExpiresAtPicker value={form.expiresAt} onChange={(expiresAt) => onChange({ expiresAt })} />
+          </FormField>
+          {error ? <ErrorBlock>{error}</ErrorBlock> : null}
+          <div className="flex justify-end gap-2">
+            <Button disabled={isPending} onClick={onClose} variant="secondary">取消</Button>
+            <Button disabled={isPending || !form.roleId || selectedCapabilityIDs.length === 0} type="submit" variant="primary">
+              {isPending ? "提交中..." : "提交授权"}
+            </Button>
+          </div>
+        </form>
+      </div>
     </ModalShell>
   );
 }
@@ -934,11 +1116,13 @@ function GrantExpiresAtPicker({ value, onChange }: { value: string; onChange: (e
 }
 
 function CapabilityMultiSelect({
+  container,
   capabilities,
   selectedCapabilityIDs,
   serverByID,
   onChange
 }: {
+  container: HTMLDivElement | null;
   capabilities: MCPCapability[];
   selectedCapabilityIDs: string[];
   serverByID: Map<string, MCPUpstreamServer>;
@@ -956,6 +1140,8 @@ function CapabilityMultiSelect({
         ? `${selectedCapabilities[0].exposedName} (${selectedCapabilities[0].id})`
         : `已选择 ${selectedCount} 个能力`;
 
+  const groups = useMemo(() => groupCapabilitiesByUpstream(capabilities, serverByID), [capabilities, serverByID]);
+
   function toggleCapability(capabilityId: string) {
     onChange(
       selectedCapabilityIDSet.has(capabilityId)
@@ -963,10 +1149,20 @@ function CapabilityMultiSelect({
         : [...selectedCapabilityIDs, capabilityId]
     );
   }
-  const handleListWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
-    event.currentTarget.scrollTop += event.deltaY;
-    event.stopPropagation();
-  }, []);
+
+  function toggleCapabilityGroup(group: CapabilityGroup, checked: boolean) {
+    if (checked) {
+      const additions = group.capabilities
+        .map((capability) => capability.id)
+        .filter((capabilityId) => !selectedCapabilityIDSet.has(capabilityId));
+      if (additions.length > 0) {
+        onChange([...selectedCapabilityIDs, ...additions]);
+      }
+      return;
+    }
+    const groupCapabilityIDs = new Set(group.capabilities.map((capability) => capability.id));
+    onChange(selectedCapabilityIDs.filter((capabilityId) => !groupCapabilityIDs.has(capabilityId)));
+  }
 
   return (
     <FormField label="capability_id">
@@ -983,60 +1179,76 @@ function CapabilityMultiSelect({
             <ChevronsUpDown className="opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+        <PopoverContent container={container} aria-label="选择授权能力" align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
           <Command>
             <CommandInput placeholder="搜索 capability_id / exposed_name" />
-            <CommandList className="max-h-72" onWheel={handleListWheel}>
+            <CommandList className="max-h-72">
               <CommandEmpty>没有匹配的能力</CommandEmpty>
-              <CommandGroup>
-                {capabilities.map((capability) => {
-                  const selected = selectedCapabilityIDSet.has(capability.id);
-                  const server = serverByID.get(capability.upstreamServerId);
-                  const serverLabel = server?.name || capability.upstreamServerId;
-                  const domainLabel = server?.domain;
-                  return (
-                    <CommandItem
-                      key={capability.id}
-                      aria-selected={selected}
-                      className="items-start gap-3 py-2"
-                      keywords={[
-                        capability.id,
-                        capability.exposedName,
-                        capability.upstreamName,
-                        capability.upstreamServerId,
-                        server?.name,
-                        server?.domain,
-                        capability.type,
-                        capability.status
-                      ].filter((keyword): keyword is string => Boolean(keyword))}
-                      value={`${capability.exposedName} ${capability.id}`}
-                      onSelect={() => toggleCapability(capability.id)}
-                    >
+              {groups.map((group) => {
+                const selectedInGroup = group.capabilities.filter((capability) => selectedCapabilityIDSet.has(capability.id)).length;
+                const groupChecked = selectedInGroup === group.capabilities.length ? true : selectedInGroup > 0 ? "indeterminate" : false;
+                return (
+                  <CommandGroup key={group.key}>
+                    <div className="flex items-center gap-2 rounded-sm px-2 py-1.5">
                       <Checkbox
-                        aria-hidden="true"
-                        checked={selected}
-                        className="mt-1"
-                        tabIndex={-1}
+                        aria-label={`选择 ${group.label} 的全部能力`}
+                        checked={groupChecked}
+                        onCheckedChange={(checked) => toggleCapabilityGroup(group, checked === true)}
                       />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate font-medium">{capability.exposedName}</span>
-                          {serverLabel ? <Badge variant="outline">{serverLabel}</Badge> : null}
-                          {domainLabel ? <Badge variant="outline">{domainLabel}</Badge> : null}
-                          {selected ? <Check className="text-primary" /> : null}
-                        </div>
-                        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                          <span className="truncate font-mono">{capability.id}</span>
-                          <Badge variant="outline">{capability.type}</Badge>
-                          <Badge variant={capability.status === "active" ? "success" : "muted"}>{mcpStatusLabel(capability.status)}</Badge>
-                          {capability.confirmRequired ? <Badge variant="warning">需确认</Badge> : null}
-                          {capability.approvalRequired ? <Badge variant="warning">需审批</Badge> : null}
-                        </div>
-                      </div>
-                    </CommandItem>
-                  );
-                })}
-              </CommandGroup>
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">{group.label}</span>
+                      {group.domain ? <Badge variant="outline">{group.domain}</Badge> : null}
+                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">已选 {selectedInGroup} / {group.capabilities.length}</span>
+                    </div>
+                    {group.capabilities.map((capability) => {
+                      const selected = selectedCapabilityIDSet.has(capability.id);
+                      const server = serverByID.get(capability.upstreamServerId);
+                      const serverLabel = server?.name || capability.upstreamServerId;
+                      const domainLabel = server?.domain;
+                      return (
+                        <CommandItem
+                          key={capability.id}
+                          aria-selected={selected}
+                          className="items-start gap-3 py-2 pl-8"
+                          keywords={[
+                            capability.id,
+                            capability.exposedName,
+                            capability.upstreamName,
+                            capability.upstreamServerId,
+                            server?.name,
+                            server?.domain,
+                            capability.type,
+                            capability.status
+                          ].filter((keyword): keyword is string => Boolean(keyword))}
+                          value={`${capability.exposedName} ${capability.id}`}
+                          onSelect={() => toggleCapability(capability.id)}
+                        >
+                          <Checkbox
+                            aria-hidden="true"
+                            checked={selected}
+                            className="mt-1"
+                            tabIndex={-1}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate font-medium">{capability.exposedName}</span>
+                              {serverLabel ? <Badge variant="outline">{serverLabel}</Badge> : null}
+                              {domainLabel ? <Badge variant="outline">{domainLabel}</Badge> : null}
+                              {selected ? <Check className="text-primary" /> : null}
+                            </div>
+                            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                              <span className="truncate font-mono">{capability.id}</span>
+                              <Badge variant="outline">{capability.type}</Badge>
+                              <Badge variant={capability.status === "active" ? "success" : "muted"}>{mcpStatusLabel(capability.status)}</Badge>
+                              {capability.confirmRequired ? <Badge variant="warning">需确认</Badge> : null}
+                              {capability.approvalRequired ? <Badge variant="warning">需审批</Badge> : null}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                );
+              })}
             </CommandList>
           </Command>
         </PopoverContent>
@@ -1051,10 +1263,36 @@ function CapabilityMultiSelect({
         </div>
       ) : null}
       <span className={cn("text-xs text-muted-foreground", capabilities.length === 0 && "text-danger")}>
-        {capabilities.length === 0 ? "当前过滤条件下没有可授权能力" : "可搜索 exposed_name、capability_id、上游服务、类型或状态"}
+        {capabilities.length === 0 ? "当前过滤条件下没有可授权能力" : "可搜索 exposed_name、capability_id、上游服务、类型或状态；支持按上游服务全选"}
       </span>
     </FormField>
   );
+}
+
+type CapabilityGroup = {
+  key: string;
+  label: string;
+  domain?: string;
+  capabilities: MCPCapability[];
+};
+
+function groupCapabilitiesByUpstream(capabilities: MCPCapability[], serverByID: Map<string, MCPUpstreamServer>): CapabilityGroup[] {
+  const groups = new Map<string, CapabilityGroup>();
+  for (const capability of capabilities) {
+    const existing = groups.get(capability.upstreamServerId);
+    if (existing) {
+      existing.capabilities.push(capability);
+      continue;
+    }
+    const server = serverByID.get(capability.upstreamServerId);
+    groups.set(capability.upstreamServerId, {
+      key: capability.upstreamServerId,
+      label: server?.name || capability.upstreamServerId,
+      domain: server?.domain,
+      capabilities: [capability]
+    });
+  }
+  return Array.from(groups.values()).sort((left, right) => left.label.localeCompare(right.label, "zh-Hans-CN"));
 }
 
 function ConfirmModal({
@@ -1076,7 +1314,7 @@ function ConfirmModal({
       : confirmState?.kind === "revoke"
         ? revokeConfirmText
         : confirmState?.kind === "deleteGrant"
-          ? deleteGrantConfirmText
+          ? confirmState.grant.roleId ? deleteRoleGrantConfirmText : deleteGrantConfirmText
           : confirmState?.kind === "deleteAgent"
             ? deleteAgentConfirmText
             : confirmState?.kind === "deleteOfficeAgent"
@@ -1173,6 +1411,10 @@ function firstGrantableActiveCapability(capabilities: MCPCapability[], grantedCa
   return capabilities.find((capability) => capability.status === "active" && !grantedCapabilityIDs.has(capability.id));
 }
 
+function isGrantAlreadyExistsError(error: unknown) {
+  return error instanceof APIError && error.status === 409 && error.message === "grant_already_exists";
+}
+
 function groupGrantsByUserID(grants: MCPGrant[]) {
   const index = new Map<string, MCPGrant[]>();
   for (const grant of grants) {
@@ -1225,4 +1467,11 @@ const defaultAddGrantForm: AddGrantForm = {
   domain: "all",
   type: "all",
   status: "active"
+};
+
+const defaultRoleGrantForm: RoleGrantForm = {
+  roleId: "",
+  capabilityIds: [],
+  grantType: "tool",
+  expiresAt: ""
 };

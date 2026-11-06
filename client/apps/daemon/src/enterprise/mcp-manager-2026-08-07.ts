@@ -1,6 +1,7 @@
 import type {
   CodexMcpServerResponse,
   EnterpriseMcpCatalogResponse,
+  EnterpriseMcpHealthResponse,
   EnterpriseMcpPreferenceUpdateRequest,
   EnterpriseMcpTokenStatus,
   RuntimeErrorCode
@@ -9,13 +10,14 @@ import { createHash } from 'node:crypto';
 import type { AgentToolRunInjection } from '../agent-tools/run-injection.js';
 import type { McpManager } from '../codex/mcp/manager.js';
 import { MCP_TOOL_TIMEOUT_SEC } from '../task-mcp/constants.js';
+import { checkEnterpriseMcpHealth } from './mcp-health.js';
 import type { RuntimeThread } from '../threads/types.js';
 import type {
   EnterpriseAccountMcpToken,
   EnterpriseHttpClient,
   EnterpriseRemoteMcpCatalog
 } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type {
   EnterpriseMcpPreferenceRepository
 } from './mcp-preferences-2026-08-07.js';
@@ -29,6 +31,7 @@ export const ENTERPRISE_MCP_TOKEN_ENV = 'CLAWEE_ENTERPRISE_MCP_TOKEN';
 export type EnterpriseMcpManager = {
   listConnections(): Promise<EnterpriseMcpCatalogResponse>;
   refreshConnections(): Promise<EnterpriseMcpCatalogResponse>;
+  checkHealth(upstreamId: string): Promise<EnterpriseMcpHealthResponse>;
   updatePreference(
     upstreamId: string,
     update: EnterpriseMcpPreferenceUpdateRequest
@@ -45,7 +48,8 @@ export type EnterpriseMcpManager = {
 export class EnterpriseMcpManagerError extends Error {
   constructor(
     readonly code: RuntimeErrorCode,
-    readonly statusCode: number
+    readonly statusCode: number,
+    readonly details?: Record<string, unknown>
   ) {
     super(`${code}: enterprise MCP operation failed`);
     this.name = 'EnterpriseMcpManagerError';
@@ -504,6 +508,39 @@ export function createEnterpriseMcpManager(input: {
     async refreshConnections() {
       return responseFrom(await refreshRemote(true));
     },
+    async checkHealth(upstreamId) {
+      const current = await refreshRemote();
+      const result = (status: EnterpriseMcpHealthResponse['status'], message: string): EnterpriseMcpHealthResponse => ({
+        status, message, checkedAt: now().toISOString()
+      });
+      const upstream = current.catalog.upstreams.find(candidate => candidate.upstreamId === upstreamId);
+      if (upstream === undefined) {
+        return result('attention', '当前账号无法访问该企业 MCP，请检查权限或目录配置');
+      }
+      const tool = upstream.tools.find(candidate => candidate.upstreamName === 'clawee_get_agent_health');
+      if (tool === undefined) {
+        return result('unknown', '尚未提供健康检查，请管理员升级 Agent 并同步健康检查工具');
+      }
+      if (upstream.status !== 'active' || tool.status !== 'active') {
+        return result('attention', '服务或健康检查工具未启用，请联系管理员');
+      }
+      if (!tool.authorized || isExpired(tool.authorizationExpiresAt, now())) {
+        return result('attention', '当前账号无健康检查权限，请联系管理员授权');
+      }
+      if (tool.confirmRequired) {
+        return result('attention', '健康检查工具需要确认，请管理员核对只读工具配置');
+      }
+      if (currentToken === undefined) {
+        return result('attention', '尚未配置企业 MCP 令牌，请前往账号设置检查');
+      }
+      const prefix = `${upstream.namespace}.`;
+      return checkEnterpriseMcpHealth({
+        endpoint: upstream.endpoint,
+        toolName: tool.exposedName.startsWith(prefix) ? tool.exposedName.slice(prefix.length) : tool.exposedName,
+        token: currentToken.token,
+        agentId: current.agentId
+      });
+    },
     async updatePreference(upstreamId, update) {
       const current = await currentCache();
       const upstream = current.catalog.upstreams.find(
@@ -797,7 +834,8 @@ function mapManagerError(error: unknown): EnterpriseMcpManagerError {
   if (error instanceof EnterpriseHttpError) {
     return new EnterpriseMcpManagerError(
       error.code,
-      managerHttpStatus(error)
+      managerHttpStatus(error),
+      enterpriseHttpErrorDetails(error)
     );
   }
   return new EnterpriseMcpManagerError(

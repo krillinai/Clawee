@@ -474,9 +474,11 @@ export function resolveWorkspacePreviewPath(
   }
 
   const pathOnly = trimmed.split(/[?#]/, 1)[0] ?? '';
+  const normalizedDocumentPath = documentPath.replace(/\\/g, '/');
+  const root = normalizedDocumentPath.startsWith('/') ? '/' : normalizedDocumentPath.match(/^[a-z]:\//i)?.[0] ?? '';
   const baseSegments = pathOnly.startsWith('/')
     ? []
-    : documentPath.split('/').slice(0, -1);
+    : normalizedDocumentPath.slice(root.length).split('/').slice(0, -1);
   for (const rawSegment of pathOnly.split('/')) {
     if (rawSegment.length === 0 || rawSegment === '.') continue;
     let segment: string;
@@ -501,5 +503,5 @@ export function resolveWorkspacePreviewPath(
     }
     baseSegments.push(segment);
   }
-  return baseSegments.length === 0 ? undefined : baseSegments.join('/');
+  return baseSegments.length === 0 ? undefined : root + baseSegments.join('/');
 }

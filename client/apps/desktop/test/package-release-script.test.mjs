@@ -18,8 +18,38 @@ const builderConfig = readFileSync(
   resolve(process.cwd(), 'electron-builder.yml'),
   'utf8'
 );
+const finalizeScript = readFileSync(resolve(process.cwd(), 'scripts/finalize-macos-release.mjs'), 'utf8');
 
 describe('Desktop package release script', () => {
+  it('checks VERSION against reachable tags only for the local directory package', () => {
+    expect(packageScript).toContain("if (mode === 'dir') assertLocalPackageVersion(repositoryRoot);");
+  });
+  it('uses recoverable App and DMG notarization only for formal macOS releases', () => {
+    expect(packageScript).toContain("args.push('--config.mac.notarize=false');");
+    expect(packageScript).toContain("--config.afterSign=${resolve(scriptDir, 'notarize-after-sign.mjs')}");
+    expect(packageScript).toMatch(/if \(packageMode !== 'release'\) \{\s+disableImplicitMacSigning[\s\S]*?\} else \{\s+args.push\('--config.mac.notarize=false'\);/);
+    expect(packageScript).toContain('await finalizeReleaseDmgArtifacts(');
+    expect(packageScript).toContain('await createNotaryRecovery(');
+    expect(packageScript.indexOf('recovery = await createNotaryRecovery('))
+      .toBeGreaterThan(packageScript.indexOf("'验证待公证安装包的静态内容'"));
+    expect(finalizeScript).toContain('await notarizeArtifact(artifact, credentialArgs,');
+    expect(finalizeScript).toContain('await waitForNotarization(');
+    expect(finalizeScript).toContain('await stapleArtifact(artifact)');
+    expect(finalizeScript).toContain('await validateArtifactTicket(artifact)');
+    expect(finalizeScript).toContain("'DMG Gatekeeper'");
+    const dmgFinalization = finalizeScript;
+    expect(dmgFinalization.indexOf('await validateArtifactTicket(artifact)'))
+      .toBeGreaterThan(dmgFinalization.indexOf('await stapleArtifact(artifact)'));
+    expect(dmgFinalization.indexOf("'DMG Gatekeeper'"))
+      .toBeGreaterThan(dmgFinalization.indexOf('await validateArtifactTicket(artifact)'));
+    expect(verifyScript).toContain('await validateArtifactTicket(packageRoot)');
+  });
+
+  it('keeps distributable packages generic instead of embedding customer gateway overrides', () => {
+    expect(packageScript).toContain("mode !== 'dir' ? { gateway: 'http://127.0.0.1:1904', transportSecurity: 'insecure_http' }");
+    expect(packageScript).not.toContain('stageCustomerUpdateMarker(');
+    expect(packageScript).not.toContain('emitCustomerUpdateManifest(');
+  });
   it('preserves the verified daemon deployment layout with pnpm 10', () => {
     const deploymentStage = prepareDaemonScript.match(
       /await runStage\('部署 Daemon 生产依赖'[\s\S]*?\n\}\);/

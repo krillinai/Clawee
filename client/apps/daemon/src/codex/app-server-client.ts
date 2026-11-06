@@ -7,9 +7,9 @@ import {
   terminateCodexProcess
 } from './process.js';
 import {
-  BoundedFrameBuffer,
   BoundedTextBuffer
 } from './bounded-buffer.js';
+import { AppServerFrameBuffer } from './app-server-frame-buffer.js';
 
 export type CodexAppServerRequestClient = {
   request<Result>(method: string, params: unknown): Promise<Result>;
@@ -35,7 +35,7 @@ type AppServerProcessState = {
   pending: Map<string, PendingRequest>;
   initialize: Promise<void>;
   nextRequestId: number;
-  stdoutFrames: BoundedFrameBuffer;
+  stdoutFrames: AppServerFrameBuffer;
   stderr: BoundedTextBuffer;
   settled: boolean;
 };
@@ -96,7 +96,7 @@ export function createCodexAppServerClient(
       pending: new Map<string, PendingRequest>(),
       initialize: Promise.resolve(),
       nextRequestId: 0,
-      stdoutFrames: new BoundedFrameBuffer(1024 * 1024),
+      stdoutFrames: new AppServerFrameBuffer(),
       stderr: new BoundedTextBuffer(MAX_STDERR_BYTES),
       settled: false
     } satisfies AppServerProcessState;
@@ -104,7 +104,14 @@ export function createCodexAppServerClient(
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
-      for (const line of state.stdoutFrames.push(chunk)) {
+      let frames: string[];
+      try {
+        frames = state.stdoutFrames.push(chunk);
+      } catch (error) {
+        failProcess(state, toError(error));
+        return;
+      }
+      for (const line of frames) {
         if (line.trim().length === 0) continue;
         let message: unknown;
         try {

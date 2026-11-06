@@ -151,7 +151,7 @@ func (t *postgresTx) Save(r Report) error {
 	if err != nil {
 		return err
 	}
-	_, err = t.tx.Exec(t.ctx, `INSERT INTO feedback_reports(report_id,client_feedback_id,report_data,reserved_bytes,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(report_id) DO UPDATE SET client_feedback_id=EXCLUDED.client_feedback_id,report_data=EXCLUDED.report_data,reserved_bytes=EXCLUDED.reserved_bytes,expires_at=EXCLUDED.expires_at`, r.ID, r.ClientID, b, r.ReservedBytes, r.CreatedAt, r.ExpiresAt)
+	_, err = t.tx.Exec(t.ctx, `INSERT INTO feedback_reports(report_id,client_feedback_id,report_data,reserved_bytes,created_at,expires_at,last_occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(report_id) DO UPDATE SET client_feedback_id=EXCLUDED.client_feedback_id,report_data=EXCLUDED.report_data,reserved_bytes=EXCLUDED.reserved_bytes,expires_at=EXCLUDED.expires_at,last_occurred_at=EXCLUDED.last_occurred_at`, r.ID, r.ClientID, b, r.ReservedBytes, r.CreatedAt, r.ExpiresAt, reportSortTime(r))
 	if err != nil {
 		return err
 	}
@@ -207,8 +207,12 @@ func (t *postgresTx) List(f Filter) ([]Report, error) {
  AND ($4='' OR report_data->'environment'->>'app_version'=$4)
  AND ($5='' OR position(lower($5) in lower((report_data->>'description')||' '||(report_data->>'display_number')))>0)
  AND ($6='' OR created_at>=NULLIF($6,'')::timestamptz) AND ($7='' OR created_at<=NULLIF($7,'')::timestamptz)
- AND ($8='' OR (created_at,report_id)<(NULLIF(split_part($8,'|',1),'')::timestamptz,split_part($8,'|',2)))
- ORDER BY created_at DESC,report_id DESC LIMIT $9`, f.IncludeUnavailable, f.Status, f.Source, f.Version, f.Keyword, f.From, f.To, f.Cursor, limit)
+ AND ($8='' OR (last_occurred_at,report_id)<(NULLIF(split_part($8,'|',1),'')::timestamptz,split_part($8,'|',2)))
+ AND ($10='' OR COALESCE(NULLIF(report_data->>'kind',''),'manual')=$10)
+ AND ($11='' OR report_data->'incident'->>'layer'=$11)
+ AND ($12='' OR report_data->'incident'->>'error_code'=$12)
+ AND ($13='' OR report_data->'incident'->'reporter'->>'subject_id'=$13 OR position(lower($13) in lower(COALESCE(report_data->'incident'->'reporter'->>'display_name','')))>0)
+ ORDER BY last_occurred_at DESC,report_id DESC LIMIT $9`, f.IncludeUnavailable, f.Status, f.Source, f.Version, f.Keyword, f.From, f.To, f.Cursor, limit, f.Kind, f.Layer, f.ErrorCode, f.Reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +234,11 @@ func (t *postgresTx) List(f Filter) ([]Report, error) {
 func (t *postgresTx) Rate(key string, now time.Time, limit int) (bool, error) {
 	var count int
 	err := t.tx.QueryRow(t.ctx, `INSERT INTO feedback_rate_limits VALUES($1,$2,1) ON CONFLICT(bucket_hash) DO UPDATE SET count=CASE WHEN feedback_rate_limits.window_at<=$2-interval '1 hour' THEN 1 ELSE feedback_rate_limits.count+1 END,window_at=CASE WHEN feedback_rate_limits.window_at<=$2-interval '1 hour' THEN $2 ELSE feedback_rate_limits.window_at END RETURNING count`, key, now).Scan(&count)
+	return count <= limit, err
+}
+func (t *postgresTx) DailyRate(key string, now time.Time, limit int) (bool, error) {
+	var count int
+	err := t.tx.QueryRow(t.ctx, `INSERT INTO feedback_rate_limits VALUES($1,$2,1) ON CONFLICT(bucket_hash) DO UPDATE SET count=feedback_rate_limits.count+1 RETURNING count`, key, now).Scan(&count)
 	return count <= limit, err
 }
 func (t *postgresTx) AddCleanup(c CleanupTask) error {

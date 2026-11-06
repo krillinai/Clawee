@@ -242,8 +242,8 @@ async function rebuildNativeSqlite(deployedDaemon) {
   database.close();
 }
 
-function pruneDeployment(root) {
-  const allowedRoot = new Set(['dist', 'node_modules', 'package.json']);
+export function pruneDeployment(root) {
+  const allowedRoot = new Set(['dist', 'node_modules', 'package.json', 'resources']);
   for (const entry of readdirSync(root)) {
     if (!allowedRoot.has(entry)) rmSync(join(root, entry), { recursive: true, force: true });
   }
@@ -397,6 +397,9 @@ function writeExampleConfiguration(packageRoot) {
     'port = 19860',
     'data_dir = "../data"',
     'default_project_root = "../data/projects"',
+    '',
+    '# 仅在承担 Skill AI 审核的服务端 Agent 上启用。',
+    '# skill_ai_review_worker_enabled = true',
     '',
     '# Token 来源二选一。直接配置 token 时，不访问 token_file。',
     '# token = "替换为实际随机Token"',

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getMyActivityStatistics, type ActivityStatistics } from "@/lib/activity-api";
+import { getMyActivityStatistics, getMyAgentUsage, type ActivityStatistics } from "@/lib/activity-api";
 import { APIError } from "@/lib/api";
 import { createRechargeSession, getBillingOverview, openRechargePage, type BillingOverview } from "@/lib/billing-api";
 import { listMyDataViews } from "@/lib/data-views-api";
@@ -14,7 +14,7 @@ import { AppActivityPage } from "./app-activity";
 
 vi.mock("@/lib/activity-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/activity-api")>("@/lib/activity-api");
-  return { ...actual, getMyActivityStatistics: vi.fn() };
+  return { ...actual, getMyActivityStatistics: vi.fn(), getMyAgentUsage: vi.fn() };
 });
 
 vi.mock("@/lib/data-views-api", async () => {
@@ -45,6 +45,7 @@ const fixtureStatistics: ActivityStatistics = {
     completed_turns: 42,
     mcp_distribution: [{ id: "filesystem", label: "filesystem", invocation_count: 18, share: 1 }],
     skill_usage: [{ skill_id: "reports", skill_name: "reports", skill_key: "reports", source: "enterprise", requested_runs: 3, observed_runs: 2, implicit_runs: 1 }],
+    employee_skill_usage: [{ employee_id: "employee-a", employee_name: "张三", observed_skill_count: 1, requested_skill_runs: 3, observed_skill_runs: 2, explicit_skill_runs: 2, implicit_skill_runs: 0, last_observed_at: "2026-08-13T03:00:00Z" }],
   },
   trend: {
     granularity: "day",
@@ -89,6 +90,7 @@ describe("AppActivityPage", () => {
     expect(screen.getByText("gpt-5.6-sol")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Skill 使用证据" })).toHaveTextContent("reports企业321");
+    expect(screen.getByRole("table", { name: "员工 Skill 使用" })).toHaveTextContent("张三132");
     expect(screen.getByRole("table", { name: "Token 使用排行" })).toHaveTextContent("张三12860,000");
     expect(screen.getByRole("region", { name: "账户额度" })).toHaveTextContent("账户余额");
     expect(screen.getByRole("region", { name: "账户额度" })).toHaveTextContent("¥100.00");
@@ -119,6 +121,18 @@ describe("AppActivityPage", () => {
 
     expect(await screen.findByText("账户额度暂不可用，请稍后重试。")).toBeInTheDocument();
     expect(screen.queryByText("¥0.00")).not.toBeInTheDocument();
+  });
+
+  it("keeps rendering when older statistics omit employee Skill usage", async () => {
+    const { employee_skill_usage: _employeeSkillUsage, ...legacyOrganization } = fixtureStatistics.organization;
+    vi.mocked(listMyDataViews).mockResolvedValue([{ view_id: "agent_activity", actions: ["read"] }]);
+    vi.mocked(getMyActivityStatistics).mockResolvedValue({ ...fixtureStatistics, organization: legacyOrganization });
+    vi.mocked(getBillingOverview).mockRejectedValue(new APIError("not managed", 409, "billing_not_managed"));
+
+    renderPage(<AppActivityPage />, "/app/activity");
+
+    expect(await screen.findByText("Hermes C03")).toBeInTheDocument();
+    expect(screen.getByText("当前范围内暂无员工 Skill 使用记录")).toBeInTheDocument();
   });
 
   it("hides central balance and recharge for enterprise-managed billing", async () => {
@@ -249,11 +263,22 @@ describe("AppActivityPage", () => {
 
   it("renders account activity detail with an app back link", async () => {
     vi.mocked(getMyAgentDetail).mockResolvedValue(fixtureAgentDetail);
+    vi.mocked(getMyAgentUsage).mockResolvedValue({
+      collector_id: "collector_1", agent_id: "hermes-c03", range: "7d", timezone: "Asia/Shanghai",
+      start_date: "2026-08-07", end_date: "2026-08-13", generated_at: "2026-08-13T03:12:37Z",
+      session_count: 1, turn_count: 2, completed_turns: 2, tool_call_count: 0, granularity: "day",
+      points: [], mcp_distribution: [], mcp_status: "unlinked",
+      skill_usage: [{ skill_id: "reports", skill_name: "reports", skill_key: "reports", source: "local", requested_runs: 1, observed_runs: 1, implicit_runs: 0 }],
+      skill_usage_totals: { requested_skill_runs: 1, observed_skill_runs: 1, explicit_skill_runs: 1, implicit_skill_runs: 0 },
+    });
 
     renderPage(<AppActivityPage detail />, "/app/activity/detail?collector_id=collector_1&agent_id=hermes-c03");
 
     expect(await screen.findByRole("heading", { name: "Hermes C03" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回活动列表" })).toHaveAttribute("href", "/app/activity");
+    expect(await screen.findByRole("table", { name: "个人 Skill 使用明细" })).toHaveTextContent("reports本地11");
+    fireEvent.click(screen.getByRole("radio", { name: "近 30 天" }));
+    await waitFor(() => expect(getMyAgentUsage).toHaveBeenLastCalledWith("collector_1", "hermes-c03", "30d"));
   });
 });
 

@@ -12,6 +12,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { McpSettingsView, type McpSettingsService } from './McpSettingsView.js';
 
 describe('McpSettingsView', () => {
+  it.each(['unsupported', 'bearer_token', 'unknown', undefined] as const)(
+    '认证状态为 %s 的服务隐藏登录、退出按钮',
+    authStatus => {
+      const data = mcpData();
+      data.servers[0]!.authStatus = authStatus;
+      render(<McpSettingsView connected service={createService()} data={data} capabilities={allCapabilities()} />);
+
+      expect(screen.queryByRole('button', { name: '登录 github' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '退出 github' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '删除 github' })).toBeEnabled();
+    }
+  );
+
   it('lists servers without rendering secret values and adds a stdio server', async () => {
     const user = userEvent.setup();
     const addServer = vi.fn(async (_input: AddCodexMcpRequest): Promise<CodexMcpAddResponse> => ({
@@ -118,8 +131,8 @@ describe('McpSettingsView', () => {
     );
 
     expect(screen.getByRole('button', { name: '新增 MCP' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '登录 github' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '退出 github' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '登录 github' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '退出 github' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '删除 github' })).toBeDisabled();
     expect(screen.getByText('当前 Codex 版本不支持新增 MCP')).toBeInTheDocument();
   });
@@ -140,8 +153,14 @@ describe('McpSettingsView', () => {
       />
     );
 
-    await user.click(screen.getByRole('button', { name: '登录 github' }));
-    await user.click(screen.getByRole('button', { name: '退出 github' }));
+    const login = screen.getByRole('button', { name: '登录 github' });
+    const logout = screen.getByRole('button', { name: '退出 github' });
+    expect(login).toHaveTextContent('登录');
+    expect(logout).toHaveTextContent('退出');
+    expect(login.querySelector('svg')).toBeNull();
+    expect(logout.querySelector('svg')).toBeNull();
+    await user.click(login);
+    await user.click(logout);
     await user.click(screen.getByRole('button', { name: '删除 github' }));
 
     expect(loginServer).toHaveBeenCalledWith('github', true);
@@ -178,6 +197,7 @@ function mcpData(overrides: Partial<CodexMcpListResponse> = {}): CodexMcpListRes
         enabled: true,
         transport: 'http',
         status: 'configured',
+        authStatus: 'oauth',
         url: 'https://example.com/mcp',
         envKeys: ['GITHUB_TOKEN'],
         hasSecrets: true,

@@ -183,6 +183,7 @@ describe('app-server session API', () => {
       items: [{
         id: 'user-1',
         type: 'user_message',
+        runId: 'run-history-image',
         text: '历史消息',
         createdAt: '2026-07-15T00:00:00.000Z',
         turnId: 'turn-1'
@@ -383,6 +384,10 @@ describe('app-server session API', () => {
       isError: false
     }, 'command-1'));
     setup.db.prepare(`
+      INSERT INTO run_events (id, run_id, seq, type, payload_json, raw_event_id)
+      VALUES ('history-noise', 'run-tools', 3, 'unknown_event', 'not-json', 'noise-item')
+    `).run();
+    setup.db.prepare(`
       UPDATE run_events
       SET created_at = CASE id
         WHEN 'event-1' THEN '2026-08-21 11:57:36.100'
@@ -451,12 +456,12 @@ describe('app-server session API', () => {
     expect(latest.json().items).toEqual([
       expect.objectContaining({ type: 'user_message' }),
       expect.objectContaining({
-        id: 'command-1:use',
+        id: 'run-tools:command-1:use',
         type: 'tool_use',
         name: 'command_execution'
       }),
       expect.objectContaining({
-        id: 'command-1:result',
+        id: 'run-tools:command-1:result',
         type: 'tool_result',
         output: 'complete\n',
         isError: false
@@ -550,7 +555,7 @@ describe('app-server session API', () => {
           text: '查找武汉市好玩的地方'
         },
         {
-          id: 'assistant-recovery',
+          id: 'run-recovery:assistant-recovery',
           type: 'assistant_message',
           text: '东湖和湖北省博物馆都值得去。'
         }

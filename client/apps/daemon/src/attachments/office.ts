@@ -1,19 +1,24 @@
 import { Worker } from 'node:worker_threads';
-import type { RuntimeErrorCode } from '@clawee/protocol';
+import type { OfficePreview, RuntimeErrorCode } from '@clawee/protocol';
 
-export const OFFICE_ATTACHMENT_FORMATS: Record<string, 'docx' | 'xlsx' | 'pptx'> = {
+type OfficeAttachmentFormat = 'doc' | 'xls' | 'ppt' | 'docx' | 'xlsx' | 'pptx';
+
+export const OFFICE_ATTACHMENT_FORMATS: Record<string, OfficeAttachmentFormat> = {
+  'application/msword': 'doc',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.ms-powerpoint': 'ppt',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx'
 };
 export const OFFICE_PARSE_TIMEOUT_MS = 15_000;
 
-export type OfficeExtraction = { content: string; detail?: string };
+export type OfficeExtraction = { content: string; detail?: string; preview?: OfficePreview };
 export type OfficeWorkerRequest = {
   content: Uint8Array;
   mime: string;
-  format: 'docx' | 'xlsx' | 'pptx';
-  mode: 'validate' | 'extract';
+  format: OfficeAttachmentFormat;
+  mode: 'validate' | 'extract' | 'preview';
   maxChars: number;
 };
 type OfficeWorkerResponse = OfficeExtraction | {
@@ -46,7 +51,8 @@ export function processOfficeAttachment(
     ), {
       execArgv: [],
       workerData: { content, mime, format, mode, maxChars } satisfies OfficeWorkerRequest,
-      resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32 }
+      // ExcelJS 解析大型工作表需要更高堆上限；压缩包总量和单项大小仍由 Worker 校验。
+      resourceLimits: { maxOldGenerationSizeMb: 512, maxYoungGenerationSizeMb: 64 }
     });
     let settled = false;
     const timer = setTimeout(() => void finish(undefined, new OfficeAttachmentError(

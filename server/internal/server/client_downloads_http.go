@@ -2,17 +2,22 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/krillinai/Clawee/server/internal/clientdownloads"
 	"github.com/krillinai/Clawee/server/internal/rbac"
+	"go.uber.org/zap"
 )
 
 func mountClientDownloadsRoutes(api, admin *gin.RouterGroup, opts Options) {
+	mountClientUpdateRoutes(api, admin, opts)
 	if opts.ClientDownloadsService == nil {
 		api.GET("/public/client-downloads", func(c *gin.Context) { clientDownloadsUnavailable(c) })
 		return
@@ -82,8 +87,149 @@ func mountClientDownloadsRoutes(api, admin *gin.RouterGroup, opts Options) {
 	})
 }
 
+func mountClientUpdateRoutes(api, admin *gin.RouterGroup, opts Options) {
+	public := api.Group("/public/client-updates")
+	public.Use(func(c *gin.Context) { c.Header("Cache-Control", "no-store"); c.Next() })
+	public.GET("", func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		response, err := opts.ClientDownloadsService.PublicUpdate(c.Request.Context())
+		if err != nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		if response.Update != nil {
+			response.Update.GatewayURL = requestOrigin(c)
+		}
+		c.JSON(http.StatusOK, response)
+	})
+	public.GET("/:revision/:platform/:arch/:filename", func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		response, err := opts.ClientDownloadsService.PublicUpdate(c.Request.Context())
+		if err != nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		if response.Update == nil || strconv.FormatInt(response.Update.Revision, 10) != c.Param("revision") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		feed, ok := response.Update.Feed(c.Param("platform"), c.Param("arch"), c.Param("filename"))
+		if !ok {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		body, err := json.Marshal(feed)
+		if err != nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		c.Data(http.StatusOK, "application/yaml; charset=utf-8", body)
+	})
+	protected := admin.Group("/client-downloads/update")
+	protected.Use(func(c *gin.Context) { c.Header("Cache-Control", "no-store"); c.Next() })
+	protected.GET("/versions", requirePermission(opts.RBACService, rbac.PermissionClientDownloadsRead), func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		versions, err := opts.ClientDownloadsService.UpdateVersions(c.Request.Context())
+		if err != nil {
+			clientDownloadsInvalid(c, "无法读取稳定版本目录，请检查下载入口配置")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"versions": versions})
+	})
+	protected.GET("/versions/:version", requirePermission(opts.RBACService, rbac.PermissionClientDownloadsRead), func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		candidate, err := opts.ClientDownloadsService.ResolveUpdateVersion(c.Request.Context(), c.Param("version"))
+		if err != nil {
+			clientDownloadsInvalid(c, "无法读取目标版本的更新包，请检查发布资料")
+			return
+		}
+		c.JSON(http.StatusOK, candidate)
+	})
+	protected.GET("", requirePermission(opts.RBACService, rbac.PermissionClientDownloadsRead), func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		response, err := opts.ClientDownloadsService.GetUpdate(c.Request.Context())
+		if err != nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		c.JSON(http.StatusOK, response)
+	})
+	protected.PUT("", requirePermission(opts.RBACService, rbac.PermissionClientDownloadsUpdate), func(c *gin.Context) {
+		if opts.ClientDownloadsService == nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		account, ok := currentAccount(c)
+		if !ok {
+			abortAuthorizationError(c, http.StatusUnauthorized, "unauthorized", "未认证")
+			return
+		}
+		var input struct {
+			clientdownloads.CustomerUpdateManifest
+			ExpectedRevision *int64 `json:"expected_revision"`
+			Enabled          *bool  `json:"enabled"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10))
+		if err := decoder.Decode(&input); err != nil || input.ExpectedRevision == nil {
+			clientDownloadsInvalid(c, "请求内容无效，必须提供 expected_revision")
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			clientDownloadsInvalid(c, "请求只能包含一个 JSON 对象")
+			return
+		}
+		configuration, err := opts.ClientDownloadsService.Get(c.Request.Context())
+		if err != nil {
+			clientDownloadsUnavailable(c)
+			return
+		}
+		var response clientdownloads.AdminUpdateResponse
+		if input.Enabled != nil {
+			response, err = opts.ClientDownloadsService.PublishVersionPolicy(c.Request.Context(), *input.Enabled, input.Version, input.Notes, requestOrigin(c), account.UserID, *input.ExpectedRevision)
+		} else {
+			response, err = opts.ClientDownloadsService.PublishUpdate(c.Request.Context(), input.CustomerUpdateManifest, configuration.GatewayURL, account.UserID, *input.ExpectedRevision)
+		}
+		if err != nil {
+			switch {
+			case errors.Is(err, clientdownloads.ErrVersionConflict):
+				clientDownloadsConflict(c)
+			case errors.Is(err, clientdownloads.ErrInvalidUpdate):
+				clientDownloadsInvalid(c, err.Error())
+			default:
+				clientDownloadsUnavailable(c)
+			}
+			return
+		}
+		if opts.Logger != nil {
+			opts.Logger.Info("admin client update action", zap.String("request_id", requestIDFromContext(c.Request.Context())), zap.String("operator_user_id", account.UserID), zap.String("action", "publish"), zap.Bool("enabled", response.Enabled), zap.String("version", response.Update.Version), zap.Int64("revision", response.Revision), zap.String("result", "success"))
+		}
+		c.JSON(http.StatusOK, response)
+	})
+}
+
 func requestOrigin(c *gin.Context) string {
 	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		clientScheme := c.GetHeader("X-Client-Scheme")
+		if clientScheme == "http" || clientScheme == "https" {
+			scheme = clientScheme
+		}
+	}
 	if scheme == "" {
 		if c.Request.TLS != nil {
 			scheme = "https"

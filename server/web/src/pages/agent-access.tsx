@@ -8,10 +8,10 @@ import { MCPAgentGrantsDrawer, MCPAgentTokenDrawer, MCPAgentTokenTable } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { isForbiddenError } from "@/lib/api";
+import { APIError, isForbiddenError } from "@/lib/api";
 import {
   deleteMyAgent,
   getMyAccountToken,
@@ -98,11 +98,11 @@ export function AgentAccessPage() {
 
   const tokenPending = revealMutation.isPending || rotateMutation.isPending || revokeMutation.isPending;
   const tokenError = revealMutation.isError
-    ? revealMutation.error.message
+    ? accountTokenErrorMessage(revealMutation.error)
     : rotateMutation.isError
-      ? rotateMutation.error.message
+      ? accountTokenErrorMessage(rotateMutation.error)
       : revokeMutation.isError
-        ? revokeMutation.error.message
+        ? accountTokenErrorMessage(revokeMutation.error)
         : null;
 
   function openToken(agent?: MCPAgent | null) {
@@ -120,11 +120,11 @@ export function AgentAccessPage() {
 
   return (
     <>
-      <PageHeader title="我的 Agent 接入">当前账户的所有 active Agent 共用一份 MCP Token 和工具授权，每个 Agent 使用自己的调用身份。</PageHeader>
+      <PageHeader title="我的 Agent 接入">当前账户的所有 active Agent 共用一份平台接入 Token；Token 同时用于模型 API 和 MCP，每个 Agent 使用自己的调用身份。</PageHeader>
 
       <Card>
         <CardHeader className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-          <div><CardTitle>账户 MCP Token</CardTitle><p className="mt-1 text-sm text-muted-foreground">Token 属于当前账户，轮换或吊销后会同时影响账户下所有 Agent。</p></div>
+          <div><CardTitle>平台接入 Token</CardTitle><p className="mt-1 text-sm text-muted-foreground">Token 属于当前账户，同时用于模型 API 和 MCP；轮换或吊销后会同时影响账户下所有 Agent。</p></div>
           <Badge variant={mcpStatusVariant(tokenInfo?.tokenStatus ?? "missing")}>{tokenInfo ? mcpStatusLabel(tokenInfo.tokenStatus) : "未生成"}</Badge>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -133,13 +133,15 @@ export function AgentAccessPage() {
             <TokenMetadata label="token_fingerprint" value={tokenInfo?.tokenFingerprint || "-"} />
             <TokenMetadata label="scopes" value={tokenInfo?.tokenScopes.join(", ") || "-"} />
             <TokenMetadata label="last_used_at" value={formatDateTime(tokenInfo?.tokenLastUsedAt)} />
+            <TokenMetadata label="model_base_url" value={`${window.location.origin}/v1`} />
+            <TokenMetadata label="mcp_endpoint" value={`${window.location.origin}/mcp`} />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button disabled={!tokenInfo || tokenInfo.tokenStatus !== "active" || tokenPending} onClick={() => openToken(selectedAgent)} variant="secondary"><Eye aria-hidden="true" />查看 Token</Button>
             <Button disabled={tokenPending} onClick={() => rotateMutation.mutate()} variant="primary"><RotateCw aria-hidden="true" />{tokenInfo?.tokenStatus === "active" ? "轮换 Token" : "生成 Token"}</Button>
             <Button disabled={!tokenInfo || tokenInfo.tokenStatus !== "active" || tokenPending} onClick={() => revokeMutation.mutate()} variant="destructive"><ShieldOff aria-hidden="true" />吊销 Token</Button>
           </div>
-          {tokenQuery.isError && !tokenInfo ? <p className="text-sm text-muted-foreground">当前账户尚未生成 MCP Token。</p> : null}
+          {tokenQuery.isError && !tokenInfo ? <p className="text-sm text-muted-foreground">当前账户尚未生成平台接入 Token。</p> : null}
           {tokenError ? <ErrorAlert>{tokenError}</ErrorAlert> : null}
         </CardContent>
       </Card>
@@ -179,7 +181,7 @@ export function AgentAccessPage() {
 
       <Dialog open={Boolean(editingAgent)} onOpenChange={(open) => { if (!open) closeEditDialog(); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>编辑 Agent 名称</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>编辑 Agent 名称</DialogTitle><DialogDescription>修改 Agent 名称，不影响 Agent ID 和已有授权。</DialogDescription></DialogHeader>
           <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (editingAgent) updateNameMutation.mutate({ agentId: editingAgent.agentId, name: editingName }); }}>
             <FieldGroup className="gap-4">
               <Field data-disabled><FieldLabel htmlFor="agent-name-agent-id">Agent ID</FieldLabel><Input disabled id="agent-name-agent-id" value={editingAgent?.agentId ?? ""} /></Field>
@@ -208,6 +210,13 @@ export function AgentAccessPage() {
 
 function TokenMetadata({ label, value }: { label: string; value: string }) {
   return <div className="grid gap-1"><span className="font-mono text-xs text-muted-foreground">{label}</span><span className="break-all font-mono text-xs">{value}</span></div>;
+}
+
+function accountTokenErrorMessage(error: unknown) {
+  if (error instanceof APIError && error.code === "username_required") {
+    return "请先设置账户用户名，再生成平台接入 Token。";
+  }
+  return error instanceof Error ? error.message : "账户 Token 操作失败，请稍后重试。";
 }
 
 function mapUserAgent(access: AgentAccess): MCPAgent {

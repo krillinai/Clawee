@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+func TestPostgresAutomaticIncidents(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testpostgres.New(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	testAutomaticIncidentPagination(t, NewPostgresStore(pool))
+}
+
+func TestPostgresIncidentReporterFilter(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), testpostgres.New(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	testIncidentReporterFilter(t, NewPostgresStore(pool))
+}
+
 func TestPostgresFeedbackReadsDoNotWaitForGlobalWriteLock(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, testpostgres.New(t))

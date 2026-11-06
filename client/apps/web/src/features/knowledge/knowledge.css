@@ -12,7 +12,7 @@
   display: flex;
   flex-direction: column;
   margin: 0;
-  padding: 28px clamp(18px, 2.4vw, 32px) 36px;
+  padding: 16px clamp(18px, 2.4vw, 32px) 36px;
 }
 
 .knowledge-page__inner[data-mode="conversation"] {
@@ -48,7 +48,7 @@
 }
 
 .knowledge-header h1 {
-  font-size: 24px;
+  font-size: var(--page-title-size);
   line-height: 1.25;
   letter-spacing: 0;
 }
@@ -490,7 +490,7 @@
 
 .knowledge-gate h1 {
   margin-bottom: 12px;
-  font-size: 24px;
+  font-size: var(--page-title-size);
   line-height: 1.25;
   letter-spacing: 0;
 }
@@ -587,7 +587,7 @@
   }
 
   .knowledge-header h1 {
-    font-size: 21px;
+    font-size: var(--page-title-size);
   }
 
   .knowledge-workbench {

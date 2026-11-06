@@ -6,7 +6,7 @@ import {
   readFileSync,
   writeFileSync
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
@@ -196,7 +196,7 @@ readline.on('line', line => {
               description: 'Configured by the Clawee model service.',
               supportedReasoningEfforts: [],
               defaultReasoningEffort: null,
-              inputModalities: ['text'],
+              inputModalities: ['text', 'image'],
               isDefault: true,
               hidden: false
             }]
@@ -262,7 +262,14 @@ readline.on('line', line => {
   }
 
   if (message.method === 'turn/start') {
-    ensureInvocation();
+    const continuing = turnFinished;
+    if (continuing) {
+      invocationIndex = undefined;
+      turnFinished = false;
+      currentAgentMessage = undefined;
+      approvalRequestId = undefined;
+    }
+    ensureInvocation(continuing);
     turnStartedAt = Date.now();
     send({ id: message.id, result: { turn: { id: turnId, status: 'inProgress' } } });
     send({
@@ -339,11 +346,48 @@ async function finishNormalInvocation(message) {
     resolve(stateDir, 'prompts.ndjson'),
     `${JSON.stringify({ invocationIndex, prompt })}\n`
   );
+  for (const error of invocation.responseErrors ?? []) {
+    send({ method: 'error', params: { threadId, turnId, willRetry: true, error } });
+  }
+  if (invocation.responseErrors?.length) await sleep(invocation.responseDelayMs);
+  if (turnFinished) return;
+  if (Array.isArray(invocation.steps)) await playSteps(invocation.steps);
   if (typeof invocation.message === 'string') {
     sendAgentMessage(invocation.message);
   }
   await sleep(invocation.completionDelayMs);
   finishTurn(invocation.turnStatus ?? 'completed');
+}
+
+// Scripted process steps for visual checks: reasoning, commands and MCP calls,
+// each emitted as the real app-server events with an optional delay.
+async function playSteps(steps) {
+  for (const [index, step] of steps.entries()) {
+    const id = `item-step-${invocationIndex + 1}-${index + 1}`;
+    if (step.kind === 'reasoning') {
+      send({ method: 'item/completed', params: { threadId, turnId, item: { type: 'reasoning', id, summary: step.text ? [step.text] : [] } } });
+    } else if (step.kind === 'message_delta') {
+      currentAgentMessage = (currentAgentMessage ?? '') + step.text;
+      send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: `item-message-${invocationIndex + 1}`, delta: step.text } });
+    } else if (step.kind === 'message_complete') {
+      sendAgentMessage(step.text);
+    } else if (step.kind === 'command') {
+      const item = { type: 'commandExecution', id, command: step.command, cwd: process.cwd(), commandActions: [] };
+      send({ method: 'item/started', params: { threadId, turnId, item: { ...item, status: 'inProgress' } } });
+      await sleep(step.durationMs);
+      const exitCode = step.exitCode ?? 0;
+      send({ method: 'item/completed', params: { threadId, turnId, item: { ...item, status: exitCode === 0 ? 'completed' : 'failed', aggregatedOutput: step.output ?? '', exitCode } } });
+    } else if (step.kind === 'mcp') {
+      const item = { type: 'mcpToolCall', id, server: step.server, tool: step.tool, arguments: step.arguments ?? {} };
+      send({ method: 'item/started', params: { threadId, turnId, item: { ...item, status: 'inProgress' } } });
+      await sleep(step.durationMs);
+      send({ method: 'item/completed', params: { threadId, turnId, item: { ...item, status: 'completed', result: { content: [] } } } });
+    }
+    if (step.barrier) {
+      while (!turnFinished && !existsSync(resolve(stateDir, `stage-${step.barrier}`))) await sleep(25);
+    }
+    await sleep(step.pauseMs);
+  }
 }
 
 async function finishApproval(message) {
@@ -387,7 +431,8 @@ function sendAgentMessage(text) {
       item: {
         type: 'agentMessage',
         id: `item-message-${invocationIndex + 1}`,
-        text
+        text,
+        phase: 'final_answer'
       }
     }
   });
@@ -401,7 +446,7 @@ function finishTurn(status) {
     method: 'turn/completed',
     params: {
       threadId,
-      turn: { id: turnId, status }
+      turn: { id: turnId, status, ...(status === 'failed' && invocation.turnError ? { error: invocation.turnError } : {}) }
     }
   });
 }
@@ -418,7 +463,7 @@ function persistTurn(status) {
   if (typeof currentAgentMessage === 'string') {
     items.push({
       type: 'agentMessage',
-      id: `assistant-${turnId}`,
+      id: `item-message-${invocationIndex + 1}`,
       text: currentAgentMessage,
       phase: 'final_answer',
       memoryCitation: null
@@ -511,11 +556,13 @@ function writeWorkspaceFiles(files) {
   const root = resolve(process.cwd());
   for (const [relativePath, content] of Object.entries(files)) {
     const target = resolve(root, relativePath);
-    if (target !== root && !target.startsWith(`${root}/`)) {
+    if (target !== root && !target.startsWith(`${root}${sep}`)) {
       throw new Error(`Refusing to write outside workspace: ${relativePath}`);
     }
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, String(content));
+    writeFileSync(target, typeof content === 'object' && content !== null
+      ? Buffer.from(content.base64, 'base64')
+      : String(content));
   }
 }
 
@@ -586,7 +633,7 @@ function runtimeConfigToml(state) {
   return `${lines.join('\n')}\n`;
 }
 
-function ensureInvocation() {
+function ensureInvocation(preserveThread = false) {
   if (invocationIndex !== undefined) return;
   invocationIndex = existsSync(invocationCountPath)
     ? Number(readFileSync(invocationCountPath, 'utf8'))
@@ -597,7 +644,7 @@ function ensureInvocation() {
   invocation = invocations[
     Math.min(invocationIndex, Math.max(0, invocations.length - 1))
   ] ?? {};
-  threadId = invocation.threadId ?? `codex-e2e-thread-${invocationIndex + 1}`;
+  threadId = invocation.threadId ?? (preserveThread ? threadId : `codex-e2e-thread-${invocationIndex + 1}`);
   turnId = `turn-e2e-${invocationIndex + 1}`;
 }
 

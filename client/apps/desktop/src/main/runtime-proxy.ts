@@ -1,6 +1,8 @@
+import { ATTACHMENT_MAX_SIZE_BYTES } from '@clawee/protocol';
+
 const RUNTIME_PREFIX = '/.clawee/runtime';
 
-export const MAX_RUNTIME_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+export const MAX_RUNTIME_REQUEST_BODY_BYTES = ATTACHMENT_MAX_SIZE_BYTES;
 
 export class RuntimeProxyError extends Error {
   constructor(
@@ -44,7 +46,7 @@ export async function readBoundedRequestBody(
 ): Promise<ArrayBuffer | undefined> {
   const declaredLength = request.headers.get('content-length');
   if (/^\d+$/.test(declaredLength ?? '') && Number(declaredLength) > limit) {
-    throw payloadTooLarge();
+    throw payloadTooLarge(limit);
   }
   if (request.body === null) return undefined;
 
@@ -58,7 +60,7 @@ export async function readBoundedRequestBody(
       total += value.byteLength;
       if (total > limit) {
         await reader.cancel().catch(() => undefined);
-        throw payloadTooLarge();
+        throw payloadTooLarge(limit);
       }
       chunks.push(value);
     }
@@ -132,10 +134,10 @@ function invalidPath(): RuntimeProxyError {
   );
 }
 
-function payloadTooLarge(): RuntimeProxyError {
+function payloadTooLarge(limit: number): RuntimeProxyError {
   return new RuntimeProxyError(
     413,
     'RUNTIME_PAYLOAD_TOO_LARGE',
-    'Runtime request body exceeds the 10 MiB limit'
+    `Runtime request body exceeds the ${limit} byte limit`
   );
 }

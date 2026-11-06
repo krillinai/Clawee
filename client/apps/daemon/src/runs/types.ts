@@ -1,12 +1,16 @@
 import type {
   PublicRunStatus,
   ReasoningEffort,
+  RunQueueReason,
   RunContextItem,
   RunSubmissionMode,
-  SandboxMode
+  SandboxMode,
+  SkillReviewThreadContext
 } from '@clawee/protocol';
 
 type CreateRunBase = {
+  executionPolicy?: 'skill-ai-review';
+  skillReview?: SkillReviewThreadContext;
   prompt: string;
   executionPrompt?: string;
   publicPrompt?: string;
@@ -16,6 +20,8 @@ type CreateRunBase = {
   codexThreadId?: string;
   createdBy?: 'api' | 'schedule';
   sourceId?: string;
+  initiatorUserId?: string;
+  initiatorAgentId?: string;
   timeoutMs?: number;
   imagePaths?: string[];
   attachmentIds?: string[];
@@ -45,4 +51,5 @@ export type CreatedRun = {
   status: PublicRunStatus;
   submissionMode: RunSubmissionMode;
   queuePosition?: number;
+  queueReason?: RunQueueReason;
 };

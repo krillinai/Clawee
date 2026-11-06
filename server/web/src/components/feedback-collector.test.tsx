@@ -8,7 +8,7 @@ vi.mock('@/lib/api', async importOriginal => ({ ...await importOriginal<typeof i
 vi.mock('@/lib/feedback-diagnostics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/feedback-diagnostics')>(), feedbackDiagnosticsSnapshot: vi.fn(() => ({ errors: [], dropped_errors: 0 })) }));
 beforeEach(() => {
   vi.clearAllMocks(); history.replaceState(null, '', '/admin/accounts');
-  vi.mocked(adminApi.get).mockResolvedValue({ external_feedback_allowed: true });
+  vi.mocked(adminApi.get).mockResolvedValue({ enabled: true });
   vi.mocked(adminApi.postForm).mockResolvedValue({ report_id: 'fb_test0001', display_number: 'FB-TEST', upload_state: 'ready', security_state: 'normal' });
   vi.stubGlobal('URL', class extends URL { static createObjectURL = vi.fn(() => 'blob:preview'); static revokeObjectURL = vi.fn(); });
 });
@@ -21,7 +21,7 @@ async function prepare() {
   fireEvent.click(screen.getByRole('button', { name: '准备反馈' }));
 }
 function consent() {
-  fireEvent.click(screen.getByLabelText('确认可以发送上述资料和截图给软件维护方'));
+  fireEvent.click(screen.getByLabelText('确认可以提交上述资料和截图到当前后台反馈中心'));
   fireEvent.click(screen.getByLabelText('确认按部分资料发送，不包含桌面、会话及服务器日志'));
 }
 
@@ -39,9 +39,9 @@ it('主动准备只采集本地快照，两项明确确认后才发送', async (
 });
 
 it('禁用及策略读取失败不允许采集或发送', async () => {
-  vi.mocked(adminApi.get).mockResolvedValueOnce({ external_feedback_allowed: false });
+  vi.mocked(adminApi.get).mockResolvedValueOnce({ enabled: false });
   render(<FeedbackCollector />); fireEvent.click(screen.getByRole('button', { name: '提交异常反馈' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('企业策略已禁止外部反馈');
+  expect(await screen.findByRole('alert')).toHaveTextContent('当前后台未开启反馈中心');
   expect(screen.getByRole('button', { name: '准备反馈' })).toBeDisabled(); expect(adminApi.postForm).not.toHaveBeenCalled();
 });
 

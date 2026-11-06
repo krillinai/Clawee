@@ -14,6 +14,16 @@ afterEach(() => {
 });
 
 describe('workspace file service', () => {
+  unixIt('拒绝通过普通别名读取敏感目标文件', async () => {
+    const { service } = createFixture();
+    writeFile('.env', 'TOKEN=secret');
+    symlinkSync(join(tempDir, '.env'), join(tempDir, 'report.txt'));
+
+    await expect(service.readContent({ threadId: 'thread_1', path: 'report.txt' })).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED'
+    });
+  });
+
   it('lists one directory level and suggests README.md', async () => {
     const { service } = createFixture();
     writeFile('README.md', '# hello');
@@ -153,16 +163,104 @@ describe('workspace file service', () => {
     expect(readFileSync(join(tempDir, '.env'), 'utf8')).toBe('TOKEN=secret\n');
   });
 
-  it('rejects absolute paths and path traversal', async () => {
+  it('拒绝相对路径穿越', async () => {
     const { service } = createFixture();
     writeFile('README.md', '# hello\n');
 
-    await expect(service.readContent({ threadId: 'thread_1', path: '/etc/passwd' })).rejects.toMatchObject({
-      code: 'PATH_INVALID'
-    });
     await expect(service.readContent({ threadId: 'thread_1', path: '../README.md' })).rejects.toMatchObject({
       code: 'PATH_INVALID'
     });
+  });
+
+  it('预览、下载和打开含单引号及空格的工作区外报告', async () => {
+    const calls: Array<{ absolutePath: string; mode: 'file' | 'directory' }> = [];
+    const { service, thread } = createFixture({ sandbox: 'workspace-write', revealExecutor: request => { calls.push(request); } });
+    const workspace = join(tempDir, 'Default Project');
+    mkdirSync(workspace);
+    thread.canonicalCwd = realpathSync(workspace);
+    thread.cwd = workspace;
+    for (const [name, content] of [['面试报告.html', '<h1>面试报告</h1>'], ['面试报告.md', '# 面试报告'], ['预览.png', 'image bytes'], ['报告.pdf', '%PDF-1.7']] as const) {
+      const relativePath = `AI项目/Example's AI projects/MokaHelper/reports/${name}`;
+      writeFile(relativePath, content);
+      const path = join(tempDir, relativePath);
+      const request = { threadId: thread.id, path };
+      const meta = await service.getMeta(request);
+      expect(meta).toMatchObject({ name, path, absolutePath: realpathSync(path), previewable: true, readonly: true });
+      if (name.endsWith('.html') || name.endsWith('.md')) {
+        expect((await service.readContent(request)).content).toBe(content);
+      } else {
+        expect((await service.readBlob(request)).buffer.toString()).toBe(content);
+      }
+      const download = await service.download(request);
+      const chunks: Buffer[] = [];
+      for await (const chunk of download.stream) chunks.push(chunk as Buffer);
+      expect(Buffer.concat(chunks).toString()).toBe(content);
+      expect(download.name).toBe(name);
+      await expect(service.reveal({ ...request, mode: 'file' })).resolves.toEqual({ ok: true });
+      expect(calls.at(-1)).toEqual({ absolutePath: realpathSync(path), mode: 'file' });
+      await expect(service.saveContent({ ...request, content: 'changed', baseVersionToken: meta.versionToken }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(readFileSync(path, 'utf8')).toBe(content);
+    }
+  });
+
+  unixIt('工作区外的敏感文件及其别名仍不可读取', async () => {
+    const { service, thread } = createFixture();
+    const workspace = join(tempDir, 'workspace');
+    mkdirSync(workspace);
+    thread.canonicalCwd = realpathSync(workspace);
+    writeFile('.env', 'TOKEN=secret');
+    symlinkSync(join(tempDir, '.env'), join(tempDir, 'report.txt'));
+    for (const name of ['.env', 'report.txt']) {
+      for (const method of ['getMeta', 'readContent', 'download'] as const) {
+        await expect(service[method]({ threadId: thread.id, path: join(tempDir, name) }))
+          .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      }
+    }
+  });
+
+  it.each([String.raw`\\server\share.txt`, String.raw`\server\share.txt`, String.raw`\share.txt`])(
+    '同名工作区文件存在时仍拒绝反斜杠绝对路径 %s',
+    async (path) => {
+      const { service } = createFixture({ sandbox: 'workspace-write' });
+      writeFile('server/share.txt', 'saved');
+      writeFile('share.txt', 'saved');
+      const request = { threadId: 'thread_1', path };
+
+      for (const method of ['getMeta', 'readContent', 'readBlob', 'download'] as const) {
+        await expect(service[method](request)).rejects.toMatchObject({ code: 'PATH_INVALID', statusCode: 400 });
+      }
+      await expect(service.saveContent({
+        ...request,
+        content: 'changed',
+        baseVersionToken: 'stale',
+        overwriteConflict: true
+      })).rejects.toMatchObject({ code: 'PATH_INVALID', statusCode: 400 });
+      expect(readFileSync(join(tempDir, 'server', 'share.txt'), 'utf8')).toBe('saved');
+      expect(readFileSync(join(tempDir, 'share.txt'), 'utf8')).toBe('saved');
+    }
+  );
+
+  it('正斜杠与反斜杠相对路径仍支持预览、保存和下载', async () => {
+    const { service } = createFixture({ sandbox: 'workspace-write' });
+    writeFile('docs/report.md', '# saved');
+    writeFile('docs/preview.png', 'image bytes');
+    for (const path of ['docs/report.md', String.raw`docs\report.md`]) {
+      const request = { threadId: 'thread_1', path };
+      const before = await service.readContent(request);
+      expect(before.meta.path).toBe('docs/report.md');
+      expect(before.content).toBe('# saved');
+      await service.saveContent({ ...request, content: '# saved', baseVersionToken: before.meta.versionToken });
+      const download = await service.download(request);
+      const chunks: Buffer[] = [];
+      for await (const chunk of download.stream) chunks.push(chunk as Buffer);
+      expect(Buffer.concat(chunks).toString()).toBe('# saved');
+    }
+    for (const path of ['docs/preview.png', String.raw`docs\preview.png`]) {
+      const blob = await service.readBlob({ threadId: 'thread_1', path });
+      expect(blob.meta.path).toBe('docs/preview.png');
+      expect(blob.buffer.toString()).toBe('image bytes');
+    }
   });
 
   it('rejects symlink escapes outside canonicalCwd', async () => {

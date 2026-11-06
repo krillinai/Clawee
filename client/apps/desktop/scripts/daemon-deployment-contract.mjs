@@ -1,5 +1,20 @@
-import { lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
+
+export function materializeLazystreamDependency(deploymentRoot) {
+  const lazyPath = join(deploymentRoot, 'node_modules', 'lazystream');
+  const lazySource = realpathSync(lazyPath);
+  const streamFile = createRequire(join(lazySource, 'package.json'))
+    .resolve('readable-stream/passthrough');
+
+  // Electron Builder copies the top-level junction but drops its pnpm sibling dependency.
+  rmSync(lazyPath, { force: true });
+  cpSync(lazySource, lazyPath, { recursive: true });
+  const nestedStream = join(lazyPath, 'node_modules', 'readable-stream');
+  mkdirSync(dirname(nestedStream), { recursive: true });
+  cpSync(dirname(streamFile), nestedStream, { recursive: true });
+}
 
 export function pruneDaemonBuildArtifacts(deploymentRoot) {
   const sqliteBuild = join(deploymentRoot, 'node_modules', 'better-sqlite3', 'build');

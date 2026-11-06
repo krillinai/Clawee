@@ -96,6 +96,36 @@
 }
 
 @layer components {
+  .permission-scroll-area {
+    scrollbar-gutter: stable;
+  }
+
+  .permission-scroll-area::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .permission-scroll-area::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 6px;
+  }
+
+  .permission-scroll-area::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground));
+    border: 2px solid hsl(var(--muted));
+    border-radius: 6px;
+  }
+
+  .permission-scroll-area::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground));
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    .permission-scroll-area {
+      scrollbar-color: hsl(var(--muted-foreground)) hsl(var(--muted));
+    }
+  }
+
   .mcp-topology-container {
     container-type: inline-size;
   }

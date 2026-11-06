@@ -16,6 +16,10 @@
         <h1 id="status-title">正在准备 Clawee</h1>
         <p id="status-detail">正在检查本机运行环境</p>
         <p class="elapsed" id="elapsed" hidden></p>
+        <div id="update-recovery" hidden>
+          <p id="update-recovery-detail"></p>
+          <button id="update-installer" type="button">官方安装包</button>
+        </div>
 
         <div class="failure-actions" id="failure-actions" hidden>
           <button class="primary" id="retry" type="button">重新检测</button>
@@ -39,12 +43,15 @@
             <div><dt>错误代码</dt><dd id="error-code">-</dd></div>
           </dl>
           <pre id="error-message"></pre>
-          <label for="feedback-description">问题描述</label>
-          <textarea id="feedback-description" maxlength="10000"></textarea>
-          <label for="feedback-screenshots">问题截图</label>
-          <input id="feedback-screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple />
-          <button id="emergency-feedback" type="button">导出本地应急反馈</button>
-          <p id="feedback-result" role="status"></p>
+          <form id="emergency-feedback-form" class="emergency-feedback" aria-label="本地应急反馈">
+            <h2>问题反馈</h2>
+            <label for="feedback-description">问题描述</label>
+            <textarea id="feedback-description" rows="5" maxlength="10000" required></textarea>
+            <label for="feedback-screenshots">问题截图</label>
+            <input id="feedback-screenshots" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+            <button id="emergency-feedback" type="submit">导出本地应急反馈</button>
+            <p id="feedback-result" role="status" aria-live="polite"></p>
+          </form>
         </details>
       </section>
     </main>

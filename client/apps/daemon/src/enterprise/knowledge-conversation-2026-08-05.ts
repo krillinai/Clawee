@@ -36,6 +36,7 @@ export function createKnowledgeConversationManager(input: {
       const identity = await input.sessionManager.requireIdentity();
       return input.threadManager.listKnowledgeThreads(identity.subjectId, {
         status: 'active',
+        assignment: 'assigned',
         limit: 1
       })[0];
     },
@@ -47,6 +48,7 @@ export function createKnowledgeConversationManager(input: {
         thread === undefined
         || !isEnterpriseKnowledgeThread(thread)
         || thread.enterpriseSubjectId !== identity.subjectId
+        || thread.projectId === null
       ) {
         throw new KnowledgeConversationError(404, 'THREAD_NOT_FOUND');
       }

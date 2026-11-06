@@ -4,6 +4,82 @@ import { describe, expect, it, vi } from 'vitest';
 import { useThreadHistory } from './use-thread-history.js';
 
 describe('useThreadHistory', () => {
+  it('最新页无重叠时保留旧窗口，先填补缺口再恢复旧前缀游标', async () => {
+    let refreshed = false;
+    const getThreadHistory = vi.fn(async (threadId: string, query?: { before?: string }): Promise<ThreadHistoryResponse> => {
+      const pages: Record<string, { ids: string[]; cursor: string }> = {
+        initial: { ids: ['old-latest'], cursor: 'before-old-latest' },
+        'before-old-latest': { ids: ['old-prefix', 'old-latest'], cursor: 'before-old-prefix' },
+        latest: { ids: ['new-latest'], cursor: 'before-new-latest' },
+        'before-new-latest': { ids: ['gap-new'], cursor: 'before-gap-new' },
+        'before-gap-new': { ids: ['old-latest', 'gap-old'], cursor: 'before-old-latest' },
+        'before-old-prefix': { ids: ['oldest'], cursor: 'before-oldest' }
+      };
+      const page = pages[query?.before ?? (refreshed ? 'latest' : 'initial')]!;
+      return { threadId, items: page.ids.map(id => historyMessage(id, id)), hasMore: true, nextCursor: page.cursor };
+    });
+    const { result, rerender } = renderHook(({ reloadKey }) => useThreadHistory({
+      threadId: 'gap-thread', enabled: true, service: { getThreadHistory }, reloadKey
+    }), { initialProps: { reloadKey: 0 } });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(() => result.current.loadOlder());
+    expect(result.current.nextCursor).toBe('before-old-prefix');
+    refreshed = true;
+    rerender({ reloadKey: 1 });
+    await waitFor(() => expect(result.current.initialLoading).toBe(false));
+    expect(result.current.items.map(item => item.id)).toEqual(['old-prefix', 'old-latest', 'new-latest']);
+    expect(result.current.nextCursor).toBe('before-new-latest');
+    await act(() => result.current.loadOlder());
+    expect(result.current.items.map(item => item.id)).toEqual(['old-prefix', 'old-latest', 'gap-new', 'new-latest']);
+    expect(result.current.nextCursor).toBe('before-gap-new');
+    rerender({ reloadKey: 2 });
+    await waitFor(() => expect(result.current.initialLoading).toBe(false));
+    expect(result.current.items.map(item => item.id)).toEqual(['old-prefix', 'old-latest', 'gap-new', 'new-latest']);
+    expect(result.current.nextCursor).toBe('before-gap-new');
+    await act(() => result.current.loadOlder());
+    expect(result.current.items.map(item => item.id)).toEqual(['old-prefix', 'old-latest', 'gap-old', 'gap-new', 'new-latest']);
+    expect(result.current.nextCursor).toBe('before-old-prefix');
+    await act(() => result.current.loadOlder());
+    expect(result.current.items[0]?.id).toBe('oldest');
+    expect(getThreadHistory.mock.calls.at(-1)?.[1]?.before).toBe('before-old-prefix');
+  });
+
+  it('搜索窗口独立保存，返回普通历史时仍恢复其旧前缀和游标', async () => {
+    const getThreadHistory = vi.fn(async (threadId: string, query?: { before?: string; targetItemId?: string }): Promise<ThreadHistoryResponse> => {
+      if (query?.targetItemId) return { threadId, items: [historyMessage('search-result', '搜索')], hasMore: true, nextCursor: 'before-search' };
+      return query?.before
+        ? { threadId, items: [historyMessage('older', '旧页')], hasMore: true, nextCursor: 'before-older' }
+        : { threadId, items: [historyMessage('latest', '最新页')], hasMore: true, nextCursor: 'before-latest' };
+    });
+    const { result, rerender } = renderHook(({ targetItemId }) => useThreadHistory({
+      threadId: 'search-thread', targetItemId, enabled: true, service: { getThreadHistory }
+    }), { initialProps: { targetItemId: undefined as string | undefined } });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(() => result.current.loadOlder());
+    rerender({ targetItemId: 'search-result' });
+    await waitFor(() => expect(result.current.initialLoading).toBe(false));
+    expect(result.current.items.map(item => item.id)).toEqual(['search-result']);
+    expect(result.current.nextCursor).toBe('before-search');
+    rerender({ targetItemId: undefined });
+    await waitFor(() => expect(result.current.initialLoading).toBe(false));
+    expect(result.current.items.map(item => item.id)).toEqual(['older', 'latest']);
+    expect(result.current.nextCursor).toBe('before-older');
+  });
+
+  it('已加载旧页后刷新最新页仍保留旧前缀的服务端游标', async () => {
+    const getThreadHistory = vi.fn(async (threadId: string, query?: { before?: string }): Promise<ThreadHistoryResponse> => query?.before
+      ? { threadId, items: [historyMessage('older', '旧页'), historyMessage('latest', '最新页')], hasMore: true, nextCursor: 'before-older' }
+      : { threadId, items: [historyMessage('latest', '最新页')], hasMore: true, nextCursor: 'before-latest' });
+    const { result, rerender } = renderHook(({ reloadKey }) => useThreadHistory({ threadId: 'thread', enabled: true, service: { getThreadHistory }, reloadKey }),
+      { initialProps: { reloadKey: 0 } });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(() => result.current.loadOlder());
+    expect(result.current.nextCursor).toBe('before-older');
+    rerender({ reloadKey: 1 });
+    await waitFor(() => expect(result.current.initialLoading).toBe(false));
+    expect(result.current.items.map(item => item.id)).toEqual(['older', 'latest']);
+    expect(result.current.nextCursor).toBe('before-older');
+  });
   it('loads only the latest page first and prepends older pages without duplicates', async () => {
     const getThreadHistory = vi.fn(async (
       threadId: string,
@@ -42,7 +118,7 @@ describe('useThreadHistory', () => {
     expect(getThreadHistory).toHaveBeenNthCalledWith(
       1,
       'thread_1',
-      { limit: 50 },
+      { limit: 10 },
       { signal: expect.any(AbortSignal) }
     );
     expect(result.current.items.map(item => item.id)).toEqual(['history_2', 'history_3']);
@@ -56,7 +132,7 @@ describe('useThreadHistory', () => {
       2,
       'thread_1',
       {
-        limit: 50,
+        limit: 10,
         before: 'cursor_older'
       },
       { signal: expect.any(AbortSignal) }
@@ -135,7 +211,7 @@ describe('useThreadHistory', () => {
     expect(getThreadHistory).toHaveBeenCalledWith(
       'thread_1',
       {
-        limit: 50,
+        limit: 10,
         targetItemId: 'target-item'
       },
       { signal: expect.any(AbortSignal) }

@@ -22,7 +22,7 @@ fail() {
 }
 
 configure_paths() {
-  require_clawee_ops_dir || exit 1
+  require_clawee_ops_dir --skip-config-check || exit 1
   CONFIG_ROOT="$CLAWEE_OPS_DIR"
 
   SERVERS_CONFIG="$CONFIG_ROOT/deploy/servers.yaml"
@@ -277,6 +277,7 @@ SERVICE_UNIT="$SERVICE_NAME"
 VERSION_URL="${VERSION_URL:-http://127.0.0.1:1904/version}"
 SERVICE_STOPPED=0
 DOCKER_COMMAND=()
+DATABASE_PASSWORD=""
 RELEASE_PATHS=(claw-gateway public db deploy)
 trap 'rm -f "$REMOTE_PACKAGE" "$REMOTE_CONFIG"' EXIT
 
@@ -338,7 +339,39 @@ configure_docker_command() {
 }
 
 docker_compose() {
-  "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml "$@"
+  if [[ "${DOCKER_COMMAND[0]}" == "sudo" ]]; then
+    sudo -n env "CLAWEE_POSTGRES_PASSWORD=$DATABASE_PASSWORD" \
+      docker compose -f deploy/docker-compose.yaml "$@"
+  else
+    CLAWEE_POSTGRES_PASSWORD="$DATABASE_PASSWORD" \
+      "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml "$@"
+  fi
+}
+
+load_database_password() {
+  local database_url database_authority
+
+  database_url="$(sed -nE 's/^[[:space:]]*url:[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' "$CONFIG_PATH" | head -n 1)"
+  case "$database_url" in
+    postgres://*|postgresql://*) ;;
+    *)
+      printf '[remote] database.url must use postgres:// or postgresql://\n' >&2
+      return 1
+      ;;
+  esac
+
+  database_authority="${database_url#*://}"
+  database_authority="${database_authority%%@*}"
+  if [[ "$database_authority" != *:* ]]; then
+    printf '[remote] database.url must include a database password\n' >&2
+    return 1
+  fi
+
+  DATABASE_PASSWORD="${database_authority#*:}"
+  if [[ -z "$DATABASE_PASSWORD" ]]; then
+    printf '[remote] database.url password must not be empty\n' >&2
+    return 1
+  fi
 }
 
 remove_release_paths() {
@@ -442,7 +475,14 @@ wait_for_postgres() {
   printf '[remote] waiting for postgres readiness\n'
   for attempt in $(seq 1 60); do
     printf '[remote] postgres readiness attempt %s/60\n' "$attempt"
-    if timeout 10 "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml \
+    if [[ "${DOCKER_COMMAND[0]}" == "sudo" ]]; then
+      if timeout 10 sudo -n env "CLAWEE_POSTGRES_PASSWORD=$DATABASE_PASSWORD" \
+        docker compose -f deploy/docker-compose.yaml \
+        exec -T postgres pg_isready -U claw_gateway -d claw_gateway </dev/null; then
+        return 0
+      fi
+    elif timeout 10 env "CLAWEE_POSTGRES_PASSWORD=$DATABASE_PASSWORD" \
+      "${DOCKER_COMMAND[@]}" compose -f deploy/docker-compose.yaml \
       exec -T postgres pg_isready -U claw_gateway -d claw_gateway </dev/null; then
       return 0
     fi
@@ -529,6 +569,7 @@ mkdir -p "$(dirname "$CONFIG_PATH")"
 install -m 0600 "$REMOTE_CONFIG" "$CONFIG_PATH"
 
 if [[ "$REQUIRES_DOCKER" == "true" ]]; then
+  load_database_password
   printf '[remote] starting postgres\n'
   docker_compose up -d postgres </dev/null
   wait_for_postgres

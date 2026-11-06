@@ -62,6 +62,7 @@ describe('enterprise activity manager', () => {
       agentId: 'agent-1'
     })).resolves.toEqual(detailFixture());
     expect(getActivityDetail).toHaveBeenCalledOnce();
+    expect(getActivityDetail).toHaveBeenCalledWith(expect.any(String), 'collector-1', 'agent-1', '7d');
   });
 
   it('invalidates the enterprise session on a Gateway 401', async () => {

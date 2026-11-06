@@ -185,6 +185,35 @@ func TestServiceStatisticsBuildsNaturalDateRangeAndFillsBuckets(t *testing.T) {
 	}
 }
 
+func TestServiceStatisticsFiltersTokenUsageRankingByAccountName(t *testing.T) {
+	client := &fakeSnapshotClient{snapshot: &Snapshot{
+		GeneratedAt: time.Now(),
+		Trend:       []TrendPoint{{Usage: Usage{TotalTokens: 6}}},
+		Models:      []ModelUsage{},
+		TokenUsageRanking: []TokenUsageRank{
+			{Rank: 1, Name: "外部账户", Requests: 8, TotalTokens: 80},
+			{Rank: 2, Name: " 张三 ", Requests: 2, TotalTokens: 20},
+			{Rank: 3, Name: "未命名 API Key", Requests: 1, TotalTokens: 10},
+		},
+	}}
+	service, err := NewService(client, fakeActivityStore{}, &fakeMCPUsageStore{}, "Asia/Shanghai", func(context.Context) ([]string, error) {
+		return []string{"张三", "李四"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statistics, err := service.Statistics(context.Background(), Range7Days)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statistics.TokenUsageRanking) != 1 || statistics.TokenUsageRanking[0].Rank != 1 || statistics.TokenUsageRanking[0].Name != " 张三 " || statistics.TokenUsageRanking[0].TotalTokens != 20 {
+		t.Fatalf("ranking = %#v", statistics.TokenUsageRanking)
+	}
+	if statistics.Organization.Usage.TotalTokens != 6 {
+		t.Fatalf("organization usage = %#v", statistics.Organization.Usage)
+	}
+}
+
 type agentListActivityStore struct {
 	agents []Agent
 }
@@ -213,5 +242,36 @@ func TestServiceAgentsAggregatesPartitionsAndSortsDeterministically(t *testing.T
 	}
 	if _, err := service.Agents(context.Background(), AgentListRequest{SortBy: "unknown", Limit: 10}); !errors.Is(err, ErrInvalidAgentList) {
 		t.Fatalf("invalid sort error = %v", err)
+	}
+}
+
+func TestServiceAgentsKeepsEmployeesSeparateAndPaginatesAfterFiltering(t *testing.T) {
+	service, err := NewService(nil, agentListActivityStore{agents: []Agent{
+		{CollectorID: "c1", AgentID: "shared", EmployeeID: "employee-a", EmployeeName: "张三", TurnCount: 2},
+		{CollectorID: "c2", AgentID: "shared", EmployeeID: "employee-a", EmployeeName: "张三", TurnCount: 3},
+		{CollectorID: "c3", AgentID: "shared", EmployeeID: "employee-b", EmployeeName: "李四", TurnCount: 7},
+		{CollectorID: "c4", AgentID: "another", EmployeeID: "employee-a", EmployeeName: "张三", TurnCount: 4},
+		{CollectorID: "c5", AgentID: "unknown", TurnCount: 1},
+	}}, &fakeMCPUsageStore{}, "Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.Agents(context.Background(), AgentListRequest{Limit: 1})
+	if err != nil || first.Total != 4 || !first.HasMore || first.NextOffset == nil || *first.NextOffset != 1 || first.Agents[0].EmployeeID != "employee-b" {
+		t.Fatalf("first=%#v err=%v", first, err)
+	}
+	filtered, err := service.Agents(context.Background(), AgentListRequest{EmployeeID: "employee-a", Limit: 1})
+	if err != nil || filtered.Total != 2 || len(filtered.Agents) != 1 || filtered.Agents[0].TurnCount != 5 || filtered.Agents[0].EmployeeName != "张三" {
+		t.Fatalf("filtered=%#v err=%v", filtered, err)
+	}
+	next, err := service.Agents(context.Background(), AgentListRequest{EmployeeID: "employee-a", Limit: 1, Offset: *filtered.NextOffset})
+	if err != nil || next.HasMore || next.NextOffset != nil || next.Agents[0].AgentID != "another" || next.Agents[0].Rank != 2 {
+		t.Fatalf("next=%#v err=%v", next, err)
+	}
+	for _, offset := range []int{2, 100} {
+		empty, err := service.Agents(context.Background(), AgentListRequest{EmployeeID: "employee-a", Offset: offset})
+		if err != nil || empty.Total != 2 || empty.Agents == nil || len(empty.Agents) != 0 || empty.HasMore || empty.NextOffset != nil {
+			t.Fatalf("empty=%#v err=%v", empty, err)
+		}
 	}
 }

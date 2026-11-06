@@ -28,7 +28,7 @@ test('渲染官网、各平台下载链接和自动变更记录', () => {
     template
   };
   const notes = renderReleaseNotes(input);
-  assert.match(notes, /^<!-- clawee-downloads:start -->\n官网：https:\/\/www\.clawee\.work\//);
+  assert.match(notes, /^<!-- clawee-downloads:start -->\r?\n官网：https:\/\/www\.clawee\.work\//);
   for (const artifact of input.manifest.artifacts) {
     assert.ok(notes.includes(`https://github.com/krillinai/Clawee/releases/download/v1.2.3-rc.1/${artifact.name}`));
   }
@@ -46,4 +46,16 @@ test('缺少平台安装包时中止', () => {
   };
   input.manifest.artifacts.pop();
   assert.throws(() => renderReleaseNotes(input), /linux-arm64\.tar\.gz/);
+});
+
+test('仅客户端版本不要求或展示 Linux 服务端下载', () => {
+  const release = manifest('1.0.6');
+  release.components = ['desktop'];
+  release.artifacts = release.artifacts.filter(item => !item.name.startsWith('clawee-server-'));
+  const input = { manifest: release, generatedNotes: '客户端更新', repository: 'krillinai/ClaweePro', template };
+  const notes = renderReleaseNotes(input);
+  assert.doesNotMatch(notes, /clawee-server-|Linux/);
+  for (const item of release.artifacts) assert.ok(notes.includes(item.name));
+  release.artifacts.pop();
+  assert.throws(() => renderReleaseNotes(input), /missing/);
 });

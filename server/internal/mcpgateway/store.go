@@ -4,21 +4,27 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	ErrUpstreamServerNotFound = errors.New("upstream mcp server not found")
-	ErrCapabilityNotFound     = errors.New("mcp capability not found")
-	ErrAgentNotFound          = errors.New("agent registration not found")
-	ErrGrantNotFound          = errors.New("account grant not found")
-	ErrGrantAlreadyExists     = errors.New("account grant already exists")
-	ErrAccountTokenNotFound   = errors.New("account token not found")
-	ErrAgentAlreadyExists     = errors.New("agent registration already exists")
-	ErrAgentOwnerUnavailable  = errors.New("agent owner account is unavailable")
-	ErrGateNotFound           = errors.New("mcp gate request not found")
-	ErrGateConflict           = errors.New("mcp gate request state conflict")
+	ErrUpstreamServerNotFound     = errors.New("upstream mcp server not found")
+	ErrCapabilityNotFound         = errors.New("mcp capability not found")
+	ErrAgentNotFound              = errors.New("agent registration not found")
+	ErrGrantNotFound              = errors.New("account grant not found")
+	ErrGrantAlreadyExists         = errors.New("account grant already exists")
+	ErrInvalidGrantTarget         = errors.New("mcp grant must target exactly one account or role")
+	ErrAccountTokenNotFound       = errors.New("account token not found")
+	ErrAccountUsernameRequired    = errors.New("account username is required")
+	ErrModelProxyAuditNotFound    = errors.New("model proxy audit record not found")
+	ErrModelProxyAuditExists      = errors.New("model proxy audit record already exists")
+	ErrModelProxyAuditUnavailable = errors.New("model proxy audit store is unavailable")
+	ErrAgentAlreadyExists         = errors.New("agent registration already exists")
+	ErrAgentOwnerUnavailable      = errors.New("agent owner account is unavailable")
+	ErrGateNotFound               = errors.New("mcp gate request not found")
+	ErrGateConflict               = errors.New("mcp gate request state conflict")
 )
 
 const (
@@ -57,6 +63,11 @@ type Store interface {
 	SaveListAuditRecord(context.Context, ListAuditRecord) error
 	SaveProxyAuditRecord(context.Context, ProxyAuditRecord) error
 	ListProxyAuditRecords(context.Context, ProxyAuditFilter) ([]ProxyAuditRecord, error)
+	CreateModelProxyAuditRecord(context.Context, ModelProxyAuditRecord) error
+	FinalizeModelProxyAuditRecord(context.Context, ModelProxyAuditFinalize) (bool, error)
+	GetModelProxyAuditRecord(context.Context, string) (ModelProxyAuditRecord, error)
+	ListModelProxyAuditRecords(context.Context, ModelProxyAuditFilter) (ModelProxyAuditPage, error)
+	SummarizeModelProxyAuditRecords(context.Context, ModelProxyAuditSummaryFilter) ([]ModelProxyAuditSummary, error)
 	SaveGateRequest(context.Context, GateRequest) error
 	GetGateRequest(context.Context, string) (GateRequest, error)
 	ListGateRequests(context.Context, GateFilter) ([]GateRequest, error)
@@ -76,6 +87,7 @@ type MemoryStore struct {
 	grants        map[string]AccountGrant
 	listAudits    []ListAuditRecord
 	audits        []ProxyAuditRecord
+	modelAudits   map[string]ModelProxyAuditRecord
 	gates         map[string]GateRequest
 	agentOwners   map[string]string
 }
@@ -100,6 +112,7 @@ func NewMemoryStore() *MemoryStore {
 		syncLogs:      []UpstreamSyncLog{},
 		capabilities:  map[string]Capability{},
 		grants:        map[string]AccountGrant{},
+		modelAudits:   map[string]ModelProxyAuditRecord{},
 		gates:         map[string]GateRequest{},
 		agentOwners:   map[string]string{},
 	}
@@ -531,11 +544,15 @@ func (s *MemoryStore) SaveGrant(ctx context.Context, grant AccountGrant) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if (strings.TrimSpace(grant.UserID) == "") == (strings.TrimSpace(grant.RoleID) == "") {
+		return ErrInvalidGrantTarget
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, existing := range s.grants {
 		if existing.ID != grant.ID &&
 			existing.UserID == grant.UserID &&
+			existing.RoleID == grant.RoleID &&
 			existing.CapabilityID == grant.CapabilityID &&
 			existing.GrantType == grant.GrantType {
 			return ErrGrantAlreadyExists
@@ -573,6 +590,9 @@ func (s *MemoryStore) ListGrants(ctx context.Context, filter GrantFilter) ([]Acc
 	out := []AccountGrant{}
 	for _, grant := range s.grants {
 		if filter.UserID != "" && grant.UserID != filter.UserID {
+			continue
+		}
+		if filter.RoleID != "" && grant.RoleID != filter.RoleID {
 			continue
 		}
 		if filter.CapabilityID != "" && grant.CapabilityID != filter.CapabilityID {
@@ -640,6 +660,251 @@ func (s *MemoryStore) ListProxyAuditRecords(ctx context.Context, filter ProxyAud
 		out = append(out, cloneProxyAuditRecord(s.audits[i]))
 	}
 	return out, nil
+}
+
+func (s *MemoryStore) CreateModelProxyAuditRecord(ctx context.Context, record ModelProxyAuditRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if record.AuditID == "" {
+		return ErrModelProxyAuditExists
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.modelAudits == nil {
+		s.modelAudits = map[string]ModelProxyAuditRecord{}
+	}
+	if _, exists := s.modelAudits[record.AuditID]; exists {
+		return ErrModelProxyAuditExists
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.UsageStatus == "" {
+		record.UsageStatus = ModelProxyAuditUsageStatus(record)
+	}
+	if record.UsageSource == "" {
+		record.UsageSource = ModelProxyAuditUsageSource(record)
+	}
+	s.modelAudits[record.AuditID] = cloneModelProxyAuditRecord(record)
+	return nil
+}
+
+func (s *MemoryStore) FinalizeModelProxyAuditRecord(ctx context.Context, update ModelProxyAuditFinalize) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, exists := s.modelAudits[update.AuditID]
+	if !exists {
+		return false, ErrModelProxyAuditNotFound
+	}
+	if record.Status != ModelProxyAuditStarted {
+		return false, nil
+	}
+	record.Status = update.Status
+	if update.Model != "" {
+		record.Model = update.Model
+	}
+	if update.RequestedModel != "" {
+		record.RequestedModel = update.RequestedModel
+	}
+	if update.UpstreamModel != "" {
+		record.UpstreamModel = update.UpstreamModel
+	}
+	if update.ResponseModel != "" {
+		record.ResponseModel = update.ResponseModel
+	}
+	record.GatewayStatus = update.GatewayStatus
+	record.UpstreamStatus = update.UpstreamStatus
+	record.ErrorCode = update.ErrorCode
+	record.ErrorMessage = update.ErrorMessage
+	record.InputTokens = update.InputTokens
+	record.OutputTokens = update.OutputTokens
+	record.TotalTokens = update.TotalTokens
+	record.CacheReadTokens = update.CacheReadTokens
+	record.CacheCreationTokens = update.CacheCreationTokens
+	record.ReasoningTokens = update.ReasoningTokens
+	record.UsageAvailable = update.UsageAvailable
+	record.UsageStatus = update.UsageStatus
+	if record.UsageStatus == "" {
+		record.UsageStatus = ModelProxyAuditUsageStatus(record)
+	}
+	record.UsageSource = update.UsageSource
+	if record.UsageSource == "" {
+		record.UsageSource = ModelProxyAuditUsageSource(record)
+	}
+	record.ResponseHeaders = cloneJSONMap(update.ResponseHeaders)
+	record.ResponseBody = cloneJSONMap(update.ResponseBody)
+	record.ResponseBytes = update.ResponseBytes
+	record.ResponseChunks = update.ResponseChunks
+	record.Truncated = update.Truncated
+	record.DurationMS = update.DurationMS
+	record.FirstByteMS = update.FirstByteMS
+	record.CompletedAt = update.CompletedAt
+	if record.CompletedAt.IsZero() {
+		record.CompletedAt = time.Now().UTC()
+	}
+	s.modelAudits[record.AuditID] = cloneModelProxyAuditRecord(record)
+	return true, nil
+}
+
+func (s *MemoryStore) GetModelProxyAuditRecord(ctx context.Context, auditID string) (ModelProxyAuditRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return ModelProxyAuditRecord{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, exists := s.modelAudits[auditID]
+	if !exists {
+		return ModelProxyAuditRecord{}, ErrModelProxyAuditNotFound
+	}
+	return cloneModelProxyAuditRecord(record), nil
+}
+
+func (s *MemoryStore) ListModelProxyAuditRecords(ctx context.Context, filter ModelProxyAuditFilter) (ModelProxyAuditPage, error) {
+	if err := ctx.Err(); err != nil {
+		return ModelProxyAuditPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]ModelProxyAuditRecord, 0, len(s.modelAudits))
+	for _, record := range s.modelAudits {
+		if modelProxyAuditMatches(record, filter) {
+			items = append(items, cloneModelProxyAuditRecord(record))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].AuditID > items[j].AuditID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	page := ModelProxyAuditPage{}
+	if len(items) > limit {
+		page.NextCreatedAt = items[limit-1].CreatedAt
+		page.NextID = items[limit-1].AuditID
+		items = items[:limit]
+	}
+	page.Items = items
+	return page, nil
+}
+
+func (s *MemoryStore) SummarizeModelProxyAuditRecords(ctx context.Context, filter ModelProxyAuditSummaryFilter) ([]ModelProxyAuditSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	type summaryKey struct {
+		userID string
+		model  string
+	}
+	summaries := map[summaryKey]ModelProxyAuditSummary{}
+	for _, record := range s.modelAudits {
+		if !modelProxyAuditSummaryMatches(record, filter) {
+			continue
+		}
+		key := summaryKey{userID: record.UserID, model: record.Model}
+		summary := summaries[key]
+		summary.UserID = record.UserID
+		summary.UserNameSnapshot = record.UserNameSnapshot
+		summary.Model = record.Model
+		summary.RequestCount++
+		if record.Status == ModelProxyAuditSucceeded {
+			summary.SucceededCount++
+		}
+		usageStatus := ModelProxyAuditUsageStatus(record)
+		switch usageStatus {
+		case ModelProxyUsageComplete:
+			summary.UsageCompleteCount++
+		case ModelProxyUsagePartial:
+			summary.UsagePartialCount++
+		default:
+			summary.UsageUnavailableCount++
+		}
+		if usageStatus == ModelProxyUsageComplete || usageStatus == ModelProxyUsagePartial {
+			summary.InputTokens += record.InputTokens
+			summary.OutputTokens += record.OutputTokens
+			summary.TotalTokens += record.TotalTokens
+			summary.CacheReadTokens += record.CacheReadTokens
+			summary.CacheCreationTokens += record.CacheCreationTokens
+			summary.ReasoningTokens += record.ReasoningTokens
+			summary.UsageCount++
+		}
+		summaries[key] = summary
+	}
+	out := make([]ModelProxyAuditSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if summary.RequestCount > 0 {
+			summary.SuccessRate = float64(summary.SucceededCount) / float64(summary.RequestCount)
+			summary.UsageCoverageRate = float64(summary.UsageCompleteCount+summary.UsagePartialCount) / float64(summary.RequestCount)
+		}
+		out = append(out, summary)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RequestCount == out[j].RequestCount {
+			if out[i].UserID == out[j].UserID {
+				return out[i].Model < out[j].Model
+			}
+			return out[i].UserID < out[j].UserID
+		}
+		return out[i].RequestCount > out[j].RequestCount
+	})
+	return out, nil
+}
+
+func modelProxyAuditMatches(record ModelProxyAuditRecord, filter ModelProxyAuditFilter) bool {
+	if filter.UserID != "" && record.UserID != filter.UserID {
+		return false
+	}
+	if filter.Model != "" && record.Model != filter.Model {
+		return false
+	}
+	if filter.Endpoint != "" && record.Endpoint != filter.Endpoint {
+		return false
+	}
+	if filter.Status != "" && record.Status != filter.Status {
+		return false
+	}
+	if filter.UsageStatus != "" && ModelProxyAuditUsageStatus(record) != filter.UsageStatus {
+		return false
+	}
+	if filter.UsageSource != "" && ModelProxyAuditUsageSource(record) != filter.UsageSource {
+		return false
+	}
+	if filter.ErrorOnly && record.ErrorCode == "" {
+		return false
+	}
+	if !filter.CreatedFrom.IsZero() && record.CreatedAt.Before(filter.CreatedFrom) {
+		return false
+	}
+	if !filter.CreatedTo.IsZero() && record.CreatedAt.After(filter.CreatedTo) {
+		return false
+	}
+	if !filter.CursorCreatedAt.IsZero() {
+		if record.CreatedAt.After(filter.CursorCreatedAt) || (record.CreatedAt.Equal(filter.CursorCreatedAt) && record.AuditID >= filter.CursorID) {
+			return false
+		}
+	}
+	return true
+}
+
+func modelProxyAuditSummaryMatches(record ModelProxyAuditRecord, filter ModelProxyAuditSummaryFilter) bool {
+	return (filter.UserID == "" || record.UserID == filter.UserID) &&
+		(filter.Model == "" || record.Model == filter.Model) &&
+		(filter.Endpoint == "" || record.Endpoint == filter.Endpoint) &&
+		(filter.Status == "" || record.Status == filter.Status) &&
+		(filter.UsageStatus == "" || ModelProxyAuditUsageStatus(record) == filter.UsageStatus) &&
+		(filter.UsageSource == "" || ModelProxyAuditUsageSource(record) == filter.UsageSource) &&
+		(!filter.ErrorOnly || record.ErrorCode != "") &&
+		(filter.CreatedFrom.IsZero() || !record.CreatedAt.Before(filter.CreatedFrom)) &&
+		(filter.CreatedTo.IsZero() || !record.CreatedAt.After(filter.CreatedTo))
 }
 
 func (s *MemoryStore) SaveGateRequest(ctx context.Context, gate GateRequest) error {
@@ -862,6 +1127,14 @@ func cloneProxyAuditRecord(record ProxyAuditRecord) ProxyAuditRecord {
 	record.ResponseHeaders = cloneJSONMap(record.ResponseHeaders)
 	record.ResponseBody = cloneJSONMap(record.ResponseBody)
 	record.ResolvedDataScope = cloneJSONMap(record.ResolvedDataScope)
+	return record
+}
+
+func cloneModelProxyAuditRecord(record ModelProxyAuditRecord) ModelProxyAuditRecord {
+	record.RequestHeaders = cloneJSONMap(record.RequestHeaders)
+	record.RequestBody = cloneJSONMap(record.RequestBody)
+	record.ResponseHeaders = cloneJSONMap(record.ResponseHeaders)
+	record.ResponseBody = cloneJSONMap(record.ResponseBody)
 	return record
 }
 

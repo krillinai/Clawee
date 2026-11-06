@@ -115,6 +115,13 @@ export class FakeEnterpriseAuthServer {
       return;
     }
 
+    if (request.method === 'POST' && path === '/api/v1/auth/session/renew') {
+      sendJson(response, 200, {
+        data: { access_token: this.token, token_type: 'Bearer', expires_at: '2099-08-06T00:00:00.000Z' }
+      });
+      return;
+    }
+
     if (request.method === 'GET' && path === '/api/v1/auth/me') {
       if (this.agentId === undefined) {
         sendJson(response, 401, { error: { code: 'unauthorized' } });

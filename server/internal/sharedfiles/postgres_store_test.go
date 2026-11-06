@@ -550,6 +550,7 @@ func openSharedFilesTestPool(t *testing.T) *pgxpool.Pool {
 	applySharedFilesMigration(t, pool, "../../db/migrations/00029_shared_files.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00030_shared_file_admin_actor.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00049_shared_file_storage_profiles.sql")
+	applySharedFilesMigration(t, pool, "../../db/migrations/00079_shared_personal_spaces.sql")
 	return pool
 }
 

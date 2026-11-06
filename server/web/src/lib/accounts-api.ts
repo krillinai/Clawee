@@ -13,13 +13,15 @@ export type AccountAgent = {
 export type Account = {
   userId: string;
   email: string;
+  phone?: string;
   name: string;
   status: AccountStatus;
   agent: AccountAgent | null;
 };
 
 export type CreateAccountInput = {
-  email: string;
+  email?: string;
+  phone?: string;
   name: string;
   password: string;
   status?: AccountStatus;
@@ -72,6 +74,7 @@ type AccountResponse = {
   user_id?: string;
   userId?: string;
   email: string;
+  phone?: string;
   name?: string;
   status: AccountStatus;
   agent?: AccountAgentResponse | null;
@@ -93,6 +96,7 @@ function mapAccount(account: AccountResponse): Account {
   return {
     userId: account.userId ?? account.user_id ?? "",
     email: account.email,
+    ...(account.phone ? { phone: account.phone } : {}),
     name: account.name ?? "",
     status: account.status,
     agent: mapAccountAgent(account.agent)

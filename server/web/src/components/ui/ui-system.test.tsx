@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CommandDialog, CommandInput } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
@@ -18,6 +19,20 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 describe("ui system primitives", () => {
+  it("命令弹窗有可访问标题和描述且不产生警告", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      render(<CommandDialog open><CommandInput placeholder="搜索命令" /></CommandDialog>);
+      expect(screen.getByRole("dialog", { name: "命令菜单" })).toHaveAccessibleDescription("搜索并选择命令。");
+      expect(warning).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it("supports project button variants and sizes", () => {
     render(
       <div>

@@ -26,6 +26,66 @@ afterEach(() => {
 });
 
 describe('enterprise HTTP client', () => {
+  it('兼容审批文件列表的统一 data 响应格式', async () => {
+    const fetch = vi.fn(async () => jsonResponse({
+      data: [{ path: 'SKILL.md', size: 12 }],
+      meta: { next_cursor: '', has_next: false }
+    }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+
+    await expect(client.approvalRequest!('token', 'GET', '/api/v1/app/approvals/skill/request_1/files'))
+      .resolves.toEqual({ items: [{ path: 'SKILL.md', size: 12 }] });
+  });
+
+  it.each([null, { text: '---\nname: skill-review\n---\n规则', version: '2.0.0' }])('读取审核规则raw响应，只有明确null允许本地兜底：%j', async data => {
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe(`${ORIGIN}/api/v1/app/skill-ai-review-rule`);
+      expect(init?.method).toBe('GET');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer review-token');
+      return jsonResponse({ data });
+    });
+    const client = createEnterpriseHttpClient({ origin: ORIGIN, fetch });
+    await expect(client.getSkillAIReviewRule!('review-token')).resolves.toEqual(data);
+  });
+
+  it.each([{}, { data: {} }, { data: { text: '规则', version: '' } }])('审核规则协议错误不当作缺失：%j', async body => {
+    const client = createEnterpriseHttpClient({ origin: ORIGIN, fetch: vi.fn(async () => jsonResponse(body)) });
+    await expect(client.getSkillAIReviewRule!('token')).rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+  });
+
+  it.each([403, 404, 500])('审核规则HTTP %s不转换为null', async status => {
+    const client = createEnterpriseHttpClient({ origin: ORIGIN, fetch: vi.fn(async () => new Response('{}', { status })) });
+    await expect(client.getSkillAIReviewRule!('token')).rejects.toMatchObject({ statusCode: status });
+  });
+
+  it('通过 Bearer 凭据续期并校验返回的新 Token 和到期时间', async () => {
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe(`${ORIGIN}/api/v1/auth/session/renew`);
+      expect(init?.method).toBe('POST');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer old-token');
+      return jsonResponse({ data: { access_token: 'new-token', token_type: 'Bearer', expires_at: '2099-01-01T00:00:00Z' } });
+    });
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.renewSession!('old-token')).resolves.toEqual({ accessToken: 'new-token', expiresAt: '2099-01-01T00:00:00Z' });
+  });
+
+  it('支持无邮箱的手机号账号，保留手机号请求字段', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body))).toMatchObject({ phone: '13800000000', password: 'password-123' });
+      expect(JSON.parse(String(init?.body))).not.toHaveProperty('email');
+      return jsonResponse({ data: {
+        account: { user_id: 'usr_phone', email: '', phone: '13800000000', name: '员工', status: 'active' },
+        agent: { agent_id: AGENT_ID, name: '员工' },
+        access_token: 'token', token_type: 'Bearer', expires_at: '2099-01-01T00:00:00Z'
+      } });
+    });
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    await expect(client.login({ phone: '13800000000', password: 'password-123' }, AGENT_ID)).resolves.toMatchObject({
+      account: { subjectId: 'usr_phone', email: '', phone: '13800000000' }
+    });
+    await client.register({ phone: '13800000000', password: 'password-123' }, AGENT_ID);
+  });
+
   it.each(['headers', 'body'])('cancels the upstream preview while waiting for %s', async (phase) => {
     const controller = new AbortController();
     let markStarted!: () => void;
@@ -125,6 +185,15 @@ describe('enterprise HTTP client', () => {
     expect(String(fetch.mock.calls[1]?.[0])).toBe(`${ORIGIN}/api/v1/app/skills/versions`);
   });
 
+  it('上传审批链接只使用配置origin和编码申请ID，不携带凭据', async () => {
+    const fetch = vi.fn(async () => jsonResponse({ data: { approval_request_id: 'request/一?x=1', skill: { skill_id: 'skill', space_id: 'space', name: 'review' }, version: { version: '1' } } }, 201));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    const result = await client.uploadSkillVersion({ accessToken: 'secret-token', spaceId: 'space', version: '1', changelog: '', package: Buffer.from('ZIP') });
+    expect(result.approvalURL).toBe(`${ORIGIN}/app/approvals/skill/request%2F%E4%B8%80%3Fx%3D1`);
+    expect(result.approvalRequestId).toBe('request/一?x=1');
+    expect(result.approvalURL).not.toContain('secret-token');
+  });
+
   it.each([
     { data: { skill: { skill_id: '', space_id: 'space_1', name: 'review' }, version: { version: '1.0.0' } } },
     { data: { skill: { skill_id: 'skill_1', space_id: 'space_1', name: 'review' } } }
@@ -156,9 +225,9 @@ describe('enterprise HTTP client', () => {
 
   it('preserves shared space write permissions returned by the gateway', async () => {
     const fetch = vi.fn(async () => jsonResponse({ data: [{
-      space_id: 'space_1', name: '团队文件', description: '', updated_at: '2026-09-18T00:00:00Z', permissions: { read: true, write: true }
+      space_id: 'space_1', name: '工作流 template-1', workflow_template_name: '内容发布流程', description: '', updated_at: '2026-09-18T00:00:00Z', permissions: { read: true, write: true }
     }], meta: { next_cursor: '', has_next: false, max_file_size_bytes: 1073741824 } }));
-    expect(await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).listSharedSpaces('token')).toMatchObject({ spaces: [{ permissions: { read: true, write: true } }] });
+    expect(await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).listSharedSpaces('token')).toMatchObject({ spaces: [{ workflowTemplateName: '内容发布流程', permissions: { read: true, write: true } }] });
   });
   it('preserves skill space and participant summaries from the gateway', async () => {
     const fetch = vi.fn(async () => jsonResponse({ data: [{

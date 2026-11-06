@@ -161,13 +161,18 @@ func roleResponse(role rbac.Role) gin.H {
 	return gin.H{
 		"role_id": role.RoleID, "code": role.Code, "name": role.Name, "is_system": role.System,
 		"permission_codes": role.Permissions, "created_at": role.CreatedAt, "updated_at": role.UpdatedAt,
+		"department_id": role.DepartmentID, "department_role_type": role.DepartmentRoleType,
 	}
 }
 
 func accountRoleResponse(role rbac.AccountRole) gin.H {
+	if len(role.Sources) == 0 {
+		role.Sources = []string{"manual"}
+	}
 	return gin.H{
 		"user_id": role.UserID, "role_id": role.RoleID, "role_code": role.RoleCode,
 		"role_name": role.RoleName, "is_system": role.System, "created_at": role.CreatedAt,
+		"sources": role.Sources, "department_id": role.DepartmentID, "department_role_type": role.DepartmentRoleType, "department_name": role.DepartmentName,
 	}
 }
 
@@ -179,6 +184,10 @@ func currentUserID(c *gin.Context) string {
 func rbacError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "RBAC 操作失败"
 	switch {
+	case errors.Is(err, rbac.ErrDepartmentManagerMembers):
+		status, code, message = http.StatusConflict, "department_role_managed", err.Error()
+	case errors.Is(err, rbac.ErrDepartmentRoleImmutable):
+		status, code, message = http.StatusConflict, "department_role_managed", err.Error()
 	case errors.Is(err, rbac.ErrInvalidRequest), errors.Is(err, rbac.ErrInvalidPermission):
 		status, code, message = http.StatusBadRequest, "invalid_request", err.Error()
 	case errors.Is(err, rbac.ErrRoleNotFound), errors.Is(err, rbac.ErrAccountRoleNotFound), errors.Is(err, accounts.ErrAccountNotFound):

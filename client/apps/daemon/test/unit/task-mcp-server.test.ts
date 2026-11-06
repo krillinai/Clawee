@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 describe('task MCP server', () => {
-  it('registers three tools and returns the task identity immediately', async () => {
+  it('registers task and health tools and returns the task identity immediately', async () => {
     const service = {
       async submit() {
         return {
@@ -41,17 +41,17 @@ describe('task MCP server', () => {
     expect(tools.map(tool => tool.name)).toEqual([
       'clawee_submit_task',
       'clawee_get_task',
-      'clawee_get_task_result'
+      'clawee_get_task_result',
+      'clawee_get_agent_health'
     ]);
     expect(tools[0]?.inputSchema).toMatchObject({
       properties: {
+        thread_id: { type: 'string' },
         project_id: { type: 'string' },
         project_name: { type: 'string' }
       }
     });
-    expect(tools[0]?.description).toBe(
-      '提交 Clawee 项目任务并立即返回任务 ID；随后使用查询工具获取状态和结果'
-    );
+    expect(tools[0]?.description).toContain('复用原会话并返回新的 task_id');
     expect(result.structuredContent).toEqual({
       task_id: 'run_1',
       thread_id: 'thread_1',
@@ -59,6 +59,17 @@ describe('task MCP server', () => {
       project_name: '测试项目',
       status: 'queued'
     });
+  });
+
+  it('提供只读健康查询，不提交任务或返回凭据', async () => {
+    await connect({
+      getHealth: () => ({ runtime: 'ready', model: 'configuration_required' })
+    } as unknown as TaskMcpService);
+    const result = await client!.callTool({ name: 'clawee_get_agent_health', arguments: {} });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({ runtime: 'ready', model: 'configuration_required' });
+    const health = (await client!.listTools()).tools.find(tool => tool.name === 'clawee_get_agent_health');
+    expect(health?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
   });
 
   it('accepts project_name and forwards both project selectors', async () => {
@@ -135,11 +146,39 @@ describe('task MCP server', () => {
     });
   });
 
+  it('将续聊会话与调用者身份传入服务，拒绝空会话 ID 和伪造身份参数', async () => {
+    const received: unknown[] = [];
+    await connect({
+      async submit(input: unknown) {
+        received.push(input);
+        return {
+          taskId: 'run_2', threadId: 'thread_1', projectId: 'project_1',
+          projectName: '测试项目', status: 'queued'
+        };
+      }
+    } as unknown as TaskMcpService, { userId: 'user_1', agentId: 'agent_1' });
+
+    const result = await client!.callTool({
+      name: 'clawee_submit_task', arguments: { prompt: '修改原图', thread_id: ' thread_1 ' }
+    });
+    expect(received).toEqual([expect.objectContaining({
+      prompt: '修改原图', threadId: 'thread_1', initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    })]);
+    expect(result.structuredContent).toMatchObject({ task_id: 'run_2', thread_id: 'thread_1' });
+    for (const args of [{ thread_id: ' ' }, { thread_id: 'thread_1', initiatorUserId: 'forged' }]) {
+      const invalid = await client!.callTool({
+        name: 'clawee_submit_task', arguments: { prompt: '修改原图', ...args }
+      });
+      expect(invalid.isError).toBe(true);
+    }
+    expect(received).toHaveLength(1);
+  });
+
 });
 
-async function connect(service: TaskMcpService) {
+async function connect(service: TaskMcpService, caller?: { userId?: string; agentId?: string }) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  server = createTaskMcpServer({ service });
+  server = createTaskMcpServer({ service, caller });
   client = new Client({ name: 'task-mcp-test', version: '1.0.0' });
   await server.connect(serverTransport);
   await client.connect(clientTransport);

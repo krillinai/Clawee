@@ -265,11 +265,12 @@ func TestAdminMCPGatewayRoutesRegisterServerAndGrantTool(t *testing.T) {
 	}
 	tokenResponse := unwrapAPIDataMap(t, rec.Body.Bytes())
 	token, _ := tokenResponse["token"].(string)
-	if len(token) != 32 || !strings.HasPrefix(token, "agt_") {
-		t.Fatalf("token = %q, want 32-character agt_ token", token)
+	if len(token) != 31 || !strings.HasPrefix(token, "sk-") {
+		t.Fatalf("token = %q, want 31-character sk- token", token)
 	}
 	tokenInfo, _ := tokenResponse["token_info"].(map[string]any)
 	assertNoSensitiveTokenFields(t, tokenInfo)
+	assertModelTokenScopes(t, tokenInfo)
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/mcp/accounts/token/reveal", strings.NewReader(`{"user_id":"`+adminUserID+`"}`))
@@ -968,6 +969,9 @@ func TestAdminMCPGateRoutesListAndDetailAdminApproval(t *testing.T) {
 func TestAdminMCPGateAcceptAdminApprovalExecutesSnapshot(t *testing.T) {
 	ctx := context.Background()
 	store := mcpgateway.NewMemoryStore()
+	if err := store.RotateAccountToken(ctx, "sales_zhang", mcpgateway.AccountToken{ID: "token-approval", UserID: "sales_zhang", TokenHash: mcpgateway.HashToken("approval-token"), Status: mcpgateway.StatusActive, Scopes: []string{"mcp:call"}}); err != nil {
+		t.Fatal(err)
+	}
 	upstream := fakeAdminUpstreamClient{}
 	proxy := testMCPGatewayService(store, upstream)
 	router := newTestRouter(t, server.Options{
@@ -996,6 +1000,8 @@ func TestAdminMCPGateAcceptAdminApprovalExecutesSnapshot(t *testing.T) {
 	}
 	gate := mcpgateway.GateRequest{
 		ID:               "mcp_approval_accept_route",
+		TokenID:          "token-approval",
+		TokenHash:        mcpgateway.HashToken("approval-token"),
 		Type:             mcpgateway.GateTypeAdminApproval,
 		Provider:         mcpgateway.GateProviderInternal,
 		TraceID:          "trace_approval_accept_route",
@@ -1179,7 +1185,7 @@ func TestAdminDeletesOnlyMissingMCPCapabilities(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := store.SaveGrant(ctx, mcpgateway.AccountGrant{ID: "grant_missing", CapabilityID: "cap_missing"}); err != nil {
+	if err := store.SaveGrant(ctx, mcpgateway.AccountGrant{ID: "grant_missing", UserID: "user-test", CapabilityID: "cap_missing"}); err != nil {
 		t.Fatal(err)
 	}
 	router := newTestRouter(t, server.Options{ProxyGateway: testMCPGatewayService(store, fakeAdminUpstreamClient{})})

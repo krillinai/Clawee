@@ -13,7 +13,8 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs';
-import type { AddressInfo } from 'node:net';
+import { createConnection, type AddressInfo } from 'node:net';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -62,6 +63,34 @@ afterEach(async () => {
 });
 
 describe('runtime api', () => {
+  it.each([42, null, {}, '', 'x'.repeat(128001)])('rejects invalid workbench context before starting a run', async workbenchContext => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-workbench-context-'));
+    server = await buildServer({ token: 'secret', dataDir: tempDir });
+    const response = await authPost('/runs', { threadId: 'missing-thread', prompt: '分析数据', workbenchContext });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('adds workbench data to execution without changing the visible user message', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-workbench-run-'));
+    const fake = createFakeCodex(tempDir, { stdoutLines: [
+      { type: 'thread.started', thread_id: 'codex-workbench' },
+      { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }
+    ] });
+    server = await buildServer({ token: 'secret', dataDir: tempDir, codexBin: fake.bin,
+      codexSessionProvider: createNoopCodexSessionProvider(), capabilities: makeResumeCapableMatrix() });
+    const thread = (await createConversationResponseViaApi({ profile: 'default', sandbox: 'read-only' })).json().thread;
+    const response = await authPost('/runs', {
+      threadId: thread.id, prompt: '分析增长趋势', workbenchContext: '{"account":"品牌账号","followerCount":128600}'
+    });
+    expect(response.statusCode).toBe(202);
+    await waitForRunStatus(response.json().id, 'succeeded');
+    expect(fake.readPrompt()).toContain('128600');
+    expect(fake.readPrompt()).toContain('分析增长趋势');
+    const history = await authGet(`/threads/${thread.id}/history`);
+    expect(history.json().items.find((item: { type: string }) => item.type === 'user_message').text).toBe('分析增长趋势');
+    expect(fake.readArgv()).toContain('read-only');
+  });
   it('starts and stops an injected scheduler when autostart is enabled', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-'));
     const steps: string[] = [];
@@ -187,7 +216,7 @@ describe('runtime api', () => {
     expect(scheduler.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks business APIs and scheduler startup until model configuration succeeds', async () => {
+  it('starts workflow scheduling while gating Agent APIs until model configuration succeeds', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-model-gate-'));
     db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
     const runManager = createRunManager({
@@ -197,11 +226,14 @@ describe('runtime api', () => {
       codexHome: join(tempDir, 'codex-home')
     });
     const cancelAll = vi.spyOn(runManager, 'cancelAll');
+    const startRun = vi.spyOn(runManager, 'startRun');
     const schedulerStart = vi.fn();
     const schedulerStop = vi.fn();
+    const schedulerRefresh = vi.fn();
     const scheduler = createFakeScheduler({
       start: schedulerStart,
-      stop: schedulerStop
+      stop: schedulerStop,
+      refreshTimer: schedulerRefresh
     });
     let ready = false;
     let resolveReady = false;
@@ -214,6 +246,8 @@ describe('runtime api', () => {
       ready = false;
     });
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ready
         ? {
             status: 'ready',
@@ -331,17 +365,18 @@ describe('runtime api', () => {
       mode: 'enterprise_managed'
     });
     expect((await authGet('/enterprise/platform-branding')).statusCode).toBe(200);
+    expect((await authGet('/runtime/model-service/api-key')).statusCode).toBe(200);
+    expect((await server.inject({ method: 'POST', url: '/runtime/model-service/check', headers: { authorization: 'Bearer secret' } })).statusCode).toBe(200);
     expect((await authGet('/enterprise/platform-branding/sidebar-logo')).statusCode).toBe(200);
     expect((await authGet('/enterprise/platform-branding/sidebar-compact-logo')).statusCode).toBe(200);
-    const blocked = await authGet('/projects');
-    expect(blocked.statusCode).toBe(428);
-    expect(blocked.json()).toEqual({
-      error: {
-        code: 'MODEL_SERVICE_CONFIGURATION_REQUIRED',
-        message: '请先配置并验证 Codex 模型服务'
-      }
-    });
-    expect(schedulerStart).not.toHaveBeenCalled();
+    for (const path of ['/projects', '/threads', '/runs', '/schedules']) {
+      expect((await authGet(path)).statusCode, path).toBe(200);
+    }
+    const blockedRun = await authPost('/runs', { prompt: '模型配置前不能执行 Agent' });
+    expect(blockedRun.statusCode).toBe(428);
+    expect(blockedRun.json().error.code).toBe('MODEL_SERVICE_CONFIGURATION_REQUIRED');
+    expect(startRun).not.toHaveBeenCalled();
+    expect(schedulerStart).toHaveBeenCalledOnce();
 
     const configured = await server.inject({
       method: 'POST',
@@ -354,7 +389,7 @@ describe('runtime api', () => {
       }
     });
     expect(configured.statusCode).toBe(200);
-    expect(schedulerStart).toHaveBeenCalledOnce();
+    expect(schedulerStart).toHaveBeenCalledTimes(2);
     expect((await server.inject({
       method: 'GET',
       url: '/healthz'
@@ -364,10 +399,15 @@ describe('runtime api', () => {
     });
     expect((await authGet('/projects')).statusCode).toBe(200);
 
+    const refreshCount = schedulerRefresh.mock.calls.length;
     const logout = await authPost('/enterprise/logout', {});
     expect(logout.statusCode).toBe(200);
     expect(signOut).toHaveBeenCalled();
-    expect(schedulerStop).toHaveBeenCalled();
+    expect(schedulerStop).not.toHaveBeenCalled();
+    expect(schedulerRefresh.mock.calls.length).toBeGreaterThan(refreshCount);
+    expect(modelServiceRuntime.ready()).toBe(false);
+    expect((await authPost('/runs', { prompt: '退出后不能执行 Agent' })).statusCode).toBe(428);
+    expect(startRun).not.toHaveBeenCalled();
     expect(cancelAll).toHaveBeenCalled();
 
     resolveReady = true;
@@ -376,7 +416,8 @@ describe('runtime api', () => {
       password: 'password-123'
     });
     expect(login.statusCode).toBe(200);
-    expect(schedulerStart).toHaveBeenCalledTimes(2);
+    expect(schedulerStart).toHaveBeenCalledTimes(3);
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   it('closes the run manager before server shutdown completes', async () => {
@@ -403,6 +444,71 @@ describe('runtime api', () => {
     expect(close).toHaveBeenCalledWith();
   });
 
+  it.each([false, true])('关闭服务时释放未发送完整 HTTP 请求的连接，更新准备状态=%s', async prepared => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-shutdown-'));
+    server = await buildServer({ token: 'secret', dataDir: tempDir });
+    const address = new URL(await server.listen({ host: '127.0.0.1', port: 0 }));
+    const sockets = [];
+    for (const data of ['', 'GET /healthz HTTP/1.1\r\n']) {
+      const accepted = once(server.server, 'connection');
+      const socket = createConnection({ host: '127.0.0.1', port: Number(address.port) });
+      sockets.push(socket);
+      await accepted;
+      if (data) socket.write(data);
+    }
+    if (prepared) {
+      const response = await authPost('/desktop-update/prepare', {});
+      expect(response.json()).toEqual({ prepared: true });
+    }
+    const close = server.close();
+    try {
+      expect(await Promise.race([close.then(() => true), delay(1_000).then(() => false)]))
+        .toBe(true);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await close;
+    }
+  });
+
+  it('关闭服务时等待已开始的写请求完成后再清理资源', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-shutdown-write-'));
+    const catalogClose = vi.fn(async () => undefined);
+    server = await buildServer({ token: 'secret', dataDir: tempDir,
+      codexModelCatalog: { listModels: async () => ({ models: [] }), close: catalogClose }
+    });
+    let releaseWrite!: () => void;
+    let startedWrite!: () => void;
+    const writeStarted = new Promise<void>(resolve => { startedWrite = resolve; });
+    const writeCanFinish = new Promise<void>(resolve => { releaseWrite = resolve; });
+    server.post('/shutdown-write', async () => {
+      startedWrite();
+      await writeCanFinish;
+      return { saved: true };
+    });
+    let startedClose!: () => void;
+    const closeStarted = new Promise<void>(resolve => { startedClose = resolve; });
+    server.addHook('preClose', async () => startedClose());
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const response = fetch(`${address}/shutdown-write`, {
+      method: 'POST', headers: { authorization: 'Bearer secret' }
+    });
+    await writeStarted;
+    const close = server.close();
+    try {
+      await closeStarted;
+      expect(catalogClose).not.toHaveBeenCalled();
+      releaseWrite();
+      expect(await Promise.race([close.then(() => true), delay(1_000).then(() => false)]))
+        .toBe(true);
+    } finally {
+      releaseWrite();
+      server.server.closeAllConnections();
+      await close;
+    }
+    expect(await (await response).json()).toEqual({ saved: true });
+    expect(catalogClose).toHaveBeenCalledOnce();
+  });
+
   it('ends live SSE connections and persists canceled runs during shutdown', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-api-'));
     db = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
@@ -414,7 +520,8 @@ describe('runtime api', () => {
       codexHome: join(tempDir, 'codex-home')
     });
     server = await buildServer({
-      token: 'secret', dataDir: tempDir, db, runManager, sseHeartbeatMs: 20
+      token: 'secret', dataDir: tempDir, db, runManager, sseHeartbeatMs: 20,
+      subscribeModelCatalogChanges: () => () => {}
     });
     await server.listen({ host: '127.0.0.1', port: 0 });
     const created = await authPost('/runs', {
@@ -423,18 +530,23 @@ describe('runtime api', () => {
     const run = created.json() as { id: string };
     await waitForRunStatus(run.id, 'running');
     const address = server.server.address() as AddressInfo;
+    // Windows 控制台进程会经过 2 秒宽限期和 taskkill 强制终止。
+    const shutdownBudgetMs = process.platform === 'win32' ? 4_000 : 2_000;
     const response = await fetch(
       `http://127.0.0.1:${address.port}/runs/${run.id}/events`,
       {
         headers: { authorization: 'Bearer secret' },
-        signal: AbortSignal.timeout(2_000)
+        signal: AbortSignal.timeout(shutdownBudgetMs)
       }
     );
     const startedAt = Date.now();
+    const models = await fetch(`http://127.0.0.1:${address.port}/codex/models/events`, {
+      headers: { authorization: 'Bearer secret' }, signal: AbortSignal.timeout(shutdownBudgetMs)
+    });
     const close = server.close();
-    await response.text();
+    await Promise.all([response.text(), models.text()]);
     await close;
-    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(Date.now() - startedAt).toBeLessThan(shutdownBudgetMs);
     server = undefined;
 
     expect(runManager.getRun(run.id)?.status).toBe('canceled');
@@ -634,6 +746,22 @@ describe('runtime api', () => {
     });
     expect(overwrite.statusCode).toBe(200);
     expect(readFileSync(join(tempDir, 'note.txt'), 'utf8')).toBe('updated');
+  });
+
+  it('accepts 50 MiB attachments by default and rejects one additional byte', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-attachment-limit-api-'));
+    server = await buildServer({ token: 'secret', dataDir: tempDir });
+    const url = `/attachments?${new URLSearchParams({
+      draftId: 'draft-limit', fileName: 'large.txt', mime: 'text/plain'
+    })}`;
+    const content = Buffer.alloc(50 * 1024 * 1024, 65);
+    const accepted = await authUpload(url, content);
+    expect(accepted.statusCode).toBe(201);
+    expect(accepted.json().attachment.size).toBe(content.length);
+
+    const rejected = await authUpload(url, Buffer.alloc(content.length + 1, 65));
+    expect(rejected.statusCode).toBe(413);
+    expect(rejected.json().error.code).toBe('ATTACHMENT_TOO_LARGE');
   });
 
   it('attachment routes enforce binary limits, content verification, scoped access, and persistence', async () => {
@@ -1107,28 +1235,24 @@ describe('runtime api', () => {
       id: string;
       type: string;
       text?: string;
+      prompt?: string;
       runId?: string;
       status?: string;
     }>;
     expect(
       archivedItems.filter(item => item.type === 'user_message')
+    ).toEqual([]);
+    expect(
+      archivedItems.filter(item => item.type === 'schedule_trigger')
     ).toEqual([
       expect.objectContaining({
-        id: `run-prompt:${runNow.json().run.id}`,
-        text: 'Summarize status'
+        runId: runNow.json().run.id,
+        prompt: 'Summarize status'
       }),
       expect.objectContaining({
-        id: `run-prompt:${secondRunNow.json().run.id}`,
-        text: 'Summarize status'
+        runId: secondRunNow.json().run.id,
+        prompt: 'Summarize status'
       })
-    ]);
-    expect(
-      archivedItems
-        .filter(item => item.type === 'schedule_trigger')
-        .map(item => item.runId)
-    ).toEqual([
-      runNow.json().run.id,
-      secondRunNow.json().run.id
     ]);
     expect(
       archivedItems.filter(item => item.type === 'done')
@@ -1622,6 +1746,78 @@ describe('runtime api', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('streams model catalog changes after an initial synchronization event', async () => {
+    let notify: ((reason: string) => void) | undefined;
+    const unsubscribe = vi.fn();
+    server = await buildServer({
+      token: 'secret',
+      codexModelCatalog: {
+        listModels: async () => ({ models: [] }),
+        close: async () => undefined
+      },
+      subscribeModelCatalogChanges(listener) {
+        notify = listener;
+        return unsubscribe;
+      }
+    });
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const catalog = await fetch(`${address}/codex/models`, {
+      headers: { authorization: 'Bearer secret' }
+    });
+    expect(await catalog.json()).toEqual({ models: [], updatesAvailable: true });
+    const unauthorized = await fetch(`${address}/codex/models/events`);
+    expect(unauthorized.status).toBe(401);
+    const controller = new AbortController();
+    const response = await fetch(`${address}/codex/models/events`, {
+      headers: { authorization: 'Bearer secret' }, signal: controller.signal
+    });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('event: changed');
+      notify?.('model_catalog_changed');
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('event: changed');
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
+    }
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalled());
+  });
+
+  it('关闭服务时主动结束模型目录长连接并释放订阅', async () => {
+    const unsubscribes: ReturnType<typeof vi.fn>[] = [];
+    server = await buildServer({
+      token: 'secret',
+      codexModelCatalog: {
+        listModels: async () => ({ models: [] }),
+        close: async () => undefined
+      },
+      subscribeModelCatalogChanges() {
+        const unsubscribe = vi.fn();
+        unsubscribes.push(unsubscribe);
+        return unsubscribe;
+      }
+    });
+    const address = await server.listen({ host: '127.0.0.1', port: 0 });
+    const shutdownBudgetMs = 2_000;
+    const response = await fetch(`${address}/codex/models/events`, {
+      headers: { authorization: 'Bearer secret' },
+      signal: AbortSignal.timeout(shutdownBudgetMs)
+    });
+    const startedAt = Date.now();
+
+    const prepared = await server.inject({ method: 'POST', url: '/desktop-update/prepare', headers: { authorization: 'Bearer secret' } });
+    expect(prepared.json()).toEqual({ prepared: true });
+    const close = server.close();
+    expect(await response.text()).toContain('event: changed');
+    await close;
+    await server.close();
+
+    expect(Date.now() - startedAt).toBeLessThan(shutdownBudgetMs);
+    for (const unsubscribe of unsubscribes) expect(unsubscribe).toHaveBeenCalledOnce();
+    server = undefined;
+  });
+
   it('returns the complete Gateway catalog including non-GPT models', async () => {
     const close = vi.fn(async () => undefined);
     const codexModelCatalog: CodexModelCatalog = {
@@ -1652,6 +1848,8 @@ describe('runtime api', () => {
       close
     };
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',
@@ -1714,6 +1912,8 @@ describe('runtime api', () => {
   it('returns the configured default model when Codex model/list fails', async () => {
     const close = vi.fn(async () => undefined);
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',
@@ -1765,6 +1965,8 @@ describe('runtime api', () => {
   it('returns the configured default model when Codex model/list is empty', async () => {
     const close = vi.fn(async () => undefined);
     const modelServiceRuntime: ModelServiceRuntime = {
+      async check() { return { status: 'succeeded' }; },
+      async readApiKey() { return null; },
       status: () => ({
         status: 'ready',
         mode: 'platform_managed',

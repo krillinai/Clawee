@@ -2,10 +2,17 @@ import type {
   CreateThreadRequest,
   ReasoningEffort,
   SandboxMode,
+  SkillReviewThreadContext,
   ThreadOrigin,
   ThreadPurpose,
   WorkspaceMode
 } from '@clawee/protocol';
+
+export type AgentPromptPolicySnapshot = {
+  version?: number;
+  serverAgentPrompt: string;
+  claweeAgentPrompt: string;
+};
 
 export type RuntimeThread = {
   id: string;
@@ -24,10 +31,12 @@ export type RuntimeThread = {
   sandbox: SandboxMode;
   status: 'active' | 'archived';
   purpose: ThreadPurpose;
+  skillReview?: SkillReviewThreadContext;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string | null;
   pinnedAt?: string | null;
+  agentPromptPolicySnapshot?: AgentPromptPolicySnapshot;
 };
 
 export type CreateConversationThreadInput = Extract<
@@ -62,7 +71,7 @@ export type CreateRuntimeThreadInput = {
 
 export type CreateKnowledgeThreadInput = {
   enterpriseSubjectId: string;
-  projectId: string;
+  projectId?: string;
   title?: string;
 };
 
@@ -92,6 +101,7 @@ export type UpdateScheduleThreadInput = {
 
 export type ThreadManagerErrorCode =
   | 'THREAD_NOT_FOUND'
+  | 'THREAD_READ_ONLY'
   | 'PROJECT_NOT_FOUND'
   | 'PROJECT_ARCHIVED'
   | 'PROJECT_DIRECTORY_UNAVAILABLE'
@@ -124,7 +134,7 @@ export type ThreadManager = {
   }): RuntimeThread[];
   listKnowledgeThreads(
     enterpriseSubjectId: string,
-    filter?: { status?: 'active' | 'archived' | 'all'; limit?: number }
+    filter?: { status?: 'active' | 'archived' | 'all'; assignment?: 'assigned' | 'unassigned'; limit?: number }
   ): RuntimeThread[];
   listPublicThreads(filter?: {
     status?: 'active' | 'archived' | 'all';
@@ -146,5 +156,6 @@ export type ThreadManager = {
     unresolvedThreadIds: string[];
   };
   setCodexThreadId(threadId: string, codexThreadId: string): void;
+  setAgentPromptPolicySnapshot(threadId: string, snapshot: AgentPromptPolicySnapshot): void;
   touchThread(threadId: string): void;
 };

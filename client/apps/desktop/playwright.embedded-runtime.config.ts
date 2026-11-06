@@ -3,6 +3,7 @@ import base from './playwright.config.js';
 
 export default defineConfig({
   ...base,
+  retries: 0,
   testMatch: 'embedded-codex-runtime.spec.ts',
   outputDir: '../../test-results/desktop-embedded-runtime-playwright',
   reporter: [

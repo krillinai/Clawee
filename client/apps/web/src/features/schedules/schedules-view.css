@@ -11,7 +11,7 @@
   width: 100%;
   min-height: 100%;
   margin: 0;
-  padding: 32px 28px 48px;
+  padding: 16px 28px 48px;
 }
 
 .schedules-view__header {
@@ -23,7 +23,7 @@
 
 .schedules-view__header h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: var(--page-title-size);
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0;
@@ -32,7 +32,7 @@
 .schedules-view__header p {
   margin: 7px 0 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--page-body-size);
   line-height: 1.5;
 }
 
@@ -900,7 +900,7 @@
   }
 
   .schedules-view__header h1 {
-    font-size: 23px;
+    font-size: var(--page-title-size);
   }
 
   .schedules-view__header p {

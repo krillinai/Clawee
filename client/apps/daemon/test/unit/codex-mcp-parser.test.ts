@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { isMcpNotFoundOutput, parseMcpGetOutput, parseMcpListOutput } from '../../src/codex/mcp/parser.js';
 
 describe('codex mcp parser', () => {
+  it.each(['unknown', 'unsupported', 'not_logged_in', 'bearer_token', 'oauth'])(
+    '保留 MCP 服务的认证状态 %s',
+    authStatus => {
+      const result = parseMcpListOutput({
+        codexHome: '/tmp/codex-home',
+        codexHomeMode: 'isolated',
+        stdout: JSON.stringify([{
+          name: 'remote',
+          transport: { type: 'streamable_http', url: 'https://example.test/mcp' },
+          auth_status: authStatus
+        }]),
+        stderr: '',
+        exitCode: 0
+      });
+
+      expect(result.servers[0]).toHaveProperty('authStatus', authStatus);
+    }
+  );
+
+  it.each([undefined, 'unexpected', null])('忽略无法识别的认证状态 %s', authStatus => {
+    const result = parseMcpListOutput({
+      codexHome: '/tmp/codex-home',
+      codexHomeMode: 'isolated',
+      stdout: JSON.stringify([{ name: 'remote', transport: 'http', auth_status: authStatus }]),
+      stderr: '',
+      exitCode: 0
+    });
+
+    expect(result.servers[0]).not.toHaveProperty('authStatus');
+  });
+
   it('parses JSON get output', () => {
     const result = parseMcpGetOutput({
       name: 'github',

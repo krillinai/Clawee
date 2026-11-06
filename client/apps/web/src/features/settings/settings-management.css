@@ -2,6 +2,127 @@
   width: min(920px, 100%);
 }
 
+.desktop-update-settings {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.desktop-update-settings p {
+  margin: 0;
+}
+
+.desktop-update-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.desktop-update-settings .desktop-update-header > h2 {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.desktop-update-metadata {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.desktop-update-metadata > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.desktop-update-metadata dt {
+  color: var(--muted);
+}
+
+.desktop-update-metadata dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.desktop-update-status {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.desktop-update-status-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.desktop-update-status-text > span {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.desktop-update-progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  appearance: none;
+  background: var(--surface-3);
+  accent-color: var(--accent);
+}
+
+.desktop-update-progress::-webkit-progress-bar {
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
+.desktop-update-progress::-webkit-progress-value {
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.desktop-update-progress::-moz-progress-bar {
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.desktop-update-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.desktop-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.desktop-update-test > :not(summary) {
+  margin-top: 12px;
+}
+
+.desktop-update-test .desktop-update-test-version {
+  width: min(240px, 100%);
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .settings-management__header {
   min-width: 0;
   display: flex !important;
@@ -165,6 +286,11 @@
   width: 32px;
   padding: 0;
   background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+.settings-item__actions .settings-mcp-auth-action {
+  width: auto;
+  padding: 0 10px;
 }
 
 .settings-tags {
@@ -340,6 +466,77 @@
 
 .model-settings .settings-primary-button {
   justify-self: start;
+}
+
+.model-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.model-reasoning-settings[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+.model-settings-actions button {
+  min-width: 104px;
+}
+
+.model-settings-status {
+  min-width: 0;
+  min-height: 88px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-hairline);
+  overflow-wrap: anywhere;
+}
+
+.model-settings-status p {
+  margin: 0;
+}
+
+.model-settings-status .model-settings-status__summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.model-settings-status__summary svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.model-settings-status .model-settings-status__summary--failed {
+  color: var(--danger);
+}
+
+.model-settings-status .model-settings-status__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-settings-status__details {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-settings-status__details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.model-settings-status__details p {
+  margin-top: 8px;
 }
 
 .settings-advanced-fields {

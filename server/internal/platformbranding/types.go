@@ -20,12 +20,13 @@ const (
 )
 
 var (
-	ErrInvalidAction    = errors.New("invalid platform branding action")
-	ErrInvalidImage     = errors.New("invalid platform branding image")
-	ErrImageTooLarge    = errors.New("platform branding image is too large")
-	ErrImageNotFound    = errors.New("platform branding image not found")
-	ErrInvalidMenuLabel = errors.New("invalid sidebar menu label")
-	ErrInvalidAdminURL  = errors.New("invalid admin URL")
+	ErrInvalidAction      = errors.New("invalid platform branding action")
+	ErrInvalidImage       = errors.New("invalid platform branding image")
+	ErrImageTooLarge      = errors.New("platform branding image is too large")
+	ErrImageNotFound      = errors.New("platform branding image not found")
+	ErrInvalidMenuLabel   = errors.New("invalid sidebar menu label")
+	ErrInvalidAdminURL    = errors.New("invalid admin URL")
+	ErrInvalidAccentColor = errors.New("invalid accent color")
 )
 
 type Image struct {
@@ -34,24 +35,32 @@ type Image struct {
 }
 
 type Configuration struct {
-	SidebarLogo        *Image
-	SidebarCompactLogo *Image
-	SidebarMenuLabels  MenuLabels
-	AdminURL           string
-	UpdatedBy          string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	SidebarLogo            *Image
+	SidebarCompactLogo     *Image
+	SidebarLogoDark        *Image
+	SidebarCompactLogoDark *Image
+	SidebarMenuLabels      MenuLabels
+	AdminURL               string
+	AccentColor            string
+	UpdatedBy              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 type UpdateInput struct {
-	SidebarLogoAction        Action
-	SidebarLogo              []byte
-	SidebarCompactLogoAction Action
-	SidebarCompactLogo       []byte
-	SidebarMenuLabels        map[string]*string
-	AdminURL                 *string
-	UpdatedBy                string
-	UpdatedAt                time.Time
+	SidebarLogoAction            Action
+	SidebarLogo                  []byte
+	SidebarCompactLogoAction     Action
+	SidebarCompactLogo           []byte
+	SidebarLogoDarkAction        Action
+	SidebarLogoDark              []byte
+	SidebarCompactLogoDarkAction Action
+	SidebarCompactLogoDark       []byte
+	SidebarMenuLabels            map[string]*string
+	AdminURL                     *string
+	AccentColor                  *string
+	UpdatedBy                    string
+	UpdatedAt                    time.Time
 }
 
 type MenuLabels struct {

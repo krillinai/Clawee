@@ -6,7 +6,13 @@ export const AGENT_CAPABILITY_SCOPES = [
   'schedule:update',
   'schedule:pause',
   'schedule:resume',
-  'schedule:run_now'
+  'schedule:run_now',
+  'workflow:upload',
+  'workflow:read',
+  'drive:upload',
+  'drive:download',
+  'skill:list_spaces',
+  'skill:upload'
 ] as const;
 
 export type AgentCapabilityScope = typeof AGENT_CAPABILITY_SCOPES[number];
@@ -17,7 +23,7 @@ export type AgentCapabilityGrant = {
   createdBy: 'api' | 'schedule';
   scopes: AgentCapabilityScope[];
   issuedAt: string;
-  expiresAt: string;
+  expiresAt: string | null;
 };
 
 export type AgentCapabilityTokenErrorCode =
@@ -50,7 +56,7 @@ export type AgentCapabilityTokenStore = {
     threadId: string;
     createdBy: 'api' | 'schedule';
     scopes: AgentCapabilityScope[];
-  }): { token: string; expiresAt: string };
+  }): { token: string; expiresAt: string | null };
   issueProcess(input: {
     createdBy: 'api';
     maxScopes: AgentCapabilityScope[];
@@ -126,7 +132,10 @@ const MUTATION_SCOPES = new Set<AgentCapabilityScope>([
   'schedule:update',
   'schedule:pause',
   'schedule:resume',
-  'schedule:run_now'
+  'schedule:run_now',
+  'workflow:upload',
+  'drive:upload',
+  'skill:upload'
 ]);
 
 export function createAgentCapabilityTokenStore(
@@ -156,7 +165,7 @@ export function createAgentCapabilityTokenStore(
     threadId: string;
     createdBy: 'api' | 'schedule';
     scopes: AgentCapabilityScope[];
-  }): { token: string; expiresAt: string } {
+  }): { token: string; expiresAt: string | null } {
     if (closed) {
       throw new AgentCapabilityTokenError(
         'CAPABILITY_STORE_CLOSED',
@@ -257,8 +266,7 @@ export function createAgentCapabilityTokenStore(
         }
         const scopes = uniqueScopes(activation.scopes);
         if (
-          scopes.length === 0
-          || scopes.some(scope => !record.maxScopes.includes(scope))
+          scopes.some(scope => !record.maxScopes.includes(scope))
         ) {
           throw new AgentCapabilityTokenError(
             'CAPABILITY_SCOPE_FORBIDDEN',
@@ -407,7 +415,7 @@ export function createAgentCapabilityTokenStore(
     let removed = 0;
     for (const [digest, record] of records) {
       if (record.kind === 'run') {
-        if (record.grant.expiresAtMs > now) continue;
+        if (!record.revoked && record.grant.expiresAtMs > now) continue;
         removeRecord(digest, record);
         removed += 1;
         continue;
@@ -481,14 +489,16 @@ export function createAgentCapabilityTokenStore(
     scopes: AgentCapabilityScope[]
   ): ActiveCapabilityGrant {
     const issuedAtMs = clock.now();
-    const expiresAtMs = issuedAtMs + ttlMs;
+    // 网盘传输可能晚于五分钟且按批逐文件执行；默认随当前运行撤销。
+    const runBound = options.ttlMs === undefined && scopes.some(scope => scope === 'drive:upload' || scope === 'drive:download');
+    const expiresAtMs = runBound ? Infinity : issuedAtMs + ttlMs;
     return {
       runId: input.runId,
       threadId: input.threadId,
       createdBy: input.createdBy,
       scopes,
       issuedAt: new Date(issuedAtMs).toISOString(),
-      expiresAt: new Date(expiresAtMs).toISOString(),
+      expiresAt: runBound ? null : new Date(expiresAtMs).toISOString(),
       expiresAtMs
     };
   }

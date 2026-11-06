@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -98,12 +99,45 @@ func feedbackClientIP(r *http.Request, proxies []string) string {
 	return ip.Unmap().String()
 }
 func mountFeedbackRoutes(api, admin *gin.RouterGroup, opts Options) {
+	api.GET("/feedback/policy", func(c *gin.Context) {
+		feedbackResponse(c, gin.H{"enabled": opts.FeedbackService != nil, "policy_version": 1, "expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)}, nil, http.StatusOK)
+	})
 	if opts.FeedbackService == nil {
 		return
 	}
 	svc := opts.FeedbackService
 	public := api.Group("/feedback")
 	public.Use(func(c *gin.Context) { c.Header("Cache-Control", "no-store"); c.Next() })
+	public.PUT("/incidents/:incidentId", func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, feedback.MaxIncidentBytes)
+		var in feedback.AutomaticIncident
+		if !feedbackJSON(c, &in) {
+			return
+		}
+		out, created, err := svc.PutIncident(c.Request.Context(), c.Param("incidentId"), feedbackBearer(c), in, feedbackClientIP(c.Request, opts.FeedbackTrustedProxies), c.GetHeader("X-Feedback-Deployment-Token"))
+		status := 200
+		if created {
+			status = 201
+		}
+		feedbackResponse(c, out, err, status)
+	})
+	public.PUT("/incidents/:incidentId/logs", func(c *gin.Context) {
+		data, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, feedback.MaxIncidentLogBytes))
+		if err != nil {
+			feedbackResponse(c, nil, &feedback.Error{Status: 413, Code: "feedback_request_too_large"}, 0)
+			return
+		}
+		count := bytes.Count(data, []byte("\n"))
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			count++
+		}
+		created, err := svc.Upload(c.Request.Context(), c.Param("incidentId"), "incident_raw_logs", feedbackBearer(c), c.GetHeader("Content-Type"), c.GetHeader("X-Content-SHA256"), int64(len(data)), bytes.NewReader(data), int64(count))
+		status := 200
+		if created {
+			status = 201
+		}
+		feedbackResponse(c, gin.H{"received": err == nil}, err, status)
+	})
 	public.POST("/reports", func(c *gin.Context) {
 		var in feedback.CreateInput
 		if !feedbackJSON(c, &in) {
@@ -171,7 +205,7 @@ func mountFeedbackRoutes(api, admin *gin.RouterGroup, opts Options) {
 	})
 	management.GET("/reports", func(c *gin.Context) {
 		limit, _ := strconv.Atoi(c.Query("limit"))
-		out, next, err := svc.List(c.Request.Context(), feedbackActor(c), feedback.Filter{Status: c.Query("status"), Source: c.Query("source"), Version: c.Query("version"), Keyword: c.Query("keyword"), From: c.Query("from"), To: c.Query("to"), Cursor: c.Query("cursor"), Limit: limit, IncludeUnavailable: c.Query("include_unavailable") == "true"})
+		out, next, err := svc.List(c.Request.Context(), feedbackActor(c), feedback.Filter{Kind: c.Query("kind"), Layer: c.Query("layer"), ErrorCode: c.Query("error_code"), Reporter: c.Query("reporter"), Status: c.Query("status"), Source: c.Query("source"), Version: c.Query("version"), Keyword: c.Query("keyword"), From: c.Query("from"), To: c.Query("to"), Cursor: c.Query("cursor"), Limit: limit, IncludeUnavailable: c.Query("include_unavailable") == "true"})
 		if err != nil {
 			feedbackResponse(c, nil, err, 0)
 			return

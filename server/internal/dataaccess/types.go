@@ -14,16 +14,18 @@ const (
 	ResourceDataView      = "data_view"
 
 	ViewAgentActivity        = "agent_activity"
+	ViewSkillContributions   = "skill_contributions"
 	ViewXiaohongshuOperation = "xiaohongshu_operation"
 	ViewDouyinAds            = "douyin_ads"
 	ViewBilibiliOperation    = "bilibili_operation"
 
-	ActionRead    = "read"
-	ActionUpload  = "upload"
-	ActionMCP     = "mcp"
-	ActionWrite   = "write"
-	ActionConnect = "connect"
-	ActionManage  = "manage"
+	ActionRead        = "read"
+	ActionUpload      = "upload"
+	ActionMCP         = "mcp"
+	ActionWrite       = "write"
+	ActionConnect     = "connect"
+	ActionManage      = "manage"
+	ActionReadContent = "read_content"
 )
 
 type ActionDefinition struct {
@@ -74,6 +76,7 @@ var resourceCatalog = []ResourceDefinition{
 			{Action: ActionRead, Name: "查看数据视图", Required: true},
 			{Action: ActionConnect, Name: "连接与同步账号", Description: "允许连接、重新授权和手动同步平台账号。"},
 			{Action: ActionManage, Name: "管理账号同步", Description: "允许停止或恢复平台账号同步。"},
+			{Action: ActionReadContent, Name: "查看员工会话正文", Description: "允许通过 Agent 动态 MCP 读取已上报的员工用户输入和助手最后一条回复。"},
 		},
 	},
 }
@@ -102,14 +105,18 @@ func ActionDefinitionsFor(resourceType, resourceID string) []ActionDefinition {
 	if !ok {
 		return []ActionDefinition{}
 	}
-	if resourceType != ResourceDataView || resourceID == ViewBilibiliOperation || resourceID == "" {
+	if resourceType != ResourceDataView || resourceID == "" {
 		return definition.Actions
 	}
 	actions := make([]ActionDefinition, 0, len(definition.Actions))
 	for _, action := range definition.Actions {
-		if action.Action != ActionConnect && action.Action != ActionManage {
-			actions = append(actions, action)
+		if (action.Action == ActionConnect || action.Action == ActionManage) && resourceID != ViewBilibiliOperation {
+			continue
 		}
+		if action.Action == ActionReadContent && resourceID != ViewAgentActivity {
+			continue
+		}
+		actions = append(actions, action)
 	}
 	return actions
 }
@@ -123,6 +130,7 @@ var (
 type Grant struct {
 	GrantID      string    `json:"grant_id"`
 	UserID       string    `json:"user_id"`
+	RoleID       string    `json:"role_id,omitempty"`
 	ResourceType string    `json:"resource_type"`
 	ResourceID   string    `json:"resource_id"`
 	Action       string    `json:"action"`
@@ -133,6 +141,9 @@ type Grant struct {
 
 type Filter struct {
 	UserID       string
+	RoleID       string
+	RoleGrants   bool
+	Effective    bool
 	ResourceType string
 	ResourceID   string
 	Action       string
@@ -140,6 +151,7 @@ type Filter struct {
 
 type SetInput struct {
 	UserID       string
+	RoleID       string
 	ResourceType string
 	ResourceID   string
 	Actions      []string
@@ -152,6 +164,7 @@ type Audit struct {
 	AuditID       string
 	OperatorID    string
 	TargetUserID  string
+	TargetRoleID  string
 	ResourceType  string
 	ResourceID    string
 	BeforeActions []string

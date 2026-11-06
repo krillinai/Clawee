@@ -13,6 +13,7 @@ export function createRunService(client: ClientLike) {
     startThreadRun(input: {
       threadId: string;
       prompt: string;
+      workbenchContext?: string;
       resumeMode?: ResumeMode;
       model?: string | null;
       reasoning?: ReasoningEffort | null;
@@ -23,6 +24,7 @@ export function createRunService(client: ClientLike) {
       const body: {
         threadId: string;
         prompt: string;
+        workbenchContext?: string;
         resumeMode: ResumeMode;
         model?: string | null;
         reasoning?: ReasoningEffort | null;
@@ -35,6 +37,7 @@ export function createRunService(client: ClientLike) {
         resumeMode: input.resumeMode ?? 'auto'
       };
       if (input.model !== undefined) body.model = input.model;
+      if (input.workbenchContext !== undefined) body.workbenchContext = input.workbenchContext;
       if (input.reasoning !== undefined) body.reasoning = input.reasoning;
       if (input.draftId !== undefined) body.draftId = input.draftId;
       if (input.attachmentIds !== undefined) body.attachmentIds = input.attachmentIds;
@@ -49,6 +52,9 @@ export function createRunService(client: ClientLike) {
     },
     steerRun(id: string): Promise<{ id: string; steered: boolean }> {
       return client.post(`/runs/${encodeURIComponent(id)}/steer`);
+    },
+    retryDriveDownload(id: string): Promise<unknown> {
+      return client.post(`/runs/${encodeURIComponent(id)}/shared-drive/download`);
     },
     getRun(id: string): Promise<RunResponse> {
       return client.get(`/runs/${encodeURIComponent(id)}`);

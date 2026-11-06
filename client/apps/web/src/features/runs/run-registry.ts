@@ -10,6 +10,7 @@ export type RunRegistryState = {
   lastSeqByRunId: Record<string, number | undefined>;
   subscriptionStateByRunId: Record<string, RunSubscriptionState | undefined>;
   cancelStateByRunId: Record<string, RunCancelState | undefined>;
+  terminalConflictsByRunId: Record<string, boolean | undefined>;
 };
 
 export type RunRegistryAction =
@@ -21,6 +22,7 @@ export type RunRegistryAction =
       runs: RunResponse[];
     }
   | { type: 'upsert_run'; run: RunResponse }
+  | { type: 'confirm_run'; run: RunResponse }
   | { type: 'record_event'; event: AgentEventEnvelope }
   | {
       type: 'set_subscription_state';
@@ -47,6 +49,11 @@ export function runRegistryReducer(
       );
     case 'upsert_run':
       return upsertRun(state, action.run);
+    case 'confirm_run': {
+      const conflicts = { ...state.terminalConflictsByRunId };
+      delete conflicts[action.run.id];
+      return { ...upsertRun(state, action.run, true), terminalConflictsByRunId: conflicts };
+    }
     case 'record_event':
       return recordEvent(state, action.event);
     case 'set_subscription_state':
@@ -113,7 +120,8 @@ function createInitialState(): RunRegistryState {
     activeRunIdByThreadId: {},
     lastSeqByRunId: {},
     subscriptionStateByRunId: {},
-    cancelStateByRunId: {}
+    cancelStateByRunId: {},
+    terminalConflictsByRunId: {}
   };
 }
 
@@ -129,19 +137,22 @@ function mergeThreadRuns(
   const runsById = { ...state.runsById };
   const cancelStateByRunId = { ...state.cancelStateByRunId };
   const subscriptionStateByRunId = { ...state.subscriptionStateByRunId };
+  const terminalConflictsByRunId = { ...state.terminalConflictsByRunId };
 
   for (const run of normalizedRuns) {
     const existingRun = runsById[run.id];
+    if (existingRun !== undefined && isTerminal(existingRun.status) && isTerminal(run.status) && existingRun.status !== run.status) {
+      terminalConflictsByRunId[run.id] = true;
+    }
     runsById[run.id] = existingRun !== undefined
       && isTerminal(existingRun.status)
-      && !isTerminal(run.status)
-      ? existingRun
+      && existingRun.status !== run.status
+      ? { ...existingRun, lastEventSeq: Math.max(existingRun.lastEventSeq ?? 0, run.lastEventSeq ?? 0) }
       : run;
     cancelStateByRunId[run.id] ??= 'idle';
     subscriptionStateByRunId[run.id] ??= 'idle';
     if (isTerminal(runsById[run.id]!.status)) {
       cancelStateByRunId[run.id] = 'idle';
-      subscriptionStateByRunId[run.id] = 'idle';
     }
   }
 
@@ -168,11 +179,19 @@ function mergeThreadRuns(
       selectActiveRunId(runIds, runsById)
     ),
     cancelStateByRunId,
-    subscriptionStateByRunId
+    subscriptionStateByRunId,
+    terminalConflictsByRunId
   };
 }
 
-function upsertRun(state: RunRegistryState, run: RunResponse): RunRegistryState {
+function upsertRun(state: RunRegistryState, run: RunResponse, authoritative = false): RunRegistryState {
+  const existing = state.runsById[run.id];
+  if (!authoritative && existing !== undefined && isTerminal(existing.status) && isTerminal(run.status) && existing.status !== run.status) {
+    return { ...state, terminalConflictsByRunId: { ...state.terminalConflictsByRunId, [run.id]: true } };
+  }
+  if (existing !== undefined && isTerminal(existing.status) && !isTerminal(run.status)) {
+    run = { ...run, ...existing, lastEventSeq: Math.max(existing.lastEventSeq ?? 0, run.lastEventSeq ?? 0) };
+  }
   const runsById = {
     ...state.runsById,
     [run.id]: run
@@ -186,9 +205,7 @@ function upsertRun(state: RunRegistryState, run: RunResponse): RunRegistryState 
   } satisfies RunRegistryState['cancelStateByRunId'];
   const subscriptionStateByRunId = {
     ...state.subscriptionStateByRunId,
-    [run.id]: isTerminal(run.status)
-      ? 'idle'
-      : state.subscriptionStateByRunId[run.id] ?? 'idle'
+    [run.id]: state.subscriptionStateByRunId[run.id] ?? 'idle'
   } satisfies RunRegistryState['subscriptionStateByRunId'];
 
   if (threadId === undefined) {

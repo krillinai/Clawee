@@ -35,9 +35,14 @@ func (s *MemoryStore) Update(ctx context.Context, input UpdateInput) (Configurat
 	configuration := cloneConfiguration(s.configuration)
 	configuration.SidebarLogo = applyAction(configuration.SidebarLogo, input.SidebarLogoAction, input.SidebarLogo)
 	configuration.SidebarCompactLogo = applyAction(configuration.SidebarCompactLogo, input.SidebarCompactLogoAction, input.SidebarCompactLogo)
+	configuration.SidebarLogoDark = applyAction(configuration.SidebarLogoDark, input.SidebarLogoDarkAction, input.SidebarLogoDark)
+	configuration.SidebarCompactLogoDark = applyAction(configuration.SidebarCompactLogoDark, input.SidebarCompactLogoDarkAction, input.SidebarCompactLogoDark)
 	configuration.UpdatedBy = input.UpdatedBy
 	if input.AdminURL != nil {
 		configuration.AdminURL = *input.AdminURL
+	}
+	if input.AccentColor != nil {
+		configuration.AccentColor = *input.AccentColor
 	}
 	for key, target := range map[string]*string{
 		"skills":    &configuration.SidebarMenuLabels.Skills,
@@ -74,6 +79,8 @@ func applyAction(current *Image, action Action, content []byte) *Image {
 func cloneConfiguration(configuration Configuration) Configuration {
 	configuration.SidebarLogo = cloneImage(configuration.SidebarLogo)
 	configuration.SidebarCompactLogo = cloneImage(configuration.SidebarCompactLogo)
+	configuration.SidebarLogoDark = cloneImage(configuration.SidebarLogoDark)
+	configuration.SidebarCompactLogoDark = cloneImage(configuration.SidebarCompactLogoDark)
 	return configuration
 }
 

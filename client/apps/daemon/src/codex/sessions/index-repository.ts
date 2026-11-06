@@ -778,6 +778,7 @@ function searchContentForHistoryItem(item: ThreadHistoryItem): string | undefine
       value = `${item.workflowName} ${item.nodeTitle} ${item.instruction} ${item.input} ${item.customInput ?? ''}`;
       break;
     case 'workflow_status':
+    case 'diagnostic':
       return undefined;
     case 'user_message':
     case 'schedule_trigger':

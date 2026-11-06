@@ -11,7 +11,7 @@ import type {
   EnterpriseHttpClient,
   EnterpriseRemoteKnowledgeDocument
 } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 
@@ -43,7 +43,8 @@ export type EnterpriseKnowledgeManager = {
 export class EnterpriseKnowledgeManagerError extends Error {
   constructor(
     readonly code: RuntimeErrorCode,
-    readonly statusCode: number
+    readonly statusCode: number,
+    readonly details?: Record<string, unknown>
   ) {
     super(`${code}: enterprise knowledge operation failed`);
     this.name = 'EnterpriseKnowledgeManagerError';
@@ -69,7 +70,8 @@ export function createEnterpriseKnowledgeManager(input: {
       if (error instanceof EnterpriseSessionError) {
         throw new EnterpriseKnowledgeManagerError(
           error.code,
-          error.statusCode
+          error.statusCode,
+          error.details
         );
       }
       throw error;
@@ -303,7 +305,8 @@ function managerErrorFromHttp(
     error.code,
     error.statusCode !== undefined && error.statusCode >= 400
       ? error.statusCode
-      : defaultStatusCode(error.code)
+      : defaultStatusCode(error.code),
+    enterpriseHttpErrorDetails(error)
   );
 }
 

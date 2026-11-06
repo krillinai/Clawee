@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 describe("AdminLayout", () => {
-  it("renders Chinese admin navigation labels and pins account pane below the scrollable navigation", () => {
+  it("renders Chinese admin navigation labels and pins account pane below the scrollable navigation", async () => {
     const { container } = render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/admin"]}>
@@ -40,6 +40,7 @@ describe("AdminLayout", () => {
           status: "active",
           userId: "usr_admin",
           adminRoles: ["admin"],
+          adminRoleNames: ["系统管理员"],
           adminPermissions: Object.values(permissions)
         }} />}
             >
@@ -63,12 +64,10 @@ describe("AdminLayout", () => {
     expect(brandLink).not.toHaveTextContent("CG");
     expect(screen.getByText("Clawee管理后台")).toBeInTheDocument();
     const accountPane = screen.getByRole("group", { name: "账户信息" });
-    const feedbackButton = within(accountPane).getByRole("button", { name: "提交异常反馈" });
+    expect(within(accountPane).queryByRole("button", { name: "提交异常反馈" })).not.toBeInTheDocument();
     expect(within(accountPane).getByRole("button", { name: "管理员" })).toHaveAttribute("aria-haspopup", "dialog");
     expect(within(accountPane).queryByRole("button", { name: "更换头像" })).not.toBeInTheDocument();
     expect(within(accountPane).queryByRole("button", { name: "恢复默认头像" })).not.toBeInTheDocument();
-    expect(feedbackButton.textContent).toBe("");
-    expect(feedbackButton).toHaveClass("h-9", "w-9");
     expect(screen.queryByText("Clawee AI网关")).not.toBeInTheDocument();
     expect(screen.queryByText("企业治理控制台")).not.toBeInTheDocument();
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent)).toEqual(["总览"]);
@@ -83,6 +82,10 @@ describe("AdminLayout", () => {
     expect(screen.getByRole("link", { name: "智能体管理" })).toHaveAttribute("href", "/admin/mcp/agents");
     expect(screen.getByRole("link", { name: "智能体管理" })).toHaveClass("h-9", "text-[13px]", "font-normal");
     expect(screen.getByRole("link", { name: "智能体活动" })).toHaveAttribute("href", "/admin/activity");
+    expect(await screen.findByRole("link", { name: "智能体提示词" })).toHaveAttribute("href", "/admin/agent-prompt-policy");
+    expect(within(navigation).getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "总览", "智能体管理", "智能体活动", "智能体提示词"
+    ]);
     expect(screen.queryByRole("link", { name: "采集器管理" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "MCP 网关" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("link", { name: "上游服务" })).not.toBeInTheDocument();
@@ -126,15 +129,17 @@ describe("AdminLayout", () => {
     expect(screen.queryByRole("link", { name: "智能体活动详情" })).not.toBeInTheDocument();
     expect(screen.getByText("管理员")).toBeInTheDocument();
     expect(screen.getByText("admin@example.com")).toBeInTheDocument();
-    expect(screen.getByText("admin")).toBeInTheDocument();
+    expect(screen.getByText("系统管理员")).toBeInTheDocument();
+    expect(screen.queryByText("admin")).not.toBeInTheDocument();
     const accountInformation = screen.getByRole("group", { name: "账户信息" });
-    expect(screen.getByRole("link", { name: "进入用户中心" })).toHaveAttribute("href", "/app/agents");
+    expect(screen.getByRole("link", { name: "用户中心" })).toHaveAttribute("href", "/app/agents");
     expect(screen.getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
-    expect(within(accountInformation).queryByRole("link", { name: "进入用户中心" })).not.toBeInTheDocument();
-    expect(within(accountInformation).queryByRole("radiogroup", { name: "界面主题" })).not.toBeInTheDocument();
+    expect(within(accountInformation).getByRole("link", { name: "用户中心" })).toHaveAttribute("href", "/app/agents");
+    expect(within(accountInformation).getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
     fireEvent.click(within(accountInformation).getByRole("button", { name: "账户操作" }));
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提交异常反馈" })).toHaveTextContent("问题反馈");
 
     expect(screen.queryByText(["Agent", "Office"].join(" "))).not.toBeInTheDocument();
     expect(screen.queryByText(["Action", "Gateway"].join(" "))).not.toBeInTheDocument();
@@ -145,13 +150,18 @@ describe("AdminLayout", () => {
     expect(container.querySelector('[data-slot="card"]')).toHaveClass("border-border/45", "bg-muted/50");
     expect(container.querySelector("main")).toHaveClass("[&_[data-slot=card]]:border-border/45");
     expect(container.querySelector('[data-sidebar="content"]')).toHaveClass("min-h-0", "flex-1", "overflow-auto", "px-3");
-    expect(container.querySelectorAll('[data-sidebar="footer"]')).toHaveLength(2);
-    expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toHaveClass("p-4", "pt-2");
-    expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toHaveTextContent("admin@example.com");
-    expect(screen.getByRole("link", { name: "下载客户端" })).toHaveAttribute("href", "/downloads");
-    expect(container.querySelectorAll('[data-sidebar="footer"]')[1]).toContainElement(
-      screen.getByRole("link", { name: "下载客户端" })
-    );
+    expect(container.querySelectorAll('[data-sidebar="footer"]')).toHaveLength(1);
+    expect(container.querySelector('[data-sidebar="footer"]')).toHaveClass("p-4", "pt-2");
+    expect(container.querySelector('[data-sidebar="footer"]')).toHaveTextContent("admin@example.com");
+    const downloadLink = screen.getByRole("link", { name: "下载客户端" });
+    const quickActions = screen.getByRole("group", { name: "快捷操作" });
+    expect(downloadLink).toHaveAttribute("href", "/downloads");
+    expect(downloadLink.textContent).toBe("");
+    expect(downloadLink.querySelector("svg")).toBeInTheDocument();
+    expect(quickActions).toContainElement(downloadLink);
+    expect(within(quickActions).getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
+    expect(accountInformation).toContainElement(quickActions);
+    expect(within(accountInformation).getByRole("link", { name: "下载客户端" })).toBe(downloadLink);
   });
 
   it("只展示当前账号拥有权限的后台菜单", async () => {
@@ -184,6 +194,31 @@ describe("AdminLayout", () => {
     expect(screen.getByRole("link", { name: "角色管理" })).toHaveAttribute("href", "/admin/rbac/roles");
     expect(screen.getByRole("link", { name: "权限目录" })).toHaveAttribute("href", "/admin/rbac/permissions");
     expect(screen.queryByRole("link", { name: "智能体管理" })).not.toBeInTheDocument();
+  });
+
+  it("企业托管模式隐藏模型网关菜单组", async () => {
+    vi.mocked(getAdminFeatureStatus).mockResolvedValue({ features: { model_gateway: false } });
+    const { queryClient } = render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/admin"]}>
+          <Routes>
+            <Route
+              path="/admin/*"
+              element={<AdminLayout account={{
+                email: "admin@example.com",
+                name: "管理员",
+                status: "active",
+                userId: "usr_admin",
+                adminPermissions: Object.values(permissions)
+              }} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await waitFor(() => expect(queryClient.getQueryState(["admin-features"])?.status).toBe("success"));
+    expect(screen.queryByRole("button", { name: "模型网关" })).not.toBeInTheDocument();
   });
 
   it("为仅有 MCP 授权权限的账号展示智能体管理入口", () => {

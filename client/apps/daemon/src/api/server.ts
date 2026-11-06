@@ -1,4 +1,6 @@
+import { createAgentDriveUploader, registerAgentDriveRoutes } from '../agent-tools/drive-routes.js';
 import type Database from 'better-sqlite3';
+import { isIncidentReporterIdentity } from '@clawee/protocol';
 import type {
   CodexAvailabilityProbe,
   CodexRuntimeStatus,
@@ -7,8 +9,12 @@ import type {
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import type { Socket } from 'node:net';
+import { postIncidentMessage } from '../feedback/incidents.js';
 import { registerGatewayRoutes } from './routes.gateway.js';
+import type { GatewayProfileStore } from '../enterprise/gateway-profile-store.js';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   ATTACHMENT_DRAFT_TTL_MS,
@@ -30,6 +36,8 @@ import {
   type AgentScheduleOperations
 } from '../agent-tools/internal-routes.js';
 import { registerAgentScheduleMcpRoute } from '../agent-tools/mcp-routes.js';
+import { registerAgentSkillRoutes } from '../agent-tools/skill-routes.js';
+import type { RuntimeThread } from '../threads/types.js';
 import {
   createAgentScheduleProcessInjector,
   createAgentScheduleRunInjector,
@@ -83,7 +91,8 @@ import {
 } from '../codex/skills/source-installer.js';
 import { buildCodexStatusResponse } from '../codex/status.js';
 import { createCleanupService } from '../cleanup/service.js';
-import { createRunManager, type RunManager } from '../runs/manager.js';
+import { createRunManager, DesktopUpdatePreparedError, type RunManager } from '../runs/manager.js';
+import { registerDesktopUpdateRoutes } from './routes.desktop-update.js';
 import {
   createPersistentAppServerExecutor,
   DEFAULT_PERSISTENT_APP_SERVER_MAX_CONCURRENCY,
@@ -95,9 +104,10 @@ import {
 } from '../scheduler/coordinator.js';
 import { ScheduleRepository } from '../scheduler/repository.js';
 import { createSchedulerService, type SchedulerService } from '../scheduler/service.js';
+import { createWorkflowSchedules } from '../scheduler/workflow.js';
 import { openRuntimeDatabase } from '../storage/database.js';
 import { createRunRepository, createThreadRepository } from '../storage/repositories.js';
-import { createThreadManager } from '../threads/manager.js';
+import { createThreadManager, isProjectlessEnterpriseConversation } from '../threads/manager.js';
 import { createTaskService } from '../tasks/service.js';
 import { createTaskMcpService } from '../task-mcp/service.js';
 import { isServerSkillDisclosureRequest } from '../task-mcp/server-skill-input-guard.js';
@@ -122,7 +132,14 @@ import {
 } from '../enterprise/legacy-collector-cleanup-2026-08-28.js';
 import { resolveEnterpriseOrigin } from '../enterprise/config-2026-07-30.js';
 import { createEnterpriseSessionManager } from '../enterprise/session-manager-2026-07-30.js';
+import {
+  createAgentPromptPolicyManager,
+  type AgentPromptPolicyManager
+} from '../enterprise/agent-prompt-policy-2026-10-30.js';
+import { createSkillAIReviewWorker } from '../enterprise/skill-ai-review-worker.js';
 import { createKnowledgeConversationManager } from '../enterprise/knowledge-conversation-2026-08-05.js';
+import { createSkillContributionsManager } from '../enterprise/skill-contributions-manager.js';
+import { createContributionConversationManager, contributionExecutionPrompt } from '../enterprise/skill-contributions-conversation.js';
 import { createEnterpriseInstallRecordRepository } from '../enterprise/install-records-2026-07-30.js';
 import {
   createEnterpriseSkillManager,
@@ -162,6 +179,7 @@ import {
 } from '../enterprise/business-dashboard-manager-2026-08-30.js';
 import { requireAuth } from './auth.js';
 import { apiError } from './errors.js';
+import { EnterpriseSessionError } from '../enterprise/session-manager-2026-07-30.js';
 import { registerAttachmentRoutes } from './routes.attachments.js';
 import { registerApprovalRoutes } from './routes.approvals.js';
 import { registerCodexRoutes } from './routes.codex.js';
@@ -184,6 +202,7 @@ import { registerTaskRoutes } from './routes.tasks.js';
 import { registerTaskMcpRoutes } from './routes.task-mcp.js';
 import { registerThreadRoutes } from './routes.threads.js';
 import { registerKnowledgeConversationRoutes } from './routes.knowledge-conversation-2026-08-05.js';
+import { registerSkillContributionRoutes } from './routes.skill-contributions.js';
 import { registerWorkspaceFileRoutes } from './routes.workspace-files.js';
 import { registerEnterpriseRoutes } from './routes.enterprise-2026-07-30.js';
 import {
@@ -203,6 +222,9 @@ import {
 } from './routes.enterprise-business-dashboard-2026-08-30.js';
 import { registerEnterprisePlatformBrandingRoutes } from './routes.enterprise-platform-branding.js';
 import { registerEnterpriseWorkflowRoutes } from './routes.enterprise-workflow.js';
+import { registerEnterpriseApprovalRoutes } from './routes.enterprise-approvals.js';
+import { createApprovalTrialManager } from '../enterprise/approval-trial-manager.js';
+import { registerAgentPromptPolicyRoutes } from './routes.agent-prompt-policy.js';
 import { createWorkflowRunHistory } from '../enterprise/workflow-run-history.js';
 
 export type BuildServerInput = {
@@ -251,6 +273,7 @@ export type BuildServerInput = {
   enterpriseAgentIdentityStore?: EnterpriseAgentIdentityStore;
   enterpriseConfigPath?: string;
   enterpriseCredentialStore?: EnterpriseCredentialStore;
+  gatewayProfiles?: GatewayProfileStore;
   enterpriseActivityReporter?: EnterpriseActivityReporter;
   enterpriseHttpClient?: EnterpriseHttpClient;
   enterpriseOrigin?: string;
@@ -266,6 +289,8 @@ export type BuildServerInput = {
   enterpriseBusinessDashboardManager?: EnterpriseBusinessDashboardManager;
   taskMcpEnabled?: boolean;
   serverDeployment?: boolean;
+  autoInstallUpdateSkills?: boolean;
+  skillAIReviewWorkerEnabled?: boolean;
   webDistDir?: string;
 };
 
@@ -283,6 +308,24 @@ export async function buildServer(input: BuildServerInput) {
     ...(input.taskMcpEnabled === true
       ? { requestTimeout: MCP_CHAIN_TIMEOUT_MS }
       : {})
+  });
+  // Node 的 HTTP 空闲连接清理不覆盖尚未收到完整请求头的 TCP 连接。
+  const pendingHttpSockets = new Set<Socket>();
+  let httpClosing = false;
+  server.server.on('connection', socket => {
+    if (httpClosing) {
+      socket.destroy();
+      return;
+    }
+    pendingHttpSockets.add(socket);
+    socket.once('close', () => pendingHttpSockets.delete(socket));
+  });
+  server.server.on('request', (request, response) => {
+    pendingHttpSockets.delete(request.socket);
+    response.once('finish', () => {
+      // 关闭开始后才完成的请求也可能留下 keep-alive 连接，待响应写完再释放。
+      if (httpClosing) server.server.closeIdleConnections();
+    });
   });
   if (input.taskMcpEnabled === true) {
     server.server.requestTimeout = MCP_CHAIN_TIMEOUT_MS;
@@ -341,7 +384,9 @@ export async function buildServer(input: BuildServerInput) {
     ? undefined
     : await enterpriseAgentIdentityStore.getOrCreate();
   let handleEnterpriseSessionSignedOut: (() => void) | undefined;
+  let handleEnterpriseSessionSignedIn: (() => void | Promise<void>) | undefined;
   let handleModelServiceSignedOut: (() => void) | undefined;
+  let skillAIReviewWorker: ReturnType<typeof createSkillAIReviewWorker> | undefined;
   let enterpriseSessionManager!: ReturnType<
     typeof createEnterpriseSessionManager
   >;
@@ -352,7 +397,18 @@ export async function buildServer(input: BuildServerInput) {
     credentialStore: enterpriseCredentialStore,
     httpClient: enterpriseHttpClient,
     get transportSecurity() { return enterpriseOrigin.transportSecurity; },
+    onSnapshot(snapshot) {
+      const account = (snapshot.status === 'signed_in' || snapshot.status === 'service_unavailable') ? snapshot.account : undefined;
+      const reporter = {
+        enterprise_key: createHash('sha256').update(enterpriseOrigin.origin).digest('hex'),
+        ...(account ? { subject_id: account.subjectId, display_name: account.name.trim() || account.subjectId } : {}),
+        ...(snapshot.agentId ? { agent_id: snapshot.agentId } : {})
+      };
+      postIncidentMessage({ type: 'clawee_incident_identity', identity: isIncidentReporterIdentity(reporter) ? reporter : null, expires_at: snapshot.expiresAt });
+    },
     onSignedIn(identity) {
+      skillAIReviewWorker?.identityChanged();
+      handleEnterpriseSessionSignedIn?.();
       if (identity.activityReportingEnabled) {
         activityReporter?.resume();
       } else {
@@ -367,7 +423,8 @@ export async function buildServer(input: BuildServerInput) {
             throw new Error('MODEL_CONFIGURATION_UNAVAILABLE');
           }
           return getConfiguration(accessToken);
-        }
+        },
+        enterpriseOrigin.origin
       ).then(() => {
         const state = input.modelServiceRuntime?.status();
         if (
@@ -380,6 +437,7 @@ export async function buildServer(input: BuildServerInput) {
       });
     },
     onSignedOut() {
+      skillAIReviewWorker?.identityChanged();
       activityReporter?.clear('signed_out');
       handleModelServiceSignedOut?.();
       void input.modelServiceRuntime?.signOut().catch(error => {
@@ -444,6 +502,16 @@ export async function buildServer(input: BuildServerInput) {
   const projectDirectoryPicker =
     input.projectDirectoryPicker ?? createNativeProjectDirectoryPicker();
   const threadManager = createThreadManager({ db, dataDir, projectManager });
+  const agentPromptPolicyManager: AgentPromptPolicyManager = createAgentPromptPolicyManager({
+    db,
+    getGatewayOrigin: () => enterpriseOrigin.origin,
+    serverDeployment: input.serverDeployment === true,
+    sessionManager: enterpriseSessionManager,
+    httpClient: enterpriseHttpClient
+  });
+  handleEnterpriseSessionSignedIn = async () => {
+    await agentPromptPolicyManager.refresh();
+  };
   const knowledgeConversationManager = createKnowledgeConversationManager({
     sessionManager: enterpriseSessionManager,
     threadManager
@@ -487,6 +555,44 @@ export async function buildServer(input: BuildServerInput) {
       publicRecords: skillMarketRecords,
       records: enterpriseInstallRecords
     });
+  const approvalTrialManager = createApprovalTrialManager({
+    dataDir,
+    http: enterpriseHttpClient,
+    projects: projectManager
+  });
+  const autoInstallUpdateSkills = input.serverDeployment === true && input.autoInstallUpdateSkills === true;
+  let enterpriseSkillRevision = 0;
+  let enterpriseSkillSyncWork: Promise<void> | undefined;
+  let enterpriseSkillSyncSubjectId: string | undefined;
+  let enterpriseSkillSyncClosing = false;
+  function syncEnterpriseSkills(): Promise<void> {
+    const current = enterpriseSessionManager.getSnapshot();
+    if (enterpriseSkillSyncClosing || current.status !== 'signed_in') return Promise.resolve();
+    if (enterpriseSkillSyncWork !== undefined && enterpriseSkillSyncSubjectId !== current.account?.subjectId) {
+      return enterpriseSkillSyncWork.then(() => syncEnterpriseSkills());
+    }
+    enterpriseSkillSyncSubjectId = current.account?.subjectId;
+    enterpriseSkillSyncWork ??= enterpriseSkillManager.syncSkills()
+      .then(changed => { if (changed) enterpriseSkillRevision += 1; })
+      .catch(() => { console.warn('Enterprise skill auto-sync failed [ENTERPRISE_SKILL_INSTALL_FAILED]'); })
+      .finally(() => { enterpriseSkillSyncWork = undefined; });
+    return enterpriseSkillSyncWork;
+  }
+  const enterpriseSkillRunInjector: RunMcpInjector | undefined = autoInstallUpdateSkills
+    ? {
+        async prepare() {
+          await syncEnterpriseSkills();
+          return { mcpServers: [], env: {}, configurationFingerprint: `enterprise_skills:${enterpriseSkillRevision}` };
+        }
+      }
+    : undefined;
+  if (autoInstallUpdateSkills) {
+    const previousOnSignedIn = handleEnterpriseSessionSignedIn;
+    handleEnterpriseSessionSignedIn = async () => {
+      await previousOnSignedIn?.();
+      void syncEnterpriseSkills();
+    };
+  }
   const enterpriseKnowledgeManager =
     input.enterpriseKnowledgeManager ??
     createEnterpriseKnowledgeManager({
@@ -522,6 +628,7 @@ export async function buildServer(input: BuildServerInput) {
       sessionManager: enterpriseSessionManager,
       httpClient: enterpriseHttpClient
     });
+  const skillContributionsManager = createSkillContributionsManager({ sessionManager: enterpriseSessionManager, httpClient: enterpriseHttpClient });
   const reportPerformance = (details: Record<string, unknown>) => {
     reportDaemonPerformance(details);
   };
@@ -566,6 +673,9 @@ export async function buildServer(input: BuildServerInput) {
     });
   };
   enterpriseSessionManager.startRestore();
+  if (input.serverDeployment === true) {
+    await enterpriseSessionManager.waitForRestore?.();
+  }
   const notificationService = createNotificationService({ db });
   const approvalManager = input.approvalManager ?? createApprovalManager({ db });
   const unsubscribeApprovalNotifications = approvalManager.subscribe(approval => {
@@ -576,18 +686,42 @@ export async function buildServer(input: BuildServerInput) {
   const memoryService = createMemoryService({ db });
   const agentCapabilityTokens =
     input.agentCapabilityTokens ?? createAgentCapabilityTokenStore();
+  const agentDriveUploader = createAgentDriveUploader({
+    db,
+    threads: threadManager,
+    session: enterpriseSessionManager,
+    drive: enterpriseSharedDriveManager,
+    serverDeployment: input.serverDeployment === true
+  });
   const getAgentToolBaseUrl = () =>
     resolveListeningOrigin(server.server.address());
+  const workflowToolsEnabled = (runId: string) => {
+    const snapshot = enterpriseSessionManager.getSnapshot();
+    if (snapshot.status !== 'signed_in') return false;
+    return Boolean(db.prepare('SELECT 1 FROM enterprise_workflow_runs WHERE run_id=? AND user_id=? AND agent_id=? AND gateway_origin=? AND state=\'pending\'').get(runId, snapshot.account?.subjectId ?? '', snapshot.agentId ?? '', enterpriseOrigin.origin));
+  };
+  const skillToolsEnabled = (thread: RuntimeThread) =>
+    input.serverDeployment !== true
+    && enterpriseSessionManager.getSnapshot().status === 'signed_in'
+    && thread.status === 'active'
+    && thread.purpose === 'conversation'
+    && thread.enterpriseSubjectId === null;
+  const driveToolsEnabled = (thread: RuntimeThread) => enterpriseSessionManager.getSnapshot().status === 'signed_in' && thread.status === 'active' && Boolean(thread.projectId) && thread.purpose !== 'skill_review';
   const scheduleRunInjector = createAgentScheduleRunInjector({
     capabilities: agentCapabilityTokens,
     getBaseUrl: getAgentToolBaseUrl,
-    scheduleToolsEnabled: input.agentToolsEnabled === true
+    scheduleToolsEnabled: input.agentToolsEnabled === true,
+    workflowToolsEnabled,
+    skillToolsEnabled,
+    driveToolsEnabled
   });
-  const agentToolProcessInjector = input.agentToolsEnabled !== true
-    ? undefined
-    : createAgentScheduleProcessInjector({
+  const agentToolProcessInjector = createAgentScheduleProcessInjector({
         capabilities: agentCapabilityTokens,
-        getBaseUrl: getAgentToolBaseUrl
+        getBaseUrl: getAgentToolBaseUrl,
+        scheduleToolsEnabled: input.agentToolsEnabled === true,
+        workflowToolsEnabled,
+        skillToolsEnabled,
+        driveToolsEnabled
       });
   const enterpriseMcpRunInjector: RunMcpInjector = {
     prepare(run) {
@@ -600,7 +734,8 @@ export async function buildServer(input: BuildServerInput) {
   const agentToolInjector = combineRunInjectors(
     scheduleRunInjector,
     codexMcpRuntimeInjector,
-    enterpriseMcpRunInjector
+    enterpriseMcpRunInjector,
+    enterpriseSkillRunInjector
   );
   persistentAppServerExecutor =
     input.runManager === undefined
@@ -613,7 +748,8 @@ export async function buildServer(input: BuildServerInput) {
           processInjector: agentToolProcessInjector,
           runtimeInjector: combineRunInjectors(
             codexMcpRuntimeInjector,
-            enterpriseMcpRunInjector
+            enterpriseMcpRunInjector,
+            enterpriseSkillRunInjector
           ),
           maxConcurrency:
             input.persistentAppServerMaxConcurrency
@@ -636,9 +772,11 @@ export async function buildServer(input: BuildServerInput) {
       resumeCapabilityVerified,
       profileValidator: profileManager,
       runtimeTransport,
+      createModelResponseObserver: model => input.modelServiceRuntime?.createResponseObserver?.(model),
       approvalManager,
       persistentAppServerExecutor,
       serverDeployment: input.serverDeployment,
+      agentPromptPolicy: agentPromptPolicyManager,
       activityReporter,
       enterpriseSkillVersion: async (name, directory) => {
         const record = enterpriseInstallRecords.getByName(name);
@@ -665,6 +803,19 @@ export async function buildServer(input: BuildServerInput) {
       }
     });
   let scheduler = input.scheduler;
+  skillAIReviewWorker = createSkillAIReviewWorker({
+    enabled: input.skillAIReviewWorkerEnabled,
+    gatewayOrigin: () => enterpriseOrigin.origin,
+    sessionManager: enterpriseSessionManager,
+    httpClient: enterpriseHttpClient,
+    runManager,
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true
+  });
+  skillAIReviewWorker.start();
+  const workflowSchedules = createWorkflowSchedules({
+    db, repository: scheduleRepository, session: enterpriseSessionManager,
+    http: enterpriseHttpClient, origin: () => enterpriseOrigin.origin
+  });
   const scheduleCoordinator = input.scheduleCoordinator ?? createScheduleCoordinator({
     db,
     repository: scheduleRepository,
@@ -672,6 +823,7 @@ export async function buildServer(input: BuildServerInput) {
     runManager,
     defaultCwd,
     profileValidator: profileManager,
+    workflowSchedules,
     onSchedulesChanged: () => scheduler?.refreshTimer()
   });
   prepareSchedulerStartup({
@@ -683,11 +835,13 @@ export async function buildServer(input: BuildServerInput) {
   scheduler ??= createSchedulerService({
     repository: scheduleRepository,
     runManager,
-    autostart: false
+    autostart: false,
+    workflowSchedules,
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true
   });
   if (input.modelServiceRuntime !== undefined) {
     handleModelServiceSignedOut = () => {
-      scheduler.stop();
+      scheduler.refreshTimer();
       runManager.cancelAll();
       invalidatePersistentRuntime('model_service_signed_out');
     };
@@ -728,7 +882,20 @@ export async function buildServer(input: BuildServerInput) {
           capabilities,
           memoryService
         },
-        serverSkillInputGuard: isServerSkillDisclosureRequest
+        serverSkillInputGuard: isServerSkillDisclosureRequest,
+        canRunAgent: input.modelServiceRuntime === undefined
+          ? undefined : () => input.modelServiceRuntime?.ready() ?? false,
+        runtimeReady: () => {
+          try {
+            accessSync(codexBin, constants.X_OK);
+            return capabilities.appServerApprovals === true;
+          } catch {
+            return false;
+          }
+        },
+        deliverOutputFiles: async (taskId, paths) => {
+          await agentDriveUploader.upload(taskId, paths, { allowTerminal: true });
+        }
       })
     : undefined;
   await attachmentService.cleanupExpiredDrafts();
@@ -741,6 +908,9 @@ export async function buildServer(input: BuildServerInput) {
   let unsubscribeRuntimeReady: (() => void) | undefined;
 
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof DesktopUpdatePreparedError) {
+      return reply.code(409).send({ error: { code: error.code, message: error.message } });
+    }
     if ((error as { code?: string }).code === 'FST_ERR_CTP_INVALID_JSON_BODY') {
       return reply
         .code(400)
@@ -783,10 +953,17 @@ export async function buildServer(input: BuildServerInput) {
   let runCloseWork: Promise<void> | undefined;
   let shutdownStartedAt = 0;
   server.addHook('preClose', async () => {
+    desktopUpdate.close();
     shutdownStartedAt = Date.now();
-    reportDaemonPerformance({ component: 'shutdown', event: 'started' });
+    httpClosing = true;
+    reportDaemonPerformance({
+      component: 'shutdown', event: 'started', pendingHttpConnections: pendingHttpSockets.size
+    });
+    for (const socket of pendingHttpSockets) socket.destroy();
+    void skillAIReviewWorker?.close();
     try {
-      scheduler.stop();
+      if (scheduler.close) scheduler.close();
+      else scheduler.stop();
     } catch (error) {
       shutdownError = error;
     }
@@ -801,9 +978,11 @@ export async function buildServer(input: BuildServerInput) {
   });
 
   server.addHook('onClose', async () => {
+    enterpriseSkillSyncClosing = true;
     let firstError: unknown = shutdownError;
     const capture = async (stage: string, operation: () => void | Promise<void>) => {
       const startedAt = Date.now();
+      reportDaemonPerformance({ component: 'shutdown', event: 'stage_started', stage });
       try {
         await operation();
       } catch (error) {
@@ -820,8 +999,10 @@ export async function buildServer(input: BuildServerInput) {
     await capture('runtime_subscription', () => unsubscribeRuntimeReady?.());
     await capture('catalog_subscription', () => unsubscribeModelCatalogChanges?.());
     await capture('approval_subscription', () => unsubscribeApprovalNotifications());
+    await capture('skill_ai_review', () => skillAIReviewWorker?.close());
     await capture('run_logs', () => runCloseWork ?? runManager.close());
     await capture('activity', () => activityReporter?.close());
+    await capture('enterprise_skill_sync', async () => { await enterpriseSkillSyncWork; });
     await Promise.all([
       capture('model_runtime', () => input.modelServiceRuntime?.signOut()),
       capture('enterprise_session', () => enterpriseSessionManager.close()),
@@ -853,9 +1034,24 @@ export async function buildServer(input: BuildServerInput) {
         })
   }));
 
+  const pendingUpdateWrites = new WeakSet<object>();
+  let updateWriteCount = 0;
+  server.addHook('onResponse', async request => {
+    if (pendingUpdateWrites.delete(request)) updateWriteCount -= 1;
+  });
   server.addHook('preHandler', async (request, reply) => {
     if (request.url === '/healthz') return;
-    if (isAgentToolInternalRequest(request.url)) return;
+    if (isAgentToolInternalRequest(request.url)) {
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+        if (desktopUpdate.isPrepared()) {
+          const error = new DesktopUpdatePreparedError();
+          return reply.code(409).send({ error: { code: error.code, message: error.message } });
+        }
+        pendingUpdateWrites.add(request);
+        updateWriteCount += 1;
+      }
+      return;
+    }
     if (
       webDistDir !== undefined
       && request.method === 'GET'
@@ -875,18 +1071,25 @@ export async function buildServer(input: BuildServerInput) {
     await auth(request, reply);
     if (reply.sent) return;
     if (
-      input.modelServiceRuntime !== undefined
-      && !input.modelServiceRuntime.ready()
-      && !isPreModelConfigurationRequest(
-        request.method,
-        request.routeOptions.url,
-        input.taskMcpEnabled === true
-      )
+      desktopUpdate.isPrepared()
+      && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)
+      && !['/desktop-update/prepare', '/desktop-update/cancel'].includes(request.routeOptions.url ?? '')
     ) {
-      return reply.code(428).send(apiError(
-        'MODEL_SERVICE_CONFIGURATION_REQUIRED',
-        '请先配置并验证 Codex 模型服务'
-      ));
+      const error = new DesktopUpdatePreparedError();
+      return reply.code(409).send({ error: { code: error.code, message: error.message } });
+    }
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !request.routeOptions.url?.startsWith('/desktop-update/')) {
+      pendingUpdateWrites.add(request);
+      updateWriteCount += 1;
+    }
+  });
+
+  const desktopUpdate = registerDesktopUpdateRoutes(server, {
+    runManager, scheduler, serverDeployment: input.serverDeployment === true,
+    isWriting: () => updateWriteCount > 0,
+    async getConnection() {
+      const gateway = enterpriseOrigin.origin;
+      return gateway.startsWith('https://') && gateway !== 'https://enterprise.invalid' ? { gateway } : null;
     }
   });
 
@@ -902,6 +1105,7 @@ export async function buildServer(input: BuildServerInput) {
     codexHome: resolvedCodexHome,
     capabilities,
     modelCatalog: codexModelCatalog,
+    subscribeModelCatalogChanges: input.subscribeModelCatalogChanges,
     getConfiguredModel: () => {
       const state = input.modelServiceRuntime?.status();
       return state?.status === 'ready'
@@ -914,8 +1118,16 @@ export async function buildServer(input: BuildServerInput) {
   await registerEnterpriseRoutes(server, {
     sessionManager: enterpriseSessionManager,
     skillManager: enterpriseSkillManager,
-    mcpManager: enterpriseMcpManager
+    mcpManager: enterpriseMcpManager,
+    gatewayProfiles: input.serverDeployment ? undefined : input.gatewayProfiles,
+    getOrigin: () => enterpriseOrigin.origin
   });
+  await registerAgentPromptPolicyRoutes(server, agentPromptPolicyManager);
+  await registerEnterpriseApprovalRoutes(server, {
+    session: enterpriseSessionManager, http: enterpriseHttpClient, origin: () => enterpriseOrigin.origin,
+    trial: approvalTrialManager
+  });
+  await registerAgentDriveRoutes(server, { db, capabilities: agentCapabilityTokens, threads: threadManager, session: enterpriseSessionManager, drive: enterpriseSharedDriveManager, serverDeployment: input.serverDeployment === true });
   await registerEnterpriseWorkflowRoutes(server, {
     session: enterpriseSessionManager,
     http: enterpriseHttpClient,
@@ -923,7 +1135,13 @@ export async function buildServer(input: BuildServerInput) {
     threads: threadManager,
     db,
     origin: () => enterpriseOrigin.origin,
-    canExecute: () => !input.serverDeployment && (input.modelServiceRuntime?.ready() ?? true)
+    canExecute: () => !input.serverDeployment,
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true,
+    capabilities: agentCapabilityTokens,
+    runtimeCapabilities: capabilities,
+    attachmentService,
+    workspaceFiles: workspaceFileService,
+    sharedDrive: enterpriseSharedDriveManager
   });
   await registerGatewayRoutes(server, {
     configPath: input.enterpriseConfigPath,
@@ -957,6 +1175,28 @@ export async function buildServer(input: BuildServerInput) {
     server,
     enterpriseBusinessDashboardManager
   );
+  await registerSkillContributionRoutes(server, skillContributionsManager);
+  const contributionConversationManager = createContributionConversationManager({ sessionManager: enterpriseSessionManager, threadManager, contributions: skillContributionsManager });
+  server.addHook('preHandler', async (request, reply) => {
+    if (!request.routeOptions.url?.startsWith('/runs/:id')) return;
+    const { id } = request.params as { id: string };
+    const run = runManager.getRun(id);
+    const thread = run?.threadId ? threadManager.getThread(run.threadId) : undefined;
+    if (!thread?.enterpriseSubjectId) return;
+    const manager = isProjectlessEnterpriseConversation(thread) ? contributionConversationManager : knowledgeConversationManager;
+    try { await manager.requireOwnedThread(thread.id); } catch (error) {
+      if (error instanceof EnterpriseSessionError) return reply.code(error.statusCode).send(apiError(error.code, '无权访问贡献对话'));
+      return reply.code(404).send(apiError('RUN_NOT_FOUND', 'Run not found'));
+    }
+  });
+  await registerKnowledgeConversationRoutes(server, contributionConversationManager, runManager, {
+    basePath: '/enterprise/skill-contribution-conversations', projectless: true, executionPrompt: contributionExecutionPrompt,
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true,
+    async readHistory(thread, options) {
+      if (!thread.codexThreadId) return { items: [], hasMore: false };
+      return codexSessionProvider.listTurns({ codexThreadId: thread.codexThreadId, limit: options.limit, ...(options.cursor === undefined ? {} : { cursor: options.cursor }) });
+    }
+  });
   await registerEnterprisePlatformBrandingRoutes(server, {
     sessionManager: enterpriseSessionManager,
     httpClient: enterpriseHttpClient
@@ -981,6 +1221,7 @@ export async function buildServer(input: BuildServerInput) {
   await registerSkillMarketRoutes(server, { skillMarketManager });
   await registerMcpRoutes(server, { mcpManager });
   await registerRunRoutes(server, runManager, {
+    canRunAgent: () => input.modelServiceRuntime?.ready() ?? true,
     sseHeartbeatMs: input.sseHeartbeatMs,
     threadManager,
     profileValidator: profileManager,
@@ -991,17 +1232,22 @@ export async function buildServer(input: BuildServerInput) {
   if (taskMcpService !== undefined) {
     await registerTaskMcpRoutes(server, { service: taskMcpService });
   }
-  await registerScheduleRoutes(server, scheduleCoordinator, scheduler);
+  await registerScheduleRoutes(server, scheduleCoordinator, scheduler, () => input.modelServiceRuntime?.ready() ?? true);
   await registerAgentToolRoutes(server, {
     capabilities: agentCapabilityTokens,
     schedules: agentScheduleOperations
   });
-  if (input.agentToolsEnabled === true) {
-    await registerAgentScheduleMcpRoute(server, {
-      capabilities: agentCapabilityTokens,
-      getBaseUrl: () => resolveListeningOrigin(server.server.address())
-    });
-  }
+  await registerAgentScheduleMcpRoute(server, {
+    capabilities: agentCapabilityTokens,
+    getBaseUrl: () => resolveListeningOrigin(server.server.address())
+  });
+  await registerAgentSkillRoutes(server, {
+    capabilities: agentCapabilityTokens,
+    skills: enterpriseSkillManager,
+    threads: threadManager,
+    codexHome,
+    enabled: skillToolsEnabled
+  });
   await registerCleanupRoutes(server, cleanupService);
   await registerAttachmentRoutes(server, attachmentService, {
     maxSizeBytes: input.attachmentMaxSizeBytes
@@ -1038,8 +1284,8 @@ export async function buildServer(input: BuildServerInput) {
       })
   });
   await registerFeedbackRoutes(server, new FeedbackService({ db, dataDir,
+    origin: () => enterpriseOrigin.origin,
     environment: () => { let runtime; let version = 'unavailable'; try { runtime = getCodexRuntimeStatus(); version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version; } catch { /* 版本不可用会在环境中明确记录。 */ } return { app_version: version, daemon_version: version, platform: process.platform, arch: process.arch, runtime_version: runtime?.version ?? 'unavailable', electron_version: 'unavailable', build_sha: process.env.CLAWEE_BUILD_SHA ?? 'unavailable', connection_status: enterpriseSessionManager.getSnapshot().status }; },
-    policy: async (refresh) => { const current = enterpriseSessionManager.getSnapshot(); if (!refresh || current.status !== 'signed_in') return { allowed: current.externalFeedbackAllowed, expiresAt: current.expiresAt }; const me = await enterpriseHttpClient.getMe(await enterpriseSessionManager.requireAccessToken()); return { allowed: me.externalFeedbackAllowed, expiresAt: current.expiresAt }; }
   }));
   await registerWorkspaceFileRoutes(server, workspaceFileService);
   await registerSearchRoutes(server, {
@@ -1067,6 +1313,7 @@ export async function buildServer(input: BuildServerInput) {
     knowledgeConversationManager,
     runManager,
     {
+      canRunAgent: () => input.modelServiceRuntime?.ready() ?? true,
       attachmentService,
       async readHistory(thread, options) {
         if (thread.codexThreadId === undefined || thread.codexThreadId === null) {
@@ -1101,10 +1348,8 @@ export async function buildServer(input: BuildServerInput) {
   );
 
   if (input.schedulerAutostart === true) {
-    if (input.modelServiceRuntime === undefined) {
-      scheduler.start();
-    } else {
-      if (input.modelServiceRuntime.ready()) scheduler.start();
+    scheduler.start();
+    if (input.modelServiceRuntime !== undefined) {
       unsubscribeRuntimeReady = input.modelServiceRuntime.subscribeReady(() => {
         scheduler.start();
       });
@@ -1145,38 +1390,6 @@ async function registerServerModeWeb(
     }
     return reply.sendFile('index.html');
   });
-}
-
-function isModelAccessRequest(
-  route: string | undefined
-): boolean {
-  return route === '/runtime/model-service'
-    || route === '/runtime/model-service/configure'
-    || route === '/runtime/model-service/retry'
-    || route === '/enterprise/session'
-    || route === '/enterprise/gateway'
-    || route === '/enterprise/session/refresh'
-    || route === '/enterprise/login'
-    || route === '/enterprise/register'
-    || route === '/enterprise/qr-login'
-    || route === '/enterprise/qr-login/:requestId'
-    || route === '/enterprise/dingtalk/login/prepare'
-    || route === '/enterprise/platform-branding'
-    || route === '/enterprise/platform-branding/sidebar-logo'
-    || route === '/enterprise/platform-branding/sidebar-compact-logo'
-    || route === '/enterprise/logout';
-}
-
-function isPreModelConfigurationRequest(
-  method: string,
-  route: string | undefined,
-  taskMcpEnabled: boolean
-): boolean {
-  return isModelAccessRequest(route)
-    || (
-      taskMcpEnabled
-      && (route === '/mcp' || (method === 'GET' && route === '/projects'))
-    );
 }
 
 function reportDaemonPerformance(details: Record<string, unknown>): void {

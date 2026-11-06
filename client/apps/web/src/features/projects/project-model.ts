@@ -24,7 +24,8 @@ export type ClaweeProject = Pick<
 
 export type ClaweeConversation = {
   id: string;
-  projectId: string;
+  projectId: string | null;
+  readOnly?: boolean;
   title: string;
   updatedAt?: string;
   updatedLabel: string;
@@ -105,5 +106,6 @@ function isLegacyProject(value: unknown): value is LegacyLocalStorageProjectV1 {
       || project.reasoning === 'medium'
       || project.reasoning === 'high'
       || project.reasoning === 'xhigh'
+      || project.reasoning === 'max'
     );
 }

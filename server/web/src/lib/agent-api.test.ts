@@ -42,11 +42,11 @@ describe("agent-api", () => {
       } }))
       .mockResolvedValueOnce(jsonResponse({ data: { token: tokenInfo() } }))
       .mockResolvedValueOnce(jsonResponse({ data: {
-        token: "agt_secret", authorization_header: "Authorization: Bearer agt_secret", token_info: tokenInfo()
+        token: "sk-account-secret", authorization_header: "Authorization: Bearer sk-account-secret", token_info: tokenInfo()
       } }))
       .mockResolvedValueOnce(jsonResponse({ data: {
-        token: "agt_rotated", token_info: tokenInfo(),
-        authorization_header: "Authorization: Bearer agt_rotated"
+        token: "sk-account-rotated", token_info: tokenInfo(),
+        authorization_header: "Authorization: Bearer sk-account-rotated"
       } }))
       .mockResolvedValueOnce(jsonResponse({ data: [{
         id: "cap_1", exposed_name: "crm.search", title: "Search", description: "Search CRM",
@@ -75,15 +75,15 @@ describe("agent-api", () => {
       status: "online"
     });
     expect(token.tokenId).toBe("token_1");
-    expect(copied.token).toBe("agt_secret");
-    expect(copied.authorizationHeader).toBe("Authorization: Bearer agt_secret");
-    expect(copied.tokenInfo).toMatchObject({ tokenId: "token_1", tokenStatus: "active", tokenScopes: ["mcp:call"] });
-    expect(rotated.authorizationHeader).toBe("Authorization: Bearer agt_rotated");
+    expect(copied.token).toBe("sk-account-secret");
+    expect(copied.authorizationHeader).toBe("Authorization: Bearer sk-account-secret");
+    expect(copied.tokenInfo).toMatchObject({ tokenId: "token_1", tokenStatus: "active", tokenScopes: ["mcp:call", "model:call"] });
+    expect(rotated.authorizationHeader).toBe("Authorization: Bearer sk-account-rotated");
     expect(tools.items[0]).toMatchObject({ id: "cap_1", exposedName: "crm.search", upstreamServerId: "crm" });
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/app/agents/detail?agent_id=agent_route", expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/app/mcp/token", expect.any(Object));
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/app/mcp/token/reveal", expect.objectContaining({ body: undefined }));
-    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/v1/app/mcp/token/rotate", expect.objectContaining({ body: JSON.stringify({ scopes: ["mcp:call"] }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/v1/app/mcp/token/rotate", expect.objectContaining({ body: "{}" }));
     expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/v1/app/agents/tools?agent_id=agent_route", expect.any(Object));
   });
 
@@ -122,7 +122,7 @@ describe("agent-api", () => {
   it("does not use a camelCase authorization header compatibility field", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ data: {
       token: tokenInfo(),
-      plaintext: "agt_secret",
+      plaintext: "sk-account-secret",
       authorizationHeader: "Authorization: Bearer legacy"
     } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -207,6 +207,6 @@ function tokenInfo() {
     token_expires_at: null,
     token_last_used_at: null,
     token_issuer: "claw-gateway-user",
-    token_scopes: ["mcp:call"]
+    token_scopes: ["mcp:call", "model:call"]
   };
 }

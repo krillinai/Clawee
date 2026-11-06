@@ -1,36 +1,23 @@
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
-import { ChevronRight, Plus, Shield, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Plus, Shield, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAdminPermission } from "@/components/admin-permissions";
+import { RolePermissionPicker } from "@/components/role-permission-picker";
 import { ConfirmDialog, DataTableShell, ErrorAlert, ModalShell, PageHeader, PageShell, TableStateRow } from "@/components/governance-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { createRole, listPermissions, listRoles, permissions, removeRole, updateRole, type Permission, type Role } from "@/lib/rbac-api";
-import { buildPermissionTree, permissionGroupLabel, type PermissionGroupNode } from "@/lib/rbac-permission-tree";
+import { createRole, listPermissions, listRoles, permissions, removeRole, updateRole, type Role } from "@/lib/rbac-api";
 import { APIError } from "@/lib/api";
-import { cleanInputIdentifier, trimInput } from "@/lib/text";
+import { trimInput } from "@/lib/text";
 
-type RoleForm = { roleId: string; code: string; name: string; permissionCodes: string[] };
-const emptyForm: RoleForm = { roleId: "", code: "", name: "", permissionCodes: [] };
-
-function normalizeRoleCode(value: string) {
-  return cleanInputIdentifier(value);
-}
-
-function roleCodeValidationMessage(input: HTMLInputElement) {
-  if (input.validity.valueMissing) return "请输入角色编码";
-  if (input.value.length < 2 || input.value.length > 64) return "角色编码长度应为 2-64 位";
-  if (!/^[a-z]/.test(input.value)) return "角色编码必须以小写英文字母开头";
-  return "角色编码只能使用小写英文字母、数字和下划线";
-}
+type RoleForm = { roleId: string; name: string; permissionCodes: string[] };
+const emptyForm: RoleForm = { roleId: "", name: "", permissionCodes: [] };
 
 export function RBACRolesPage() {
   const canCreate = useAdminPermission(permissions.rbacRoleCreate);
@@ -41,13 +28,23 @@ export function RBACRolesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
   const rolesQuery = useQuery({ queryKey: ["rbac", "roles"], queryFn: listRoles });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const managedRole = rolesQuery.data?.find((role) => role.roleId === form.roleId)?.departmentId;
+  useEffect(() => {
+    const role = rolesQuery.data?.find((item) => item.roleId === searchParams.get("edit"));
+    if (!role || !canUpdate || role.isSystem) return;
+    setForm({roleId: role.roleId, name: role.name, permissionCodes: role.permissionCodes});
+    setFormOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("edit");
+    setSearchParams(next, {replace: true});
+  }, [rolesQuery.data, searchParams, setSearchParams, canUpdate]);
   const permissionsQuery = useQuery({ queryKey: ["rbac", "permissions"], queryFn: listPermissions });
-  const permissionTree = useMemo(() => buildPermissionTree(permissionsQuery.data ?? []), [permissionsQuery.data]);
 
   const saveMutation = useMutation({
     mutationFn: () => form.roleId
-      ? updateRole({ roleId: form.roleId, name: trimInput(form.name), permissionCodes: form.permissionCodes })
-      : createRole({ code: normalizeRoleCode(form.code), name: trimInput(form.name), permissionCodes: form.permissionCodes }),
+      ? updateRole({ roleId: form.roleId, name: managedRole ? form.name : trimInput(form.name), permissionCodes: form.permissionCodes })
+      : createRole({ name: trimInput(form.name), permissionCodes: form.permissionCodes }),
     onSuccess: async () => {
       setFormOpen(false);
       setForm(emptyForm);
@@ -69,7 +66,7 @@ export function RBACRolesPage() {
   }
   function openEdit(role: Role) {
     saveMutation.reset();
-    setForm({ roleId: role.roleId, code: role.code, name: role.name, permissionCodes: role.permissionCodes });
+    setForm({ roleId: role.roleId, name: role.name, permissionCodes: role.permissionCodes });
     setFormOpen(true);
   }
   function closeForm() {
@@ -79,31 +76,12 @@ export function RBACRolesPage() {
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!trimInput(form.name) || (!form.roleId && !normalizeRoleCode(form.code))) return;
+    if (!trimInput(form.name)) return;
     saveMutation.mutate();
-  }
-  function togglePermission(code: string, checked: boolean) {
-    setForm((current) => ({
-      ...current,
-      permissionCodes: checked
-        ? [...new Set([...current.permissionCodes, code])].sort()
-        : current.permissionCodes.filter((item) => item !== code)
-    }));
-  }
-  function togglePermissionCodes(codes: string[], checked: boolean) {
-    setForm((current) => {
-      const permissionCodes = new Set(current.permissionCodes);
-      codes.forEach((code) => {
-        if (checked) permissionCodes.add(code);
-        else permissionCodes.delete(code);
-      });
-      return { ...current, permissionCodes: [...permissionCodes].sort() };
-    });
   }
 
   const roles = rolesQuery.data ?? [];
   const catalog = permissionsQuery.data ?? [];
-  const selectedPermissionCount = catalog.filter((permission) => form.permissionCodes.includes(permission.code)).length;
   return (
     <PageShell>
       <PageHeader
@@ -130,13 +108,13 @@ export function RBACRolesPage() {
             <TableRow key={role.roleId}>
               <TableCell><div className="flex items-center gap-2"><Shield aria-hidden="true" className="size-4 text-muted-foreground" /><strong>{role.name}</strong></div></TableCell>
               <TableCell className="font-mono text-xs">{role.code}</TableCell>
-              <TableCell><Badge variant={role.isSystem ? "default" : "muted"}>{role.isSystem ? "系统内置" : "自定义"}</Badge></TableCell>
+              <TableCell><Badge variant={role.isSystem ? "default" : "muted"}>{role.isSystem ? "系统内置" : role.departmentId ? role.departmentRoleType === "manager" ? "部门管理员" : "部门默认" : "自定义"}</Badge></TableCell>
               <TableCell>{role.permissionCodes.length}</TableCell>
               <TableCell className="text-right">
                 {(canUpdate || canDelete) && !role.isSystem ? (
                   <div className="flex justify-end gap-2">
                     {canUpdate ? <Button onClick={() => openEdit(role)} size="sm" variant="outline">编辑</Button> : null}
-                    {canDelete ? <Button aria-label={`删除 ${role.name}`} onClick={() => setDeleteTarget(role)} size="icon" variant="destructive"><Trash2 /></Button> : null}
+                    {canDelete && !role.departmentId ? <Button aria-label={`删除 ${role.name}`} onClick={() => setDeleteTarget(role)} size="icon" variant="destructive"><Trash2 /></Button> : null}
                   </div>
                 ) : <span className="text-xs text-muted-foreground">只读</span>}
               </TableCell>
@@ -149,27 +127,9 @@ export function RBACRolesPage() {
         <form onSubmit={submit}>
           <FieldGroup className="gap-5">
             <Field>
-              <FieldLabel htmlFor="role-code">角色编码</FieldLabel>
-              <Input
-                id="role-code" aria-label="角色编码" disabled={Boolean(form.roleId)}
-                pattern="[a-z][a-z0-9_]{1,63}" required value={form.code}
-                onChange={(event) => {
-                  const code = normalizeRoleCode(event.currentTarget.value);
-                  event.currentTarget.setCustomValidity(code === "admin" ? "admin 是系统保留的角色编码，请更换" : "");
-                  setForm((current) => ({ ...current, code }));
-                }}
-                onInvalid={(event) => {
-                  if (!event.currentTarget.validity.customError) {
-                    event.currentTarget.setCustomValidity(roleCodeValidationMessage(event.currentTarget));
-                  }
-                }}
-              />
-              <FieldDescription>2-64 位，以小写英文字母开头，仅使用小写英文字母、数字和下划线；创建后不可修改。</FieldDescription>
-            </Field>
-            <Field>
               <FieldLabel htmlFor="role-name">角色名称</FieldLabel>
               <Input
-                id="role-name" aria-label="角色名称" maxLength={100} required value={form.name}
+                id="role-name" aria-label="角色名称" readOnly={Boolean(managedRole)} maxLength={100} required value={form.name}
                 onChange={(event) => {
                   const name = event.currentTarget.value;
                   event.currentTarget.setCustomValidity(name && !trimInput(name) ? "角色名称不能只包含空格或不可见字符" : "");
@@ -180,29 +140,8 @@ export function RBACRolesPage() {
                 }}
               />
             </Field>
-            <FieldSet className="gap-3">
-              <FieldLegend className="mb-0 flex w-full items-center justify-between gap-2">
-                <span>权限配置</span>
-                <Badge className="shrink-0" variant="secondary">已选 {selectedPermissionCount} / {catalog.length}</Badge>
-              </FieldLegend>
-              <div className="max-h-[min(40vh,24rem)] overflow-y-auto overscroll-contain pr-1">
-                <TooltipProvider delayDuration={200}>
-                  <ul aria-label="角色权限树" className="divide-y divide-border rounded-md border bg-card">
-                    {permissionTree.map((node) => (
-                      <RolePermissionTreeNode
-                        depth={0}
-                        key={node.key}
-                        node={node}
-                        selectedCodes={form.permissionCodes}
-                        onToggleCodes={togglePermissionCodes}
-                        onTogglePermission={togglePermission}
-                      />
-                    ))}
-                  </ul>
-                </TooltipProvider>
-              </div>
-            </FieldSet>
-            {saveMutation.isError ? <ErrorAlert>{saveMutation.error instanceof APIError && saveMutation.error.message === "rbac role code already exists" ? "角色编码已存在，请更换编码" : saveMutation.error.message}</ErrorAlert> : null}
+            <RolePermissionPicker catalog={catalog} selectedCodes={form.permissionCodes} onChange={(permissionCodes) => setForm((current) => ({...current, permissionCodes}))} />
+            {saveMutation.isError ? <ErrorAlert>{saveMutation.error instanceof APIError && saveMutation.error.message === "rbac role code already exists" ? "角色创建冲突，请重试" : saveMutation.error.message}</ErrorAlert> : null}
             <Field className="justify-end" orientation="horizontal">
               <Button disabled={saveMutation.isPending} onClick={closeForm} type="button" variant="outline">取消</Button>
               <Button disabled={saveMutation.isPending} type="submit">保存角色</Button>
@@ -223,121 +162,5 @@ export function RBACRolesPage() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
       />
     </PageShell>
-  );
-}
-
-function RolePermissionTreeNode({
-  depth,
-  node,
-  selectedCodes,
-  onToggleCodes,
-  onTogglePermission
-}: {
-  depth: number;
-  node: PermissionGroupNode;
-  selectedCodes: string[];
-  onToggleCodes: (codes: string[], checked: boolean) => void;
-  onTogglePermission: (code: string, checked: boolean) => void;
-}) {
-  const label = permissionGroupLabel(node);
-  const selectedCount = node.permissionCodes.filter((code) => selectedCodes.includes(code)).length;
-  const checked = selectedCount === node.count ? true : selectedCount > 0 ? "indeterminate" : false;
-  const groupID = `permission-tree-${node.key.replaceAll(":", "-")}`;
-  const defaultOpen = selectedCount > 0 && selectedCount < node.count;
-
-  return (
-    <li>
-      <Collapsible defaultOpen={defaultOpen}>
-        <div className="flex items-center gap-2 pr-2">
-          <Checkbox
-            aria-label={`选择 ${label} 全部权限`}
-            checked={checked}
-            className="ml-3"
-            id={groupID}
-            onCheckedChange={(nextChecked) => onToggleCodes(node.permissionCodes, nextChecked === true)}
-          />
-          <CollapsibleTrigger asChild>
-            <Button
-              aria-label={`查看 ${label} 权限明细`}
-              className="group h-auto min-h-11 min-w-0 flex-1 justify-start px-1 py-2 text-left"
-              type="button"
-              variant="ghost"
-            >
-              <ChevronRight className="transition-transform group-data-[state=open]:rotate-90" data-icon="inline-start" />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
-                </TooltipTrigger>
-                <TooltipContent className="font-mono">{node.key}</TooltipContent>
-              </Tooltip>
-            </Button>
-          </CollapsibleTrigger>
-          <Badge className="shrink-0 tabular-nums" variant={selectedCount > 0 ? "secondary" : "muted"}>
-            {selectedCount} / {node.count}
-          </Badge>
-        </div>
-        <CollapsibleContent className="border-t bg-muted/20">
-          <div className="ml-5 border-l border-border pl-2">
-            {node.children.length > 0 ? (
-              <ul className="divide-y divide-border">
-                {node.children.map((child) => (
-                  <RolePermissionTreeNode
-                    depth={depth + 1}
-                    key={child.key}
-                    node={child}
-                    selectedCodes={selectedCodes}
-                    onToggleCodes={onToggleCodes}
-                    onTogglePermission={onTogglePermission}
-                  />
-                ))}
-              </ul>
-            ) : null}
-            {node.permissions.length > 0 ? (
-              <ul className="divide-y divide-border">
-                {node.permissions.map((permission) => (
-                  <RolePermissionLeaf
-                    key={permission.code}
-                    permission={permission}
-                    selected={selectedCodes.includes(permission.code)}
-                    onToggle={onTogglePermission}
-                  />
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </li>
-  );
-}
-
-function RolePermissionLeaf({
-  permission,
-  selected,
-  onToggle
-}: {
-  permission: Permission;
-  selected: boolean;
-  onToggle: (code: string, checked: boolean) => void;
-}) {
-  return (
-    <li>
-      <Field className="px-3 py-3" orientation="horizontal">
-        <Checkbox
-          checked={selected}
-          id={permission.code}
-          onCheckedChange={(nextChecked) => onToggle(permission.code, nextChecked === true)}
-        />
-        <FieldContent className="gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <FieldLabel htmlFor={permission.code}>{permission.name}</FieldLabel>
-            </TooltipTrigger>
-            <TooltipContent className="font-mono">{permission.code}</TooltipContent>
-          </Tooltip>
-          <FieldDescription className="text-xs">{permission.description}</FieldDescription>
-        </FieldContent>
-      </Field>
-    </li>
   );
 }

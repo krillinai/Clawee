@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
 export const PRIVATE_CREDENTIAL_DIRECTORY_NAME = 'private';
 export const PRIVATE_CREDENTIAL_FILE_NAME = 'credentials.json';
 
-export type PrivateCredentialSection = 'enterprise' | 'modelService';
+export type PrivateCredentialSection = 'enterprise' | 'modelService' | 'gatewayProfiles';
 
 export type PrivateCredentialFileStore = {
   read(section: PrivateCredentialSection): Promise<unknown | undefined>;
@@ -35,6 +35,8 @@ type PrivateCredentialDocument = {
   schemaVersion: 1;
   enterprise?: unknown;
   modelService?: unknown;
+  gatewayProfiles?: unknown;
+  [key: string]: unknown;
 };
 
 export class PrivateCredentialFileError extends Error {
@@ -203,32 +205,15 @@ function parseDocument(source: string): PrivateCredentialDocument {
   if (!isRecord(value) || value.schemaVersion !== SCHEMA_VERSION) {
     throw new Error('private credential file is invalid');
   }
-  const allowedKeys = new Set([
-    'schemaVersion',
-    'enterprise',
-    'modelService'
-  ]);
-  if (Object.keys(value).some(key => !allowedKeys.has(key))) {
-    throw new Error('private credential file is invalid');
-  }
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    ...('enterprise' in value
-      ? { enterprise: structuredClone(value.enterprise) }
-      : {}),
-    ...('modelService' in value
-      ? { modelService: structuredClone(value.modelService) }
-      : {})
-  };
+  // Preserve unknown top-level sections so newer versions remain readable and
+  // older versions do not erase data they do not understand when writing.
+  return structuredClone(value) as PrivateCredentialDocument;
 }
 
 function hasCredentialSections(
   document: PrivateCredentialDocument
 ): boolean {
-  return (
-    document.enterprise !== undefined
-    || document.modelService !== undefined
-  );
+  return Object.keys(document).some(key => key !== 'schemaVersion');
 }
 
 async function assertSafeDestination(path: string): Promise<void> {

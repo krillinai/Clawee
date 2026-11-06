@@ -8,6 +8,7 @@ security:
   session_cookie_name: "claw_front_token"
   admin_session_cookie_name: "claw_admin_token"
   session_cookie_secure: false
+  # Clawee 客户端按用户操作自动续期，连续闲置超过此期限需重新登录；管理台会话仍为固定有效期。
   session_duration: "168h"
   user_jwt_signing_key: ""
   agent_token_encryption_key: ""
@@ -48,6 +49,8 @@ knowledge:
 
 skillhub:
   enabled: false
+  # 唯一审核 Agent 的稳定 ID；也可通过 CLAW_GATEWAY_SKILL_REVIEW_AGENT_ID 设置。
+  review_agent_id: ""
   package_root: "data/skillhub/packages"
   github_sync_enabled: false
   repository_root: "data/skillhub/repositories"
@@ -70,6 +73,7 @@ agent_activity:
   reporting_enabled: false
 
 feedback:
+  # 本部署反馈中心：客户端异常、手工反馈与管理台反馈均在本部署保存，不转发维护方。
   enabled: false
   # 是否展示管理台的问题反馈菜单和页面；开启后仍需对应权限和数据授权。
   admin_ui_enabled: false
@@ -88,6 +92,7 @@ dingtalk:
   client_secret: ""
   redirect_url: ""
   provider_key: "default"
+  employee_source: "dingtalk"
   auto_provision: false
   state_ttl: "10m"
   request_timeout: "10s"

@@ -65,7 +65,11 @@ export function createProjectManager(input: CreateProjectManagerInput): ProjectM
         );
       }
 
-      const cwd = join(managedProjectRoot, 'Default Project');
+      const legacyCwd = join(managedProjectRoot, 'Default Project');
+      const cwd = existsSync(legacyCwd)
+        || projects.listProjects('active').some(project => project.cwd === legacyCwd)
+        ? legacyCwd
+        : join(managedProjectRoot, 'DefaultProject');
       let createdDirectory = false;
       if (!existsSync(cwd)) {
         try {

@@ -80,6 +80,68 @@ const disabledAccount = account({
 });
 
 describe("UsersPage", () => {
+  it("角色目录未加载完成时不能保存或撤销已有手工角色", async () => {
+    let resolveRoles!: (roles: Role[]) => void;
+    listRolesMock.mockImplementation(() => new Promise((resolve) => {resolveRoles = resolve;}));
+    listAccountRolesMock.mockImplementation(async (id) => id === "usr_user" ? [auditorAssignment] : []);
+    renderPage();
+    const cell = await screen.findByText("user@example.com");
+    fireEvent.click(within(cell.closest("tr")!).getByRole("button",{name:"角色"}));
+    const dialog = await screen.findByRole("dialog",{name:"管理后台角色"});
+    expect(within(dialog).getByRole("button",{name:"保存角色"})).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
+    expect(removeAccountRoleMock).not.toHaveBeenCalled();
+    resolveRoles([adminRole,auditorRole]);
+    await waitFor(() => expect(within(dialog).getByRole("button",{name:"保存角色"})).not.toBeDisabled());
+    expect(within(dialog).getByRole("checkbox",{name:"安全审计员"})).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(removeAccountRoleMock).not.toHaveBeenCalled();
+    expect(assignAccountRoleMock).not.toHaveBeenCalled();
+  });
+  it("管理员成员只读，不进入手工选择及提交差异", async () => {
+    const manager = role({roleId:"manager",code:"rose_dept_mgr_test",name:"研发管理员角色",departmentId:"dept",departmentRoleType:"manager"});
+    listRolesMock.mockResolvedValue([adminRole,auditorRole,manager]);
+    listAccountRolesMock.mockImplementation(async (id) => id === "usr_user" ? [{...assignment(manager,"usr_user"),departmentRoleType:"manager",departmentName:"研发",sources:["rose_department"]}] : []);
+    renderPage();
+    const cell = await screen.findByText("user@example.com");
+    fireEvent.click(within(cell.closest("tr")!).getByRole("button",{name:"角色"}));
+    const dialog = await screen.findByRole("dialog",{name:"管理后台角色"});
+    await within(dialog).findByText(/只读自动授权，成员由 ROSE 同步管理/);
+    expect(within(dialog).queryByRole("checkbox",{name:manager.name})).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("checkbox",{name:"安全审计员"}));
+    fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
+    await waitFor(() => expect(assignAccountRoleMock).toHaveBeenCalledExactlyOnceWith("usr_user","role_auditor"));
+    expect(removeAccountRoleMock).not.toHaveBeenCalled();
+  });
+  it("双来源取消勾选只移除手工关联", async () => {
+    listAccountRolesMock.mockImplementation(async (id) => id === "usr_user" ? [{...auditorAssignment,sources:["manual","rose_department"],departmentName:"研发"}] : []);
+    renderPage();
+    const cell = await screen.findByText("user@example.com");
+    fireEvent.click(within(cell.closest("tr")!).getByRole("button",{name:"角色"}));
+    const dialog = await screen.findByRole("dialog",{name:"管理后台角色"});
+    const checkbox = within(dialog).getByRole("checkbox",{name:"安全审计员"});
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(within(dialog).getByText(/取消勾选仅移除手工来源/)).toBeInTheDocument();
+    fireEvent.click(checkbox);
+    fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
+    await waitFor(() => expect(removeAccountRoleMock).toHaveBeenCalledWith("usr_user","role_auditor"));
+    expect(assignAccountRoleMock).not.toHaveBeenCalled();
+  });
+  it("自动来源可以新增手工授权，不通过手工移除修改自动来源", async () => {
+    listAccountRolesMock.mockImplementation(async (id) => id === "usr_user" ? [{...auditorAssignment,sources:["rose_department"],departmentName:"研发"}] : []);
+    renderPage();
+    const cell = await screen.findByText("user@example.com");
+    const row = cell.closest("tr")!;
+    fireEvent.click(within(row).getByRole("button",{name:"角色"}));
+    const dialog = await screen.findByRole("dialog",{name:"管理后台角色"});
+    const checkbox = within(dialog).getByRole("checkbox",{name:"安全审计员"});
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    fireEvent.click(checkbox);
+    fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
+    await waitFor(() => expect(assignAccountRoleMock).toHaveBeenCalledWith("usr_user","role_auditor"));
+    expect(removeAccountRoleMock).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     listAccountsMock.mockResolvedValue([adminAccount, userAccount, disabledAccount]);
@@ -116,7 +178,7 @@ describe("UsersPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "新增账号" }));
-    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "新增账号" } });
     fireEvent.change(screen.getByLabelText("初始密码"), { target: { value: "passw0rd!" } });
     fireEvent.click(screen.getByRole("button", { name: "创建账号" }));
@@ -134,7 +196,7 @@ describe("UsersPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "新增账号" }));
-    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "\u200bnew\u200d@example.com\ufeff" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "\u200bnew\u200d@example.com\ufeff" } });
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "\u2060 新增账号 \u200b" } });
     fireEvent.change(screen.getByLabelText("初始密码"), { target: { value: " passw0rd! " } });
     fireEvent.click(screen.getByRole("button", { name: "创建账号" }));
@@ -256,12 +318,12 @@ describe("UsersPage", () => {
     createAccountMock.mockRejectedValueOnce(new Error("email already exists"));
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "新增账号" }));
-    fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("邮箱或手机号"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "新增账号" } });
     fireEvent.change(screen.getByLabelText("初始密码"), { target: { value: "passw0rd!" } });
     fireEvent.click(screen.getByRole("button", { name: "创建账号" }));
     expect(await screen.findByText("email already exists")).toBeInTheDocument();
-    expect(screen.getByLabelText("邮箱")).toHaveValue("new@example.com");
+    expect(screen.getByLabelText("邮箱或手机号")).toHaveValue("new@example.com");
   });
 });
 

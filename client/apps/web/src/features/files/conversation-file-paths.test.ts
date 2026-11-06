@@ -3,6 +3,13 @@ import type { TimelineItem } from '../../components/timeline/timeline-model.js';
 import { collectConversationFilePaths } from './conversation-file-paths.js';
 
 describe('collectConversationFilePaths', () => {
+  it('收集文本、JSON 和 ZIP 成果，保留中文空格绝对路径并去重', () => {
+    expect(collectConversationFilePaths([{
+      kind: 'assistant_message', id: 'downloads', source: 'runtime',
+      text: '[文本](/srv/任务 工作区/报告.txt) [数据](/srv/任务%20工作区/数据.json) [压缩包](outputs/成果.zip) [再次下载](outputs/成果.zip)'
+    }])).toEqual(['outputs/成果.zip', '/srv/任务%20工作区/数据.json', '/srv/任务 工作区/报告.txt']);
+  });
+
   it('returns only current conversation files with newest results first', () => {
     const items: TimelineItem[] = [
       {
@@ -52,12 +59,20 @@ describe('collectConversationFilePaths', () => {
     }])).toEqual(['/workspace/output/pdf/clawee-user-guide.pdf']);
   });
 
+  it('lists a Windows artifact once when its basename is also mentioned', () => {
+    const path = String.raw`C:\Users\example\Documents\Clawee\Default Project\AI-Agent-内容整理.md`;
+    expect(collectConversationFilePaths([{
+      kind: 'assistant_message', id: 'windows-artifact', source: 'runtime',
+      text: `文件：\`AI-Agent-内容整理.md\`\n位置：\`${path}\``
+    }])).toEqual([path]);
+  });
+
   it('includes generated images in the current conversation files', () => {
     expect(collectConversationFilePaths([{
       kind: 'assistant_message',
       id: 'generated-image',
-      text: '![杨泗港大桥](outputs/arose-imagegen/bridge.png)',
+      text: '![杨泗港大桥](outputs/image-generator/bridge.png)',
       source: 'runtime'
-    }])).toEqual(['outputs/arose-imagegen/bridge.png']);
+    }])).toEqual(['outputs/image-generator/bridge.png']);
   });
 });

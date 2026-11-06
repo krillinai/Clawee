@@ -1,10 +1,12 @@
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -83,6 +85,24 @@ describe('remote model catalog', () => {
       .toEqual(['model-a', 'model-b']);
   });
 
+  it('assigns supported reasoning levels to a generated gpt-6.1-sol model', async () => {
+    const fixture = setup();
+    const result = await install(fixture, async () => jsonResponse({
+      object: 'list', data: [{ id: 'gpt-6.1-sol' }]
+    }), 'gpt-6.1-sol');
+    expect(readCatalog(result.path).models[0]).toMatchObject({
+      slug: 'gpt-6.1-sol',
+      default_reasoning_level: 'medium',
+      supported_reasoning_levels: [
+        { effort: 'low', description: expect.any(String) },
+        { effort: 'medium', description: expect.any(String) },
+        { effort: 'high', description: expect.any(String) },
+        { effort: 'xhigh', description: expect.any(String) },
+        { effort: 'max', description: expect.any(String) }
+      ]
+    });
+  });
+
   it('preserves a Codex manifest and appends the default model', async () => {
     const fixture = setup();
     const result = await install(fixture, async () => jsonResponse({
@@ -103,6 +123,68 @@ describe('remote model catalog', () => {
     expect(catalog.models[1]?.future_capability).toEqual({ enabled: true });
     expect(catalog.models[1]?.input_modalities).toEqual(['text']);
     expect(catalog.models[0]?.input_modalities).toEqual(['text', 'image']);
+  });
+
+  it('corrects the incompatible none-only gpt-6.1-sol manifest without changing other models', async () => {
+    const fixture = setup();
+    const result = await install(fixture, async () => jsonResponse({ models: [
+      { slug: 'model-a', default_reasoning_level: 'none', supported_reasoning_levels: [{ effort: 'none', description: 'Default' }] },
+      { slug: 'gpt-6.1-sol', default_reasoning_level: 'none', supported_reasoning_levels: [{ effort: 'none', description: 'Default' }], future_capability: true }
+    ] }), 'model-a');
+    const models = readCatalog(result.path).models;
+    expect(models[0]).toMatchObject({ slug: 'model-a', default_reasoning_level: 'none', supported_reasoning_levels: [{ effort: 'none', description: 'Default' }] });
+    expect(models[1]).toMatchObject({ slug: 'gpt-6.1-sol', default_reasoning_level: 'medium', future_capability: true,
+      supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max'].map(effort => ({ effort, description: expect.any(String) })) });
+  });
+
+  it('preserves a valid gpt-6.1-sol manifest instead of overriding upstream capabilities', async () => {
+    const fixture = setup();
+    const supported = [{ effort: 'low', description: 'Fast' }, { effort: 'high', description: 'Deep' }];
+    const result = await install(fixture, async () => jsonResponse({ models: [
+      { slug: 'gpt-6.1-sol', default_reasoning_level: 'high', supported_reasoning_levels: supported }
+    ] }), 'gpt-6.1-sol');
+    expect(readCatalog(result.path).models[0]).toMatchObject({ default_reasoning_level: 'high', supported_reasoning_levels: supported });
+  });
+
+  it('uses detailed reasoning summaries for Kimi K3.1 models only', async () => {
+    const fixture = setup();
+    const result = await install(fixture, async () => jsonResponse({ models: [
+      { slug: 'k3.1-pro', default_reasoning_summary: 'auto' },
+      { slug: 'k3.1-pro-highspeed', default_reasoning_summary: 'detailed' },
+      { slug: 'k3', default_reasoning_summary: 'auto' },
+      { slug: 'model-a', default_reasoning_summary: 'auto' }
+    ] }), 'k3.1-pro');
+    const models = readCatalog(result.path).models;
+    expect(models.find(model => model.slug === 'k3.1-pro')).toMatchObject({ default_reasoning_summary: 'detailed' });
+    expect(models.find(model => model.slug === 'k3.1-pro-highspeed')).toMatchObject({ default_reasoning_summary: 'detailed' });
+    expect(models.find(model => model.slug === 'k3')).toMatchObject({ default_reasoning_summary: 'auto' });
+    expect(models.find(model => model.slug === 'model-a')).toMatchObject({ default_reasoning_summary: 'auto' });
+  });
+
+  it('repairs an already cached none-only manifest after 304 and keeps its ETag cache valid', async () => {
+    const fixture = setup();
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
+    const models = [
+      { slug: 'model-a' },
+      { slug: 'k3.1-pro', default_reasoning_summary: 'auto' },
+      { slug: 'gpt-6.1-sol', default_reasoning_level: 'none', supported_reasoning_levels: [{ effort: 'none', description: 'Default' }] }
+    ];
+    const old = `${JSON.stringify({ models }, null, 2)}\n`;
+    const catalogDir = join(fixture.codexHome, 'model-catalogs');
+    mkdirSync(catalogDir, { recursive: true });
+    writeFileSync(join(catalogDir, 'clawee-last-success.json'), old);
+    writeFileSync(join(catalogDir, 'clawee-catalog-meta.json'), JSON.stringify({
+      schemaVersion: 3, credentialVersion: 1, requestUrl: 'https://gateway.example.test/v1/models?client_version=0.146.0',
+      defaultModel: 'model-a', etag: '"stale"', contentHash: createHash('sha256').update(old).digest('hex'), remoteShape: 'codex_manifest', updatedAt: new Date().toISOString()
+    }));
+
+    const first = await install(fixture, fetch, 'model-a');
+    expect(first).toMatchObject({ source: 'remote', changed: true });
+    expect(readCatalog(first.path).models[1]?.default_reasoning_summary).toBe('detailed');
+    expect(readCatalog(first.path).models[2]?.default_reasoning_level).toBe('medium');
+    const second = await install(fixture, fetch, 'model-a');
+    expect(second).toMatchObject({ source: 'remote', changed: false });
+    expect(fetch.mock.calls[1]?.[1]?.headers).toMatchObject({ 'If-None-Match': '"stale"' });
   });
 
   it.each([

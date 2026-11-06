@@ -238,6 +238,9 @@ function createRunManager(inputs: Array<Record<string, unknown>>): RunManager {
     listEvents() {
       return [];
     },
+    listHistoryEvents() {
+      return { events: [], identities: [] };
+    },
     subscribe() {
       return () => undefined;
     },

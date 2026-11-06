@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../helpers/build-server.js';
+import { createUnknownCapabilityMatrix } from '../../src/codex/capabilities.js';
 import type {
   EnterpriseCredential,
   EnterpriseCredentialStore
@@ -15,7 +17,7 @@ import type {
   EnterpriseHttpClient,
   EnterpriseMeResult
 } from '../../src/enterprise/http-client-2026-07-30.js';
-import { EnterpriseHttpError } from '../../src/enterprise/http-client-2026-07-30.js';
+import { createEnterpriseHttpClient, EnterpriseHttpError } from '../../src/enterprise/http-client-2026-07-30.js';
 import type { EnterpriseActivityReporter } from '../../src/enterprise/activity-reporter-2026-08-28.js';
 import type {
   EnterpriseKnowledgeManager
@@ -32,16 +34,334 @@ import type {
 
 let server: FastifyInstance | undefined;
 let tempDir = '';
+const originalParentPort = Object.getOwnPropertyDescriptor(process, 'parentPort');
 const agentId = 'clawee_550e8400-e29b-41d4-a716-446655440000';
 
 afterEach(async () => {
   await server?.close();
   server = undefined;
+  if (originalParentPort) Object.defineProperty(process, 'parentPort', originalParentPort);
+  else Reflect.deleteProperty(process, 'parentPort');
   if (tempDir) rmSync(tempDir, { force: true, recursive: true });
   tempDir = '';
 });
 
 describe('enterprise runtime API', () => {
+  it('登录前发布 Agent，服务暂不可用保留员工，退出清除员工而保留 Agent', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-incident-identity-'));
+    const postMessage = vi.fn();
+    Object.defineProperty(process, 'parentPort', { configurable: true, value: { postMessage } });
+    const client = createClient();
+    const origin = 'https://enterprise.example';
+    const agent = { enterprise_key: createHash('sha256').update(origin).digest('hex'), agent_id: agentId };
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'), enterpriseOrigin: origin,
+      enterpriseConfigPath: join(tempDir, 'config.toml'), enterpriseHttpClient: client,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore()
+    });
+    await vi.waitFor(async () => { expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_out'); });
+    const identity = () => postMessage.mock.calls.map(([message]) => message).filter(message => message.type === 'clawee_incident_identity').at(-1);
+    expect(identity()).toMatchObject({ identity: agent });
+    expect(identity().identity.subject_id).toBeUndefined();
+    const login = await authRequest('POST', '/enterprise/login', { email: 'user@example.com', password: 'password123' });
+    expect(login.statusCode).toBe(200);
+    expect(identity()).toMatchObject({ identity: { ...agent, subject_id: 'acct_01JZ8W6A2M4S', display_name: 'User' } });
+    const employee = identity().identity;
+    client.getMe = vi.fn(async () => { throw new EnterpriseHttpError('ENTERPRISE_SERVICE_UNAVAILABLE', 'request', 503); });
+    expect((await authRequest('POST', '/enterprise/session/refresh')).statusCode).toBe(503);
+    expect(identity()).toMatchObject({ identity: employee });
+    expect((await authRequest('POST', '/enterprise/logout')).statusCode).toBe(200);
+    expect(identity()).toMatchObject({ identity: agent });
+    expect(identity().identity.subject_id).toBeUndefined();
+    expect(JSON.stringify(postMessage.mock.calls)).not.toContain('enterprise-token');
+  });
+  it('钉钉登录准备失败保留底层原因、上游路径与脱敏诊断日志', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-dingtalk-diagnostics-'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const remote = createEnterpriseHttpClient({ origin: 'https://gateway.test', retryDelayMs: 0, fetch: async () => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect timeout Bearer private-value'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) });
+    } });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'), enterpriseOrigin: 'https://gateway.test',
+      enterpriseHttpClient: createClient({ prepareDingTalkAuthorization: remote.prepareDingTalkAuthorization }),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore()
+    });
+    const origin = await server.listen({ host: '127.0.0.1', port: 0 });
+    try {
+      const response = await fetch(`${origin}/enterprise/dingtalk/login/prepare`, { method: 'POST', headers: { Authorization: 'Bearer secret' } });
+      expect(response.status).toBe(503);
+      const body = await response.json();
+      expect(body).toMatchObject({ error: { message: expect.stringContaining('连接超时'), details: {
+        causeCode: 'UND_ERR_CONNECT_TIMEOUT', requestMethod: 'GET', requestUrl: 'https://gateway.test/api/v1/auth/methods', attempts: 1, maxAttempts: 1
+      } } });
+      const failed = warn.mock.calls.map(([message]) => { try { return JSON.parse(String(message)); } catch { return {}; } }).find(message => message.type === 'enterprise_dingtalk_auth' && message.outcome === 'failed');
+      expect(failed).toMatchObject({ causeCode: 'UND_ERR_CONNECT_TIMEOUT', requestUrl: 'https://gateway.test/api/v1/auth/methods' });
+      expect(JSON.stringify([body, warn.mock.calls])).not.toContain('private-value');
+    } finally { warn.mockRestore(); }
+  });
+  it('企业请求经过会话和业务错误转换后仍保留具体网络原因', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-network-diagnostics-'));
+    const remote = createEnterpriseHttpClient({ origin: 'https://gateway.test', retryDelayMs: 0, fetch: async () => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo ENOTFOUND gateway.test'), { code: 'ENOTFOUND' }) });
+    } });
+    const httpClient = createClient({ listSkills: remote.listSkills, listSkillSpaces: remote.listSkillSpaces, listKnowledgeBases: remote.listKnowledgeBases, getMcpCatalog: remote.getMcpCatalog });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'), enterpriseOrigin: 'https://gateway.test',
+      enterpriseHttpClient: httpClient, enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore({ accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z' })
+    });
+    await vi.waitFor(async () => { expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in'); });
+    for (const path of ['/enterprise/skill-spaces', '/enterprise/knowledge-bases']) {
+      const response = await authRequest('GET', path);
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ error: { code: 'ENTERPRISE_SERVICE_UNAVAILABLE', message: expect.stringContaining('DNS 解析失败'), details: {
+        causeCode: 'ENOTFOUND', failureKind: 'dns', requestMethod: 'GET', requestUrl: expect.stringContaining('https://gateway.test/api/v1/'), timeoutMs: 15000
+      } } });
+      expect(response.body).not.toContain('enterprise-token');
+    }
+    httpClient.getMe = remote.getMe;
+    const refresh = await authRequest('POST', '/enterprise/session/refresh');
+    expect(refresh.statusCode).toBe(503);
+    expect(refresh.json()).toMatchObject({ error: { message: expect.stringContaining('ENOTFOUND'), details: { attempts: 2, maxAttempts: 2 } } });
+  });
+  it('用户续期保存新凭据，状态轮询不保活且不向 Web 暴露 Token', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-session-renewal-'));
+    const renewed = { accessToken: 'renewed-enterprise-token', expiresAt: '2099-02-01T00:00:00Z' };
+    const renewSession = vi.fn(async () => renewed);
+    const getMe = vi.fn(async () => ({ ...activeMeResult(), sessionId: 'sess_stable' }));
+    const store = createStore({ accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z' });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseOrigin: 'https://enterprise.example',
+      enterpriseHttpClient: createClient({ renewSession, getMe }),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: store,
+      modelServiceRuntime: {
+        ready: () => false,
+        status: () => ({ status: 'configuration_required', mode: 'enterprise_managed' }),
+        async resolve() {}, async signOut() {}, async readApiKey() { return null; },
+        async check() { return { status: 'succeeded' }; },
+        async configure() { throw new Error('此测试不配置模型'); },
+        subscribeReady() { return () => {}; }
+      }
+    });
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    });
+    await authRequest('POST', '/enterprise/session/refresh');
+    expect(renewSession).not.toHaveBeenCalled();
+    const connectionBefore = (await authRequest('GET', '/desktop-update/context')).json();
+    expect(connectionBefore.connection).not.toBeNull();
+    const response = await authRequest('POST', '/enterprise/session/renew');
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'signed_in', expiresAt: renewed.expiresAt });
+    expect(response.body).not.toContain(renewed.accessToken);
+    expect(response.json()).not.toHaveProperty('accessToken');
+    expect(renewSession).toHaveBeenCalledWith('enterprise-token');
+    expect(await store.read()).toMatchObject(renewed);
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(connectionBefore);
+    renewSession.mockResolvedValueOnce({ ...renewed, accessToken: 'token-after-concurrent-renewal' });
+    expect((await authRequest('POST', '/enterprise/session/renew')).statusCode).toBe(200);
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(connectionBefore);
+    getMe.mockResolvedValue({ ...activeMeResult(), sessionId: 'sess_other_login' });
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(connectionBefore);
+    await authRequest('POST', '/enterprise/logout');
+    expect((await authRequest('POST', '/enterprise/session/renew')).statusCode).toBe(401);
+  });
+
+  it('更新来源仅依赖已配置的 HTTPS Gateway，不依赖登录、账号状态或身份接口', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-update-identity-'));
+    const client = createClient();
+    const origin = 'https://enterprise.example';
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseConfigPath: join(tempDir, 'config.toml'),
+      enterpriseOrigin: origin, enterpriseHttpClient: client,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore({
+        accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z', origin
+      })
+    });
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    });
+    const expected = { connection: {
+      gateway: origin
+    } };
+    const identityRequests = vi.mocked(client.getMe).mock.calls.length;
+    expect((await server.inject({ method: 'GET', url: '/desktop-update/context' })).statusCode).toBe(401);
+    const response = await authRequest('GET', '/desktop-update/context');
+    expect(response.json()).toEqual(expected);
+    expect(response.body).not.toContain('enterprise-token');
+    for (const invalid of [
+      { ...activeMeResult(), frontendAllowed: false },
+      { ...activeMeResult(), agentId: 'other-agent' },
+      { ...activeMeResult(), account: { ...activeMeResult().account, subjectId: 'other-account' } }
+    ]) {
+      vi.mocked(client.getMe).mockResolvedValue(invalid);
+      expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(expected);
+    }
+    vi.mocked(client.getMe).mockRejectedValueOnce(new Error('offline'));
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(expected);
+    expect(vi.mocked(client.getMe)).toHaveBeenCalledTimes(identityRequests);
+    vi.mocked(client.getMe).mockResolvedValue(activeMeResult());
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(expected);
+    expect((await authRequest('POST', '/enterprise/logout')).statusCode).toBe(200);
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual(expected);
+    expect((await authRequest('POST', '/enterprise/gateway', { gateway: 'https://other.example' })).statusCode).toBe(200);
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual({ connection: { gateway: 'https://other.example' } });
+    expect((await authRequest('POST', '/enterprise/gateway', { gateway: 'http://other.example' })).statusCode).toBe(200);
+    expect((await authRequest('GET', '/desktop-update/context')).json()).toEqual({ connection: null });
+  });
+
+  it('校验并规范化手机号凭证，拒绝混合或无效登录标识', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-phone-login-'));
+    const client = createClient();
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore(),
+      enterpriseHttpClient: client, enterpriseOrigin: 'https://enterprise.example'
+    });
+    const result = await authRequest('POST', '/enterprise/login', { phone: '+8613800000000', password: 'password-123' });
+    expect(result.statusCode).toBe(200);
+    expect(client.login).toHaveBeenCalledWith({ phone: '13800000000', password: 'password-123' }, agentId);
+    for (const payload of [
+      { phone: '123', password: 'password-123' },
+      { email: 'user@example.com', phone: '13800000000', password: 'password-123' },
+      { password: 'password-123' }
+    ]) {
+      expect((await authRequest('POST', '/enterprise/login', payload)).statusCode).toBe(400);
+    }
+  });
+
+  it.each([
+    { name: '默认配置', serverDeployment: undefined, autoInstallUpdateSkills: undefined, calls: 0 },
+    { name: 'Server 模式未配置自动同步', serverDeployment: true, autoInstallUpdateSkills: undefined, calls: 0 },
+    { name: 'Server 模式关闭自动同步', serverDeployment: true, autoInstallUpdateSkills: false, calls: 0 },
+    { name: '非 Server 模式开启自动同步', serverDeployment: false, autoInstallUpdateSkills: true, calls: 0 },
+    { name: '默认部署模式开启自动同步', serverDeployment: undefined, autoInstallUpdateSkills: true, calls: 0 },
+    { name: 'Server 模式开启自动同步', serverDeployment: true, autoInstallUpdateSkills: true, calls: 1 }
+  ])('$name：仅显式开启的 Server 在恢复和登录成功后同步 Skill', async ({
+    serverDeployment, autoInstallUpdateSkills, calls
+  }) => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment, autoInstallUpdateSkills,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore({
+        accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z'
+      }),
+      enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    });
+    expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledTimes(calls);
+    expect((await authRequest('POST', '/enterprise/logout')).statusCode).toBe(200);
+    expect((await authRequest('POST', '/enterprise/login', {
+      email: 'user@example.com', password: 'password-123'
+    })).statusCode).toBe(200);
+
+    await server.close();
+    server = undefined;
+    expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledTimes(calls * 2);
+  });
+
+  it('开启自动同步但未登录或登录校验失败时不调用 Skill 同步', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore(), enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+
+    await vi.waitFor(async () => {
+      expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_out');
+    });
+    expect((await authRequest('POST', '/enterprise/login', {
+      email: 'not-an-email', password: 'short'
+    })).statusCode).toBe(400);
+    await server.close();
+    server = undefined;
+    expect(enterpriseSkillManager.syncSkills).not.toHaveBeenCalled();
+  });
+
+  it('登录响应不等待 Skill 同步，但关闭服务等待未完成的同步', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-skill-sync-'));
+    const sync = deferred<boolean>();
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    vi.mocked(enterpriseSkillManager.syncSkills).mockImplementation(() => sync.promise);
+    const capabilities = createUnknownCapabilityMatrix();
+    capabilities.appServer = true;
+    capabilities.appServerApprovals = true;
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      capabilities, serverDeployment: true, autoInstallUpdateSkills: true,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: createStore(), enterpriseHttpClient: createClient(),
+      enterpriseMcpManager: createMcpManager(),
+      enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+    let closed = false;
+    let closeWork: Promise<void> | undefined;
+    const syncTimeout = setTimeout(() => sync.resolve(false), 5_000);
+    try {
+      expect((await authRequest('POST', '/enterprise/login', {
+        email: 'user@example.com', password: 'password-123'
+      })).statusCode).toBe(200);
+      expect(enterpriseSkillManager.syncSkills).toHaveBeenCalledOnce();
+      closeWork = server.close().then(() => { closed = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(closed).toBe(false);
+    } finally {
+      clearTimeout(syncTimeout);
+      sync.resolve(false);
+      await closeWork;
+    }
+    expect(closed).toBe(true);
+    server = undefined;
+  });
+
+  it('登录后保存服务器列表保留认证，切换当前服务器仍需退出登录', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-gateway-session-'));
+    const configPath = join(tempDir, 'config.toml');
+    writeFileSync(configPath, 'gateway = "https://enterprise.example"\n');
+    const credential = { accessToken: 'enterprise-token', expiresAt: '2099-01-01T00:00:00Z', origin: 'https://enterprise.example' };
+    const store = createStore(credential);
+    const client = createClient();
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseOrigin: credential.origin, enterpriseConfigPath: configPath,
+      enterpriseAgentIdentityStore: createAgentIdentityStore(),
+      enterpriseCredentialStore: store, enterpriseHttpClient: client
+    });
+    await vi.waitFor(async () => expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in'));
+    const response = await authRequest('POST', '/enterprise/gateway', {
+      gateway: credential.origin, gateways: [credential.origin, 'https://other.example']
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().gateways).toEqual([credential.origin, 'https://other.example']);
+    expect((await authRequest('GET', '/enterprise/session')).json().status).toBe('signed_in');
+    expect(await store.read()).toEqual(credential);
+    expect(client.logout).not.toHaveBeenCalled();
+    expect((await authRequest('POST', '/enterprise/gateway', { gateway: 'https://other.example' })).statusCode).toBe(409);
+    expect(await store.read()).toEqual(credential);
+  });
+
   it('propagates a disconnected preview request to the manager', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-preview-cancel-'));
     const manager = createSharedDriveManager();
@@ -114,6 +434,42 @@ describe('enterprise runtime API', () => {
     expect(enterpriseSkillManager.uploadSkill).toHaveBeenCalledTimes(2);
     expect((await upload({ ...fields, changelog: '字'.repeat(2000) })).statusCode).toBe(201);
   });
+  it.each([
+    [400, 'Skill 包格式不合法：ZIP 根目录或单一顶层包装目录下缺少 SKILL.md'],
+    [422, 'Skill 包格式不合法：SKILL.md frontmatter 缺少必填字段 name'],
+    [400, undefined],
+    [400, '   '],
+    [400, 42]
+  ])('上传包校验错误保留具体原因，兼容空消息：HTTP %s / %j', async (status, message) => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-enterprise-upload-error-'));
+    const remote = createEnterpriseHttpClient({ origin: 'https://gateway.test', fetch: async () => Response.json({
+      error: { code: 'package_invalid', message }
+    }, { status }) });
+    const enterpriseSkillManager = createEnterpriseSkillManager();
+    enterpriseSkillManager.uploadSkill = input => remote.uploadSkillVersion({ ...input, accessToken: 'enterprise-token' });
+    server = await buildServer({
+      token: 'secret', dataDir: tempDir, codexHome: join(tempDir, 'codex-home'),
+      enterpriseAgentIdentityStore: createAgentIdentityStore(), enterpriseCredentialStore: createStore(),
+      enterpriseHttpClient: createClient(), enterpriseSkillManager, enterpriseOrigin: 'https://enterprise.example'
+    });
+    const form = new FormData();
+    form.append('spaceId', 'space_1');
+    form.append('version', '1.0.0');
+    form.append('package', new Blob(['ZIP']), 'review.zip');
+    const encoded = new Request('http://runtime/upload', { method: 'POST', body: form });
+    const response = await server.inject({ method: 'POST', url: '/enterprise/skills/versions',
+      headers: { authorization: 'Bearer secret', 'content-type': encoded.headers.get('content-type')! },
+      payload: Buffer.from(await encoded.arrayBuffer())
+    });
+    expect(response.statusCode).toBe(status);
+    expect(response.json().error.code).toBe('ENTERPRISE_SKILL_PACKAGE_INVALID');
+    if (typeof message === 'string' && message.trim()) {
+      expect(response.json().error.details.packageValidationMessage).toBe(message);
+    } else {
+      expect(response.json().error.details).not.toHaveProperty('packageValidationMessage');
+    }
+  });
+
   it('authenticates gateway configuration and never restores credentials from another gateway', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-gateway-api-'));
     const configPath = join(tempDir, 'config.toml');
@@ -562,6 +918,12 @@ describe('enterprise runtime API', () => {
       'crm-main',
       { installed: true, enabled: false }
     );
+    const health = await authRequest('POST', '/enterprise/mcp/upstreams/crm-main/health');
+    expect(health.statusCode).toBe(200);
+    expect(enterpriseMcpManager.checkHealth).toHaveBeenCalledWith('crm-main');
+    expect(health.json()).toMatchObject({ status: 'unknown', checkedAt: '2026-10-29T06:00:00Z' });
+    expect((await authRequest('POST', '/enterprise/mcp/upstreams/bad%20id/health')).statusCode).toBe(400);
+    expect((await server.inject({ method: 'POST', url: '/enterprise/mcp/upstreams/crm-main/health' })).statusCode).toBe(401);
   });
 
   it('exposes knowledge list, document list, and binary upload routes', async () => {
@@ -877,7 +1239,7 @@ function createClient(
       agentId,
       accessToken: 'enterprise-token',
       tokenType: 'Bearer' as const,
-      expiresAt: '2026-07-31T10:00:00Z'
+      expiresAt: '2099-01-01T00:00:00Z'
     })),
     getMe: vi.fn(async () => activeMeResult()),
     logout: vi.fn(async () => undefined),
@@ -975,6 +1337,7 @@ function createMcpManager(): EnterpriseMcpManager {
   return {
     listConnections: vi.fn(async () => response),
     refreshConnections: vi.fn(async () => response),
+    checkHealth: vi.fn(async () => ({ status: 'unknown' as const, message: '尚未检查', checkedAt: '2026-10-29T06:00:00Z' })),
     updatePreference: vi.fn(async () => response),
     prepareRuntime: vi.fn(async () => undefined),
     handleSessionAuthenticated: vi.fn(),
@@ -1022,6 +1385,7 @@ function createEnterpriseSkillManager(): EnterpriseSkillManager {
     createdAt: '2026-07-30T10:00:00.000Z'
   };
   return {
+    syncSkills: vi.fn(async () => false),
     listSpaces: vi.fn(async () => ({ spaces: [{ spaceId: 'skillspace_1', name: '团队技能', description: '', actions: ['read', 'write'] as Array<'read' | 'write'> }] })),
     uploadSkill: vi.fn(async () => ({ skillId: 'skill_1', spaceId: 'skillspace_1', name: 'review', version: '1.0.0' })),
     listSkills: vi.fn(async () => ({

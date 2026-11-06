@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -33,6 +35,7 @@ import type {
   AttachmentResponse,
   CodexModelResponse,
   ReasoningEffort,
+  RunQueueReason,
   RunSubmissionMode
 } from '@clawee/protocol';
 import type { ClaweeProject, ProjectPermission } from '../projects/project-model.js';
@@ -48,6 +51,8 @@ import {
   isImageAttachmentMime,
   resolveAttachmentMime
 } from '../../services/attachment-types.js';
+import { resolveModelReasoning, type ModelReasoningPreferences } from '../../services/model-reasoning-preferences.js';
+import { isModelHidden } from '../../services/model-blacklist.js';
 
 export type ComposerRunConfig = {
   permission: ProjectPermission;
@@ -59,6 +64,7 @@ export type ComposerRunConfig = {
 export type ComposerDraftRequest = {
   id: number;
   text: string;
+  quote?: boolean;
 };
 
 export type ComposerSkillRequest = {
@@ -91,11 +97,13 @@ export type ComposerQueuedItem = {
   runId: string;
   text: string;
   queuePosition?: number;
+  queueReason?: RunQueueReason;
 };
 
 type ComposerAttachmentDraft = AttachmentTrayItem & {
   file: File;
   attachment?: AttachmentResponse;
+  awaitingImageUpload?: boolean;
 };
 
 type SlashTrigger = {
@@ -140,6 +148,7 @@ export function Composer(props: {
   running?: boolean;
   canceling?: boolean;
   permissionChangeDisabled?: boolean;
+  readOnly?: boolean;
   modelChangeDisabled?: boolean;
   projectId: string;
   projectName: string;
@@ -148,7 +157,7 @@ export function Composer(props: {
   permission: ProjectPermission;
   profile: string;
   model: string | null;
-  reasoning: ReasoningEffort | null;
+  modelReasoningPreferences?: ModelReasoningPreferences;
   models?: readonly CodexModelResponse[];
   modelsLoading?: boolean;
   modelsError?: string;
@@ -190,6 +199,7 @@ export function Composer(props: {
   onSteerQueuedRun?(runId: string): void;
   onUploadAttachment?(file: File): Promise<AttachmentResponse>;
   onDeleteAttachment?(attachment: AttachmentResponse): Promise<void>;
+  onSelectContextDirectory?(): Promise<string | null>;
   onManageSkills?(): void;
   onManageConnectors?(): void;
   onSubmit(
@@ -206,11 +216,6 @@ export function Composer(props: {
     normalizePermission(props.permission)
   );
   const [selectedModel, setSelectedModel] = useState<string | null>(props.model);
-  const [selectedReasoning, setSelectedReasoning] = useState<ReasoningEffort | null>(
-    props.reasoning
-  );
-  const [modelsExpanded, setModelsExpanded] = useState(true);
-  const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const [openMenu, setOpenMenu] = useState<
     'project' | 'add' | 'permission' | 'connectors' | 'model' | null
   >(null);
@@ -225,10 +230,14 @@ export function Composer(props: {
   const [connectorUpdatingId, setConnectorUpdatingId] = useState<string>();
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null);
   const [attachmentDrafts, setAttachmentDrafts] = useState<ComposerAttachmentDraft[]>([]);
+  const [directoryPaths, setDirectoryPaths] = useState<string[]>([]);
+  const [selectingDirectory, setSelectingDirectory] = useState(false);
+  const [directoryError, setDirectoryError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [permissionUpdating, setPermissionUpdating] = useState(false);
   const [modelUpdating, setModelUpdating] = useState(false);
   const [pendingPermission, setPendingPermission] = useState<ProjectPermission>();
+  const attachmentBlockReasonId = useId();
   const composerRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const slashMenuRootRef = useRef<HTMLDivElement | null>(null);
@@ -243,6 +252,7 @@ export function Composer(props: {
   const nextAttachmentIdRef = useRef(0);
   const scheduledDraftIdRef = useRef<number>();
   const appliedDraftIdRef = useRef<number>();
+  const preparedDraftRef = useRef<{ id: number; text: string }>();
   const scheduledSkillIdRef = useRef<number>();
   const appliedSkillIdRef = useRef<number>();
   const promptRevisionRef = useRef(0);
@@ -260,17 +270,15 @@ export function Composer(props: {
   );
   const selectedModelSupportsImages =
     resolvedSelectedModel?.inputModalities.includes('image');
+  const imageInputUnsupportedReason = selectedModelSupportsImages === false
+    ? `${selectedModelLabel} 不支持图片输入`
+    : props.imageInputSupported !== true
+      ? props.imageInputUnsupportedReason ?? '当前 Codex 版本不支持图片输入'
+      : undefined;
   const canAttachFiles = props.onUploadAttachment !== undefined;
-  const canAttachImages =
-    canAttachFiles
-    && props.imageInputSupported === true
-    && selectedModelSupportsImages !== false;
-  const attachmentsSupportedByModel =
-    attachmentDrafts.every(item => (
-      !isImageAttachmentMime(item.mime) || selectedModelSupportsImages !== false
-    ));
-  const selectedReasoningOptions =
-    resolvedSelectedModel?.supportedReasoningEfforts ?? [];
+  const canAttachImages = canAttachFiles && imageInputUnsupportedReason === undefined;
+  const hasImageAttachments = attachmentDrafts.some(item => isImageAttachmentMime(item.mime));
+  const selectedReasoning = resolveModelReasoning(resolvedSelectedModel, props.modelReasoningPreferences);
   const addCommands = slashCommands.filter(command => (
     command.category === 'skill'
     && (
@@ -351,14 +359,13 @@ export function Composer(props: {
 
   useEffect(() => {
     setSelectedModel(props.model);
-    setSelectedReasoning(props.reasoning);
-  }, [props.model, props.reasoning, props.projectName]);
+  }, [props.model, props.projectName]);
 
   useEffect(() => {
     if (
       props.models === undefined
       || props.modelsLoading === true
-      || selectedModel === null
+      || (selectedModel === null && props.models.some(option => option.isDefault))
       || props.models.some(option => option.model === selectedModel)
     ) {
       return;
@@ -367,12 +374,11 @@ export function Composer(props: {
       ?? props.models[0];
     if (fallback === undefined) return;
     setSelectedModel(fallback.model);
-    setSelectedReasoning(null);
     props.onModelConfigChange?.({
       model: fallback.model,
-      reasoning: null
+      reasoning: resolveModelReasoning(fallback, props.modelReasoningPreferences)
     });
-  }, [props.models, props.modelsLoading, props.onModelConfigChange, selectedModel]);
+  }, [props.models, props.modelsLoading, props.onModelConfigChange, props.modelReasoningPreferences, selectedModel]);
 
   useEffect(() => {
     if (activeFloatingMenu === null) return;
@@ -393,6 +399,21 @@ export function Composer(props: {
       closeFloatingMenu();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (activeFloatingMenu === 'model'
+        && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        const options = Array.from(modelMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+          '[role="menuitemradio"]:not(:disabled)'
+        ) ?? []);
+        if (options.length === 0) return;
+        event.preventDefault();
+        const currentIndex = options.findIndex(option => option === document.activeElement);
+        const nextIndex = event.key === 'Home' || (currentIndex < 0 && event.key === 'ArrowDown') ? 0
+          : event.key === 'End' || currentIndex < 0 ? options.length - 1
+          : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+        options[nextIndex]?.focus({ preventScroll: true });
+        options[nextIndex]?.scrollIntoView?.({ block: 'nearest' });
+        return;
+      }
       if (event.key !== 'Escape') return;
       event.preventDefault();
       if (activeFloatingMenu === 'add' && addSubmenu !== null) {
@@ -401,6 +422,9 @@ export function Composer(props: {
         return;
       }
       closeFloatingMenu();
+      if (activeFloatingMenu === 'model') {
+        modelMenuRootRef.current?.querySelector('button')?.focus({ preventScroll: true });
+      }
     };
 
     document.addEventListener('pointerdown', handlePointerDown);
@@ -430,8 +454,19 @@ export function Composer(props: {
     if (scheduledDraftIdRef.current === draftRequest.id) return;
 
     scheduledDraftIdRef.current = draftRequest.id;
+    if (preparedDraftRef.current?.id !== draftRequest.id) {
+      const currentPrompt = promptRef.current;
+      const quotedText = draftRequest.text.replace(/\r\n?/g, '\n').split('\n').map(line => `> ${line}`).join('\n');
+      preparedDraftRef.current = {
+        id: draftRequest.id,
+        text: draftRequest.quote
+          ? `${currentPrompt}${currentPrompt && !currentPrompt.endsWith('\n\n') ? '\n\n' : ''}引用回复：\n${quotedText}\n\n`
+          : draftRequest.text
+      };
+    }
+    const draftText = preparedDraftRef.current.text;
     promptRevisionRef.current += 1;
-    setPrompt(draftRequest.text);
+    setPrompt(draftText);
     setSlashTrigger(null);
     setOpenMenu(null);
 
@@ -439,7 +474,7 @@ export function Composer(props: {
       scheduledDraftIdRef.current = undefined;
       const textarea = textareaRef.current;
       if (textarea === null) return;
-      const caret = draftRequest.text.length;
+      const caret = promptRef.current.length;
       textarea.focus();
       textarea.setSelectionRange(caret, caret);
       appliedDraftIdRef.current = draftRequest.id;
@@ -525,7 +560,8 @@ export function Composer(props: {
     : prompt.slice(selectedSkillPrefix.length);
   const hasComposerContent = visiblePrompt.length > 0
     || selectedSkillCommand !== undefined
-    || attachmentDrafts.length > 0;
+    || attachmentDrafts.length > 0
+    || directoryPaths.length > 0;
   const filteredSlashCommands = useMemo(
     () => filterSlashCommands(slashCommands, slashTrigger?.query ?? ''),
     [slashCommands, slashTrigger?.query]
@@ -535,17 +571,26 @@ export function Composer(props: {
     [filteredSlashCommands]
   );
   const slashMenuOpen = slashTrigger !== null;
-  const attachmentsSettled =
-    attachmentDrafts.length === 0
-    || attachmentDrafts.every(item => item.status === 'ready');
+  const attachmentBlockReason = hasImageAttachments && imageInputUnsupportedReason !== undefined
+    ? `${imageInputUnsupportedReason}，${selectedModelSupportsImages === false
+      ? '请切换到支持图片的模型或移除图片后发送'
+      : '请移除图片后发送'}`
+    : attachmentDrafts.some(item => item.awaitingImageUpload)
+      ? '图片正在准备上传，请稍候再发送'
+      : attachmentDrafts.some(item => item.status === 'uploading')
+        ? '附件正在上传，请稍候再发送'
+        : attachmentDrafts.some(item => item.status === 'error')
+          ? '附件未上传成功，请重试或移除附件后发送'
+          : undefined;
   const canSubmit =
     !props.disabled
     && !submitting
+    && !selectingDirectory
     && !modelUpdating
     && (trimmedPrompt.length > 0 || props.workflowDraft !== undefined)
-    && attachmentsSettled
-    && attachmentsSupportedByModel;
+    && attachmentBlockReason === undefined;
   const showStopAction = props.running === true && !canSubmit;
+  const sendBlockReason = showStopAction ? undefined : attachmentBlockReason;
   const submitPrompt = async () => {
     if (!canSubmit) return;
     textareaRef.current?.focus({ preventScroll: true });
@@ -564,9 +609,11 @@ export function Composer(props: {
         model: selectedModel,
         reasoning: selectedReasoning
       };
+      const submittedPrompt = directoryPaths.length === 0 ? trimmedPrompt
+        : `${trimmedPrompt}\n\n参考文件夹（本机路径）：\n${JSON.stringify(directoryPaths, null, 2)}`;
       accepted = props.running
-        ? await props.onSubmit(trimmedPrompt, config, attachments, 'enqueue')
-        : await props.onSubmit(trimmedPrompt, config, attachments);
+        ? await props.onSubmit(submittedPrompt, config, attachments, 'enqueue')
+        : await props.onSubmit(submittedPrompt, config, attachments);
       if (accepted === false) {
         for (const item of attachments) transferredPreviewUrlsRef.current.delete(item.previewUrl);
       }
@@ -582,6 +629,8 @@ export function Composer(props: {
     setSlashTrigger(null);
     attachmentDraftsRef.current = [];
     setAttachmentDrafts([]);
+    setDirectoryPaths([]);
+    setDirectoryError(undefined);
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (textarea !== null && !textarea.disabled) {
@@ -619,7 +668,8 @@ export function Composer(props: {
       ? '--composer-slash-menu-available-height'
       : '--composer-model-menu-available-height';
     const clippingAncestors = findClippingAncestors(root);
-    const updateAvailableHeight = () => {
+    const updateAvailableSpace = () => {
+      const rootRect = root.getBoundingClientRect();
       const boundaryTop = clippingAncestors.reduce(
         (top, ancestor) => Math.max(top, ancestor.getBoundingClientRect().top),
         window.visualViewport?.offsetTop ?? 0
@@ -627,35 +677,67 @@ export function Composer(props: {
       const availableHeight = Math.max(
         0,
         Math.floor(
-          root.getBoundingClientRect().top
+          rootRect.top
           - boundaryTop
           - COMPOSER_POPOVER_GAP
           - COMPOSER_POPOVER_VIEWPORT_MARGIN
         )
       );
       menu.style.setProperty(heightProperty, `${availableHeight}px`);
+
+      if (slashMenuOpen) return;
+      const viewportLeft = window.visualViewport?.offsetLeft ?? 0;
+      const boundaryLeft = clippingAncestors.reduce(
+        (left, ancestor) => Math.max(left, ancestor.getBoundingClientRect().left),
+        viewportLeft
+      ) + COMPOSER_POPOVER_VIEWPORT_MARGIN;
+      const boundaryRight = clippingAncestors.reduce(
+        (right, ancestor) => Math.min(right, ancestor.getBoundingClientRect().right),
+        viewportLeft + (window.visualViewport?.width ?? window.innerWidth)
+      ) - COMPOSER_POPOVER_VIEWPORT_MARGIN;
+      const availableWidth = Math.max(0, boundaryRight - boundaryLeft);
+      menu.style.setProperty('--composer-model-menu-available-width', `${availableWidth}px`);
+      const menuLeft = Math.max(
+        boundaryLeft,
+        Math.min(rootRect.right, boundaryRight) - menu.getBoundingClientRect().width
+      );
+      menu.style.setProperty('--composer-model-menu-offset', `${menuLeft - rootRect.left}px`);
     };
 
-    updateAvailableHeight();
-    window.addEventListener('resize', updateAvailableHeight);
+    updateAvailableSpace();
+    window.addEventListener('resize', updateAvailableSpace);
     const visualViewport = window.visualViewport;
-    visualViewport?.addEventListener('resize', updateAvailableHeight);
-    visualViewport?.addEventListener('scroll', updateAvailableHeight);
+    visualViewport?.addEventListener('resize', updateAvailableSpace);
+    visualViewport?.addEventListener('scroll', updateAvailableSpace);
 
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
-      : new ResizeObserver(updateAvailableHeight);
+      : new ResizeObserver(updateAvailableSpace);
     resizeObserver?.observe(root);
     for (const ancestor of clippingAncestors) resizeObserver?.observe(ancestor);
 
     return () => {
-      window.removeEventListener('resize', updateAvailableHeight);
-      visualViewport?.removeEventListener('resize', updateAvailableHeight);
-      visualViewport?.removeEventListener('scroll', updateAvailableHeight);
+      window.removeEventListener('resize', updateAvailableSpace);
+      visualViewport?.removeEventListener('resize', updateAvailableSpace);
+      visualViewport?.removeEventListener('scroll', updateAvailableSpace);
       resizeObserver?.disconnect();
       menu.style.removeProperty(heightProperty);
+      menu.style.removeProperty('--composer-model-menu-available-width');
+      menu.style.removeProperty('--composer-model-menu-offset');
     };
   }, [slashMenuOpen, openMenu]);
+
+  useLayoutEffect(() => {
+    if (openMenu !== 'model') return;
+    const selectedOption = modelMenuRef.current?.querySelector<HTMLButtonElement>(
+      '[aria-checked="true"]'
+    );
+    const focusOption = selectedOption != null && !selectedOption.disabled
+      ? selectedOption
+      : modelMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)');
+    focusOption?.focus({ preventScroll: true });
+    (selectedOption ?? focusOption)?.scrollIntoView?.({ block: 'nearest' });
+  }, [openMenu, props.models, resolvedSelectedModel?.model]);
 
   const updatePrompt = (value: string, caret: number) => {
     promptRevisionRef.current += 1;
@@ -807,12 +889,13 @@ export function Composer(props: {
     void submitPrompt();
   };
 
-  async function uploadAttachment(localId: string) {
+  const uploadAttachment = useCallback(async (localId: string) => {
     const item = attachmentDraftsRef.current.find(candidate => candidate.localId === localId);
     if (item === undefined || props.onUploadAttachment === undefined) return;
+    if (isImageAttachmentMime(item.mime) && !canAttachImages) return;
     setAttachmentDrafts(current => current.map(candidate =>
       candidate.localId === localId
-        ? { ...candidate, status: 'uploading', error: undefined }
+        ? { ...candidate, status: 'uploading', error: undefined, awaitingImageUpload: false, retryable: true }
         : candidate
     ));
     try {
@@ -833,6 +916,28 @@ export function Composer(props: {
           : candidate
       ));
     }
+  }, [canAttachImages, props.onUploadAttachment]);
+
+  useEffect(() => {
+    if (!canAttachImages || modelUpdating) return;
+    for (const item of attachmentDrafts) {
+      if (item.awaitingImageUpload) void uploadAttachment(item.localId);
+    }
+  }, [attachmentDrafts, canAttachImages, modelUpdating, uploadAttachment]);
+
+  async function selectContextDirectory() {
+    if (props.onSelectContextDirectory === undefined || selectingDirectory || submitting || props.disabled) return;
+    setOpenMenu(null);
+    setSelectingDirectory(true);
+    setDirectoryError(undefined);
+    try {
+      const path = await props.onSelectContextDirectory();
+      if (path !== null) setDirectoryPaths(current => current.includes(path) ? current : [...current, path]);
+    } catch (error) {
+      setDirectoryError(error instanceof Error ? error.message : '无法打开文件夹选择窗口');
+    } finally {
+      setSelectingDirectory(false);
+    }
   }
 
   function addFiles(files: Iterable<File>) {
@@ -845,9 +950,7 @@ export function Composer(props: {
       const error = mime === undefined
         ? '不支持此文件类型'
         : isImageAttachmentMime(mime) && !canAttachImages
-          ? selectedModelSupportsImages === false
-            ? `${selectedModelLabel} 不支持图片输入`
-            : props.imageInputUnsupportedReason ?? '当前 Codex 版本不支持图片输入'
+          ? imageInputUnsupportedReason
           : undefined;
       const draft: ComposerAttachmentDraft = {
         localId,
@@ -856,6 +959,7 @@ export function Composer(props: {
         mime: mime ?? (file.type || 'application/octet-stream'),
         previewUrl: URL.createObjectURL(file),
         status: error === undefined ? 'uploading' : 'error',
+        awaitingImageUpload: mime !== undefined && isImageAttachmentMime(mime) && !canAttachImages,
         ...(error === undefined ? {} : { error, retryable: false })
       };
       setAttachmentDrafts(current => [...current, draft]);
@@ -905,26 +1009,27 @@ export function Composer(props: {
   }
 
   async function applyModelConfig(
-    config: Pick<ComposerRunConfig, 'model' | 'reasoning'>,
-    closeMenu: boolean
+    config: Pick<ComposerRunConfig, 'model' | 'reasoning'>
   ) {
     if (modelUpdating || props.modelChangeDisabled) return;
     const previousModel = selectedModel;
-    const previousReasoning = selectedReasoning;
     setSelectedModel(config.model);
-    setSelectedReasoning(config.reasoning);
     setModelUpdating(true);
     try {
       const accepted = await props.onModelConfigChange?.(config);
       if (accepted === false) {
         setSelectedModel(previousModel);
-        setSelectedReasoning(previousReasoning);
         return;
       }
-      if (closeMenu) setOpenMenu(null);
+      setOpenMenu(null);
+      window.requestAnimationFrame(() => {
+        const root = modelMenuRootRef.current;
+        if (document.activeElement === document.body || root?.contains(document.activeElement)) {
+          root?.querySelector('button')?.focus({ preventScroll: true });
+        }
+      });
     } catch {
       setSelectedModel(previousModel);
-      setSelectedReasoning(previousReasoning);
     } finally {
       setModelUpdating(false);
     }
@@ -1085,8 +1190,14 @@ export function Composer(props: {
               <span className="composer-queue-copy" title={item.text}>
                 {item.text}
               </span>
-              {item.queuePosition === undefined ? null : (
-                <span className="composer-queue-position">第 {item.queuePosition} 位</span>
+              {item.queuePosition === undefined && item.queueReason === undefined ? null : (
+                <span className="composer-queue-position">
+                  {item.queueReason === 'thread_active' ? '等待本会话任务完成'
+                    : item.queueReason === 'thread_finalizing' ? '上一轮正在收尾'
+                      : item.queueReason === 'capacity' ? '等待其他会话完成' : null}
+                  {item.queueReason !== undefined && item.queuePosition !== undefined ? ' · ' : null}
+                  {item.queuePosition === undefined ? null : `第 ${item.queuePosition} 位`}
+                </span>
               )}
               {props.onSteerQueuedRun ? (
                 <button
@@ -1227,10 +1338,31 @@ export function Composer(props: {
           : props.onCreateBlankProject?.(name, sourceCwd)}
       />
       <AttachmentTray
-        items={attachmentDrafts}
-        onRemove={(localId) => void removeAttachment(localId)}
+        items={[
+          ...attachmentDrafts.map(item => item.awaitingImageUpload
+            ? {
+                ...item,
+                status: canAttachImages ? 'uploading' as const : item.status,
+                error: imageInputUnsupportedReason,
+                retryable: false
+              }
+            : item),
+          ...directoryPaths.map(path => ({
+            localId: `directory:${path}`,
+            fileName: path.split(/[\\/]/).filter(Boolean).at(-1) ?? path,
+            mime: 'inode/directory', previewUrl: '', status: 'ready' as const, directoryPath: path
+          }))
+        ]}
+        onRemove={(localId) => {
+          if (localId.startsWith('directory:')) {
+            setDirectoryPaths(current => current.filter(path => `directory:${path}` !== localId));
+          } else void removeAttachment(localId);
+        }}
         onRetry={(localId) => void uploadAttachment(localId)}
       />
+      {directoryError === undefined ? null : (
+        <p className="composer-model-status composer-model-status-error" role="alert">{directoryError}</p>
+      )}
       <div
         ref={slashMenuRootRef}
         className={`composer-input-wrap${selectedSkillCommand === undefined ? '' : ' has-skill-chip'}`}
@@ -1256,6 +1388,7 @@ export function Composer(props: {
         <textarea
           ref={textareaRef}
           aria-label={props.workflowDraft ? '任务要求' : '输入任务'}
+          aria-describedby={attachmentBlockReason === undefined ? undefined : attachmentBlockReasonId}
           id={props.workflowDraft ? 'composer-workflow-input' : undefined}
           aria-autocomplete="list"
           aria-controls={slashMenuOpen ? 'composer-slash-menu' : undefined}
@@ -1266,7 +1399,6 @@ export function Composer(props: {
           rows={2}
           value={visiblePrompt}
           disabled={props.disabled}
-          readOnly={props.workflowDraft?.firstNode}
           onChange={(event) => updateVisiblePrompt(event.target.value, event.target.selectionStart)}
           onClick={(event) => updatePrompt(
             prompt,
@@ -1277,7 +1409,7 @@ export function Composer(props: {
           placeholder={
             props.disabled
               ? props.disabledReason ?? '当前对话不可用'
-              : props.workflowDraft?.firstNode ? '发起时填写的任务要求' : props.workflowDraft ? '补充本节点的任务要求' : hasComposerContent ? '' : '输入 / 调用插件'
+              : props.workflowDraft?.firstNode ? '补充或调整首节点任务要求' : props.workflowDraft ? '补充本节点的任务要求' : hasComposerContent ? '' : '输入 / 调用插件'
           }
         />
         {slashMenuOpen ? (
@@ -1357,6 +1489,18 @@ export function Composer(props: {
                   <Paperclip aria-hidden="true" size={15} />
                   <span>添加文件</span>
                 </button>
+                {props.onSelectContextDirectory === undefined ? null : (
+                  <button
+                    className="composer-menu-item"
+                    type="button"
+                    role="menuitem"
+                    disabled={props.disabled || submitting || selectingDirectory}
+                    onClick={() => void selectContextDirectory()}
+                  >
+                    <FolderPlus aria-hidden="true" size={15} />
+                    <span>{selectingDirectory ? '正在选择文件夹' : '添加文件夹'}</span>
+                  </button>
+                )}
                 <button
                   className={`composer-menu-item composer-add-menu-trigger${addSubmenu === 'skill' ? ' is-active' : ''}`}
                   type="button"
@@ -1464,11 +1608,13 @@ export function Composer(props: {
             <button
               className={`composer-select composer-select-${selectedPermission}`}
               type="button"
-              aria-label={`选择访问权限 ${selectedPermissionOption.label}`}
+              aria-label={props.readOnly ? '只读分析权限' : `选择访问权限 ${selectedPermissionOption.label}`}
               aria-expanded={openMenu === 'permission'}
-              disabled={props.permissionChangeDisabled === true || permissionUpdating}
+              disabled={props.readOnly === true || props.permissionChangeDisabled === true || permissionUpdating}
               title={
-                props.permissionChangeDisabled === true
+                props.readOnly === true
+                  ? '当前模块使用只读沙箱'
+                  : props.permissionChangeDisabled === true
                   ? '当前任务结束后可修改访问权限'
                   : '更改项目权限'
               }
@@ -1478,8 +1624,8 @@ export function Composer(props: {
               }}
             >
               <ShieldCheck aria-hidden="true" size={15} />
-              <span>{selectedPermissionOption.label}</span>
-              <ChevronDown aria-hidden="true" size={13} />
+              <span>{props.readOnly ? '只读分析' : selectedPermissionOption.label}</span>
+              {props.readOnly ? null : <ChevronDown aria-hidden="true" size={13} />}
             </button>
             {openMenu === 'permission' ? (
               <div className="composer-popover composer-permission-menu" role="menu" aria-label="访问权限">
@@ -1586,166 +1732,91 @@ export function Composer(props: {
             </button>
             {openMenu === 'model' ? (
               <div className="composer-popover composer-model-menu" role="menu" aria-label="模型" ref={modelMenuRef}>
-                <div className="composer-model-section" role="presentation">
-                  <button
-                    className="composer-model-section-label"
-                    type="button"
-                    aria-expanded={modelsExpanded}
-                    onClick={() => setModelsExpanded(expanded => !expanded)}
-                  >
-                    模型
-                    {modelsExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-                  </button>
-                  {modelsExpanded ? (
-                    <div className="composer-model-options">
-                      {props.modelsLoading === true && availableModels.length === 0 ? (
-                        <div className="composer-model-status" role="status">正在加载模型</div>
-                      ) : null}
-                      {props.modelsError !== undefined && availableModels.length === 0 ? (
-                        <div className="composer-model-status composer-model-status-error">
-                          {props.modelsError}
-                        </div>
-                      ) : null}
-                      {props.modelsNotice !== undefined && availableModels.length > 0 ? (
-                        <div className="composer-model-status" role="status">
-                          {props.modelsNotice}
-                        </div>
-                      ) : null}
-                      {availableModels.length === 0
-                        && props.modelsLoading !== true
-                        && props.modelsError === undefined ? (
-                        <div className="composer-model-status">暂无可用模型</div>
-                      ) : null}
-                      {selectedModel !== null && resolvedSelectedModel === undefined ? (
-                        <button
-                          className="composer-menu-item"
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked="true"
-                          disabled
-                        >
-                          <span className="composer-menu-icon" aria-hidden="true">
-                            <Check size={15} />
-                          </span>
-                          <span>
-                            <strong>{selectedModel} · 不可用</strong>
-                            <small>该模型不在当前可用目录中</small>
-                          </span>
-                        </button>
-                      ) : null}
-                      {availableModels.map(option => {
-                        const imageBlocked =
-                          attachmentDrafts.length > 0
-                          && !option.inputModalities.includes('image');
-                        return (
-                          <button
-                            key={option.id}
-                            className="composer-menu-item"
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={resolvedSelectedModel?.model === option.model}
-                            disabled={
-                              imageBlocked
-                              || props.modelChangeDisabled
-                              || modelUpdating
-                            }
-                            onClick={() => {
-                              const nextReasoning = isReasoningAvailable(
-                                option,
-                                selectedReasoning
-                              )
-                                ? selectedReasoning
-                                : null;
-                              void applyModelConfig({
-                                model: option.model,
-                                reasoning: nextReasoning
-                              }, false);
-                            }}
-                          >
-                            <span className="composer-menu-icon" aria-hidden="true">
-                              {resolvedSelectedModel?.model === option.model ? <Check size={15} /> : null}
-                            </span>
-                            <span>
-                              <strong>{option.displayName}</strong>
-                              <small>{modelOptionDescription(option, imageBlocked)}</small>
-                            </span>
-                          </button>
-                        );
-                      })}
+                <div className="composer-model-section-label" role="presentation">模型</div>
+                <div className="composer-model-options">
+                  {props.modelsLoading === true && availableModels.length === 0 ? (
+                    <div className="composer-model-status" role="status">正在加载模型</div>
+                  ) : null}
+                  {props.modelsError !== undefined && availableModels.length === 0 ? (
+                    <div className="composer-model-status composer-model-status-error">
+                      {props.modelsError}
                     </div>
                   ) : null}
-                </div>
-                {selectedReasoningOptions.length > 0 ? (
-                  <div className="composer-model-section" role="presentation">
+                  {props.modelsNotice !== undefined && availableModels.length > 0 ? (
+                    <div className="composer-model-status" role="status">
+                      {props.modelsNotice}
+                    </div>
+                  ) : null}
+                  {availableModels.length === 0
+                    && props.modelsLoading !== true
+                    && props.modelsError === undefined ? (
+                    <div className="composer-model-status">暂无可用模型</div>
+                  ) : null}
+                  {selectedModel !== null && !isModelHidden(selectedModel) && resolvedSelectedModel === undefined ? (
                     <button
-                      className="composer-model-section-label"
+                      className="composer-menu-item"
                       type="button"
-                      aria-expanded={reasoningExpanded}
-                      onClick={() => setReasoningExpanded(expanded => !expanded)}
+                      role="menuitemradio"
+                      aria-checked="true"
+                      aria-description="该模型不在当前可用目录中"
+                      title={`${selectedModel} · 该模型不在当前可用目录中`}
+                      disabled
                     >
-                      推理强度
-                      {reasoningExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                      <strong>{selectedModel} · 不可用</strong>
+                      <span className="composer-model-meta" />
+                      <Check className="composer-model-check" size={15} aria-hidden="true" />
                     </button>
-                    {reasoningExpanded ? (
-                      <div className="composer-model-options composer-reasoning-options">
-                        <button
-                          className="composer-menu-item"
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={selectedReasoning === null || selectedReasoning === 'default'}
-                          disabled={props.modelChangeDisabled || modelUpdating}
-                          onClick={() => {
-                            void applyModelConfig({
-                              model: selectedModel,
-                              reasoning: null
-                            }, true);
-                          }}
-                        >
-                          <span className="composer-menu-icon" aria-hidden="true">
-                            {selectedReasoning === null || selectedReasoning === 'default'
-                              ? <Check size={15} />
-                              : null}
-                          </span>
-                          <span>
-                            <strong>默认</strong>
-                            <small>跟随 Codex 配置</small>
-                          </span>
-                        </button>
-                        {selectedReasoningOptions.map(option => (
-                          <button
-                            key={option.reasoningEffort}
-                            className="composer-menu-item"
-                            type="button"
-                            role="menuitemradio"
-                            aria-checked={selectedReasoning === option.reasoningEffort}
-                            disabled={props.modelChangeDisabled || modelUpdating}
-                            onClick={() => {
-                              void applyModelConfig({
-                                model: selectedModel,
-                                reasoning: option.reasoningEffort
-                              }, true);
-                            }}
-                          >
-                            <span className="composer-menu-icon" aria-hidden="true">
-                              {selectedReasoning === option.reasoningEffort
-                                ? <Check size={15} />
-                                : null}
-                            </span>
-                            <span>
-                              <strong>{reasoningEffortLabel(option.reasoningEffort)}</strong>
-                              <small>{reasoningEffortDescription(option.reasoningEffort)}</small>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
+                  ) : null}
+                  {availableModels.map(option => {
+                    const imageBlocked =
+                      hasImageAttachments
+                      && !option.inputModalities.includes('image');
+                    const description = modelOptionDescription(option, imageBlocked);
+                    return (
+                      <button
+                        key={option.id}
+                        className="composer-menu-item"
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={resolvedSelectedModel?.model === option.model}
+                        aria-description={description}
+                        title={`${option.displayName} · ${description}`}
+                        disabled={
+                          imageBlocked
+                          || props.modelChangeDisabled
+                          || modelUpdating
+                        }
+                        onClick={() => {
+                          void applyModelConfig({
+                            model: option.model,
+                            reasoning: resolveModelReasoning(option, props.modelReasoningPreferences)
+                          });
+                        }}
+                      >
+                        <strong>{option.displayName}</strong>
+                        <span className="composer-model-meta">
+                          {option.isDefault ? <span className="composer-model-default">默认</span> : null}
+                          {option.inputModalities.includes('image')
+                            ? <span>支持图片</span>
+                            : <span>仅文本</span>}
+                        </span>
+                        <Check className="composer-model-check" size={15} aria-hidden="true" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
           </div>
 
-          <div className="composer-submit-wrap">
+          <div
+            className="composer-submit-wrap"
+            title={sendBlockReason}
+            role={sendBlockReason === undefined ? undefined : 'group'}
+            aria-label={sendBlockReason === undefined ? undefined : '发送受限'}
+            aria-describedby={sendBlockReason === undefined ? undefined : attachmentBlockReasonId}
+            tabIndex={sendBlockReason === undefined ? undefined : 0}
+          >
             <button
               className={showStopAction ? 'composer-stop' : 'composer-send'}
               type={showStopAction ? 'button' : 'submit'}
@@ -1754,10 +1825,11 @@ export function Composer(props: {
                   ? props.canceling ? '正在停止任务' : '停止任务'
                   : props.running ? '排队发送' : '发送'
               }
+              aria-describedby={sendBlockReason === undefined ? undefined : attachmentBlockReasonId}
               title={
                 showStopAction
                   ? props.canceling ? '正在停止任务' : '停止任务'
-                  : props.running ? '加入等待队列' : '发送'
+                  : sendBlockReason ?? (props.running ? '加入等待队列' : '发送')
               }
               disabled={
                 showStopAction
@@ -1776,6 +1848,11 @@ export function Composer(props: {
         </div>
       </div>
       </form>
+      {attachmentBlockReason === undefined ? null : (
+        <p id={attachmentBlockReasonId} className="composer-send-hint" role="status">
+          {attachmentBlockReason}
+        </p>
+      )}
       <ConfirmDialog
         open={pendingPermission === 'danger-full-access'}
         title="开启完全访问权限"
@@ -1832,37 +1909,10 @@ function modelOptionDescription(
 ): string {
   if (imageBlocked) return '当前任务包含图片，无法选择';
   const details = [
-    option.isDefault ? 'Codex 当前默认模型' : undefined,
+    option.isDefault ? '默认模型' : undefined,
     option.inputModalities.includes('image') ? '支持图片输入' : '仅支持文本输入'
   ].filter((detail): detail is string => detail !== undefined);
   return details.join(' · ');
-}
-
-function isReasoningAvailable(
-  model: CodexModelResponse,
-  reasoning: ReasoningEffort | null
-): boolean {
-  return reasoning === null
-    || reasoning === 'default'
-    || model.supportedReasoningEfforts.some(
-      option => option.reasoningEffort === reasoning
-    );
-}
-
-function reasoningEffortLabel(reasoning: ReasoningEffort): string {
-  if (reasoning === 'low') return '低';
-  if (reasoning === 'medium') return '中';
-  if (reasoning === 'high') return '高';
-  if (reasoning === 'xhigh') return '超高';
-  return '默认';
-}
-
-function reasoningEffortDescription(reasoning: ReasoningEffort): string {
-  if (reasoning === 'low') return '更快响应，适合简单任务';
-  if (reasoning === 'medium') return '平衡速度与推理深度';
-  if (reasoning === 'high') return '增强复杂任务的推理深度';
-  if (reasoning === 'xhigh') return '使用最充分的推理深度';
-  return '跟随 Codex 配置';
 }
 
 function findSlashTrigger(value: string, caret: number): SlashTrigger | null {

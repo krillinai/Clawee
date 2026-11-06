@@ -69,6 +69,7 @@ describe("SharedSpaceFilesPage", () => {
     expect(screen.queryByRole("link", { name: "下载文件 guide.txt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "上传新版本 guide.txt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "预览文件 guide.txt" })).not.toBeInTheDocument();
+    expect(screen.getByText("当前账号无下载权限，仅可查看文件信息。请联系管理员开通预览与下载权限。")).toBeInTheDocument();
   });
 
   it("previews safe text in a dialog and keeps the download link", async () => {

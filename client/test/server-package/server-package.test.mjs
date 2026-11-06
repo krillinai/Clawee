@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -10,10 +10,28 @@ import {
 import {
   assertNoSymbolicLinks,
   assertProductionPackageContents,
-  inspectManagedFiles
+  inspectManagedFiles,
+  pruneDeployment
 } from '../../scripts/server-package.mjs';
 
 let tempDir = '';
+
+test('server deployment retains the trusted skill review resource', async () => {
+  const packageRoot = createPackageRoot();
+  const daemonRoot = join(packageRoot, 'daemon');
+  const rulePath = join(daemonRoot, 'resources/skills/skill-review/SKILL.md');
+  mkdirSync(join(daemonRoot, 'resources/skills/skill-review'), { recursive: true });
+  mkdirSync(join(daemonRoot, 'src'), { recursive: true });
+  const rule = readFileSync(new URL('../../apps/daemon/resources/skills/skill-review/SKILL.md', import.meta.url));
+  writeFileSync(rulePath, rule);
+  writeFileSync(join(daemonRoot, 'package.json'), JSON.stringify({ name: '@clawee/daemon', type: 'module' }));
+  pruneDeployment(daemonRoot);
+  assert.deepEqual(readFileSync(rulePath), rule);
+  assert.equal(existsSync(join(daemonRoot, 'src')), false);
+  assert.doesNotThrow(() => assertProductionPackageContents(packageRoot));
+  const files = await inspectManagedFiles(packageRoot);
+  assert.ok(files.some(file => file.path === 'daemon/resources/skills/skill-review/SKILL.md'));
+});
 
 afterEach(() => {
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -47,7 +65,11 @@ test('package integrity rejects modified managed files', async () => {
 
 test('package validation rejects symbolic links', () => {
   const packageRoot = createPackageRoot();
-  symlinkSync(join(packageRoot, 'web/index.html'), join(packageRoot, 'web/link.html'));
+  symlinkSync(
+    join(packageRoot, process.platform === 'win32' ? 'web' : 'web/index.html'),
+    join(packageRoot, 'web/link.html'),
+    process.platform === 'win32' ? 'junction' : 'file'
+  );
 
   assert.throws(
     () => assertNoSymbolicLinks(packageRoot),

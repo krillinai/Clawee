@@ -19,7 +19,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	proxyStore := newClaweeOwnedAgentStore(accountService)
 	store := skillhub.NewMemoryStore()
-	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		AccountService:  accountService,
 		ProxyGateway:    testProxyGateway(proxyStore),
@@ -170,13 +170,13 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 	webCookies := []*http.Cookie{{Name: "claw_front_token", Value: webTokens.Token(accounts.AudienceFrontend).Token}}
 	pending := doJSON(t, router, http.MethodGet, "/api/v1/app/skills/own-pending-versions", "", webCookies, http.StatusOK)
 	items := pending["data"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["version_id"] != webUploaded.Version.VersionID {
+	if len(items) != 3 || items[0].(map[string]any)["version_id"] != webUploaded.Version.VersionID {
 		t.Fatalf("own pending versions=%#v", items)
 	}
 	publishBody := `{"skill_id":"` + webUploaded.Skill.SkillID + `","version_id":"` + webUploaded.Version.VersionID + `"}`
 	doJSON(t, router, http.MethodPost, "/api/v1/app/skills/current-version/own", publishBody, webCookies, http.StatusOK)
 	pending = doJSON(t, router, http.MethodGet, "/api/v1/app/skills/own-pending-versions", "", webCookies, http.StatusOK)
-	if len(pending["data"].([]any)) != 0 {
+	if len(pending["data"].([]any)) != 2 {
 		t.Fatalf("published version remains pending: %#v", pending)
 	}
 
@@ -202,7 +202,7 @@ func TestClaweeSkillSpaceAccessAndUpload(t *testing.T) {
 func TestSkillSpaceAdminMemberLifecycleAndStrictJSON(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		AccountService:  accountService,
 		ProxyGateway:    testProxyGateway(mcpgateway.NewMemoryStore()),
@@ -257,7 +257,7 @@ func TestAdminSkillSpaceVisibilityRequiresMembership(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	store := skillhub.NewMemoryStore()
-	service := skillhub.NewService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: store, PackageRoot: t.TempDir()})
 	sourceService := skillhub.NewGitHubSourceService(skillhub.GitHubSourceServiceConfig{
 		Store: skillhub.NewMemorySourceStore(store), TokenCipher: sourceHTTPTestCipher{},
 	})
@@ -344,7 +344,7 @@ func TestAdminSkillSpaceVisibilityRequiresMembership(t *testing.T) {
 func TestAdminBatchMovesSkillsToSpaceAtomically(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		AccountService: accountService, ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), SkillHubService: service,
 	})

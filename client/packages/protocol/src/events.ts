@@ -1,3 +1,24 @@
+import type { IncidentDiagnostics } from './incidents.js';
+
+export type ModelResponseError = {
+  errorCode: string;
+  reason: string;
+  suggestion: string;
+  retrying: boolean;
+  retryAttempt?: number;
+  retryLimit?: number;
+  httpStatus?: number;
+  transportCode?: string;
+  requestId?: string;
+  networkPath?: 'direct' | 'http_proxy' | 'system_proxy' | 'unknown';
+  proxyStage?: 'resolve' | 'connect' | 'tunnel' | 'response_headers' | 'response_body' | 'stream';
+  proxyErrorCode?: 'PROXY_AUTH_REQUIRED' | 'PROXY_CONNECT_FAILED' | 'PROXY_CONNECT_TIMEOUT' | 'PROXY_TUNNEL_FAILED' | 'PROXY_POLICY_DENIED' | 'PROXY_STREAM_INTERRUPTED';
+  // 本地会话展示的脱敏错误文本，不作为自动上报的技术摘要。
+  runtimeMessage?: string;
+  runtimeDetails?: string;
+  diagnostics: IncidentDiagnostics;
+};
+
 export type PublicRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
 export type TerminationReason =
@@ -52,7 +73,7 @@ export type AgentEventPayload =
       reasoningOutputTokens?: number;
       source: 'stream_cumulative' | 'rollout_best_effort';
     }
-  | { type: 'diagnostic'; code: string; severity: 'info' | 'warning' | 'error'; message: string; details?: Record<string, unknown> }
+  | { type: 'diagnostic'; code: string; severity: 'info' | 'warning' | 'error'; message: string; details?: Record<string, unknown>; modelResponse?: ModelResponseError }
   | {
       type: 'approval';
       approval: {
@@ -75,7 +96,7 @@ export type AgentEventPayload =
         resolutionReason?: string | null;
       };
     }
-  | { type: 'error'; code: string; message: string; details?: Record<string, unknown> }
+  | { type: 'error'; code: string; message: string; details?: Record<string, unknown>; modelResponse?: ModelResponseError }
   | { type: 'unknown_event'; rawEventId: string; codexType?: string }
   | { type: 'done'; status: 'succeeded' | 'failed' | 'canceled'; terminationReason: TerminationReason };
 
@@ -89,5 +110,15 @@ export type AgentEventEnvelope = {
     payload: Extract<AgentEventPayload, { type: Type }>;
     normalizerVersion: number;
     rawEventId?: string;
+    turnId?: string;
   };
 }[AgentEventType];
+
+export function isModelResponseEvent(event: AgentEventEnvelope): boolean {
+  if (event.type === 'assistant_message' || event.type === 'reasoning_summary') {
+    return event.payload.text.trim().length > 0;
+  }
+  return event.type === 'tool_use'
+    && event.payload.toolCallId.trim().length > 0
+    && event.payload.name.trim().length > 0;
+}

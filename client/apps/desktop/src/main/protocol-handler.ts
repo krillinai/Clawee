@@ -1,8 +1,10 @@
 import { stat, readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { protocol } from 'electron';
 import type { DaemonConnection } from '../shared/types.js';
 import type { DesktopLogger } from './logger.js';
+import { runtimeFetch as defaultRuntimeFetch } from './runtime-fetch.js';
 import {
   RuntimeProxyError,
   createRuntimeProxyHeaders,
@@ -32,11 +34,18 @@ export async function installProtocolHandler(input: {
   bootstrapRoot: string;
   getConnection(): DaemonConnection | undefined;
   logger: DesktopLogger;
+  runtimeFetch?: typeof defaultRuntimeFetch;
 }): Promise<void> {
   await protocol.handle('clawee-app', async request => {
     const url = new URL(request.url);
     if (isRuntimeRequestUrl(url)) {
-      return await proxyRuntimeRequest(request, url, input.getConnection(), input.logger);
+      return await proxyRuntimeRequest(
+        request,
+        url,
+        input.getConnection(),
+        input.logger,
+        input.runtimeFetch ?? defaultRuntimeFetch
+      );
     }
     if (url.hostname === 'app') {
       return await staticResponse(input.webRoot, url.pathname, true);
@@ -52,9 +61,18 @@ async function proxyRuntimeRequest(
   request: Request,
   url: URL,
   connection: DaemonConnection | undefined,
-  logger: DesktopLogger
+  logger: DesktopLogger,
+  fetchRuntime: typeof defaultRuntimeFetch
 ): Promise<Response> {
+  const requestId = `rtp_${randomUUID()}`;
+  const startedAt = Date.now();
   if (connection === undefined) {
+    logger.warn('Runtime proxy request rejected', {
+      requestId,
+      method: request.method,
+      path: url.pathname,
+      reason: 'connection_unavailable'
+    });
     return jsonError(503, 'RUNTIME_UNAVAILABLE', 'Clawee Runtime is not ready');
   }
   try {
@@ -63,29 +81,55 @@ async function proxyRuntimeRequest(
     const body = request.method === 'GET' || request.method === 'HEAD'
       ? undefined
       : await readBoundedRequestBody(request);
-    const upstream = await fetch(target.toString(), {
+    const upstreamAbort = new AbortController();
+    const upstream = await fetchRuntime(target, {
       method: request.method,
       headers,
       body,
-      redirect: 'manual',
-      signal: request.signal
+      redirect: 'error',
+      signal: AbortSignal.any([request.signal, upstreamAbort.signal])
     });
-    return relayRuntimeResponse(upstream, logger);
+    return relayRuntimeResponse(
+      upstream,
+      logger,
+      {
+        requestId,
+        method: request.method,
+        path: url.pathname,
+        startedAt,
+        transport: 'node_http'
+      },
+      reason => upstreamAbort.abort(reason)
+    );
   } catch (error) {
     if (error instanceof RuntimeProxyError) {
       return jsonError(error.status, error.code, error.message);
     }
     logger.warn('Runtime proxy request failed', {
+      requestId,
+      method: request.method,
       path: url.pathname,
-      message: error instanceof Error ? error.message : String(error)
+      durationMs: Date.now() - startedAt,
+      transport: 'node_http',
+      ...runtimeErrorDetails(error)
     });
     return jsonError(502, 'RUNTIME_PROXY_FAILED', 'Runtime request failed');
   }
 }
 
+type RuntimeResponseLogContext = {
+  requestId: string;
+  method: string;
+  path: string;
+  startedAt: number;
+  transport: string;
+};
+
 function relayRuntimeResponse(
   upstream: Response,
-  logger: DesktopLogger
+  logger: DesktopLogger,
+  context: RuntimeResponseLogContext,
+  abortUpstream: (reason: unknown) => void
 ): Response {
   const headers = new Headers(upstream.headers);
   for (const name of [
@@ -109,7 +153,10 @@ function relayRuntimeResponse(
     });
   }
   const reader = source.getReader();
+  let canceled = false;
   let released = false;
+  let bytesForwarded = 0;
+  let chunkCount = 0;
   const release = () => {
     if (released) return;
     released = true;
@@ -119,23 +166,62 @@ function relayRuntimeResponse(
     async pull(controller) {
       try {
         const result = await reader.read();
+        if (canceled) return;
         if (result.done) {
           release();
           controller.close();
+          logger.info('Runtime proxy response stream completed', {
+            requestId: context.requestId,
+            method: context.method,
+            path: context.path,
+            status: upstream.status,
+            contentType: upstream.headers.get('content-type'),
+            bytesForwarded,
+            chunkCount,
+            durationMs: Date.now() - context.startedAt,
+            transport: context.transport
+          });
           return;
         }
+        bytesForwarded += result.value.byteLength;
+        chunkCount += 1;
         controller.enqueue(result.value);
       } catch (error) {
+        if (canceled) return;
+        abortUpstream(error);
         release();
         logger.warn('Runtime proxy response stream failed', {
-          message: error instanceof Error ? error.message : String(error)
+          requestId: context.requestId,
+          method: context.method,
+          path: context.path,
+          status: upstream.status,
+          contentType: upstream.headers.get('content-type'),
+          bytesForwarded,
+          chunkCount,
+          durationMs: Date.now() - context.startedAt,
+          transport: context.transport,
+          ...runtimeErrorDetails(error)
         });
         controller.error(error);
       }
     },
     async cancel(reason) {
+      canceled = true;
+      // Chromium 的响应流取消不会自动关闭上游 SSE 连接，须同时中止网络请求。
+      abortUpstream(reason);
       await reader.cancel(reason).catch(() => undefined);
       release();
+      logger.info('Runtime proxy response stream canceled', {
+        requestId: context.requestId,
+        method: context.method,
+        path: context.path,
+        status: upstream.status,
+        bytesForwarded,
+        chunkCount,
+        durationMs: Date.now() - context.startedAt,
+        transport: context.transport,
+        cancelReason: normalizeErrorMessage(reason)
+      });
     }
   });
   return new Response(body, {
@@ -143,6 +229,27 @@ function relayRuntimeResponse(
     statusText: upstream.statusText,
     headers
   });
+}
+
+function runtimeErrorDetails(error: unknown): Record<string, unknown> {
+  const value = error as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
+  const message = normalizeErrorMessage(value?.message ?? error);
+  const cause = value?.cause as { code?: unknown; message?: unknown } | undefined;
+  const code = typeof value?.code === 'string'
+    ? value.code
+    : typeof cause?.code === 'string'
+      ? cause.code
+      : message.match(/\bERR_[A-Z0-9_]+\b/)?.[0];
+  return {
+    errorName: typeof value?.name === 'string' ? value.name : 'Error',
+    ...(code === undefined ? {} : { errorCode: code }),
+    errorMessage: message.slice(0, 1024),
+    ...(typeof cause?.message === 'string' ? { causeMessage: cause.message.slice(0, 1024) } : {})
+  };
+}
+
+function normalizeErrorMessage(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
 
 export async function staticResponse(
@@ -176,7 +283,8 @@ export async function staticResponse(
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: blob: https://github.com https://raw.githubusercontent.com",
+        // Cited sites' favicons load from the site itself (https only, no referrer).
+        "img-src 'self' data: blob: https:",
         "font-src 'self' data:",
         "connect-src 'self' blob:",
         "worker-src 'self' blob:",

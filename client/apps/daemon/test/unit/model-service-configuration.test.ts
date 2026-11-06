@@ -5,9 +5,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentEventEnvelope, AgentEventPayload } from '@clawee/protocol';
 import { createCodexAppServerClient } from '../../src/codex/app-server-client.js';
+import { createDeferredCodexAppServerClient } from '../../src/codex/deferred-app-server-client.js';
 import {
   createModelServiceRuntime,
+  ModelServiceConfigurationError,
   resolveStoredModelServiceConfiguration,
   type ResolvedModelServiceConfiguration,
   validateModelServiceConfiguration
@@ -20,6 +23,7 @@ import {
   prepareCodexRuntimeConfiguration
 } from '../../src/codex/runtime-configuration.js';
 import { createFakeAppServer } from '../helpers/fake-app-server.js';
+import { createGatewayProfileStore } from '../../src/enterprise/gateway-profile-store.js';
 
 let tempDir = '';
 
@@ -31,6 +35,52 @@ afterEach(() => {
 });
 
 describe('model service configuration', () => {
+  it('切换平台服务器后恢复原服务器的手动配置，且不串用其他服务器的密钥', async () => {
+    const sections = new Map<string, unknown>();
+    const gatewayProfiles = createGatewayProfileStore({ file: {
+      async read(section) { return structuredClone(sections.get(section)); },
+      async write(section, value) { sections.set(section, structuredClone(value)); },
+      async delete(section) { sections.delete(section); }
+    } });
+    const manual = { baseUrl: 'https://manual.example/v1', model: 'manual-model', apiKey: 'manual-secret' };
+    const store = credentialStore(manual.apiKey);
+    const activate = vi.fn();
+    const createRuntime = () => createModelServiceRuntime({
+      credentialStore: store,
+      gatewayProfiles,
+      legacyGateway: 'https://a.example',
+      async loadStored() {
+        const apiKey = await store.read();
+        const configuration = { baseUrl: manual.baseUrl, model: manual.model };
+        return apiKey ? { status: { status: 'ready', configuration, apiKeyConfigured: true }, configuration, apiKey }
+          : { status: { status: 'configuration_required', configuration: null, apiKeyConfigured: false } };
+      },
+      async validate(request) { return { configuration: { baseUrl: request.baseUrl, model: request.model }, apiKey: request.apiKey }; },
+      activate,
+      async deactivate() {}
+    });
+    let runtime = createRuntime();
+    const enterprise = async () => ({ mode: 'enterprise_managed' as const });
+    await runtime.resolve('a-token', async () => { throw new Error('临时网络故障'); }, 'https://a.example');
+    await runtime.resolve('a-token', enterprise, 'https://a.example');
+    expect(runtime.ready()).toBe(true);
+    await runtime.signOut();
+    await runtime.resolve('b-token', async () => ({ mode: 'platform_managed', baseUrl: 'https://platform.example/v1', model: 'platform-model', apiKey: 'platform-secret', credentialVersion: 1 }), 'https://b.example');
+    await runtime.signOut();
+    runtime = createRuntime();
+    await runtime.resolve('a-token', enterprise, 'https://a.example');
+    expect(runtime.status()).toMatchObject({ status: 'ready', configuration: { model: 'manual-model' } });
+    expect(await runtime.readApiKey()).toBe('manual-secret');
+    await runtime.configure({ ...manual, model: 'updated-model', apiKey: 'updated-secret' });
+    await runtime.signOut();
+    await runtime.resolve('c-token', enterprise, 'https://c.example');
+    expect(runtime.status()).toEqual({ status: 'configuration_required', mode: 'enterprise_managed' });
+    await runtime.signOut();
+    await runtime.resolve('a-token', enterprise, 'https://a.example');
+    expect(runtime.status()).toMatchObject({ status: 'ready', configuration: { model: 'updated-model' } });
+    expect(await runtime.readApiKey()).toBe('updated-secret');
+  });
+
   it('writes an isolated Responses provider and verifies it with the supplied API key', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-model-service-'));
     const fake = createFakeAppServer({
@@ -158,7 +208,7 @@ describe('model service configuration', () => {
     expect(fake.readSpawns()).toHaveLength(2);
   });
 
-  it('does not become ready until validation, secure persistence, and activation all succeed', async () => {
+  it('saves normalized configuration without generation checks and becomes ready after activation', async () => {
     const operations: string[] = [];
     const listeners = vi.fn();
     const store: ModelServiceCredentialStore = {
@@ -209,9 +259,9 @@ describe('model service configuration', () => {
 
     expect(runtime.ready()).toBe(false);
     await expect(runtime.configure({
-      baseUrl: 'https://api.example.test/v1',
-      model: 'model-1',
-      apiKey: 'secret-key'
+      baseUrl: ' https://api.example.test/v1/ ',
+      model: ' model-1 ',
+      apiKey: ' secret-key '
     })).resolves.toEqual({
       status: 'ready',
       configuration: {
@@ -220,9 +270,34 @@ describe('model service configuration', () => {
       },
       apiKeyConfigured: true
     });
-    expect(operations).toEqual(['validate', 'credential', 'activate']);
+    expect(operations).toEqual(['credential', 'activate']);
     expect(runtime.ready()).toBe(true);
     expect(listeners).toHaveBeenCalledOnce();
+  });
+
+  it('activates stored configuration without waiting for model availability', async () => {
+    const request = { baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'secret' };
+    const validation = deferred<{ configuration: typeof request; apiKey: string }>();
+    const runtime = createModelServiceRuntime({
+      credentialStore: credentialStore(request.apiKey),
+      async loadStored() {
+        return {
+          status: { status: 'ready', configuration: request, apiKeyConfigured: true },
+          configuration: request,
+          apiKey: request.apiKey
+        };
+      },
+      validate: () => validation.promise,
+      async activate() {},
+      async deactivate() {}
+    });
+    const resolving = runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    try {
+      await vi.waitFor(() => expect(runtime.ready()).toBe(true), { timeout: 200 });
+    } finally {
+      validation.resolve({ configuration: request, apiKey: request.apiKey });
+      await resolving;
+    }
   });
 
   it('applies platform configuration in memory without writing credentials', async () => {
@@ -285,9 +360,9 @@ describe('model service configuration', () => {
     expect(operations).toEqual([
       'deactivate',
       'catalog',
-      'validate',
       'delete',
-      'activate'
+      'activate',
+      'validate'
     ]);
     expect(runtime.status()).toEqual({
       status: 'ready',
@@ -307,9 +382,10 @@ describe('model service configuration', () => {
     });
   });
 
-  it('installs the platform catalog before validation even when validation fails', async () => {
+  it('keeps platform configuration ready when background validation fails', async () => {
     const operations: string[] = [];
     const activate = vi.fn();
+    const availability = vi.fn();
     const runtime = createModelServiceRuntime({
       credentialStore: credentialStore(undefined),
       async loadStored() {
@@ -324,6 +400,7 @@ describe('model service configuration', () => {
         throw new Error('validation failed');
       },
       activate,
+      onAvailabilityChange: availability,
       async deactivate() {
         operations.push('deactivate');
       }
@@ -339,10 +416,11 @@ describe('model service configuration', () => {
 
     expect(operations).toEqual(['deactivate', 'catalog', 'validate']);
     expect(runtime.status()).toMatchObject({
-      status: 'unavailable',
+      status: 'ready',
       mode: 'platform_managed'
     });
-    expect(activate).not.toHaveBeenCalled();
+    expect(activate).toHaveBeenCalled();
+    await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
   });
 
   it('does not activate platform configuration when deleting old credentials fails', async () => {
@@ -548,6 +626,212 @@ describe('model service configuration', () => {
     expect(runtime.status()).toMatchObject({
       status: 'ready',
       configuration: { model: 'second-model' }
+    });
+  });
+
+  it('checks drafts without saving or activating them and allows updating ready enterprise configuration', async () => {
+    const request = { baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'old-secret' };
+    let storedApiKey: string | undefined = request.apiKey;
+    const store: ModelServiceCredentialStore = {
+      async read() { return storedApiKey; },
+      async write(apiKey) { storedApiKey = apiKey; },
+      async delete() { storedApiKey = undefined; }
+    };
+    const write = vi.spyOn(store, 'write');
+    const appServer = createDeferredCodexAppServerClient();
+    const clients: { close: ReturnType<typeof vi.fn> }[] = [];
+    const activate = vi.fn(async (configuration: { baseUrl: string; model: string }) => {
+      const client = {
+        async request<Result>() { return configuration as Result; },
+        close: vi.fn(async () => undefined)
+      };
+      clients.push(client);
+      await appServer.activate(client);
+    });
+    const checkConnection = vi.fn().mockResolvedValue({ status: 'succeeded', responseReceived: true, checkedAt: new Date().toISOString() });
+    const runtime = createModelServiceRuntime({
+      credentialStore: store,
+      async loadStored() {
+        return { status: { status: 'ready', configuration: request, apiKeyConfigured: true }, configuration: request, apiKey: request.apiKey };
+      },
+      async validate(target) { return { configuration: { baseUrl: target.baseUrl, model: target.model }, apiKey: target.apiKey }; },
+      checkConnection,
+      activate,
+      async deactivate() { await appServer.deactivate(); }
+    });
+    await runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    expect(await runtime.readApiKey()).toBe('old-secret');
+    activate.mockClear();
+    const draft = { ...request, model: 'model-2', apiKey: 'new-secret' };
+    expect(await runtime.check(draft)).toMatchObject({ status: 'succeeded', checkedAt: expect.any(String) });
+    expect(checkConnection).toHaveBeenCalledWith(draft);
+    expect(write).not.toHaveBeenCalled();
+    expect(activate).not.toHaveBeenCalled();
+    expect(runtime.status()).toMatchObject({ configuration: { model: 'model-1' } });
+    await runtime.configure(draft);
+    expect(write).toHaveBeenCalledWith('new-secret');
+    expect(runtime.status()).toMatchObject({ configuration: { model: 'model-2' } });
+    await expect(appServer.request('config/read', {})).resolves.toMatchObject({ model: 'model-2' });
+    expect(clients[0]?.close).toHaveBeenCalledOnce();
+
+    await runtime.configure(draft);
+    expect(runtime.ready()).toBe(true);
+    expect(clients[1]?.close).toHaveBeenCalledOnce();
+
+    activate.mockRejectedValueOnce(new Error('activation failed'));
+    await expect(runtime.configure({ ...draft, model: 'model-3', apiKey: 'failed-secret' }))
+      .rejects.toThrow('activation failed');
+    expect(runtime.status()).toMatchObject({ configuration: { model: 'model-2' } });
+    await expect(appServer.request('config/read', {})).resolves.toMatchObject({ model: 'model-2' });
+    expect(await runtime.readApiKey()).toBe('new-secret');
+    expect(clients[2]?.close).not.toHaveBeenCalled();
+    await runtime.signOut();
+    expect(clients[2]?.close).toHaveBeenCalledOnce();
+  });
+
+  it('retains the current background check when saving an invalid draft fails', async () => {
+    const configuration = { baseUrl: 'https://api.example.test/v1', model: 'model-1' };
+    const validation = deferred<{ configuration: typeof configuration; apiKey: string }>();
+    const availability = vi.fn();
+    const runtime = createModelServiceRuntime({
+      credentialStore: credentialStore('saved-secret'),
+      async loadStored() {
+        return { status: { status: 'ready', configuration, apiKeyConfigured: true }, configuration, apiKey: 'saved-secret' };
+      },
+      validate: () => validation.promise,
+      checkConnection: vi.fn().mockResolvedValue({ status: 'failed', errorCode: 'MODEL_SERVICE_AUTH_FAILED', message: 'API Key 无效或无权限' }),
+      async activate() {},
+      async deactivate() {},
+      onAvailabilityChange: availability
+    });
+    await runtime.resolve('token', async () => ({ mode: 'enterprise_managed' }));
+    const draft = { ...configuration, apiKey: 'draft-secret' };
+    await expect(runtime.configure({ ...draft, baseUrl: 'not-a-url' })).rejects.toMatchObject({ code: 'MODEL_SERVICE_CONFIGURATION_INVALID' });
+    validation.resolve({ configuration, apiKey: 'saved-secret' });
+    await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'succeeded' })));
+    const result = await runtime.check(draft);
+    expect(result).toMatchObject({ status: 'failed', message: 'API Key 无效或无权限' });
+    expect(JSON.stringify(result)).not.toContain('draft-secret');
+    expect(runtime.ready()).toBe(true);
+  });
+
+  it('does not expose platform keys or publish stale checks after sign-out', async () => {
+    const validation = deferred<{ configuration: { baseUrl: string; model: string }; apiKey: string }>();
+    const availability = vi.fn();
+    const read = vi.fn();
+    const runtime = createModelServiceRuntime({
+      credentialStore: { ...credentialStore(undefined), read },
+      async loadStored() { throw new Error('unexpected'); },
+      validate: () => validation.promise,
+      async activate() {},
+      async deactivate() {},
+      onAvailabilityChange: availability
+    });
+    await runtime.resolve('token', async () => ({ mode: 'platform_managed', baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'platform-secret', credentialVersion: 1 }));
+    expect(await runtime.readApiKey()).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    await expect(runtime.check({ baseUrl: 'https://draft.example/v1', model: 'draft', apiKey: 'draft-secret' })).rejects.toMatchObject({ code: 'model_configuration_managed_by_platform' });
+    await runtime.signOut();
+    availability.mockClear();
+    validation.reject(new Error('old check failed'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(availability).not.toHaveBeenCalled();
+    expect(await runtime.readApiKey()).toBeNull();
+  });
+
+  describe('真实模型响应恢复可用性', () => {
+    const configuration = { baseUrl: 'https://api.example.test/v1', model: 'model-1' };
+    const timeout = () => new ModelServiceConfigurationError(
+      'MODEL_SERVICE_VALIDATION_FAILED', '检测超时', { terminationReason: 'timeout' }
+    );
+    function setup() {
+      const availability = vi.fn();
+      const validate = vi.fn().mockRejectedValue(timeout());
+      const runtime = createModelServiceRuntime({
+        credentialStore: credentialStore(undefined),
+        async loadStored() { throw new Error('unexpected'); },
+        validate,
+        async activate() {},
+        async deactivate() {},
+        onAvailabilityChange: availability
+      });
+      const resolve = () => runtime.resolve('token', async () => ({
+        mode: 'platform_managed', ...configuration, apiKey: 'secret', credentialVersion: 1
+      }));
+      const event = (payload: AgentEventPayload) => ({
+        id: 'event_1', runId: 'run_1', seq: 1, ts: new Date().toISOString(),
+        type: payload.type, payload, normalizerVersion: 1
+      }) as AgentEventEnvelope;
+      return { runtime, availability, validate, resolve, event };
+    }
+
+    it.each<AgentEventPayload>([
+      { type: 'assistant_message', text: '已恢复', format: 'plain_text', delivery: 'delta' },
+      { type: 'reasoning_summary', text: '正在分析', format: 'plain_text', delivery: 'delta' },
+      { type: 'tool_use', toolCallId: 'call_1', name: 'command_execution', input: { command: 'pwd' } }
+    ])('收到 $type 后清除检测失败，连续输出不重复发布', async payload => {
+      const { runtime, availability, resolve, event } = setup();
+      await resolve();
+      await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
+      const observe = runtime.createResponseObserver!('model-1')!;
+      observe(event(payload));
+      expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: 'succeeded', responseReceived: true, checkedAt: expect.any(String)
+      }));
+      availability.mockClear();
+      observe(event(payload));
+      expect(availability).not.toHaveBeenCalled();
+    });
+
+    it('运行状态、空文本、工具结果和完成事件不能确认模型恢复', async () => {
+      const { runtime, availability, resolve, event } = setup();
+      await resolve();
+      await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
+      const observe = runtime.createResponseObserver!()!;
+      availability.mockClear();
+      for (const payload of [
+        { type: 'status', label: 'running' },
+        { type: 'assistant_message', text: ' ', format: 'plain_text', delivery: 'delta' },
+        { type: 'reasoning_summary', text: '', format: 'plain_text', delivery: 'summary' },
+        { type: 'tool_result', toolCallId: 'call_1', output: 'OK', isError: false },
+        { type: 'done', status: 'succeeded', terminationReason: 'completed' }
+      ] satisfies AgentEventPayload[]) observe(event(payload));
+      expect(availability).not.toHaveBeenCalled();
+    });
+
+    it('真实响应恢复后，旧探测超时不能覆盖成功状态', async () => {
+      const { runtime, availability, validate, resolve, event } = setup();
+      await resolve();
+      await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
+      const validation = deferred<{ configuration: typeof configuration; apiKey: string }>();
+      validate.mockImplementationOnce(() => validation.promise);
+      const check = runtime.checkRuntime!();
+      runtime.createResponseObserver!()!(event({
+        type: 'assistant_message', text: '已恢复', format: 'plain_text', delivery: 'message'
+      }));
+      availability.mockClear();
+      validation.reject(timeout());
+      await check;
+      expect(availability).not.toHaveBeenCalled();
+    });
+
+    it('其他模型、旧配置和退出登录后的响应不能清除当前告警', async () => {
+      const { runtime, availability, resolve, event } = setup();
+      await resolve();
+      await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
+      expect(runtime.createResponseObserver!('other-model')).toBeUndefined();
+      const observeOld = runtime.createResponseObserver!()!;
+      await resolve();
+      await vi.waitFor(() => expect(availability).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed' })));
+      const response = event({ type: 'assistant_message', text: '旧响应', format: 'plain_text', delivery: 'message' });
+      availability.mockClear();
+      observeOld(response);
+      expect(availability).not.toHaveBeenCalled();
+      const observeCurrent = runtime.createResponseObserver!()!;
+      await runtime.signOut();
+      availability.mockClear();
+      observeCurrent(response);
+      expect(availability).not.toHaveBeenCalled();
     });
   });
 

@@ -60,6 +60,10 @@ func (s *Service) Initialize(ctx context.Context) error {
 	})
 }
 
+func (s *Service) RecordAudit(ctx context.Context, operatorID, action, targetType, targetID string, before, after any) error {
+	return s.store.RecordAudit(ctx, s.audit(operatorID, action, targetType, targetID, before, after))
+}
+
 func (s *Service) ListRoles(ctx context.Context) ([]Role, error) {
 	roles, err := s.store.ListRoles(ctx)
 	if err != nil {
@@ -97,6 +101,9 @@ func (s *Service) RoleByCode(ctx context.Context, code string) (Role, error) {
 
 func (s *Service) CreateRole(ctx context.Context, operatorID string, input CreateRoleInput) (Role, error) {
 	code := textutil.CleanInputIdentifier(input.Code)
+	if code == "" {
+		code = generateID("role")
+	}
 	name := textutil.TrimInput(input.Name)
 	permissions, err := normalizePermissions(input.Permissions)
 	if err != nil {
@@ -125,11 +132,17 @@ func (s *Service) UpdateRole(ctx context.Context, operatorID string, input Updat
 		return Role{}, ErrSystemRoleImmutable
 	}
 	name := textutil.TrimInput(input.Name)
+	if role.DepartmentID != "" {
+		if input.Name != role.Name {
+			return Role{}, ErrDepartmentRoleImmutable
+		}
+		name = role.Name
+	}
 	permissions, err := normalizePermissions(input.Permissions)
 	if err != nil {
 		return Role{}, err
 	}
-	if name == "" || len(name) > 100 {
+	if name == "" || (role.DepartmentID == "" && len(name) > 100) {
 		return Role{}, ErrInvalidRequest
 	}
 	before := role
@@ -146,6 +159,9 @@ func (s *Service) DeleteRole(ctx context.Context, operatorID, roleID string) err
 	role, err := s.store.GetRole(ctx, strings.TrimSpace(roleID))
 	if err != nil {
 		return err
+	}
+	if role.DepartmentID != "" {
+		return ErrDepartmentRoleImmutable
 	}
 	if role.System {
 		if err := s.store.RecordAudit(ctx, s.audit(operatorID, AuditRoleDeleteRejected, "role", role.RoleID, role, nil)); err != nil {
@@ -194,8 +210,11 @@ func (s *Service) AssignAccountRole(ctx context.Context, operatorID, userID, rol
 	if err != nil {
 		return err
 	}
+	if role.DepartmentRoleType == "manager" {
+		return ErrDepartmentManagerMembers
+	}
 	now := s.clock().UTC()
-	binding := AccountRole{UserID: userID, RoleID: role.RoleID, RoleCode: role.Code, RoleName: role.Name, System: role.System, CreatedAt: now}
+	binding := AccountRole{DepartmentRoleType: role.DepartmentRoleType, DepartmentID: role.DepartmentID, UserID: userID, RoleID: role.RoleID, RoleCode: role.Code, RoleName: role.Name, System: role.System, CreatedAt: now}
 	return s.store.AssignAccountRole(ctx, binding, s.audit(operatorID, AuditAccountRoleAssign, "account_role", userID+":"+roleID, nil, binding))
 }
 
@@ -240,7 +259,10 @@ func (s *Service) RemoveAccountRole(ctx context.Context, operatorID, userID, rol
 	if err != nil {
 		return err
 	}
-	binding := AccountRole{UserID: userID, RoleID: roleID, RoleCode: role.Code, RoleName: role.Name, System: role.System}
+	if role.DepartmentRoleType == "manager" {
+		return ErrDepartmentManagerMembers
+	}
+	binding := AccountRole{DepartmentRoleType: role.DepartmentRoleType, DepartmentID: role.DepartmentID, UserID: userID, RoleID: roleID, RoleCode: role.Code, RoleName: role.Name, System: role.System}
 	removeAudit := s.audit(operatorID, AuditAccountRoleRemove, "account_role", userID+":"+roleID, binding, nil)
 	rejectedAudit := s.audit(operatorID, AuditAccountRoleRemoveRejected, "account_role", userID+":"+roleID, binding, nil)
 	if role.Code == AdminRoleCode {

@@ -12,8 +12,6 @@ import {
   Globe2,
   KeyRound,
   LoaderCircle,
-  LogIn,
-  LogOut,
   Plus,
   Server,
   Settings2,
@@ -22,6 +20,7 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { ApiClientError } from '../../runtime/errors.js';
 
 export type McpSettingsService = {
@@ -67,6 +66,7 @@ export function McpSettingsView(props: {
   const [error, setError] = useState<string>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [busyName, setBusyName] = useState<string>();
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     setData(props.data);
@@ -101,9 +101,9 @@ export function McpSettingsView(props: {
     action: 'login' | 'logout' | 'remove'
   ) {
     if (props.service === null) return;
-    if (action === 'remove' && !(props.confirmRemove?.(server) ?? window.confirm(`删除 MCP ${server.name}？`))) return;
+    if (action === 'remove' && !(props.confirmRemove?.(server) ?? await confirm({ title: '删除 MCP', description: `删除 MCP ${server.name}？`, confirmLabel: '删除', destructive: true }))) return;
     const confirmed = !data?.requiresWriteConfirmation
-      || (props.confirmWrite?.() ?? window.confirm('此操作会修改全局 CODEX_HOME，是否继续？'));
+      || (props.confirmWrite?.() ?? await confirm({ title: '确认修改全局配置', description: '此操作会修改全局 CODEX_HOME，是否继续？', confirmLabel: '继续' }));
     if (!confirmed) return;
 
     setBusyName(server.name);
@@ -164,7 +164,7 @@ export function McpSettingsView(props: {
             if (props.service === null) return;
             setError(undefined);
             const confirmed = !data?.requiresWriteConfirmation
-              || (props.confirmWrite?.() ?? window.confirm('此操作会修改全局 CODEX_HOME，是否继续？'));
+              || (props.confirmWrite?.() ?? await confirm({ title: '确认修改全局配置', description: '此操作会修改全局 CODEX_HOME，是否继续？', confirmLabel: '继续' }));
             if (!confirmed) return;
             try {
               const result = await props.service.addServer({
@@ -203,6 +203,8 @@ export function McpSettingsView(props: {
         <ul className="settings-item-list" aria-label="MCP 服务列表">
           {data?.servers.map(server => {
             const busy = busyName === server.name;
+            const supportsAuth = server.authStatus === 'not_logged_in'
+              || server.authStatus === 'oauth';
             return (
               <li className="settings-item" key={server.name}>
                 <div className="settings-item__main">
@@ -223,24 +225,28 @@ export function McpSettingsView(props: {
                   ))}
                 </div>
                 <div className="settings-item__actions">
-                  <button
-                    type="button"
-                    aria-label={`登录 ${server.name}`}
-                    title="登录"
-                    disabled={busy || props.capabilities?.mcpLogin !== true}
-                    onClick={() => void runServerAction(server, 'login')}
-                  >
-                    <LogIn size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`退出 ${server.name}`}
-                    title="退出"
-                    disabled={busy || props.capabilities?.mcpLogout !== true}
-                    onClick={() => void runServerAction(server, 'logout')}
-                  >
-                    <LogOut size={16} />
-                  </button>
+                  {supportsAuth && props.capabilities?.mcpLogin === true ? (
+                    <button
+                      className="settings-mcp-auth-action"
+                      type="button"
+                      aria-label={`登录 ${server.name}`}
+                      disabled={busy}
+                      onClick={() => void runServerAction(server, 'login')}
+                    >
+                      登录
+                    </button>
+                  ) : null}
+                  {supportsAuth && props.capabilities?.mcpLogout === true ? (
+                    <button
+                      className="settings-mcp-auth-action"
+                      type="button"
+                      aria-label={`退出 ${server.name}`}
+                      disabled={busy}
+                      onClick={() => void runServerAction(server, 'logout')}
+                    >
+                      退出
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     aria-label={`删除 ${server.name}`}
@@ -256,6 +262,7 @@ export function McpSettingsView(props: {
           })}
         </ul>
       )}
+      {confirmDialog}
     </section>
   );
 }

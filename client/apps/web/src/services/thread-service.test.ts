@@ -18,6 +18,9 @@ describe('ThreadService', () => {
       if (path.includes('purpose=schedule_task')) {
         return { threads: [createThreadResponse()] };
       }
+      if (path.includes('purpose=skill_review')) {
+        return { threads: [createThreadResponse({ id: 'thread-review', purpose: 'skill_review', projectId: null, scheduleId: undefined })] };
+      }
       throw new Error(`Unexpected request ${path}`);
     });
     const service = createThreadService(createClient(get));
@@ -30,7 +33,8 @@ describe('ThreadService', () => {
     expect(get).toHaveBeenCalledWith(
       '/threads?status=active&purpose=schedule_task&limit=100'
     );
-    expect(response.threads).toHaveLength(2);
+    expect(response.threads).toHaveLength(3);
+    expect(response.threads[2]).toMatchObject({ id: 'thread-review', purpose: 'skill_review' });
     expect(response.threads[1]).toMatchObject({
       id: 'thread-task',
       purpose: 'schedule_task',

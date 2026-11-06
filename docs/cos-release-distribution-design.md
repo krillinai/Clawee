@@ -1,5 +1,7 @@
 # GitHub Actions 发布产物同步腾讯云 COS 设计与实现基线
 
+> 更新机制补充（2026-10-12）：通用客户端的更新目标由运行时当前连接的客户 Gateway 批准，不再由包内客户渠道决定。本文的 COS 产物布局和上传约束继续适用；更新检查入口、后台启停与自动安装流程以 [客户服务器控制通用客户端更新](../client/apps/desktop/docs/customer-update.md) 为准。
+
 > 状态：已实现并投入正式发布。
 >
 > 更新日期：2026-09-12。
@@ -24,7 +26,7 @@ Clawee 当前通过 GitHub Actions 构建并发布以下产物：
 
 仓库当前已经实现：
 
-1. 正式 Release 将完整公开产物集中上传到 COS；Preflight 只上传完整候选产物集的摘要清单。
+1. 正式 Release 将完整公开产物集中上传到 COS；Preflight 默认只验证源码，按需启用候选构建时才上传完整候选产物集的摘要清单。
 2. 正式版本按版本号永久保存，官网可以下载最新版本和指定历史版本。
 3. 官网通过公开 JSON 目录获取稳定版、预发布版和历史版本信息，不依赖列举 COS Bucket。
 4. 正式桌面客户端通过官网/CDN 域名检查更新，并从同一域名下载更新包。
@@ -69,12 +71,12 @@ CI 必须从官方 Release 下载 COSCLI，校验 SHA256 后再执行。不得�
 
 - COS 自定义域名是官网和新版本桌面客户端的主下载源。
 - GitHub Release 是公开发布记录和回退镜像。
-- GHCR 继续承载服务端容器镜像，不复制容器镜像层到 COS。
-- COS 的 `release.json` 记录 GHCR 镜像名称与 digest，官网可展示容器部署信息。
+- 完整发布时 GHCR 承载服务端容器镜像，不复制容器镜像层到 COS；当前正式 Release 暂停服务端和镜像发布。
+- 完整发布的 `release.json` 记录 GHCR 镜像名称与 digest；仅客户端发布不包含 `serverImage`，官网不得据此展示不存在的容器部署信息。
 
 ### 4.3 发布边界
 
-- `Release Preflight` 只上传内部预检目录，不更新官网或客户端的稳定更新入口。
+- `Release Preflight` 默认不上传 COS；启用候选构建时只上传内部预检目录，不更新官网或客户端的稳定更新入口。
 - 正式 `Release` 上传永久版本目录，并在全部校验通过后更新对应渠道。
 - 稳定版本只更新 `stable`；SemVer 预发布版本只更新 `prerelease`。
 - 预发布版本永远不能覆盖 `stable/latest.json` 或稳定版 updater YML。
@@ -272,7 +274,7 @@ clawee/
 
 `release.json` 的 20 个 artifact 是 13 个 Desktop 文件、4 个 Server 文件和 3 个不可变 updater YML；它不包含 `SHA256SUMS`、`release-manifest.json`、`release-notes.md` 和自身。GHCR 镜像层也不复制到 COS，只在 `release.json.serverImage` 中记录镜像名称与 digest。
 
-同一个 Release Run 还写入以下 Preflight 对象，但它不属于正式公开分发文件：
+历史 `v0.1.7` Release Run 还写入以下 Preflight 对象，但它不属于正式公开分发文件；当前默认 Release 不再构建候选包或写入该对象：
 
 ```text
 clawee/preflight/268e493a76782a2856504850170860e2f2004a27/34622536741/preflight-manifest.json
@@ -322,6 +324,7 @@ clawee/preflight/268e493a76782a2856504850170860e2f2004a27/34622536741/preflight-
 
 约束：
 
+- 当前正式发布采用仅客户端范围：输入清单与 `release.json` 标记 `components: ["desktop"]`，省略 `serverImage`，不要求也不包含服务端产物。未声明该范围的历史完整清单仍要求服务端包，不能因文件缺失自动降级为仅客户端发布。
 - `artifacts` 必须覆盖本次正式发布的二进制、更新辅助文件、服务端包和 build manifest；`release.json` 不记录自身，避免自引用摘要。
 - 当前 `v0.1.7` 的 `release.json` 包含 20 个 artifact；数量会随受支持平台或产物协议变化，消费者应按字段筛选，不应写死数量。
 - `downloadUrl` 必须位于 `COS_PUBLIC_BASE_URL/COS_PREFIX/releases/<tag>/` 下。
@@ -459,7 +462,9 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 
 ### 10.1 `Release Preflight`
 
-现有工作流在 Desktop 和 Server Package Job 成功后运行 `cos-preflight-upload`：
+工作流默认 `build_candidates=false`，只运行客户端测试、类型检查、构建及源码契约验证，服务端源码检查与候选构建 Job 均跳过，不读取 COS 凭据。所有关闭的 Job 定义保留。
+
+需要内部候选产物时，手动开启 `build_candidates`，恢复完整候选构建、Runtime E2E 和容器 smoke；Desktop 和 Server Package Job 成功后运行 `cos-preflight-upload`：
 
 - `needs: [client, server, desktop, server-package, container]`。
 - 运行于 `ubuntu-latest`。
@@ -470,7 +475,7 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 - 上传到 `preflight/<target-sha>/<github-run-id>/`。
 - 远端验证失败则整个 Preflight 失败，不写 `release-preflight=success` 状态。
 
-`record` Job 的 `needs`、结果环境变量和成功条件均包含 `cos-preflight-upload`；上传失败时 Commit Status 不会被记录为成功。
+`record` Job 始终汇总客户端、服务端及候选 Job 的结果。默认模式要求客户端源码检查成功且服务端和全部候选 Job 为 `skipped`；候选模式要求全部 Job 成功。失败或取消均记录失败状态，并使 `record` 自身失败，避免 reusable workflow 错误放行。候选上传失败时 Commit Status 不会被记录为成功。
 
 安全边界：该 Job 先下载候选构建产物，再另行 checkout 默认受保护分支到 `publisher/`，并从该目录运行 `publisher/scripts/cos-publish.mjs`。它不 checkout 或执行 `inputs.ref` 指向的候选代码；候选构建产物只作为不可信数据处理，不执行其中的脚本或二进制。
 
@@ -478,19 +483,23 @@ COS/CDN 的 Bucket 级配置不由发布 Job 修改，以免扩大 CAM 权限。
 
 正式 Tag Release 当前按以下顺序执行：
 
-1. Tag 触发 Release，并运行完整的 reusable Release Preflight。
+1. Tag 触发 Release，对固定 SHA 运行仅客户端源码模式的 reusable Release Preflight，不传入 COS 凭据，不重复生成候选产物。
 2. Gate 校验版本、Tag、签名/公证凭据和 GitHub Release 状态。
-3. 对尚未公开的版本构建 Desktop、Server 包和 `sha-<commit>` 多架构镜像。
+3. 对尚未公开的版本并行构建三个平台的 Desktop 包。正式 Server、image Job 和镜像标签发布步骤暂时关闭，定义保留，不再阻塞 `publish`。正式 Release 暂停包内 Runtime E2E、真实会话 smoke 和证据上传；本地 `desktop:preflight:local` 和按需完整候选 Preflight 的 E2E 不变，正式签名、公证和包内静态校验继续执行。
 4. `publish` 创建或复用 GitHub 草稿 Release，读取 release notes 和 `createdAt`。
-5. 下载并校验产物，生成统一清单、COS staged layout、`release.json` 和 updater YML。
+5. 只下载并校验 Desktop 产物，使用 `--desktop-only` 生成统一清单、COS staged layout、`release.json` 和 updater YML。发布工具来自当前工作流提交；安装包、清单源码 SHA 和生成时间仍绑定既有 Tag。
 6. 上传并验证 COS 不可变版本目录。
 7. 将发布资产上传到 GitHub 草稿 Release。
-8. 为已构建的 GHCR digest 发布版本 Tag；稳定版同时更新 `latest`。
+8. GHCR 登录、镜像版本 Tag 和 `latest` 发布步骤暂停，但不删除。
 9. 仅当 COS 渠道尚未建立时，在无消费者的前提下执行 bootstrap。
 10. 公开 GitHub Release。
 11. 晋级 COS updater YML 和 `versions.json`，最后写入 `catalog/<channel>/latest.json`。
 
 COS 不可变文件失败时不得公开 GitHub Release。GitHub 已公开但 COS 晋级失败时，workflow 会失败；重跑同一 Tag 时跳过 Desktop、Server 和镜像重建，从 GitHub Release 下载原始 `release.json` 与三个 updater YML，以 `--verify-immutable` 核对不可变目录后只重试 COS 渠道晋级。该分支不得重建不可变内容或重新绑定 GHCR 版本标签。
+
+安装包验证已成功但后续步骤失败时，可手动补发既有 Tag 并指定 `artifacts_run_id`，只复用先前 Release 的 Desktop 产物。仅客户端复用校验仍要求同仓库可信 Release、相同 SHA 的预检状态、客户端源码和三平台正式打包 Job 成功，以及产物版本、签名构建模式和哈希一致；服务端源码检查允许成功或跳过，不要求服务端包。候选 Job 允许全部成功（旧流程）或全部跳过（当前源码模式），不允许失败、取消或混合结果。校验脚本的完整发布模式保留，不加 `--desktop-only` 时仍要求服务端证据。
+
+保留集中 `publish` 上传 COS，不新增各平台独立上传 Job。三个客户端平台产物齐备并验证后才晋级渠道；某个平台失败时先重跑失败 Job，完整客户端产物已成功时可按上述方式复用，无需因后续上传失败重建安装包。
 
 ### 10.3 并发和版本顺序
 
@@ -619,7 +628,7 @@ pnpm --dir client --filter @clawee/desktop test
 
 ### 16.2 Release 中的真实 COS/CDN 校验
 
-- 正式发布和 Preflight 均上传真实 COS 对象，并通过 COS `stat` 校验字节数和 SHA256 元数据。
+- 正式发布与按需候选 Preflight 上传真实 COS 对象，并通过 COS `stat` 校验字节数和 SHA256 元数据；默认源码 Preflight 不上传对象。
 - 正式发布通过公开域名验证 `release.json`、三个 updater YML 和公开二进制的 HEAD/GET/Range、MIME 与缓存头。
 - 正式发布解析 `latest*.yml` 的实际包 URL，核对文件大小、Range 能力和本地 `sha512`。
 - 渠道晋级执行版本顺序、同版本幂等、stable/prerelease 隔离和 `latest.json` 最后写入检查；失败恢复由单元测试覆盖。
@@ -629,10 +638,10 @@ pnpm --dir client --filter @clawee/desktop test
 - 修改客户端可执行代码、打包或发布配置后，提交前运行并通过 `pnpm run desktop:preflight:local`。
 - 正式发布在干净提交上运行 `pnpm run desktop:preflight:release`。
 - 推送后审查普通 CI、Server CI、Source Security。
-- 对同一 SHA 运行一次远端 Release Preflight。
-- 运行 `pnpm run desktop:tag:check` 后创建不可移动的正式 Tag。
+- 运行 `pnpm run desktop:tag:check` 后创建不可移动的正式 Tag，无需先额外运行独立远端 Preflight。
+- Tag 的 Release 自动执行客户端源码 Preflight，再构建并统一上传三平台 Desktop 产物；服务端与镜像 Job、包内 E2E 暂停但不删除。本地预检仍执行 E2E，需要完整内部候选验证时才手动开启 `build_candidates`。
 - 正式发布后从 COS 公网域名实际下载并安装 macOS x64、macOS arm64、Windows x64 包。
-- 校验 Linux amd64/arm64 服务端包和 GHCR 多架构镜像 digest。
+- 恢复完整发布时再校验 Linux amd64/arm64 服务端包和 GHCR 多架构镜像 digest，当前仅客户端发布不要求这些产物。
 - 从上一正式版本执行一次真实自动更新。
 - 在腾讯云侧确认 Bucket Versioning、Preflight 14 天生命周期、CORS、CDN 回源鉴权和可变目录缓存规则仍生效。
 - 在官网所属仓库验证 `latest.json`、`versions.json`、历史版本和预发布入口；本仓库不自动化官网 UI 验收。
@@ -642,7 +651,7 @@ pnpm --dir client --filter @clawee/desktop test
 仓库侧 COS 分发一期已经落地，当前代码具备：
 
 - GitHub Actions 中只有集中上传 Job 可以访问 COS Secret。
-- 正式版本按本文目录上传完整产物，Preflight 只上传包含完整产物摘要的清单。
+- 正式版本按本文目录上传完整产物，默认 Preflight 不上传对象；按需候选 Preflight 只上传包含完整产物摘要的清单。
 - Desktop 稳定正式包使用官网/COS generic feed；非正式包不会连接正式更新源。
 - stable、prerelease 不会互相覆盖，旧版本不能反向覆盖新版本。
 - 任一二进制上传失败时，客户端和官网仍看到上一完整版本。

@@ -3,14 +3,17 @@ import { adminApi, authApi } from "./api";
 export type Account = {
   userId: string;
   email: string;
+  phone?: string;
   name: string;
   status: string;
   adminRoles?: string[];
+  adminRoleNames?: string[];
   adminPermissions?: string[];
   applications?: { frontend: boolean; admin: boolean };
   dingtalkEnabled?: boolean;
   dingtalkBound?: boolean;
   localPasswordConfigured?: boolean;
+  modelGatewayEnabled?: boolean;
   avatarUrl?: string;
 };
 
@@ -18,6 +21,7 @@ type AccountResponse = {
   user_id?: string;
   userId?: string;
   email: string;
+  phone?: string;
   name?: string;
   status: string;
   avatar_url?: string;
@@ -30,10 +34,12 @@ type AuthResponseBody = {
   redirect_to?: string;
   applications?: { frontend?: boolean; admin?: boolean };
   admin_roles?: string[];
+  admin_role_names?: string[];
   admin_permissions?: string[];
   dingtalk_enabled?: boolean;
   dingtalk_bound?: boolean;
   local_password_configured?: boolean;
+  model_gateway_enabled?: boolean;
 };
 
 type AuthAPIResponse = AuthResponseBody & { data?: AuthResponseBody };
@@ -47,6 +53,7 @@ function mapAccount(account: AccountResponse): Account {
   return {
     userId: account.userId ?? account.user_id ?? "",
     email: account.email,
+    ...(account.phone ? { phone: account.phone } : {}),
     name: account.name ?? "",
     status: account.status,
     avatarUrl: account.avatar_url
@@ -66,10 +73,12 @@ function mapAuthResponse(response: AuthAPIResponse): AuthResponse {
         ? { frontend: payload.applications.frontend !== false, admin: payload.applications.admin === true }
         : undefined,
       adminRoles: payload.admin_roles,
+      adminRoleNames: payload.admin_role_names,
       adminPermissions: payload.admin_permissions,
       dingtalkEnabled: payload.dingtalk_enabled === true,
       dingtalkBound: payload.dingtalk_bound === true,
-      localPasswordConfigured: payload.local_password_configured === true
+      localPasswordConfigured: payload.local_password_configured === true,
+      modelGatewayEnabled: payload.model_gateway_enabled !== false
     },
     redirectTo: payload.redirectTo ?? payload.redirect_to ?? (payload.applications?.admin === true ? "/admin" : "/app")
   };
@@ -88,20 +97,21 @@ export function hasAnyAdminPermission(account: Account) {
   return (account.adminPermissions?.length ?? 0) > 0;
 }
 
-export async function registerAccount(input: { email: string; name: string; password: string }) {
+export function accountIdentifierInput(value: string): { email: string } | { phone: string } {
+  const identifier = value.trim();
+  return identifier.includes('@') ? { email: identifier } : { phone: identifier };
+}
+
+export async function registerAccount(input: { email?: string; phone?: string; name: string; password: string }) {
   return mapAuthResponse(await authApi.post<AuthAPIResponse>("/register", input));
 }
 
-export async function login(input: { email: string; password: string }) {
+export async function login(input: { email?: string; phone?: string; password: string }) {
   return mapAuthResponse(await authApi.post<AuthAPIResponse>("/login", input));
 }
 
 export function logout() {
   return authApi.post<void>("/logout", {});
-}
-
-export function unbindDingTalk(password: string) {
-  return authApi.post<void>("/dingtalk/unbind", { password });
 }
 
 export function uploadAccountAvatar(file: File) {

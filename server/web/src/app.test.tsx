@@ -19,8 +19,11 @@ import { permissions } from "@/lib/rbac-api";
 import { APIError } from "@/lib/api";
 import { getSharedSpace, listSharedFiles } from "@/lib/shared-files-api";
 import { workflowAdmin } from "@/lib/workflow-api";
+import { approvalsApp } from "@/lib/approvals-api";
 
 import { App } from "./app";
+
+vi.mock("@/lib/approvals-api", async () => ({ ...await vi.importActual<typeof import("@/lib/approvals-api")>("@/lib/approvals-api"), approvalsApp: { list: vi.fn(), detail: vi.fn() } }));
 
 vi.mock("@/lib/accounts-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/accounts-api")>("@/lib/accounts-api");
@@ -155,7 +158,7 @@ describe("App", () => {
     renderApp();
 
     expect(await screen.findByRole("heading", { name: "登录管理台" })).toBeInTheDocument();
-    expect(screen.getByLabelText("邮箱地址")).toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱或手机号")).toBeInTheDocument();
     expect(screen.getByLabelText("密码")).toBeInTheDocument();
     const themeSwitcher = screen.getByRole("radiogroup", { name: "界面主题" });
     expect(themeSwitcher).toBeInTheDocument();
@@ -170,7 +173,7 @@ describe("App", () => {
     renderApp();
 
     expect(await screen.findByRole("heading", { name: "注册账号" })).toBeInTheDocument();
-    expect(screen.getByLabelText("邮箱地址")).toBeInTheDocument();
+    expect(screen.getByLabelText("邮箱或手机号")).toBeInTheDocument();
     expect(screen.getByLabelText("密码")).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
     expect(screen.getByText("角色分配规则")).toBeInTheDocument();
@@ -222,7 +225,9 @@ describe("App", () => {
     renderApp();
 
     await waitFor(() => expect(window.location.pathname).toBe("/app/agents"));
-    expect(screen.queryByRole("link", { name: "进入管理后台" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "管理后台" })).not.toBeInTheDocument();
+    const quickActions = await screen.findByRole("group", { name: "快捷操作" });
+    expect(within(quickActions).getByRole("link", { name: "下载客户端" })).toHaveAttribute("href", "/downloads");
   });
 
   it("opens the workflow template editor by URL", async () => {
@@ -232,7 +237,7 @@ describe("App", () => {
     try {
       window.history.pushState({}, "", "/admin/workflow-templates/template-1");
       renderApp();
-      expect(await screen.findByRole("heading", { name: "编辑工作流模板" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "编辑流程模板" })).toBeInTheDocument();
       expect(await screen.findByDisplayValue("选题")).toBeInTheDocument();
       expect(template).toHaveBeenCalledWith("template-1");
     } finally {
@@ -247,8 +252,8 @@ describe("App", () => {
     try {
       window.history.pushState({}, "", "/admin/workflow-instances/instance-1");
       renderApp();
-      expect(await screen.findByRole("heading", { name: "实例详情" })).toBeInTheDocument();
-      expect(await screen.findByRole("heading", { name: "实例 instance-1" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "流程任务详情" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "流程任务 stance-1" })).toBeInTheDocument();
       expect(instance).toHaveBeenCalledWith("instance-1");
     } finally {
       instance.mockRestore();
@@ -263,23 +268,31 @@ describe("App", () => {
     const appNavigation = screen.getByRole("navigation", { name: "前台应用导航" });
     expect(view.container.querySelector("aside")).toContainElement(appNavigation);
     expect(view.container.querySelector("main nav")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "进入管理后台" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "管理后台" })).toHaveAttribute("href", "/admin");
     const accountInformation = screen.getByRole("group", { name: "账户信息" });
     expect(screen.getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
-    expect(within(accountInformation).queryByRole("link", { name: "进入管理后台" })).not.toBeInTheDocument();
-    expect(within(accountInformation).queryByRole("radiogroup", { name: "界面主题" })).not.toBeInTheDocument();
+    const quickActions = screen.getByRole("group", { name: "快捷操作" });
+    expect(accountInformation).toContainElement(quickActions);
+    const downloadLink = within(quickActions).getByRole("link", { name: "下载客户端" });
+    expect(downloadLink).toHaveAttribute("href", "/downloads");
+    expect(downloadLink.textContent).toBe("");
+    expect(downloadLink.querySelector("svg")).toBeInTheDocument();
+    expect(within(quickActions).getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
+    expect(within(accountInformation).getByRole("link", { name: "下载客户端" })).toBe(downloadLink);
+    expect(within(accountInformation).getByRole("link", { name: "管理后台" })).toHaveAttribute("href", "/admin");
+    expect(within(accountInformation).getByRole("radiogroup", { name: "界面主题" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
     fireEvent.click(within(accountInformation).getByRole("button", { name: "账户操作" }));
     expect(screen.getByRole("button", { name: "退出登录" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "活动" })).not.toBeInTheDocument();
 
     expect(screen.queryByRole("link", { name: "Collector" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("link", { name: "MCP" }));
+    fireEvent.click(screen.getByRole("link", { name: "MCP 授权" }));
 
     expect(await screen.findByRole("heading", { name: "MCP 能力目录" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "MCP" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "MCP 授权" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("admin@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "进入管理后台" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "管理后台" })).toHaveAttribute("href", "/admin");
 
     view.unmount();
   });
@@ -290,7 +303,7 @@ describe("App", () => {
     renderApp();
 
     expect(await screen.findByRole("heading", { name: "MCP 能力目录" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "MCP" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "MCP 授权" })).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps the root and app redirects", async () => {
@@ -468,5 +481,26 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Hermes C03" })).toBeInTheDocument();
     expect(screen.queryByText("智能体活动详情")).not.toBeInTheDocument();
     expect(screen.getByText(/采集器 ID:/)).toBeInTheDocument();
+  });
+
+  it("用户直接访问审批中心无需管理员权限", async () => {
+    currentAccountMock.mockResolvedValue({ user: { userId: "ordinary", email: "ordinary@test.invalid", name: "普通用户", status: "active", adminPermissions: [] }, redirectTo: "/app" });
+    vi.mocked(approvalsApp.list).mockResolvedValue({ items: [], meta: { next_cursor: "", has_next: false } });
+    window.history.pushState({}, "", "/app/approvals");
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "审批中心" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "审批中心" })).toHaveAttribute("href", "/app/approvals");
+    expect(screen.queryByRole("link", { name: "管理后台" })).not.toBeInTheDocument();
+  });
+
+  it.each(["skill", "workflow", "workflow_instance"] as const)("直接刷新个人详情路径 %s，不转为 query 弹窗或管理接口", async kind => {
+    currentAccountMock.mockResolvedValue({ user: { userId: "ordinary", email: "ordinary@test.invalid", name: "普通用户", status: "active", adminPermissions: [] }, redirectTo: "/app" });
+    vi.mocked(approvalsApp.detail).mockResolvedValue({ item: { kind, id: "original-id", type: kind === "skill" ? "skill" : "workflow", title: "原记录详情", business_status: "pending", my_status: "", created_at: "2026-10-09T09:00:00Z", can_process: false } });
+    window.history.pushState({}, "", `/app/approvals/${kind}/original-id`);
+    renderApp();
+    expect(await screen.findByRole("heading", { name: "原记录详情" })).toBeInTheDocument();
+    expect(approvalsApp.detail).toHaveBeenCalledWith(kind, "original-id", expect.anything());
+    expect(window.location.pathname).toBe(`/app/approvals/${kind}/original-id`);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

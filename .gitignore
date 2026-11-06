@@ -39,3 +39,11 @@ server/deploy/servers.yaml
 .worktrees/
 output/
 tmp/
+client/Clawee/Default\ Project/
+
+# Local reference repositories
+/agentgateway/
+/sub2api/
+/open-creator-gateway/
+.clawee-build/
+tasks/

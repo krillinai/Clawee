@@ -1,0 +1,64 @@
+.contribution-page { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); overflow: auto; position: relative; }
+.contribution-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 20px 8px; }
+.contribution-heading__title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.contribution-heading h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
+.contribution-page button { min-height: 32px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--text); background: var(--surface); font-size: 12px; }
+.contribution-page button:disabled { opacity: .5; cursor: default; }
+.contribution-page button[aria-selected="true"] { background: var(--surface-3); color: var(--accent); }
+.contribution-page button:focus-visible, .contribution-page input:focus-visible, .contribution-page select:focus-visible, .contribution-page textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.contribution-filters { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 20px; }
+.contribution-filters label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; min-width: 0; }
+.contribution-filters input, .contribution-filters select { height: 32px; width: 148px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 12px; }
+.contribution-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding: 12px 20px; gap: 16px; border-bottom: 1px solid var(--border); }
+.contribution-summary dt { color: var(--muted); font-size: 12px; }
+.contribution-summary dd { margin: 6px 0 0; font-size: 22px; font-variant-numeric: tabular-nums; }
+.contribution-summary small { color: var(--muted); font-size: 11px; }
+.contribution-workspace { flex: 1; min-height: 460px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 36%); }
+.contribution-data { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 20px; }
+.contribution-table-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.contribution-table-toolbar [role="tablist"] { display: flex; flex-wrap: wrap; gap: 4px; }
+.contribution-table-filters { padding: 10px 0; }
+.contribution-table-scroll { flex: 1; overflow: auto; min-height: 160px; }
+.contribution-page table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 12px; }
+.contribution-page th, .contribution-page td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; max-width: 240px; overflow-wrap: anywhere; }
+.contribution-page th { color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.contribution-page td button { border: 0; background: transparent; padding: 0; min-height: 24px; text-align: left; justify-content: flex-start; overflow-wrap: anywhere; }
+.contribution-page td small { display: block; margin-top: 4px; color: var(--muted); }
+.contribution-pagination { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+.contribution-pagination span { flex: 1; color: var(--muted); font-size: 12px; }
+.contribution-pagination button { width: 32px; height: 32px; padding: 0; }
+.contribution-coverage { display: grid; gap: 5px; margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.contribution-chat { min-height: 0; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); padding: 12px; }
+.contribution-chat header { display: flex; justify-content: space-between; height: 32px; flex: none; }
+.contribution-chat h2 { font-size: 14px; margin: 5px 0; }
+.contribution-chat-timeline { flex: 1; min-height: 200px; }
+.contribution-chat form { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: end; gap: 8px; margin-top: 10px; }
+.contribution-chat textarea { resize: vertical; min-width: 0; width: 100%; min-height: 72px; max-height: 180px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text); background: var(--surface); font-size: 13px; box-sizing: border-box; }
+.contribution-chat form button { width: 34px; height: 34px; padding: 0; }
+.contribution-query { padding: 8px 0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; color: var(--muted); }
+.contribution-download { min-height: 34px; flex: none; }
+.contribution-mobile-tabs { display: none; }
+.contribution-drawer-backdrop { position: absolute; inset: 0; background: #0005; display: flex; justify-content: flex-end; z-index: 20; }
+.contribution-drawer { width: min(440px, 100%); background: var(--surface); padding: 20px; overflow: auto; border-left: 1px solid var(--border); box-sizing: border-box; }
+.contribution-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.contribution-drawer h2 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.contribution-drawer h3 { font-size: 13px; margin: 0; }
+.contribution-drawer p { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.contribution-drawer article { padding: 14px 0; border-top: 1px solid var(--border); }
+.contribution-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px; }
+.contribution-scores dd { margin: 5px 0; }
+.contribution-spinner { animation: contribution-spin 1s linear infinite; }
+@keyframes contribution-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1000px) {
+  .contribution-mobile-tabs { display: flex; gap: 6px; padding: 8px 20px; }
+  .contribution-workspace { display: flex; flex-direction: column; }
+  .contribution-data, .contribution-chat { flex: 1; }
+  .contribution-chat { border-left: 0; }
+  .contribution-page[data-mobile-view="data"] .contribution-chat, .contribution-page[data-mobile-view="chat"] .contribution-data { display: none; }
+}
+@media (max-width: 560px) {
+  .contribution-heading, .contribution-filters, .contribution-data, .contribution-mobile-tabs { padding-left: 12px; padding-right: 12px; }
+  .contribution-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+  .contribution-filters { display: grid; grid-template-columns: 1fr 1fr; }
+  .contribution-filters input, .contribution-filters select { width: 100%; box-sizing: border-box; }
+}

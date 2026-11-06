@@ -8,7 +8,7 @@ export async function registerFeedbackRoutes(server: FastifyInstance, service: F
   const native = z.object({ environment: z.record(z.string().max(256)), records: z.array(z.unknown()).max(500), warnings: z.array(z.string().max(256)).max(20) }).strict();
   type Request = FastifyRequest<{ Params: { id: string; screenshotId: string } }>;
   const action = (fn: (request: Request) => Promise<unknown>, status = 200) => async (request: FastifyRequest, reply: FastifyReply) => { try { reply.header('Cache-Control', 'no-store'); return reply.code(status).send(await fn(request as Request)); } catch { return reply.code(400).send(apiError('VALIDATION_FAILED', '反馈请求未完成，请检查状态、授权或部署策略')); } };
-  server.get('/feedback/policy', action(async () => ({ external_feedback_allowed: await service.allowed() })));
+  server.get('/feedback/policy', action(async () => ({ external_feedback_allowed: await service.allowed(), origin: service.origin })));
   server.post('/feedback/diagnostics', { bodyLimit: 4096 }, action(async request => {
     const body = z.object({ thread_id: z.string().max(128), source: z.literal('web'), error_code: z.enum(['network_failed', 'http_failed', 'browser_error', 'unhandled_rejection']), method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']).optional(), route: z.string().max(256).optional(), status: z.number().int().min(0).max(599).optional() }).strict().parse(request.body);
     service.recordDiagnostic(body.thread_id, { ...body, request_id: request.id }); return { recorded: true };

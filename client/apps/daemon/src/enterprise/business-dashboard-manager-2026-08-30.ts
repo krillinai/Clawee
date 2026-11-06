@@ -4,7 +4,7 @@ import type {
   RuntimeErrorCode
 } from '@clawee/protocol';
 import type { EnterpriseHttpClient } from './http-client-2026-07-30.js';
-import { EnterpriseHttpError } from './http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from './http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from './session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from './session-manager-2026-07-30.js';
 
@@ -18,7 +18,8 @@ export type EnterpriseBusinessDashboardManager = {
 export class EnterpriseBusinessDashboardManagerError extends Error {
   constructor(
     readonly code: RuntimeErrorCode,
-    readonly statusCode: number
+    readonly statusCode: number,
+    readonly details?: Record<string, unknown>
   ) {
     super(`${code}: enterprise business dashboard operation failed`);
     this.name = 'EnterpriseBusinessDashboardManagerError';
@@ -64,7 +65,8 @@ export function createEnterpriseBusinessDashboardManager(input: {
         }
         throw new EnterpriseBusinessDashboardManagerError(
           error.code,
-          dashboardStatusCode(error)
+          dashboardStatusCode(error),
+          enterpriseHttpErrorDetails(error)
         );
       }
     }

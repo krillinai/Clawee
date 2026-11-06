@@ -33,6 +33,28 @@ func TestCreateRoleNormalizesPastedCodeAndName(t *testing.T) {
 	}
 }
 
+func TestCreateRoleGeneratesCodeWhenOmitted(t *testing.T) {
+	service, _, _ := newTestService(t)
+	seen := map[string]bool{}
+	for _, code := range []string{"", "", " \u200c "} {
+		role, err := service.CreateRole(context.Background(), "usr_admin", CreateRoleInput{
+			Code: code, Name: "技能审核员", Permissions: []string{PermissionMCPAuditRead},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !roleCodePattern.MatchString(role.Code) || role.Code == AdminRoleCode || seen[role.Code] {
+			t.Fatalf("generated code = %q, want a unique non-reserved code", role.Code)
+		}
+		seen[role.Code] = true
+		stored, err := service.GetRole(context.Background(), role.RoleID)
+		if err != nil || stored.Code != role.Code || stored.Name != "技能审核员" {
+			t.Fatalf("stored role = %#v, error = %v", stored, err)
+		}
+		assertStringsEqual(t, stored.Permissions, []string{PermissionMCPAuditRead})
+	}
+}
+
 func TestServiceCombinesRolesAndExpandsManagePermission(t *testing.T) {
 	service, _, accountService := newTestService(t)
 	ctx := context.Background()
@@ -411,5 +433,48 @@ func assertStringsEqual(t *testing.T, got, want []string) {
 		if got[i] != want[i] {
 			t.Fatalf("got %#v, want %#v", got, want)
 		}
+	}
+}
+
+func TestDepartmentRoleProtectionAndDefaultManualMembership(t *testing.T) {
+	service, store, accountService := newTestService(t)
+	ctx := context.Background()
+	account := createAccount(t, accountService, "department@example.com")
+	for _, roleType := range []string{"default", "manager"} {
+		t.Run(roleType, func(t *testing.T) {
+			role := Role{RoleID: "dept-" + roleType, Code: "dept_" + roleType, Name: "部门角色", DepartmentID: "dept", DepartmentRoleType: roleType}
+			if err := store.CreateRole(ctx, role, OperationAudit{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.UpdateRole(ctx, "admin", UpdateRoleInput{RoleID: role.RoleID, Name: "改名"}); !errors.Is(err, ErrDepartmentRoleImmutable) {
+				t.Fatal(err)
+			}
+			if err := service.DeleteRole(ctx, "admin", role.RoleID); !errors.Is(err, ErrDepartmentRoleImmutable) {
+				t.Fatal(err)
+			}
+			if _, err := service.UpdateRole(ctx, "admin", UpdateRoleInput{RoleID: role.RoleID, Name: role.Name, Permissions: []string{PermissionRBACRead}}); err != nil {
+				t.Fatal(err)
+			}
+			err := service.AssignAccountRole(ctx, "admin", account.UserID, role.RoleID)
+			if roleType == "manager" {
+				if !errors.Is(err, ErrDepartmentManagerMembers) {
+					t.Fatal(err)
+				}
+				if err := service.RemoveAccountRole(ctx, "admin", account.UserID, role.RoleID); !errors.Is(err, ErrDepartmentManagerMembers) {
+					t.Fatal(err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				bindings, err := service.ListAccountRoles(ctx, account.UserID)
+				if err != nil || len(bindings) != 1 || bindings[0].DepartmentRoleType != "default" {
+					t.Fatalf("%+v %v", bindings, err)
+				}
+				if err := service.RemoveAccountRole(ctx, "admin", account.UserID, role.RoleID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

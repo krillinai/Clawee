@@ -79,6 +79,23 @@ describe('WorkbenchLayout', () => {
     expect(screen.getByLabelText('Clawee 导航')).toHaveAttribute('data-collapsed', 'true');
   });
 
+  it('omits navigation and its mobile drawer when the sidebar is hidden', () => {
+    render(
+      <WorkbenchLayout
+        sidebar={<div>左侧</div>}
+        main={<div>模块内容</div>}
+        sidebarHidden
+        mobileSidebarOpen
+      />
+    );
+
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开导航' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '关闭导航遮罩' })).not.toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveClass('sidebar-hidden');
+    expect(screen.getByText('模块内容')).toBeInTheDocument();
+  });
+
   it('opens the mobile navigation as a focus-managed drawer and restores focus after closing', async () => {
     const user = userEvent.setup();
 

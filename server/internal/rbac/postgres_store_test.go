@@ -22,7 +22,7 @@ func TestPostgresStoreReadsRolesBindingsAndAudits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listRows := roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead})
+	listRows := roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead}, "", "")
 	mock.ExpectQuery(`(?s)SELECT r.role_id.*ORDER BY r.is_system DESC, r.code`).WillReturnRows(listRows)
 	roles, err := store.ListRoles(ctx)
 	if err != nil || len(roles) != 1 || roles[0].Code != "reader" {
@@ -30,26 +30,26 @@ func TestPostgresStoreReadsRolesBindingsAndAudits(t *testing.T) {
 	}
 
 	mock.ExpectQuery(`(?s)SELECT r.role_id.*WHERE r.role_id = \$1.*GROUP BY`).
-		WithArgs("role_reader").WillReturnRows(roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead}))
+		WithArgs("role_reader").WillReturnRows(roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead}, "", ""))
 	if _, err := store.GetRole(ctx, "role_reader"); err != nil {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(`(?s)SELECT r.role_id.*WHERE r.code = \$1.*GROUP BY`).
-		WithArgs("reader").WillReturnRows(roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead}))
+		WithArgs("reader").WillReturnRows(roleRows(now).AddRow("role_reader", "reader", "只读", false, now, now, []string{PermissionAccountRead}, "", ""))
 	if _, err := store.GetRoleByCode(ctx, "reader"); err != nil {
 		t.Fatal(err)
 	}
 
 	mock.ExpectQuery(`SELECT ar.user_id, ar.role_id`).WithArgs("usr_1").WillReturnRows(
-		pgxmock.NewRows([]string{"user_id", "role_id", "code", "name", "is_system", "created_at"}).
-			AddRow("usr_1", "role_reader", "reader", "只读", false, now),
+		pgxmock.NewRows([]string{"user_id", "role_id", "code", "name", "is_system", "created_at", "sources", "department_id", "department_name", "department_role_type"}).
+			AddRow("usr_1", "role_reader", "reader", "只读", false, now, []string{"manual"}, "", "", ""),
 	)
 	bindings, err := store.ListAccountRoles(ctx, "usr_1")
 	if err != nil || len(bindings) != 1 || bindings[0].RoleCode != "reader" {
 		t.Fatalf("ListAccountRoles = %#v, %v", bindings, err)
 	}
 
-	mock.ExpectQuery(`SELECT count\(\*\) FROM account_roles`).WithArgs("role_reader").WillReturnRows(
+	mock.ExpectQuery(`SELECT count\(\*\) FROM effective_account_roles`).WithArgs("role_reader").WillReturnRows(
 		pgxmock.NewRows([]string{"count"}).AddRow(2),
 	)
 	if count, err := store.CountRoleAccounts(ctx, "role_reader"); err != nil || count != 2 {
@@ -218,7 +218,7 @@ func newRBACPGXMock(t *testing.T) pgxmock.PgxPoolIface {
 }
 
 func roleRows(now time.Time) *pgxmock.Rows {
-	return pgxmock.NewRows([]string{"role_id", "code", "name", "is_system", "created_at", "updated_at", "permissions"})
+	return pgxmock.NewRows([]string{"role_id", "code", "name", "is_system", "created_at", "updated_at", "permissions", "department_id", "department_role_type"})
 }
 
 func testAudit(now time.Time) OperationAudit {

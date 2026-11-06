@@ -984,7 +984,7 @@ func TestAuthMeReportsExistingDingTalkBindingWhenProviderDisabled(t *testing.T) 
 	}
 }
 
-func TestDingTalkUnbindRequiresPasswordAndWorksWhenProviderDisabled(t *testing.T) {
+func TestDingTalkUnbindForbiddenPreservesIdentityWhenProviderDisabled(t *testing.T) {
 	ctx := context.Background()
 	accountSvc := accounts.NewService(accounts.Config{Store: accounts.NewMemoryStore(), JWTSigningKey: []byte(testJWTKey)})
 	registered, err := accountSvc.Register(ctx, accounts.RegisterRequest{Email: "unbind@example.com", Name: "Unbind", Password: "passw0rd!"})
@@ -1025,25 +1025,21 @@ func TestDingTalkUnbindRequiresPasswordAndWorksWhenProviderDisabled(t *testing.T
 	if recorder := request("passw0rd!", nil); recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if recorder := request("wrong-password", frontCookie); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"invalid_password"`) {
-		t.Fatalf("wrong password status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	if _, err := accountSvc.AccountIdentityForUser(ctx, registered.Account.UserID, "dingtalk", "default"); err != nil {
-		t.Fatalf("wrong password removed identity: %v", err)
-	}
-	if recorder := request("passw0rd!", frontCookie); recorder.Code != http.StatusNoContent {
-		t.Fatalf("unbind status=%d body=%s", recorder.Code, recorder.Body.String())
+	for _, password := range []string{"wrong-password", "passw0rd!", ""} {
+		if recorder := request(password, frontCookie); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"dingtalk_unbind_forbidden"`) {
+			t.Fatalf("unbind status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		if _, err := accountSvc.AccountIdentityForUser(ctx, registered.Account.UserID, "dingtalk", "default"); err != nil {
+			t.Fatalf("forbidden unbind removed identity: %v", err)
+		}
 	}
 
 	me := httptest.NewRecorder()
 	meRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	meRequest.AddCookie(frontCookie)
 	router.ServeHTTP(me, meRequest)
-	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"dingtalk_bound":false`) || !strings.Contains(me.Body.String(), `"local_password_configured":true`) {
-		t.Fatalf("me after unbind status=%d body=%s", me.Code, me.Body.String())
-	}
-	if recorder := request("passw0rd!", frontCookie); recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"dingtalk_not_bound"`) {
-		t.Fatalf("repeated unbind status=%d body=%s", recorder.Code, recorder.Body.String())
+	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"dingtalk_bound":true`) || !strings.Contains(me.Body.String(), `"local_password_configured":true`) {
+		t.Fatalf("me after rejected unbind status=%d body=%s", me.Code, me.Body.String())
 	}
 }
 
@@ -1075,7 +1071,7 @@ func TestDingTalkUnbindRejectsAccountWithoutLocalPassword(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	request.AddCookie(&http.Cookie{Name: "claw_front_token", Value: tokens.Token(accounts.AudienceFrontend).Token})
 	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"local_password_required"`) {
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"dingtalk_unbind_forbidden"`) {
 		t.Fatalf("passwordless unbind status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if _, err := accountSvc.AccountIdentityForUser(ctx, account.UserID, "dingtalk", "default"); err != nil {

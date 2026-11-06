@@ -21,6 +21,7 @@ const FORBIDDEN_MULTI_AGENT_TOOL_NAMES = new Set([
 
 export const CONTROLLED_EXEC_COMMAND_CALL_ID =
   'clawee-e2e-exec-command';
+const CONTROLLED_WRITE_STDIN_CALL_ID_PREFIX = 'clawee-e2e-write-stdin-';
 export const CONTROLLED_EXEC_COMMAND_PROMPT =
   'CLAWEE_E2E_EXEC_COMMAND';
 export const CONTROLLED_EXEC_COMMAND_OUTPUT =
@@ -37,7 +38,7 @@ export type ControlledModelRequest = {
   marker: string | null;
 };
 
-export type ControlledModelResponseMode = 'success' | 'failure' | 'hang';
+export type ControlledModelResponseMode = 'success' | 'failure' | 'task-failure' | 'hang' | 'probe-hang';
 
 export type ControlledCommandToolCall = {
   name: 'exec_command' | 'shell_command';
@@ -49,6 +50,7 @@ export class ControlledModelServer {
   private originValue = '';
   private readonly capturedRequests: ControlledModelRequest[] = [];
   private responseSequence = 0;
+  private commandRequestBaseline = 0;
 
   constructor(
     private readonly responseMode: ControlledModelResponseMode = 'success',
@@ -159,8 +161,8 @@ export class ControlledModelServer {
       toolNames,
       this.platform
     );
-    if (this.responseMode === 'failure') {
-      response.writeHead(503, { 'content-type': 'application/json' });
+    if (this.responseMode === 'failure' || (this.responseMode === 'task-failure' && marker === null)) {
+      response.writeHead(503, { 'content-type': 'application/json', 'x-request-id': 'req_controlled_failure' });
       response.end(JSON.stringify({
         error: {
           message: 'Controlled model failure'
@@ -168,13 +170,36 @@ export class ControlledModelServer {
       }));
       return;
     }
-    if (this.responseMode === 'hang') return;
     if (
-      findControlledFunctionCallOutput(
-        this.capturedRequests.slice(-1),
-        CONTROLLED_EXEC_COMMAND_CALL_ID
-      ) !== undefined
-    ) {
+      this.responseMode === 'hang'
+      || (this.responseMode === 'probe-hang' && marker !== null)
+    ) return;
+    const commandOutput = controlledCommandOutputs(this.capturedRequests.slice(-1)).at(-1);
+    if (commandOutput !== undefined) {
+      const outputText = typeof commandOutput === 'string'
+        ? commandOutput
+        : JSON.stringify(commandOutput);
+      const sessionId = outputText.match(/Process running with session ID (\d+)/)?.[1];
+      if (sessionId !== undefined) {
+        if (!toolNames.includes('write_stdin')) {
+          throw new Error('Runtime 返回后台 session，但未提供 write_stdin');
+        }
+        const sequence = ++this.responseSequence;
+        this.sendModelResponse(response, functionCallResponseBody(
+          sequence,
+          `${CONTROLLED_WRITE_STDIN_CALL_ID_PREFIX}${sequence}`,
+          'write_stdin',
+          { session_id: Number(sessionId), chars: '', yield_time_ms: 1_000 }
+        ));
+        return;
+      }
+      const accumulatedOutput = findControlledCommandOutput(
+        this.capturedRequests.slice(this.commandRequestBaseline)
+      );
+      if (/Process exited with code (?!0\b)\S+/.test(outputText)
+        || !accumulatedOutput?.includes(CONTROLLED_EXEC_COMMAND_OUTPUT)) {
+        throw new Error('Runtime 命令结束，但未返回预期工具输出');
+      }
       this.sendModelResponse(
         response,
         assistantMessageResponseBody(
@@ -191,6 +216,7 @@ export class ControlledModelServer {
         CONTROLLED_EXEC_COMMAND_PROMPT
       )
     ) {
+      this.commandRequestBaseline = this.capturedRequests.length - 1;
       this.sendModelResponse(
         response,
         functionCallResponseBody(
@@ -272,10 +298,29 @@ export function findControlledFunctionCallOutput(
   callId: string
 ): unknown {
   for (const request of requests) {
-    const output = findFunctionCallOutput(request.body, callId);
+    const output = collectFunctionCallOutputs(request.body)
+      .find(item => item.callId === callId)?.output;
     if (output !== undefined) return output;
   }
   return undefined;
+}
+
+export function findControlledCommandOutput(
+  requests: readonly ControlledModelRequest[]
+): string | undefined {
+  const outputs = controlledCommandOutputs(requests);
+  return outputs.length === 0 ? undefined : outputs.map(output => (
+    typeof output === 'string' ? output : JSON.stringify(output)
+  )).join('\n');
+}
+
+function controlledCommandOutputs(
+  requests: readonly ControlledModelRequest[]
+): unknown[] {
+  return requests.flatMap(request => collectFunctionCallOutputs(request.body))
+    .filter(item => item.callId === CONTROLLED_EXEC_COMMAND_CALL_ID
+      || item.callId.startsWith(CONTROLLED_WRITE_STDIN_CALL_ID_PREFIX))
+    .map(item => item.output);
 }
 
 export function resolveControlledCommandToolCall(
@@ -288,7 +333,7 @@ export function resolveControlledCommandToolCall(
       ? 'shell_command'
       : undefined;
   if (name === undefined) return undefined;
-  const command = controlledWriteFileCommand(platform);
+  const command = controlledWriteFileCommand(platform, name === 'exec_command');
   return name === 'exec_command'
     ? {
         name,
@@ -414,14 +459,17 @@ function functionCallResponseBody(
   )).join('');
 }
 
-function controlledWriteFileCommand(platform: NodeJS.Platform): string {
-  return platform === 'win32'
+function controlledWriteFileCommand(platform: NodeJS.Platform, asynchronous: boolean): string {
+  const prefix = !asynchronous ? '' : platform === 'win32'
+    ? 'Start-Sleep -Seconds 11; '
+    : 'sleep 2; ';
+  return prefix + (platform === 'win32'
     ? `[System.IO.File]::WriteAllText(`
       + `'clawee-tool-loop.txt', '${CONTROLLED_EXEC_COMMAND_OUTPUT}'); `
       + `Write-Output '${CONTROLLED_EXEC_COMMAND_OUTPUT}'`
     : `printf '%s' '${CONTROLLED_EXEC_COMMAND_OUTPUT}' `
       + `> clawee-tool-loop.txt && printf '%s\\n' `
-      + `'${CONTROLLED_EXEC_COMMAND_OUTPUT}'`;
+      + `'${CONTROLLED_EXEC_COMMAND_OUTPUT}'`);
 }
 
 function valueContainsText(value: unknown, expected: string): boolean {
@@ -433,29 +481,20 @@ function valueContainsText(value: unknown, expected: string): boolean {
   return Object.values(value).some(item => valueContainsText(item, expected));
 }
 
-function findFunctionCallOutput(
-  value: unknown,
-  callId: string
-): unknown {
+function collectFunctionCallOutputs(
+  value: unknown
+): Array<{ callId: string; output: unknown }> {
   if (Array.isArray(value)) {
-    for (const item of value) {
-      const output = findFunctionCallOutput(item, callId);
-      if (output !== undefined) return output;
-    }
-    return undefined;
+    return value.flatMap(collectFunctionCallOutputs);
   }
-  if (!isRecord(value)) return undefined;
+  if (!isRecord(value)) return [];
   if (
     value.type === 'function_call_output'
-    && value.call_id === callId
+    && typeof value.call_id === 'string'
   ) {
-    return value.output;
+    return [{ callId: value.call_id, output: value.output }];
   }
-  for (const item of Object.values(value)) {
-    const output = findFunctionCallOutput(item, callId);
-    if (output !== undefined) return output;
-  }
-  return undefined;
+  return Object.values(value).flatMap(collectFunctionCallOutputs);
 }
 
 async function readHttpBody(request: IncomingMessage): Promise<string> {

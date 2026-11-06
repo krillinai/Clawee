@@ -16,13 +16,18 @@ import {
 } from '../enterprise/session-manager-2026-07-30.js';
 import type { RunManager } from '../runs/manager.js';
 import { ThreadManagerError, type RuntimeThread } from '../threads/types.js';
+import { mergeRunEventsIntoThreadHistory, reconcileRunPromptsInThreadHistory } from '../threads/run-event-history.js';
 import { apiError } from './errors.js';
 
 export async function registerKnowledgeConversationRoutes(
   server: FastifyInstance,
   manager: KnowledgeConversationManager,
-  runManager: Pick<RunManager, 'getLastEventSeq' | 'listRunsByThread' | 'startRun'>,
+  runManager: Pick<RunManager, 'getLastEventSeq' | 'listRunsByThread' | 'startRun' | 'listEvents'>,
   options: {
+    canRunAgent?(): boolean;
+    basePath?: string;
+    projectless?: boolean;
+    executionPrompt?(prompt: string, body: Record<string, unknown>): string;
     attachmentService?: AttachmentService;
     readHistory(
       thread: RuntimeThread,
@@ -30,14 +35,13 @@ export async function registerKnowledgeConversationRoutes(
     ): Promise<CodexThreadHistoryPage>;
   }
 ): Promise<void> {
-  server.post<{ Body: unknown }>('/enterprise/knowledge-conversations', async (request, reply) => {
+  const basePath = options.basePath ?? '/enterprise/knowledge-conversations';
+  server.post<{ Body: unknown }>(basePath, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
     if (
       body === null
       || typeof body !== 'object'
-      || typeof body.projectId !== 'string'
-      || body.projectId.trim().length === 0
-      || Object.keys(body).some(key => key !== 'projectId')
+      || (options.projectless ? Object.keys(body).length !== 0 : typeof body.projectId !== 'string' || body.projectId.trim().length === 0 || Object.keys(body).some(key => key !== 'projectId'))
     ) {
       return reply.code(400).send(apiError(
         'VALIDATION_FAILED',
@@ -46,14 +50,14 @@ export async function registerKnowledgeConversationRoutes(
     }
     try {
       return reply.code(201).send({
-        thread: toThreadResponse(await manager.create(body.projectId.trim()))
+        thread: toThreadResponse(await manager.create(typeof body.projectId === 'string' ? body.projectId.trim() : ''))
       });
     } catch (error) {
       return sendKnowledgeError(reply, error);
     }
   });
 
-  server.get('/enterprise/knowledge-conversations/latest', async (_request, reply) => {
+  server.get(`${basePath}/latest`, async (_request, reply) => {
     try {
       const thread = await manager.latest();
       if (thread === undefined) return reply.code(204).send();
@@ -63,7 +67,7 @@ export async function registerKnowledgeConversationRoutes(
     }
   });
 
-  server.get('/enterprise/knowledge-conversations/:id', async (request, reply) => {
+  server.get(`${basePath}/:id`, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       return { thread: toThreadResponse(await manager.requireOwnedThread(id)) };
@@ -72,7 +76,7 @@ export async function registerKnowledgeConversationRoutes(
     }
   });
 
-  server.get('/enterprise/knowledge-conversations/:id/runs', async (request, reply) => {
+  server.get(`${basePath}/:id/runs`, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       await manager.requireOwnedThread(id);
@@ -89,7 +93,8 @@ export async function registerKnowledgeConversationRoutes(
           lastEventSeq: runManager.getLastEventSeq(run.id),
           attachments: options.attachmentService?.listByRun(run.id) ?? [],
           submissionMode: run.submissionMode,
-          ...(run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition })
+          ...(run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition }),
+          ...(run.queueReason === undefined ? {} : { queueReason: run.queueReason })
         }))
       };
       return response;
@@ -99,8 +104,11 @@ export async function registerKnowledgeConversationRoutes(
   });
 
   server.post<{ Body: unknown }>(
-    '/enterprise/knowledge-conversations/:id/runs',
+    `${basePath}/:id/runs`,
     async (request, reply) => {
+      if (options.canRunAgent?.() === false) {
+        return reply.code(428).send(apiError('MODEL_SERVICE_CONFIGURATION_REQUIRED', '请先配置并验证 Codex 模型服务'));
+      }
       try {
         const { id } = request.params as { id: string };
         const thread = await manager.requireOwnedThread(id);
@@ -109,9 +117,11 @@ export async function registerKnowledgeConversationRoutes(
         if (prompt.length === 0 || prompt.length > 100_000) {
           return reply.code(400).send(apiError('VALIDATION_FAILED', 'prompt is invalid'));
         }
+        let executionPrompt: string;
+        try { executionPrompt = options.executionPrompt?.(prompt, body!) ?? prompt; } catch { return reply.code(400).send(apiError('VALIDATION_FAILED', '查询条件无效')); }
         const run = runManager.startRun({
           prompt,
-          publicPrompt: prompt,
+          executionPrompt,
           threadId: thread.id,
           resumeMode: 'auto',
           createdBy: 'api',
@@ -128,7 +138,7 @@ export async function registerKnowledgeConversationRoutes(
     }
   );
 
-  server.get('/enterprise/knowledge-conversations/:id/history', async (request, reply) => {
+  server.get(`${basePath}/:id/history`, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       const thread = await manager.requireOwnedThread(id);
@@ -155,6 +165,15 @@ export async function registerKnowledgeConversationRoutes(
         codexThreadId: thread.codexThreadId,
         ...history
       };
+      const threadRuns = runManager.listRunsByThread(id, 10_000);
+      if (query.before === undefined) {
+        response.items = mergeRunEventsIntoThreadHistory(
+          response.items,
+          threadRuns.slice(0, limit ?? 50),
+          runId => runManager.listEvents(runId)
+        );
+      }
+      response.items = reconcileRunPromptsInThreadHistory(response.items, threadRuns);
       return response;
     } catch (error) {
       return sendKnowledgeError(reply, error);

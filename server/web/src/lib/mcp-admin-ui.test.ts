@@ -22,6 +22,7 @@ import {
   formatDuration,
   isMCPGateExpired,
   isMCPGateTerminal,
+  isDataAuthorizedTool,
   mcpGateStatusLabel,
   mcpGateStatusVariant,
   mcpGateTypeLabel,
@@ -35,6 +36,18 @@ import {
 } from "./mcp-admin-ui";
 
 const now = "2026-05-27T12:00:00Z";
+
+describe("贡献数据工具识别", () => {
+  it("仅内置上游的真实两个工具使用数据权限", () => {
+    const builtin = { ...servers[0]!, id: "skill-contributions", transport: "builtin" as const };
+    const tool = { ...capabilities[0]!, upstreamServerId: builtin.id, upstreamName: "skill_contributions_query" };
+    expect(isDataAuthorizedTool(tool, builtin)).toBe(true);
+    expect(isDataAuthorizedTool({ ...tool, upstreamName: "skill_contributions_export" }, builtin)).toBe(true);
+    expect(isDataAuthorizedTool(tool, { ...builtin, transport: "streamable_http" })).toBe(false);
+    expect(isDataAuthorizedTool({ ...tool, upstreamServerId: "other" }, builtin)).toBe(false);
+    expect(isDataAuthorizedTool({ ...tool, upstreamName: "other" }, builtin)).toBe(false);
+  });
+});
 
 const servers: MCPUpstreamServer[] = [
   {

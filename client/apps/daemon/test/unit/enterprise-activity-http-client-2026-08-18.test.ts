@@ -6,6 +6,81 @@ import {
 const ORIGIN = 'https://enterprise.example';
 
 describe('enterprise activity HTTP client', () => {
+  it('loads personal statistics for the exact Agent and range and maps usage evidence', async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/agent-usage')
+      ? jsonResponse({ data: usagePayload() }) : jsonResponse(detailPayload()));
+    const result = await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityDetail('access-token', 'collector/上海', 'agent?research', '7d');
+    expect(result.usage).toMatchObject({ range: '7d', collectorId: 'collector/上海', agentId: 'agent?research',
+      turnCount: 123, points: [{ turnCount: 123 }], mcpDistribution: [{ invocationCount: 4 }],
+      skillUsage: [{ observedRuns: 5 }], skillUsageTotals: { observedSkillRuns: 5 } });
+    expect(String(fetch.mock.calls[1]?.[0])).toBe(`${ORIGIN}/api/v1/app/activity/agent-usage?collector_id=collector%2F%E4%B8%8A%E6%B5%B7&agent_id=agent%3Fresearch&range=7d`);
+  });
+
+  it.each([404, 503])('keeps execution history when personal statistics return %s', async status => {
+    const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/agent-usage')
+      ? jsonResponse({ error: { code: 'activity_unavailable' } }, status) : jsonResponse(detailPayload()));
+    const result = await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityDetail('access-token', 'collector/上海', 'agent?research', '7d');
+    expect(result.usage).toBeUndefined();
+    expect(result.agent.agentId).toBe('agent?research');
+  });
+
+  it.each([401, 403])('propagates personal statistics authorization failures (%s)', async status => {
+    const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/agent-usage')
+      ? jsonResponse({ error: { code: 'data_view_forbidden' } }, status) : jsonResponse(detailPayload()));
+    await expect(createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityDetail('access-token', 'collector/上海', 'agent?research', '7d'))
+      .rejects.toMatchObject({ statusCode: status });
+  });
+
+  it.each([{ collector_id: 'other' }, { agent_id: 'other' }, { range: 'today' }, { granularity: 'hour' }])('rejects mismatched personal usage: %j', async mismatch => {
+    const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/agent-usage')
+      ? jsonResponse({ data: { ...usagePayload(), ...mismatch } }) : jsonResponse(detailPayload()));
+    await expect(createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityDetail('access-token', 'collector/上海', 'agent?research', '7d'))
+      .rejects.toMatchObject({ code: 'ENTERPRISE_PROTOCOL_ERROR' });
+  });
+
+  it('preserves Skill evidence counts and employee ownership without inventing missing statistics', async () => {
+    const payload = statisticsPayload();
+    const fetch = vi.fn(async () => jsonResponse({ data: {
+      ...payload.data,
+      organization: { ...payload.data.organization,
+        skill_usage: [{ skill_id: 'skill-1', skill_key: 'research', skill_name: '调研', source: 'enterprise', requested_runs: 8, observed_runs: 5, implicit_runs: 2 }],
+        skill_usage_totals: { requested_skill_runs: 8, observed_skill_runs: 5, explicit_skill_runs: 3, implicit_skill_runs: 2 }
+      },
+      agents: payload.data.agents.map(agent => ({ ...agent, employee_id: 'employee-1', employee_name: '张三' }))
+    } }));
+    const client = createEnterpriseHttpClient({ fetch, origin: ORIGIN });
+    const result = await client.getActivityStatistics('access-token', '7d');
+    expect(result.organization.skillUsage?.[0]).toMatchObject({ skillName: '调研', requestedRuns: 8, observedRuns: 5, implicitRuns: 2 });
+    expect(result.organization.skillUsageTotals).toEqual({ requestedSkillRuns: 8, observedSkillRuns: 5, explicitSkillRuns: 3, implicitSkillRuns: 2 });
+    expect(result.agents[0]).toMatchObject({ employeeId: 'employee-1', employeeName: '张三' });
+    fetch.mockImplementation(async () => jsonResponse(payload));
+    expect((await client.getActivityStatistics('access-token', '7d')).organization.skillUsage).toBeUndefined();
+  });
+
+  it('loads organization runtime status and strips undeclared fields', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request) => jsonResponse({
+      schema_version: 'office.v1', scope: 'organization', server_time: '2026-10-28T00:00:00Z',
+      summary: { total_agents: 1, online_agents: 1, working_agents: 1, blocked_agents: 0, error_agents: 0 },
+      agents: [{ collector_id: 'collector', agent_id: 'agent', status: 'thinking', current_task: '调研', last_seen_at: '2026-10-28T00:00:00Z', user_prompt: 'PRIVATE' }]
+    }));
+    const result = await createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityRuntime('access-token');
+    expect(result).toMatchObject({ scope: 'organization', summary: { workingAgents: 1 }, agents: [{ currentTask: '调研', status: 'thinking' }] });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE');
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(`${ORIGIN}/api/v1/app/activity/runtime`);
+  });
+
+  it('loads organization runtime status when the gateway wraps the payload in data', async () => {
+    const runtime = {
+      schema_version: 'office.v1', scope: 'organization', server_time: '2026-10-28T00:00:00Z',
+      summary: { total_agents: 1, online_agents: 1, working_agents: 1, blocked_agents: 0, error_agents: 0 },
+      agents: [{ collector_id: 'collector', agent_id: 'agent', status: 'thinking', current_task: '调研', last_seen_at: '2026-10-28T00:00:00Z' }]
+    };
+    const fetch = vi.fn(async () => jsonResponse({ data: runtime }));
+
+    await expect(createEnterpriseHttpClient({ fetch, origin: ORIGIN }).getActivityRuntime('access-token'))
+      .resolves.toMatchObject({ scope: 'organization', summary: { workingAgents: 1 }, agents: [{ currentTask: '调研' }] });
+  });
+
   it('uses only the documented app routes and strips sensitive detail fields', async () => {
     const fetch = vi.fn(async (
       url: string | URL | Request,
@@ -45,6 +120,11 @@ describe('enterprise activity HTTP client', () => {
       organization: {
         usage: {
           totalTokens: 1_200
+        },
+        platformActivity: {
+          activeUsers: 2,
+          totalUsers: 4,
+          rate: 0.5
         }
       },
       agents: [{
@@ -192,7 +272,7 @@ describe('enterprise activity HTTP client', () => {
     ).rejects.toMatchObject({
       code: 'ENTERPRISE_DATA_VIEW_FORBIDDEN',
       requestId: 'request-forbidden',
-      details: undefined
+      details: expect.objectContaining({ failureKind: 'response', statusCode: 403, upstreamCode: 'data_view_forbidden' })
     });
     await expect(
       client.getActivityStatistics('access-token', '7d')
@@ -222,6 +302,11 @@ function statisticsPayload() {
         active_employees: 1,
         active_agents: 1,
         completed_turns: 2,
+        platform_activity: {
+          active_users: 2,
+          total_users: 4,
+          rate: 0.5
+        },
         mcp_distribution: []
       },
       trend: {
@@ -317,4 +402,16 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json' }
   });
+}
+
+function usagePayload() {
+  return {
+    collector_id: 'collector/上海', agent_id: 'agent?research', range: '7d', timezone: 'Asia/Shanghai',
+    start_date: '2026-08-12', end_date: '2026-08-18', generated_at: '2026-08-18T08:00:00Z',
+    session_count: 51, turn_count: 123, completed_turns: 120, tool_call_count: 345, granularity: 'day',
+    points: [{ bucket_start: '2026-08-18T00:00:00+08:00', session_count: 51, turn_count: 123, completed_turns: 120, tool_call_count: 345 }],
+    mcp_status: 'available', mcp_distribution: [{ id: 'search', label: '搜索服务', invocation_count: 4, share: 1 }],
+    skill_usage: [{ skill_id: 'research', skill_key: 'research', skill_name: '调研', source: 'enterprise', requested_runs: 8, observed_runs: 5, implicit_runs: 2 }],
+    skill_usage_totals: { requested_skill_runs: 8, observed_skill_runs: 5, explicit_skill_runs: 3, implicit_skill_runs: 2 }
+  };
 }

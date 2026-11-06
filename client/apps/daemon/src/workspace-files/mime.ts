@@ -3,6 +3,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_JSON_FORMAT_BYTES,
   MAX_PDF_BYTES,
+  MAX_OFFICE_BYTES,
   MAX_TEXT_BYTES
 } from './types.js';
 
@@ -120,6 +121,18 @@ export function mimeFor(path: string): string {
       return 'image/webp';
     case '.pdf':
       return 'application/pdf';
+    case '.docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case '.doc':
+      return 'application/msword';
+    case '.xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case '.xls':
+      return 'application/vnd.ms-excel';
+    case '.pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case '.ppt':
+      return 'application/vnd.ms-powerpoint';
     default:
       if (codeExtensions.has(extension) || textExtensions.has(extension)) {
         return 'text/plain; charset=utf-8';
@@ -136,6 +149,7 @@ export function kindFor(path: string): WorkspaceFileKind {
   if (extension === '.svg') return 'code';
   if (codeExtensions.has(extension)) return 'code';
   if (extension === '.pdf') return 'pdf';
+  if (['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].includes(extension)) return 'office';
   if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico'].includes(extension)) return 'image';
   if (textExtensions.has(extension)) return 'text';
   if (mimeFor(path).startsWith('text/')) return 'text';
@@ -170,6 +184,7 @@ export function isPreviewable(kind: WorkspaceFileKind, path: string, size: numbe
   if (isSensitivePath(path)) return false;
   if (kind === 'image') return size <= MAX_IMAGE_BYTES;
   if (kind === 'pdf') return size <= MAX_PDF_BYTES;
+  if (kind === 'office') return size <= MAX_OFFICE_BYTES;
   return isEditable(kind, path, size);
 }
 
@@ -179,6 +194,7 @@ export function reasonForUnavailable(kind: WorkspaceFileKind, path: string, size
   if (isTextualKind(kind) && size > editableLimit) return `File exceeds ${editableLimit} bytes limit.`;
   if (kind === 'image' && size > MAX_IMAGE_BYTES) return `Image exceeds ${MAX_IMAGE_BYTES} bytes limit.`;
   if (kind === 'pdf' && size > MAX_PDF_BYTES) return `PDF exceeds ${MAX_PDF_BYTES} bytes limit.`;
+  if (kind === 'office' && size > MAX_OFFICE_BYTES) return '文件超过 20 MB 预览限制，请下载后查看。';
   if (!isEditable(kind, path, size) && !isPreviewable(kind, path, size)) return 'File type is not supported.';
   return undefined;
 }

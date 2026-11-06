@@ -4,19 +4,29 @@ export type SidebarMenuKey = "skills" | "knowledge" | "drive" | "dashboard";
 export type SidebarMenuLabels = Partial<Record<SidebarMenuKey, string>>;
 
 export type PlatformBranding = {
+  accentColor?: string;
   sidebarLogoConfigured: boolean;
   sidebarLogoUrl: string | null;
   sidebarCompactLogoConfigured: boolean;
   sidebarCompactLogoUrl: string | null;
+  sidebarLogoDarkConfigured: boolean;
+  sidebarLogoDarkUrl: string | null;
+  sidebarCompactLogoDarkConfigured: boolean;
+  sidebarCompactLogoDarkUrl: string | null;
   sidebarMenuLabels?: SidebarMenuLabels;
   adminUrl?: string;
 };
 
 type PlatformBrandingResponse = {
+  accent_color?: string;
   sidebar_logo_configured: boolean;
   sidebar_logo_url: string | null;
   sidebar_compact_logo_configured: boolean;
   sidebar_compact_logo_url: string | null;
+  sidebar_logo_dark_configured?: boolean;
+  sidebar_logo_dark_url?: string | null;
+  sidebar_compact_logo_dark_configured?: boolean;
+  sidebar_compact_logo_dark_url?: string | null;
   sidebar_menu_labels?: SidebarMenuLabels;
   admin_url?: string;
 };
@@ -32,25 +42,40 @@ export async function updatePlatformBranding(input: {
   sidebarLogo?: File;
   sidebarCompactLogoAction: PlatformBrandingAction;
   sidebarCompactLogo?: File;
+  sidebarLogoDarkAction?: PlatformBrandingAction;
+  sidebarLogoDark?: File;
+  sidebarCompactLogoDarkAction?: PlatformBrandingAction;
+  sidebarCompactLogoDark?: File;
   sidebarMenuLabels?: Partial<Record<SidebarMenuKey, string | null>>;
   adminUrl?: string;
+  accentColor?: string;
 }): Promise<PlatformBranding> {
   const body = new FormData();
   body.set("sidebar_logo_action", input.sidebarLogoAction);
   body.set("sidebar_compact_logo_action", input.sidebarCompactLogoAction);
   if (input.sidebarLogo) body.set("sidebar_logo", input.sidebarLogo);
   if (input.sidebarCompactLogo) body.set("sidebar_compact_logo", input.sidebarCompactLogo);
+  if (input.sidebarLogoDarkAction) body.set("sidebar_logo_dark_action", input.sidebarLogoDarkAction);
+  if (input.sidebarLogoDark) body.set("sidebar_logo_dark", input.sidebarLogoDark);
+  if (input.sidebarCompactLogoDarkAction) body.set("sidebar_compact_logo_dark_action", input.sidebarCompactLogoDarkAction);
+  if (input.sidebarCompactLogoDark) body.set("sidebar_compact_logo_dark", input.sidebarCompactLogoDark);
   if (input.sidebarMenuLabels) body.set("sidebar_menu_labels", JSON.stringify(input.sidebarMenuLabels));
   if (input.adminUrl !== undefined) body.set("admin_url", input.adminUrl);
+  if (input.accentColor !== undefined) body.set("accent_color", input.accentColor);
   return mapPlatformBranding(await adminApi.putForm<PlatformBrandingResponse>("/platform-branding", body));
 }
 
 function mapPlatformBranding(response: PlatformBrandingResponse): PlatformBranding {
   return {
+    accentColor: response.accent_color || undefined,
     sidebarLogoConfigured: response.sidebar_logo_configured,
     sidebarLogoUrl: response.sidebar_logo_url,
     sidebarCompactLogoConfigured: response.sidebar_compact_logo_configured,
     sidebarCompactLogoUrl: response.sidebar_compact_logo_url,
+    sidebarLogoDarkConfigured: response.sidebar_logo_dark_configured ?? false,
+    sidebarLogoDarkUrl: response.sidebar_logo_dark_url ?? null,
+    sidebarCompactLogoDarkConfigured: response.sidebar_compact_logo_dark_configured ?? false,
+    sidebarCompactLogoDarkUrl: response.sidebar_compact_logo_dark_url ?? null,
     sidebarMenuLabels: response.sidebar_menu_labels ?? {},
     adminUrl: response.admin_url ?? ""
   };

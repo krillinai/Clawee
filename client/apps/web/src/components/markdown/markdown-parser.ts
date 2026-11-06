@@ -7,6 +7,7 @@ export type MarkdownBlock =
   | { kind: 'ordered-list'; items: string[] }
   | { kind: 'blockquote'; text: string }
   | { kind: 'code'; lang: string | null; body: string }
+  | { kind: 'details'; summary: string; blocks: MarkdownBlock[]; open: boolean; source: string }
   | { kind: 'table'; headers: string[]; aligns: TableAlign[]; rows: string[][] }
   | { kind: 'hr' };
 
@@ -32,6 +33,10 @@ function isBlockquote(line: string): boolean {
 
 function isFence(line: string): RegExpExecArray | null {
   return /^```([A-Za-z0-9_+-]+)?\s*$/.exec(line);
+}
+
+function isDetailsStart(line: string): RegExpExecArray | null {
+  return /^\s*<details(?:\s+(open))?\s*>\s*$/i.exec(line);
 }
 
 export function splitTableCells(line: string): string[] {
@@ -95,6 +100,7 @@ function isParagraphBoundary(lines: string[], index: number): boolean {
   const line = lines[index] ?? '';
   if (line.trim() === '') return true;
   if (isFence(line)) return true;
+  if (isDetailsStart(line)) return true;
   if (isHeading(line)) return true;
   if (isHr(line)) return true;
   if (isUnorderedList(line)) return true;
@@ -128,6 +134,41 @@ export function parseMarkdownBlocks(input: string): MarkdownBlock[] {
       if (index < lines.length) index++;
       blocks.push({ kind: 'code', lang, body: body.join('\n') });
       continue;
+    }
+
+    const details = isDetailsStart(line);
+    if (details) {
+      let summaryIndex = index + 1;
+      while (summaryIndex < lines.length && lines[summaryIndex]!.trim() === '') summaryIndex++;
+      const summary = /^\s*<summary>(.*?)<\/summary>\s*$/i.exec(lines[summaryIndex] ?? '');
+      if (summary) {
+        let end = summaryIndex + 1;
+        let depth = 1;
+        let inCode = false;
+        for (; end < lines.length; end++) {
+          const current = lines[end]!;
+          if (inCode) {
+            if (/^```\s*$/.test(current)) inCode = false;
+            continue;
+          }
+          if (isFence(current)) {
+            inCode = true;
+            continue;
+          }
+          if (isDetailsStart(current)) depth++;
+          if (/^\s*<\/details>\s*$/i.test(current) && --depth === 0) break;
+        }
+        const nextIndex = Math.min(end + 1, lines.length);
+        blocks.push({
+          kind: 'details',
+          summary: summary[1]!,
+          blocks: parseMarkdownBlocks(lines.slice(summaryIndex + 1, end).join('\n')),
+          open: Boolean(details[1]),
+          source: lines.slice(index, nextIndex).join('\n')
+        });
+        index = nextIndex;
+        continue;
+      }
     }
 
     const heading = /^(#{1,4})\s+(.*\S)\s*$/.exec(line);

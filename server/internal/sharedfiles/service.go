@@ -51,6 +51,29 @@ func NewServiceWithRegistry(store Store, registry StorageRegistry, logger *zap.L
 	return &Service{store: store, registry: registry, logger: logger, clock: func() time.Time { return time.Now().UTC() }}
 }
 
+func (s *Service) EnsurePersonalSpace(ctx context.Context, userID, operatorID string) (SpaceSummary, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(operatorID) == "" {
+		return SpaceSummary{}, ErrInvalidRequest
+	}
+	now := s.clock()
+	id := newID("space_")
+	return s.store.EnsurePersonalSpace(ctx, Space{SpaceID: id, Name: "个人网盘", PersonalOwnerUserID: userID, CreatedBy: operatorID, UpdatedBy: operatorID, CreatedAt: now, UpdatedAt: now})
+}
+
+func (s *Service) requireOrdinarySpace(ctx context.Context, spaceID string) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return ErrInvalidRequest
+	}
+	space, err := s.store.GetSpaceSummary(ctx, spaceID)
+	if err != nil {
+		return err
+	}
+	if space.PersonalOwnerUserID != "" {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 func (s *Service) CreateSpace(ctx context.Context, name, description, operator string) (SpaceSummary, error) {
 	name, description, err := normalizeSpaceInput(name, description)
 	if err != nil || strings.TrimSpace(operator) == "" {
@@ -77,11 +100,15 @@ func (s *Service) GetSpaceSummary(ctx context.Context, spaceID string) (SpaceSum
 }
 
 func (s *Service) ListAdminSpaces(ctx context.Context, query string, limit int, cursor string) (Page[SpaceSummary], error) {
+	return s.ListAdminSpacesForOwner(ctx, query, "", limit, cursor)
+}
+
+func (s *Service) ListAdminSpacesForOwner(ctx context.Context, query, owner string, limit int, cursor string) (Page[SpaceSummary], error) {
 	query, limit, decoded, err := normalizePage(query, limit, cursor, "time")
 	if err != nil {
 		return Page[SpaceSummary]{}, err
 	}
-	items, err := s.store.ListSpaceSummaries(ctx, SpaceFilter{Query: query, Limit: limit + 1, Cursor: decoded})
+	items, err := s.store.ListSpaceSummaries(ctx, SpaceFilter{Query: query, PersonalOwnerUserID: owner, Limit: limit + 1, Cursor: decoded})
 	return timePage(items, limit, func(item SpaceSummary) (time.Time, string) { return item.UpdatedAt, item.SpaceID }, err)
 }
 
@@ -94,7 +121,16 @@ func (s *Service) ListSpaces(ctx context.Context, userID string, limit int, curs
 		return Page[Space]{}, ErrInvalidRequest
 	}
 	items, err := s.store.ListAuthorizedSpaces(ctx, SpaceFilter{UserID: userID, Limit: limit + 1, Cursor: decoded})
-	return timePage(items, limit, func(item Space) (time.Time, string) { return item.UpdatedAt, item.SpaceID }, err)
+	page, err := timePage(items, limit, func(item Space) (time.Time, string) { return item.UpdatedAt, item.SpaceID }, err)
+	if err == nil && page.HasNext {
+		last := page.Items[len(page.Items)-1]
+		kind := "shared"
+		if last.PersonalOwnerUserID != "" {
+			kind = "personal"
+		}
+		page.NextCursor = encodeCursor(Cursor{UpdatedAt: last.UpdatedAt, ID: last.SpaceID, Name: kind})
+	}
+	return page, err
 }
 
 func (s *Service) ListMembers(ctx context.Context, spaceID, query string, limit int, cursor string) (Page[Member], error) {
@@ -136,6 +172,9 @@ func (s *Service) AddMember(ctx context.Context, spaceID, userID, operator strin
 }
 
 func (s *Service) AddMemberWithActions(ctx context.Context, spaceID, userID string, actions []string, operator string) (Member, error) {
+	if err := s.requireOrdinarySpace(ctx, spaceID); err != nil {
+		return Member{}, err
+	}
 	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(operator) == "" {
 		return Member{}, ErrInvalidRequest
 	}
@@ -147,6 +186,9 @@ func (s *Service) AddMemberWithActions(ctx context.Context, spaceID, userID stri
 }
 
 func (s *Service) UpdateMember(ctx context.Context, spaceID, userID string, actions []string, operator string) (Member, error) {
+	if err := s.requireOrdinarySpace(ctx, spaceID); err != nil {
+		return Member{}, err
+	}
 	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(operator) == "" {
 		return Member{}, ErrInvalidRequest
 	}
@@ -158,6 +200,9 @@ func (s *Service) UpdateMember(ctx context.Context, spaceID, userID string, acti
 }
 
 func (s *Service) RemoveMember(ctx context.Context, spaceID, userID string) error {
+	if err := s.requireOrdinarySpace(ctx, spaceID); err != nil {
+		return err
+	}
 	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(userID) == "" {
 		return ErrInvalidRequest
 	}
@@ -274,22 +319,48 @@ func (s *Service) OpenAdminFile(ctx context.Context, fileID string) (File, io.Re
 }
 
 func (s *Service) Upload(ctx context.Context, userID, agentID, spaceID, logicalPath, contentType string, declaredSize int64, declaredDigest string, expectedRevision *int64, src io.Reader) (UploadResult, error) {
-	return s.upload(ctx, userID, agentID, spaceID, logicalPath, contentType, declaredSize, declaredDigest, expectedRevision, src, false)
+	if strings.TrimSpace(agentID) == "" {
+		return UploadResult{}, ErrInvalidRequest
+	}
+	return s.UploadForUser(ctx, userID, agentID, userID, spaceID, logicalPath, contentType, declaredSize, declaredDigest, expectedRevision, src)
+}
+
+// 调用方负责校验跨用户上传管理权限；文件审计始终记录实际操作者。
+func (s *Service) UploadForUser(ctx context.Context, operator, agent, effectiveUser, spaceID, logicalPath, contentType string, size int64, digest string, revision *int64, src io.Reader) (UploadResult, error) {
+	if strings.TrimSpace(agent) == "" || strings.TrimSpace(effectiveUser) == "" {
+		return UploadResult{}, ErrInvalidRequest
+	}
+	if spaceID == "" {
+		space, err := s.EnsurePersonalSpace(ctx, effectiveUser, operator)
+		if err != nil {
+			return UploadResult{}, err
+		}
+		spaceID = space.SpaceID
+	} else if effectiveUser != operator {
+		space, err := s.store.GetSpaceSummary(ctx, spaceID)
+		if err != nil {
+			return UploadResult{}, err
+		}
+		if space.PersonalOwnerUserID != effectiveUser {
+			return UploadResult{}, ErrSharedSpaceNotFound
+		}
+	}
+	return s.upload(ctx, operator, effectiveUser, agent, spaceID, logicalPath, contentType, size, digest, revision, src, false)
 }
 
 func (s *Service) UploadAdmin(ctx context.Context, operatorUserID, spaceID, logicalPath, contentType string, declaredSize int64, expectedRevision *int64, src io.Reader) (UploadResult, error) {
 	if strings.TrimSpace(operatorUserID) == "" {
 		return UploadResult{}, ErrInvalidRequest
 	}
-	return s.upload(ctx, operatorUserID, "", spaceID, logicalPath, contentType, declaredSize, "", expectedRevision, src, true)
+	return s.upload(ctx, operatorUserID, operatorUserID, "", spaceID, logicalPath, contentType, declaredSize, "", expectedRevision, src, true)
 }
 
-func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalPath, contentType string, declaredSize int64, declaredDigest string, expectedRevision *int64, src io.Reader, admin bool) (UploadResult, error) {
+func (s *Service) upload(ctx context.Context, userID, accessUserID, agentID, spaceID, logicalPath, contentType string, declaredSize int64, declaredDigest string, expectedRevision *int64, src io.Reader, admin bool) (UploadResult, error) {
 	logicalPath, err := NormalizeLogicalPath(logicalPath, false)
 	if err != nil {
 		return UploadResult{}, err
 	}
-	if strings.TrimSpace(userID) == "" || (!admin && strings.TrimSpace(agentID) == "") || strings.TrimSpace(spaceID) == "" || declaredSize < 0 {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(spaceID) == "" || declaredSize < 0 {
 		return UploadResult{}, ErrInvalidRequest
 	}
 	if declaredSize > MaxFileSizeBytes {
@@ -315,7 +386,7 @@ func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalP
 			if _, err := s.store.GetSpaceSummary(ctx, spaceID); err != nil {
 				return UploadResult{}, err
 			}
-		} else if err := s.store.CheckSpaceAccess(ctx, userID, spaceID, ActionWrite); err != nil {
+		} else if err := s.store.CheckSpaceAccess(ctx, accessUserID, spaceID, ActionWrite); err != nil {
 			return UploadResult{}, err
 		}
 	} else {
@@ -324,7 +395,7 @@ func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalP
 		if admin {
 			current, err = s.store.GetAdminFileByPath(ctx, spaceID, logicalPath)
 		} else {
-			current, err = s.store.GetAuthorizedFileByPath(ctx, userID, spaceID, logicalPath, ActionWrite)
+			current, err = s.store.GetAuthorizedFileByPath(ctx, accessUserID, spaceID, logicalPath, ActionWrite)
 		}
 		if err != nil {
 			return UploadResult{}, err
@@ -370,24 +441,29 @@ func (s *Service) upload(ctx context.Context, userID, agentID, spaceID, logicalP
 		if admin {
 			file, err = s.store.CreateAdminFile(ctx, file)
 		} else {
-			file, err = s.store.CreateFileAuthorized(ctx, userID, file)
+			file, err = s.store.CreateFileAuthorized(ctx, accessUserID, file)
 		}
 	} else {
 		if admin {
 			file, oldRef, err = s.store.ReplaceAdminFile(ctx, file, *expectedRevision)
 		} else {
-			file, oldRef, err = s.store.ReplaceFileAuthorized(ctx, userID, file, *expectedRevision)
+			file, oldRef, err = s.store.ReplaceFileAuthorized(ctx, accessUserID, file, *expectedRevision)
 		}
 	}
 	if err != nil {
 		cleanup("upload_compensation")
+		if !admin && created && errors.Is(err, ErrFileAlreadyExists) {
+			current, lookupErr := s.store.GetAuthorizedFileByPath(ctx, accessUserID, spaceID, logicalPath, ActionWrite)
+			if lookupErr == nil && current.SizeBytes == metadata.SizeBytes && current.SHA256 == metadata.SHA256 {
+				return uploadReceipt(current, false), nil
+			}
+		}
 		return UploadResult{}, err
 	}
 	if oldRef.StorageKey != "" {
 		s.cleanupObject(context.WithoutCancel(ctx), oldRef, "replace_old_object", file.FileID, "")
 	}
-	return UploadResult{FileID: file.FileID, SpaceID: file.SpaceID, LogicalPath: file.LogicalPath, FileName: file.FileName,
-		SizeBytes: file.SizeBytes, SHA256: file.SHA256, ContentType: file.ContentType, Revision: file.Revision, Created: created, UpdatedAt: file.UpdatedAt}, nil
+	return uploadReceipt(file, created), nil
 }
 
 type cleanupRecorder interface {
@@ -458,4 +534,9 @@ func newID(prefix string) string {
 		return prefix + hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return prefix + hex.EncodeToString(raw[:])
+}
+
+func uploadReceipt(file File, created bool) UploadResult {
+	return UploadResult{FileID: file.FileID, SpaceID: file.SpaceID, LogicalPath: file.LogicalPath, FileName: file.FileName,
+		SizeBytes: file.SizeBytes, SHA256: file.SHA256, ContentType: file.ContentType, Revision: file.Revision, Created: created, UpdatedAt: file.UpdatedAt}
 }

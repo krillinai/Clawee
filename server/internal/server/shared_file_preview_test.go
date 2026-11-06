@@ -42,7 +42,7 @@ func TestSharedFilePreview(t *testing.T) {
 				if recorder.Header().Get("X-Preview-Kind") != test.kind || recorder.Header().Get("Content-Type") != test.contentType || recorder.Body.String() != test.content {
 					t.Fatalf("headers=%v body=%q", recorder.Header(), recorder.Body.String())
 				}
-				if recorder.Header().Get("Cache-Control") != "no-store" || !strings.HasPrefix(recorder.Header().Get("Content-Disposition"), "attachment") {
+				if recorder.Header().Get("Cache-Control") != "no-store" || !strings.HasPrefix(recorder.Header().Get("Content-Disposition"), "inline") {
 					t.Fatalf("unsafe headers=%v", recorder.Header())
 				}
 			}

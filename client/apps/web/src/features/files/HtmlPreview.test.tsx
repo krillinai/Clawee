@@ -4,6 +4,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HtmlPreview, resolveWorkspacePreviewPath } from './HtmlPreview.js';
 
 describe('HtmlPreview', () => {
+  it.each([
+    ["/Users/example/Example's AI projects/reports/index.html", './images/cover.png', "/Users/example/Example's AI projects/reports/images/cover.png"],
+    ["/Users/example/Example's AI projects/reports/index.html", '/Users/example/cover.png', '/Users/example/cover.png'],
+    ["C:/Users/example/Example's AI projects/reports/index.html", '../cover.png', "C:/Users/example/Example's AI projects/cover.png"],
+    [String.raw`C:\Users\example\Example's AI projects\reports\index.html`, '../cover.png', "C:/Users/example/Example's AI projects/cover.png"],
+    ["C:/Users/example/Example's AI projects/reports/index.html", '/images/cover.png', 'C:/images/cover.png']
+  ] as const)('工作区外 HTML 保留资源的绝对路径：%s + %s', (documentPath, reference, expected) => {
+    expect(resolveWorkspacePreviewPath(documentPath, reference)).toBe(expected);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

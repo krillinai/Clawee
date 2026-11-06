@@ -57,6 +57,21 @@ describe('NotificationService', () => {
     expect(service.getUnreadIds()).toEqual(new Set());
   });
 
+  it('starts a new unread baseline without inheriting legacy task ids and preserves new results across restarts', () => {
+    window.localStorage.setItem('clawee.tasks.unread.v1', JSON.stringify(['old_run']));
+    const createService = () => createNotificationService({
+      hostBridge: hostBridge(vi.fn())
+    });
+    const service = createService();
+
+    expect(service.getUnreadIds()).toEqual(new Set());
+    service.setUnreadIds(new Set(['new_run']));
+    expect(createService().getUnreadIds()).toEqual(new Set(['new_run']));
+
+    service.setUnreadIds(new Set());
+    expect(createService().getUnreadIds()).toEqual(new Set());
+  });
+
   it('enables desktop notifications by default and honors manual disable', async () => {
     const notify = vi.fn(async () => undefined);
     const service = createNotificationService({

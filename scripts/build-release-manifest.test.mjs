@@ -64,3 +64,22 @@ test('拒绝候选版本冒充稳定 Tag', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('仅客户端清单无需镜像摘要，完整模式仍要求合法镜像摘要', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clawee-desktop-manifest-'));
+  try {
+    writeFileSync(join(root, 'Clawee-1.0.6.dmg'), 'desktop');
+    const input = {
+      artifactDirectory: root, outputDirectory: join(root, 'output'),
+      version: '1.0.6', tag: 'v1.0.6', commit: 'a'.repeat(40)
+    };
+    assert.throws(() => buildReleaseManifest(input), /Invalid image digest/);
+    const result = buildReleaseManifest({ ...input, desktopOnly: true });
+    assert.deepEqual(result.manifest.components, ['desktop']);
+    assert.equal('serverImage' in result.manifest, false);
+    assert.deepEqual(result.manifest.artifacts.map(item => item.name), ['Clawee-1.0.6.dmg']);
+    assert.match(readFileSync(result.checksumsPath, 'utf8'), /Clawee-1\.0\.6\.dmg/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

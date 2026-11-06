@@ -52,11 +52,13 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 	if opts.SkillHubService == nil || opts.AccountService == nil {
 		return
 	}
+	mountSkillAIReviewRoutes(app, admin, opts)
 	list := handleSkillList(opts.SkillHubService)
 	detail := handleSkillDetail(opts.SkillHubService)
 	download := handleSkillDownload(opts.SkillHubService)
 
 	app.GET("/skills", list)
+	app.POST("/skills/permission-check", skillRequirePermission(opts.RBACService, rbac.PermissionSkillPermissionCheck), handleSkillPermissionCheck(opts.AccountService, opts.SkillHubService))
 	app.GET("/skills/detail", detail)
 	app.GET("/skills/participant-avatar", handleSkillParticipantAvatar(opts.SkillHubService, opts.AccountService))
 	app.GET("/skills/version-files", handlePublishedSkillVersionFiles(opts.SkillHubService))
@@ -74,6 +76,7 @@ func mountSkillHubRoutes(app, admin *gin.RouterGroup, opts Options) {
 
 	mountSkillHubAdminRoutes(admin, opts)
 	mountSkillSpaceAdminRoutes(admin, opts)
+	mountCloudSkillRoutes(app, admin, opts)
 }
 
 func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
@@ -85,7 +88,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.GET("/skills/detail", read, handleAdminSkillDetail(opts.SkillHubService))
 	admin.GET("/skills/version-files", read, handleAdminSkillVersionFiles(opts.SkillHubService))
 	admin.GET("/skills/version-file", read, handleAdminSkillVersionFile(opts.SkillHubService))
-	admin.GET("/skills/version-package", skillOperationLog(opts.Logger, skillActionDownload), read, handleAdminSkillVersionPackage(opts.SkillHubService))
+	admin.GET("/skills/version-package", skillOperationLog(opts.Logger, skillActionDownload), read, skillRequirePermission(opts.RBACService, rbac.PermissionSkillDownload), handleAdminSkillVersionPackage(opts.SkillHubService))
 	admin.POST("/skills/versions", skillOperationLog(opts.Logger, skillActionUpload), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSkillUpload(opts.SkillHubService, false))
 	admin.POST("/skills/versions/submit-approval", skillOperationLog(opts.Logger, "skill_approval_submit"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSubmitSkillApproval(opts, false))
 	admin.POST("/skills/versions/sync-approval", skillOperationLog(opts.Logger, "skill_approval_sync"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSyncSkillApproval(opts))
@@ -95,6 +98,7 @@ func mountSkillHubAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.PUT("/skills/current-version", skillOperationLog(opts.Logger, skillActionSet), skillRequirePermission(opts.RBACService, rbac.PermissionSkillPublish), handleSkillSetCurrent(opts.SkillHubService))
 	admin.POST("/skills/current-version/own", skillOperationLog(opts.Logger, skillActionSet), read, handleSkillPublishOwn(opts.SkillHubService, false))
 	admin.POST("/skills/versions/review", skillOperationLog(opts.Logger, "skill_review"), read, handleSkillReview(opts.SkillHubService))
+	admin.POST("/skills/versions/resubmit-review", skillOperationLog(opts.Logger, "skill_review_resubmit"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillVersionUpload), handleSkillResubmitReview(opts.SkillHubService))
 	admin.POST("/skills/current-version/remove", skillOperationLog(opts.Logger, skillActionClear), skillRequirePermission(opts.RBACService, rbac.PermissionSkillUnpublish), handleSkillClearCurrent(opts.SkillHubService))
 	if opts.SkillSourceService == nil {
 		return
@@ -581,10 +585,11 @@ func handleAdminSkillDetail(service *skillhub.Service) gin.HandlerFunc {
 		account, _ := currentAccount(c)
 		if space.ApprovalProvider == "local" {
 			for _, version := range item.Versions {
-				if version.LocalApproval != nil && version.LocalApproval.Status == "pending" {
+				if version.LocalApproval != nil && version.LocalApproval.Status == "pending" && (version.Source != nil || version.LocalApproval.WorkflowStage == "human_pending") {
 					for _, reviewer := range version.LocalApproval.Approvers {
 						if reviewer.UserID == account.UserID && reviewer.Status == "pending" {
 							item.CanReview = true
+							version.LocalApproval.CanSubmitReview = true
 						}
 					}
 				}
@@ -883,10 +888,12 @@ func handleSkillPublishOwn(service *skillhub.Service, requireSpaceWrite bool) gi
 func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
-			SkillID   string `json:"skill_id"`
-			VersionID string `json:"version_id"`
-			Decision  string `json:"decision"`
-			Comment   string `json:"comment"`
+			SkillID   string                 `json:"skill_id"`
+			VersionID string                 `json:"version_id"`
+			Decision  string                 `json:"decision"`
+			Comment   string                 `json:"comment"`
+			RequestID string                 `json:"request_id"`
+			Scores    *skillhub.ReviewScores `json:"scores"`
 		}
 		if decodeSkillJSON(c, &request) != nil || (request.Decision != "approved" && request.Decision != "rejected") {
 			skillError(c, skillhub.ErrInvalidRequest)
@@ -904,7 +911,40 @@ func handleSkillReview(service *skillhub.Service) gin.HandlerFunc {
 			return
 		}
 		c.Set(skillReviewDecisionKey, request.Decision)
-		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment)
+		version, err := service.ReviewVersion(c.Request.Context(), request.SkillID, request.VersionID, account.UserID, request.Decision == "approved", request.Comment, skillhub.ReviewInput{RequestID: request.RequestID, Scores: request.Scores})
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.Set(skillSHAKey, version.PackageSHA256)
+		c.Set(skillSpaceIDKey, detail.Skill.SpaceID)
+		c.JSON(http.StatusOK, version)
+	}
+}
+
+func handleSkillResubmitReview(service *skillhub.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request struct {
+			SkillID   string `json:"skill_id"`
+			VersionID string `json:"version_id"`
+			RequestID string `json:"request_id"`
+		}
+		if decodeSkillJSON(c, &request) != nil {
+			skillError(c, skillhub.ErrInvalidRequest)
+			return
+		}
+		account, _ := currentAccount(c)
+		c.Set(skillIDKey, request.SkillID)
+		c.Set(skillVersionKey, request.VersionID)
+		if !checkAdminSkillRead(c, service, request.SkillID) {
+			return
+		}
+		version, err := service.ResubmitReview(c.Request.Context(), request.SkillID, request.VersionID, request.RequestID, account.UserID)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		detail, err := service.GetAdmin(c.Request.Context(), request.SkillID)
 		if err != nil {
 			skillError(c, err)
 			return
@@ -1098,7 +1138,24 @@ func decodeSkillJSON(c *gin.Context, target any) error {
 func skillError(c *gin.Context, err error) {
 	status, code, message := http.StatusInternalServerError, "internal_error", "技能中心操作失败"
 	var pgErr *pgconn.PgError
+	var skillConflict *skillhub.SkillConflictError
 	switch {
+	case errors.As(err, &skillConflict):
+		status, code = http.StatusConflict, "conflict"
+		switch skillConflict.Kind {
+		case skillhub.SkillConflictExisting:
+			if skillConflict.SkillName != "" && skillConflict.SpaceName != "" {
+				message = fmt.Sprintf("技能“%s”已存在于“%s”空间，请选择该空间或修改 Skill 名称", skillConflict.SkillName, skillConflict.SpaceName)
+			}
+		case skillhub.SkillConflictVersion:
+			if skillConflict.SkillName != "" && skillConflict.SpaceName != "" && skillConflict.Version != "" {
+				message = fmt.Sprintf("技能“%s”在“%s”空间已存在版本 %s，请使用新的版本号", skillConflict.SkillName, skillConflict.SpaceName, skillConflict.Version)
+			}
+		}
+	case errors.Is(err, skillhub.ErrAIReviewRequired):
+		status, code, message = http.StatusConflict, "skill_ai_review_required", "AI 评估尚未通过，需修改时请上传新版本，执行异常可重试"
+	case errors.Is(err, skillhub.ErrAIReviewFailed):
+		status, code, message = http.StatusConflict, "skill_ai_review_failed", skillhub.AIReviewMaterialsFailure
 	case errors.As(err, &pgErr) && pgErr.Code == "42501":
 		status, code, message = http.StatusInternalServerError, "skill_database_permission_denied", "技能中心数据库权限不足，请联系管理员检查服务账号授权"
 	case errors.Is(err, skillhub.ErrExternalApprovalConflict):
@@ -1118,6 +1175,10 @@ func skillError(c *gin.Context, err error) {
 		}
 	case errors.Is(err, skillhub.ErrPackageTooLarge):
 		status, code, message = http.StatusRequestEntityTooLarge, "package_too_large", "Skill 包超过大小限制"
+	case errors.Is(err, skillhub.ErrStoredPackageMissing):
+		status, code, message = http.StatusNotFound, "skill_package_missing", "技能版本的包文件缺失，请联系管理员恢复文件或重新上传版本"
+	case errors.Is(err, skillhub.ErrStoredPackageInvalid):
+		status, code, message = http.StatusInternalServerError, "skill_package_invalid", "技能版本的包文件损坏或存储异常，请联系管理员检查或重新上传版本"
 	case errors.Is(err, skillhub.ErrNotFound):
 		status, code, message = http.StatusNotFound, "not_found", "Skill、版本或来源不存在"
 	case errors.Is(err, skillhub.ErrSpaceNotFound):
@@ -1138,6 +1199,9 @@ func skillError(c *gin.Context, err error) {
 		status, code, message = http.StatusInternalServerError, "source_credential_failure", "来源凭据处理失败"
 	case errors.Is(err, skillhub.ErrSourceStoreFailure):
 		status, code, message = http.StatusInternalServerError, "source_store_failure", "来源存储操作失败"
+	}
+	if status >= http.StatusInternalServerError || errors.Is(err, skillhub.ErrStoredPackageMissing) {
+		_ = c.Error(err)
 	}
 	c.JSON(status, gin.H{"code": code, "error": message})
 }

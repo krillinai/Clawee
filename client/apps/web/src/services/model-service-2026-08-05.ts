@@ -6,12 +6,14 @@ import type {
   ReasoningEffort
 } from '@clawee/protocol';
 import type { RuntimeClient } from '../runtime/client.js';
+import { createSseParser } from '../runtime/sse.js';
+import { isModelHidden } from './model-blacklist.js';
 import {
   readJsonFromStorage,
   writeJsonToStorage
 } from '../storage/browser-storage.js';
 
-type ClientLike = Pick<RuntimeClient, 'get'>;
+type StreamClientLike = Pick<RuntimeClient, 'get' | 'rawGet'>;
 
 type StoredModelCatalog = {
   version: 1;
@@ -32,16 +34,33 @@ const REASONING_EFFORTS = new Set<ReasoningEffort>([
   'low',
   'medium',
   'high',
-  'xhigh'
+  'xhigh',
+  'max'
 ]);
 const INPUT_MODALITIES = new Set<CodexModelInputModality>(['text', 'image']);
 
-export function createModelService(client: ClientLike) {
+export function createModelService(client: StreamClientLike) {
   return {
     async listModels(): Promise<CodexModelListResponse> {
-      const response = parseModelCatalog(await client.get<unknown>('/codex/models'));
-      writeCachedModelCatalog(response);
-      return response;
+      return parseModelCatalog(await client.get<unknown>('/codex/models'));
+    },
+    async watchCatalog(onChanged: () => void, signal: AbortSignal): Promise<void> {
+      const response = await client.rawGet('/codex/models/events', { signal });
+      if (!response.ok || response.body === null) throw new Error('Model catalog stream unavailable');
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      const parser = createSseParser();
+      try {
+        while (!signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const frame of parser.parseChunk(value)) {
+            if (frame.event === 'changed') onChanged();
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
     }
   };
 }
@@ -116,7 +135,8 @@ function parseModelCatalog(value: unknown): CodexModelListResponse {
     throw new Error('Runtime returned an invalid model catalog');
   }
   return {
-    models: value.models.map(parseModel)
+    models: value.models.map(parseModel).filter(model => !isModelHidden(model.model)),
+    ...(value.updatesAvailable === true ? { updatesAvailable: true } : {})
   };
 }
 

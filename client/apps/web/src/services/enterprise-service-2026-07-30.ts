@@ -2,6 +2,7 @@ import type {
   EnterpriseActivityCapabilityResponse,
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
+  EnterpriseActivityRuntimeResponse,
   EnterpriseActivityStatisticsResponse,
   EnterpriseBilibiliDashboardRange,
   EnterpriseBillingOverviewResponse,
@@ -11,8 +12,12 @@ import type {
   EnterpriseKnowledgeDocumentUploadResponse,
   EnterpriseDingTalkLoginPrepareResponse,
   EnterpriseLoginRequest,
+  EnterpriseLoginPreferencesResponse,
+  EnterpriseGatewayConfiguration,
   EnterprisePlatformBrandingResponse,
+  EnterprisePlatformBrandingImageKind,
   EnterpriseMcpCatalogResponse,
+  EnterpriseMcpHealthResponse,
   EnterpriseMcpPreferenceUpdateRequest,
   EnterpriseQrLoginStartRequest,
   EnterpriseQrLoginStartResponse,
@@ -27,10 +32,14 @@ import type {
   EnterpriseSharedFileMutationResponse,
   EnterpriseSharedSpaceListResponse,
   EnterpriseSkillDetailResponse,
+  EnterpriseCloudSkillListResponse,
   EnterpriseSkillListResponse,
   EnterpriseSkillMutationResponse,
   EnterpriseSkillSpaceListResponse,
-  EnterpriseSkillUploadResponse
+  EnterpriseSkillUploadResponse,
+  SkillContributionQuery,
+  SkillContributionResponse,
+  SkillContributionCSV
 } from '@clawee/protocol';
 import type { RuntimeClient } from '../runtime/client.js';
 
@@ -39,6 +48,14 @@ type ClientLike = Pick<RuntimeClient, 'get' | 'post' | 'postBinary' | 'patch'>
 
 export type { EnterprisePlatformBrandingResponse } from '@clawee/protocol';
 
+export type AgentPromptPolicyStatus = {
+  version: number;
+  updated?: number;
+  prompt: string;
+  promptType: 'server_agent' | 'clawee_agent';
+  fetchedAt: string;
+};
+
 const KNOWLEDGE_DOCUMENT_CONTENT_TYPE =
   'application/vnd.clawee.knowledge-document';
 const SHARED_FILE_CONTENT_TYPE =
@@ -46,6 +63,17 @@ const SHARED_FILE_CONTENT_TYPE =
 
 export function createEnterpriseService(client: ClientLike) {
   return {
+    getSkillContributionCapability(): Promise<{ allowed: boolean }> {
+      return client.get('/enterprise/skill-contributions/capability');
+    },
+    getSkillContributions(endpoint: 'summary' | 'records' | 'detail', input: SkillContributionQuery | { skill_id?: string; version_id?: string }): Promise<SkillContributionResponse> {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(input)) if (value !== undefined) query.set(key, String(value));
+      return client.get(`/enterprise/skill-contributions/${endpoint}?${query}`);
+    },
+    exportSkillContributions(query: SkillContributionQuery): Promise<SkillContributionCSV> {
+      return client.post('/enterprise/skill-contributions/export', query);
+    },
     listSkillSpaces(): Promise<EnterpriseSkillSpaceListResponse> {
       return client.get('/enterprise/skill-spaces');
     },
@@ -58,19 +86,25 @@ export function createEnterpriseService(client: ClientLike) {
       body.append('package', input.file);
       return client.postBinary('/enterprise/skills/versions', body);
     },
-    getGateway(): Promise<{ gateway: string; configurable: boolean }> {
+    getGateway(): Promise<EnterpriseGatewayConfiguration> {
       return client.get('/enterprise/gateway');
     },
-    setGateway(gateway: string): Promise<{ gateway: string; configurable: boolean }> {
-      return client.post('/enterprise/gateway', { gateway });
+    setGateway(gateway: string, gateways?: string[]): Promise<EnterpriseGatewayConfiguration> {
+      return client.post('/enterprise/gateway', { gateway, ...(gateways === undefined ? {} : { gateways }) });
     },
     getSession(): Promise<EnterpriseSessionResponse> {
       return client.get('/enterprise/session');
     },
+    getAgentPromptPolicyStatus(): Promise<AgentPromptPolicyStatus> {
+      return client.get('/agent-prompt-policy/status');
+    },
+    getLoginPreferences(): Promise<EnterpriseLoginPreferencesResponse> {
+      return client.get('/enterprise/login-preferences');
+    },
     getPlatformBranding(): Promise<EnterprisePlatformBrandingResponse> {
       return client.get('/enterprise/platform-branding');
     },
-    getPlatformBrandingImage(kind: 'sidebar-logo' | 'sidebar-compact-logo'): Promise<Response> {
+    getPlatformBrandingImage(kind: EnterprisePlatformBrandingImageKind): Promise<Response> {
       if (client.rawGet === undefined) {
         return Promise.reject(new Error('Runtime raw response access is unavailable'));
       }
@@ -78,6 +112,9 @@ export function createEnterpriseService(client: ClientLike) {
     },
     refreshSession(): Promise<EnterpriseSessionResponse> {
       return client.post('/enterprise/session/refresh');
+    },
+    renewSession(): Promise<EnterpriseSessionResponse> {
+      return client.post('/enterprise/session/renew');
     },
     prepareDingTalkLogin(): Promise<EnterpriseDingTalkLoginPrepareResponse> {
       return client.post('/enterprise/dingtalk/login/prepare');
@@ -101,6 +138,9 @@ export function createEnterpriseService(client: ClientLike) {
     },
     getActivityCapability(): Promise<EnterpriseActivityCapabilityResponse> {
       return client.get('/enterprise/activity/capability');
+    },
+    getActivityRuntime(): Promise<EnterpriseActivityRuntimeResponse> {
+      return client.get('/enterprise/activity/runtime');
     },
     getActivityStatistics(
       range: EnterpriseActivityRange
@@ -156,6 +196,9 @@ export function createEnterpriseService(client: ClientLike) {
     },
     refreshMcpConnections(): Promise<EnterpriseMcpCatalogResponse> {
       return client.post('/enterprise/mcp/refresh');
+    },
+    checkMcpHealth(upstreamId: string): Promise<EnterpriseMcpHealthResponse> {
+      return client.post(`/enterprise/mcp/upstreams/${encodeURIComponent(upstreamId)}/health`);
     },
     updateMcpPreference(
       upstreamId: string,
@@ -229,7 +272,7 @@ export function createEnterpriseService(client: ClientLike) {
       );
     },
     uploadSharedFile(input: {
-      spaceId: string;
+      spaceId?: string;
       logicalPath: string;
       expectedRevision?: number;
       file: File;
@@ -243,7 +286,7 @@ export function createEnterpriseService(client: ClientLike) {
         query.set('expectedRevision', String(input.expectedRevision));
       }
       return client.postBinary(
-        `/enterprise/shared-spaces/${encodeURIComponent(input.spaceId)}/files?${query.toString()}`,
+        `/enterprise/shared-spaces/${encodeURIComponent(input.spaceId ?? 'default')}/files?${query.toString()}`,
         input.file,
         SHARED_FILE_CONTENT_TYPE
       );
@@ -263,6 +306,9 @@ export function createEnterpriseService(client: ClientLike) {
     },
     listSkills(): Promise<EnterpriseSkillListResponse> {
       return client.get('/enterprise/skills');
+    },
+    listCloudSkills(): Promise<EnterpriseCloudSkillListResponse> {
+      return client.get('/enterprise/cloud-skills');
     },
     getSkillParticipantAvatar(skillId: string, userId: string): Promise<Response> {
       if (client.rawGet === undefined) {

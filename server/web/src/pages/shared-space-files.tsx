@@ -48,7 +48,7 @@ export function SharedSpaceFilesPage() {
   const spaceId = searchParams.get("space_id") ?? "";
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [logicalPathPrefix, setLogicalPathPrefix] = useState("");
+  const [logicalPathPrefix, setLogicalPathPrefix] = useState(searchParams.get("logical_path_prefix") ?? "");
   const [cursor, setCursor] = useState("");
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [uploadForm, setUploadForm] = useState<UploadForm | null>(null);
@@ -121,7 +121,7 @@ export function SharedSpaceFilesPage() {
         actions={(
           <>
             <Button asChild variant="outline">
-              <Link to="/admin/shared-files">
+              <Link to={`/admin/shared-files${spaceQuery.data?.personalOwnerUserId ? `?personal_owner_user_id=${encodeURIComponent(spaceQuery.data.personalOwnerUserId)}` : ""}`}>
                 <ArrowLeft data-icon="inline-start" aria-hidden="true" />
                 返回网盘
               </Link>
@@ -146,12 +146,14 @@ export function SharedSpaceFilesPage() {
       {spaceQuery.data ? (
         <div className="grid gap-6">
           <section className="flex flex-wrap items-center gap-2" aria-label="共享空间摘要">
+            {spaceQuery.data.personalOwnerUserId ? <Badge variant="outline">个人空间 · {spaceQuery.data.personalOwnerName || spaceQuery.data.personalOwnerEmail || spaceQuery.data.personalOwnerUserId}</Badge> : null}
             <Badge variant="muted">{spaceQuery.data.fileCount} 个文件</Badge>
             <Badge variant="outline">{formatBytes(spaceQuery.data.sizeBytes)}</Badge>
             <span className="font-mono text-xs text-muted-foreground">{spaceQuery.data.spaceId}</span>
           </section>
 
           {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
+          {!canDownload ? <p className="text-sm text-muted-foreground" role="status">当前账号无下载权限，仅可查看文件信息。请联系管理员开通预览与下载权限。</p> : null}
 
           <section className="grid gap-3" aria-labelledby="shared-file-list-title">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

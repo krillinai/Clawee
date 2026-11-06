@@ -40,7 +40,7 @@ test('校验 COS 配置和对象 URL', () => {
   assert.throws(() => publicObjectUrl(config, '../secret'));
 });
 
-test('生成稳定版目录、公开清单并结构化改写三种 updater feed', () => {
+for (const desktopOnly of [false, true]) test(`生成${desktopOnly ? '仅客户端' : '完整'}稳定版目录并结构化改写三种 updater feed`, () => {
   const root = mkdtempSync(join(tmpdir(), 'clawee-cos-layout-'));
   try {
     const artifacts = join(root, 'artifacts');
@@ -65,6 +65,11 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
       'latest-arm64-mac.yml': updater('1.2.3', 'Clawee-1.2.3-arm64-mac.zip'),
       'latest.yml': updater('1.2.3', 'Clawee-Setup-1.2.3.exe')
     };
+    if (desktopOnly) {
+      for (const name of Object.keys(files).filter(name => /^(?:clawee-server-|server-linux-)/.test(name))) {
+        delete files[name];
+      }
+    }
     for (const [name, value] of Object.entries(files)) writeFileSync(join(artifacts, name), value);
     const manifest = {
       schemaVersion: 1,
@@ -76,11 +81,15 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
       serverImage: { name: 'ghcr.io/krillinai/clawee-server', digest: `sha256:${'b'.repeat(64)}` },
       artifacts: Object.keys(files).map(name => details(artifacts, name))
     };
+    if (desktopOnly) {
+      manifest.components = ['desktop'];
+      delete manifest.serverImage;
+    }
     const manifestPath = join(root, 'release-manifest.json');
     const notesPath = join(root, 'release-notes.md');
     writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
     writeFileSync(notesPath, 'release notes');
-    const result = prepareReleaseLayout({
+    const input = {
       ...config,
       artifactDirectory: artifacts,
       outputDirectory: join(root, 'stage'),
@@ -90,10 +99,17 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
       tag: 'v1.2.3',
       commit: 'a'.repeat(40),
       publishedAt: '2026-09-10T10:00:00.000Z'
-    });
+    };
+    const result = prepareReleaseLayout(input);
     assert.equal(result.channel, 'stable');
     assert.equal(result.release.artifacts.length, Object.keys(files).length);
-    assert.equal(result.release.serverImage.digest, `sha256:${'b'.repeat(64)}`);
+    if (desktopOnly) {
+      assert.deepEqual(result.release.components, ['desktop']);
+      assert.equal('serverImage' in JSON.parse(readFileSync(join(result.versionRoot, 'release.json'), 'utf8')), false);
+      assert.ok(result.release.artifacts.every(item => item.component === 'desktop'));
+    } else {
+      assert.equal(result.release.serverImage.digest, `sha256:${'b'.repeat(64)}`);
+    }
     assert.equal(result.release.desktop.windowsSigning, 'unsigned');
     const macFeed = readFileSync(join(result.versionRoot, 'updates/latest-mac.yml'), 'utf8');
     assert.match(macFeed, /https:\/\/download\.example\.com\/clawee\/releases\/v1\.2\.3\/desktop\/macos\/x64\/Clawee-1\.2\.3-mac\.zip/);
@@ -103,6 +119,22 @@ test('生成稳定版目录、公开清单并结构化改写三种 updater feed'
     assert.match(sums, /release-notes\.md/);
     assert.doesNotMatch(sums, /  SHA256SUMS/);
     assert.equal(readFileSync(join(result.versionRoot, 'release-notes.md'), 'utf8'), 'release notes');
+    for (const name of [
+      'Clawee-Setup-1.2.3.exe', 'latest-mac.yml',
+      'clawee-desktop-build-manifest-mac-arm64.json', 'Clawee-Setup-1.2.3.exe.blockmap',
+      ...(desktopOnly ? [] : ['clawee-server-v1.2.3-linux-amd64.tar.gz'])
+    ]) {
+      writeFileSync(manifestPath, JSON.stringify({
+        ...manifest, artifacts: manifest.artifacts.filter(item => item.name !== name)
+      }));
+      assert.throws(() => prepareReleaseLayout(input), /incomplete|blockmap is missing/);
+    }
+    if (desktopOnly) {
+      writeFileSync(manifestPath, JSON.stringify({ ...manifest, components: undefined }));
+      assert.throws(() => prepareReleaseLayout(input), /incomplete/);
+      writeFileSync(manifestPath, JSON.stringify({ ...manifest, serverImage: { name: 'unexpected' } }));
+      assert.throws(() => prepareReleaseLayout(input), /Desktop-only release/);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -10,7 +10,8 @@ import { ErrorAlert } from "@/components/governance-ui";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { authMethods, login } from "@/lib/auth-api";
+import { APIError } from "@/lib/api";
+import { accountIdentifierInput, authMethods, login } from "@/lib/auth-api";
 import { cleanInputIdentifier } from "@/lib/text";
 
 const oauthErrors: Record<string, string> = {
@@ -18,6 +19,8 @@ const oauthErrors: Record<string, string> = {
   oauth_provider_denied: "已取消钉钉授权",
   oauth_state_invalid: "登录请求已失效，请重试",
   dingtalk_upstream_unavailable: "钉钉服务暂时不可用",
+  employee_directory_unavailable: "企业员工服务暂时不可用，请稍后重试",
+  employee_phone_missing: "企业员工资料缺少有效手机号，请联系管理员",
   not_enterprise_member: "当前钉钉账号不是可用企业成员",
   dingtalk_email_missing: "企业资料未配置邮箱，请联系管理员",
   account_binding_required: "请先使用原密码登录并绑定钉钉",
@@ -54,11 +57,11 @@ export function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      const response = await login({ email: cleanInputIdentifier(email), password });
+      const response = await login({ ...accountIdentifierInput(cleanInputIdentifier(email)), password });
       queryClient.removeQueries({ queryKey: ["auth"] });
       navigate(loginDestination(location.state, response.redirectTo), { replace: true });
-    } catch {
-      setError("邮箱或密码不正确");
+    } catch (reason) {
+      setError(reason instanceof APIError && reason.status >= 500 ? "登录服务暂时不可用，请检查服务端数据库连接" : "邮箱、手机号或密码不正确");
     } finally {
       setSubmitting(false);
     }
@@ -76,14 +79,14 @@ export function LoginPage() {
         <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit}>
           <FieldGroup className="gap-5">
             <Field className="gap-2">
-              <FieldLabel htmlFor="login-email">邮箱地址</FieldLabel>
+              <FieldLabel htmlFor="login-email">邮箱或手机号</FieldLabel>
               <Input
-                autoComplete="email"
+                autoComplete="username"
                 id="login-email"
                 name="email"
                 onChange={(event) => setEmail(cleanInputIdentifier(event.target.value))}
                 required
-                type="email"
+                type="text"
                 value={email}
               />
             </Field>

@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { registerAccount } from "@/lib/auth-api";
+import { accountIdentifierInput, registerAccount } from "@/lib/auth-api";
 import { cleanInputIdentifier, trimInput } from "@/lib/text";
 
 export function RegisterPage() {
@@ -28,7 +28,7 @@ export function RegisterPage() {
     if (!normalizedName) return;
     setSubmitting(true);
     try {
-      const response = await registerAccount({ email: cleanInputIdentifier(email), name: normalizedName, password });
+      const response = await registerAccount({ ...accountIdentifierInput(cleanInputIdentifier(email)), name: normalizedName, password });
       navigate(response.redirectTo, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "注册失败");
@@ -49,14 +49,14 @@ export function RegisterPage() {
         <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit}>
           <FieldGroup className="gap-5">
             <Field className="gap-2">
-              <FieldLabel htmlFor="register-email">邮箱地址</FieldLabel>
+              <FieldLabel htmlFor="register-email">邮箱或手机号</FieldLabel>
               <Input
-                autoComplete="email"
+                autoComplete="username"
                 id="register-email"
                 name="email"
                 onChange={(event) => setEmail(cleanInputIdentifier(event.target.value))}
                 required
-                type="email"
+                type="text"
                 value={email}
               />
             </Field>

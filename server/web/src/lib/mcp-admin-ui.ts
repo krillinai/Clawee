@@ -8,6 +8,12 @@ import type {
 } from "./mcp-admin-api";
 import { formatBeijingDateTime } from "./datetime";
 
+export function isDataAuthorizedTool(capability?: MCPCapability, server?: MCPUpstreamServer): boolean {
+  return server?.id === "skill-contributions" && server.transport === "builtin" &&
+    capability?.upstreamServerId === server.id && capability.type === "tool" &&
+    ["skill_contributions_query", "skill_contributions_export"].includes(capability.upstreamName);
+}
+
 export type BadgeVariant = "default" | "success" | "muted" | "warning" | "danger" | "accent";
 
 export type CapabilityRowView = Partial<MCPCapability> & {

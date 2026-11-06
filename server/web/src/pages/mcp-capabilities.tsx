@@ -958,7 +958,7 @@ function GrantList({ grants }: { grants: MCPGrant[] }) {
       {grants.map((grant) => (
         <ResourceItem
           key={grant.id}
-          meta={`账户 ${compactGrantAgentID(grant.userId)} · 创建人 ${grant.createdBy || "-"}`}
+          meta={`${grant.roleId ? `角色 ${compactGrantAgentID(grant.roleId)}` : `账户 ${compactGrantAgentID(grant.userId)}`} · 创建人 ${grant.createdBy || "-"}`}
           title={grantTypeLabel(grant.grantType)}
         >
           <div className="grid gap-2 text-xs">
