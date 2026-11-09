@@ -20,8 +20,8 @@ if (args.includes('--help')) {
   console.log([
     'Usage: pnpm desktop:tag:check -- [v<version>]',
     '',
-    'Checks local release evidence, pushed HEAD, GitHub Release Preflight status,',
-    'tag immutability, and macOS signing credentials. It never creates a tag.'
+    '检查本地发布证据、已推送 HEAD、Tag 不可变性及 macOS 签名凭据，不创建 Tag。',
+    '远端预检由 Tag 触发的 Release 工作流执行，通过后才允许正式打包和发布。'
   ].join('\n'));
   process.exit(0);
 }
@@ -98,24 +98,13 @@ if (
 }
 
 assertTagDoesNotExist(requestedTag);
-const preflightState = commandOutput('gh', [
-  'api',
-  `repos/{owner}/{repo}/commits/${head}/status`,
-  '--jq',
-  '[.statuses[] | select(.context == "release-preflight")][0].state // "missing"'
-]);
-if (preflightState !== 'success') {
-  throw new Error(
-    `Commit ${head} Release Preflight status is ${preflightState}; `
-    + 'do not create or push the release tag.'
-  );
-}
 commandOutput('pnpm', ['desktop:release:doctor'], { inherit: true });
 
 console.log(
   `[desktop-tag-check] ${requestedTag} 可以创建：commit=${head} `
-  + 'local=passed remote=passed credentials=passed'
+  + 'local=passed upstream=passed credentials=passed'
 );
+console.log('[desktop-tag-check] 远端预检由 Tag 触发的 Release 工作流执行，当前未验证远端发布结果。');
 console.log('[desktop-tag-check] 本命令没有创建或推送任何 Tag。');
 
 function assertTagDoesNotExist(tag) {

@@ -221,6 +221,7 @@ type catalogArtifact struct {
 	Format      string `json:"format"`
 	DownloadURL string `json:"downloadUrl"`
 	SHA256      string `json:"sha256"`
+	Bytes       int64  `json:"bytes"`
 }
 
 func parseCatalog(doc catalogDocument) ([]Artifact, string, error) {

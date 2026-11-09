@@ -42,15 +42,20 @@ func ProductionEndpoints() Endpoints {
 }
 
 type Client struct {
-	clientID     string
-	clientSecret string
-	httpClient   *http.Client
-	endpoints    Endpoints
-	clock        func() time.Time
+	clientID          string
+	clientSecret      string
+	httpClient        *http.Client
+	endpoints         Endpoints
+	clock             func() time.Time
+	employeeDirectory EmployeeDirectory
 
 	mu             sync.Mutex
 	appToken       string
 	appTokenExpiry time.Time
+}
+
+func (c *Client) SetEmployeeDirectory(directory EmployeeDirectory) {
+	c.employeeDirectory = directory
 }
 
 func (c *Client) AuthorizationURL(redirectURL, state string) string {
@@ -88,6 +93,13 @@ func (c *Client) ResolveMember(ctx context.Context, code string) (Member, error)
 	userID, err := c.userIDByUnionID(ctx, appToken, unionID)
 	if err != nil {
 		return Member{}, err
+	}
+	if c.employeeDirectory != nil {
+		profile, err := c.employeeDirectory.LookupEmployee(ctx, userID)
+		if err != nil {
+			return Member{}, err
+		}
+		return Member{UnionID: unionID, UserID: userID, Name: profile.Name, Phone: profile.Phone, EnterpriseUserID: profile.EnterpriseUserID, AvatarURL: avatarURL, Organization: profile.Organization}, nil
 	}
 	name, email, detailAvatarURL, err := c.userDetail(ctx, appToken, userID)
 	if err != nil {

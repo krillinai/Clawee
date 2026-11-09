@@ -111,6 +111,15 @@ export class FakeEnterpriseDaemon {
     });
 
     if (path === '/healthz') return fulfill(route, { ok: true });
+    if (path === '/feedback/policy' && request.method() === 'GET') {
+      return fulfill(route, { external_feedback_allowed: false });
+    }
+    if (path === '/enterprise/skill-contributions/capability' && request.method() === 'GET') {
+      return fulfill(route, { allowed: false });
+    }
+    if (path === '/desktop-update/activity' && request.method() === 'POST') {
+      return fulfill(route, { recorded: true });
+    }
     if (path === '/runtime/model-service') {
       return fulfill(route, modelServiceStatus());
     }
@@ -149,10 +158,29 @@ export class FakeEnterpriseDaemon {
     if (path === '/threads?status=active&purpose=conversation&limit=50') {
       return fulfill(route, { threads: [] });
     }
+    if (
+      path === '/threads?status=active&purpose=skill_review&limit=50'
+      && request.method() === 'GET'
+    ) {
+      return fulfill(route, { threads: [] });
+    }
     if (path.startsWith('/tasks?')) return fulfill(route, { tasks: [], hasMore: false });
     if (path === '/schedules') return fulfill(route, { schedules: [] });
+    if (path === '/enterprise/gateway' && request.method() === 'GET') {
+      return fulfill(route, {
+        gateway: 'https://gateway.example.test',
+        gateways: ['https://gateway.example.test'],
+        configurable: true
+      });
+    }
+    if (path === '/enterprise/platform-branding' && request.method() === 'GET') {
+      return fulfill(route, { sidebarLogoConfigured: false });
+    }
     if (path === '/enterprise/session') return fulfill(route, sessionResponse(this.state.session));
-    if (path === '/enterprise/session/refresh' && request.method() === 'POST') {
+    if (
+      (path === '/enterprise/session/refresh' || path === '/enterprise/session/renew')
+      && request.method() === 'POST'
+    ) {
       return fulfill(route, sessionResponse(this.state.session));
     }
     if (
@@ -165,23 +193,30 @@ export class FakeEnterpriseDaemon {
       });
     }
     if (
-      path === '/enterprise/business-dashboards/bilibili-operation'
+      url.pathname === `${runtimePrefix}/enterprise/business-dashboards/bilibili-operation`
       && request.method() === 'GET'
     ) {
       return fulfill(route, {
         status: 'available',
+        range: url.searchParams.get('range') ?? '7d',
+        unavailableParts: [],
+        sources: [],
         data: {
           capturedAt: '2026-08-30T01:30:00.000Z',
           followerCount: 128600,
           collectedContentCount: 24,
           viewCount: 8650000,
           interactionCount: 316800,
+          trend: [],
           topContents: [{
+            sourceId: 'bdsrc_enterprise',
+            accountName: '企业账号',
             externalContentId: 'BV1enterprise',
             title: '企业新品内容复盘',
             capturedAt: '2026-08-30T01:20:00.000Z',
             viewCount: 680000,
-            interactionCount: 28600
+            interactionCount: 28600,
+            status: 'published'
           }]
         }
       });
@@ -475,7 +510,7 @@ export class FakeEnterpriseDaemon {
       this.state.createdThread = true;
       return fulfill(route, { thread: createdThread() }, 201);
     }
-    if (path === '/threads/thread-enterprise-skill/history?limit=50') {
+    if (path === '/threads/thread-enterprise-skill/history?limit=10') {
       return fulfill(route, {
         threadId: 'thread-enterprise-skill',
         codexThreadId: null,
@@ -523,7 +558,7 @@ function sessionResponse(status: 'signed_out' | 'signed_in') {
           email: 'member@example.com',
           name: 'Enterprise Member'
         },
-        expiresAt: '2026-08-30T12:00:00.000Z',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         transportSecurity: 'secure_https'
       }
     : {

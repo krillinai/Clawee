@@ -75,6 +75,81 @@ func TestStaticBearerHTTPUnauthorizedIsTyped(t *testing.T) {
 	}
 }
 
+func TestSDKUpstreamClientForwardsTaskInitiatorOnlyForSubmission(t *testing.T) {
+	server := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		upstream := mcp.NewServer(&mcp.Implementation{Name: "clawee-task-service", Version: "0.1.0"}, nil)
+		for _, name := range []string{"clawee_submit_task", "clawee_get_task", "other_tool"} {
+			mcp.AddTool(upstream, &mcp.Tool{Name: name},
+				func(_ context.Context, req *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
+					return nil, map[string]any{
+						"user_id":       req.Extra.Header.Get("X-Claw-User-ID"),
+						"agent_id":      req.Extra.Header.Get("X-Claw-Agent-ID"),
+						"authorization": req.Extra.Header.Get("Authorization"),
+					}, nil
+				})
+		}
+		return upstream
+	}, nil))
+	defer server.Close()
+
+	client := NewSDKUpstreamClient("test-gateway")
+	remote := UpstreamServer{ID: "remote-agent", Transport: TransportStreamableHTTP, Endpoint: server.URL, AuthType: "static_bearer"}
+	for _, test := range []struct {
+		name      string
+		caller    AgentIdentity
+		wantUser  string
+		wantAgent string
+	}{
+		{"clawee_submit_task", AgentIdentity{UserID: "user_1", AgentID: "agent_1"}, "user_1", "agent_1"},
+		{"clawee_submit_task", AgentIdentity{UserID: "user_2", AgentID: "agent_2"}, "user_2", "agent_2"},
+		{"clawee_submit_task", AgentIdentity{}, "", ""},
+		{"clawee_get_task", AgentIdentity{UserID: "user_1", AgentID: "agent_1"}, "", ""},
+		{"other_tool", AgentIdentity{UserID: "user_1", AgentID: "agent_1"}, "", ""},
+	} {
+		result, err := client.CallTool(context.Background(), UpstreamCallRequest{
+			Server: remote, Capability: Capability{UpstreamName: test.name},
+			Arguments: JSONMap{}, BearerToken: "runtime-token", Caller: test.caller,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := result.StructuredContent.(map[string]any)
+		if content["user_id"] != test.wantUser || content["agent_id"] != test.wantAgent || content["authorization"] != "Bearer runtime-token" {
+			t.Fatalf("%s caller headers = %#v", test.name, content)
+		}
+	}
+}
+
+func TestBearerRoundTripperReplacesCallerHeadersWithoutMutatingRequest(t *testing.T) {
+	received := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		received <- req.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	req, err := http.NewRequest(http.MethodPost, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Claw-User-ID", "forged-user")
+	req.Header.Set("X-Claw-Agent-ID", "forged-agent")
+	for _, caller := range []AgentIdentity{{UserID: "user_1", AgentID: "agent_1"}, {}} {
+		transport := &bearerRoundTripper{token: "runtime-token", caller: caller}
+		response, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		headers := <-received
+		if headers.Get("X-Claw-User-ID") != caller.UserID || headers.Get("X-Claw-Agent-ID") != caller.AgentID {
+			t.Fatalf("caller headers = %#v", headers)
+		}
+		if req.Header.Get("X-Claw-User-ID") != "forged-user" || req.Header.Get("X-Claw-Agent-ID") != "forged-agent" {
+			t.Fatal("original request headers were modified")
+		}
+	}
+}
+
 func TestSDKUpstreamClientForwardsJSONNumberProgressToken(t *testing.T) {
 	var receivedProgressToken any
 	server := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {

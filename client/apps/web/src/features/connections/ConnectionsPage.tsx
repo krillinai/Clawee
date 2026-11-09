@@ -3,6 +3,7 @@ import type {
   CodexMcpPresetResponse,
   CodexMcpServerResponse,
   EnterpriseMcpCatalogResponse,
+  EnterpriseMcpHealthResponse,
   EnterpriseMcpPreferenceUpdateRequest,
   EnterpriseMcpUpstreamResponse,
   EnterpriseSessionResponse
@@ -13,7 +14,6 @@ import {
   ListFilter,
   LoaderCircle,
   LogIn,
-  LogOut,
   Network,
   Plus,
   RefreshCw,
@@ -26,12 +26,14 @@ import {
   WifiOff
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import {
   McpEditor,
   type McpCapabilities,
   type McpSettingsService
 } from '../settings/McpSettingsView.js';
 import { McpIcon } from './McpIcon.js';
+import { AgentHealth } from './AgentHealth.js';
 import '../settings/settings-management.css';
 import './connections.css';
 
@@ -40,6 +42,7 @@ type ConnectionFilter = 'all' | 'enabled' | 'installed' | 'available';
 export type EnterpriseMcpConnectionService = {
   listMcpConnections(): Promise<EnterpriseMcpCatalogResponse>;
   refreshMcpConnections(): Promise<EnterpriseMcpCatalogResponse>;
+  checkMcpHealth(upstreamId: string): Promise<EnterpriseMcpHealthResponse>;
   updateMcpPreference(
     upstreamId: string,
     input: EnterpriseMcpPreferenceUpdateRequest
@@ -85,6 +88,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
   const [filter, setFilter] = useState<ConnectionFilter>('all');
   const [busyKey, setBusyKey] = useState<string>();
   const [editorOpen, setEditorOpen] = useState(false);
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     setNativeData(props.mcpData);
@@ -215,9 +219,9 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
     ));
   }, [connections, filter, query]);
 
-  function confirmGlobalWrite(): boolean {
+  async function confirmGlobalWrite(): Promise<boolean> {
     return nativeData?.requiresWriteConfirmation !== true
-      || window.confirm('此操作会修改全局 CODEX_HOME，是否继续？');
+      || confirm({ title: '确认修改全局配置', description: '此操作会修改全局 CODEX_HOME，是否继续？', confirmLabel: '继续' });
   }
 
   async function runNativeAction(
@@ -234,11 +238,11 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
     }
     if (
       action === 'remove'
-      && !window.confirm(`删除 MCP ${item.server.name}？`)
+      && !(await confirm({ title: '删除 MCP', description: `删除 MCP ${item.server.name}？`, confirmLabel: '删除', destructive: true }))
     ) {
       return;
     }
-    if (!confirmGlobalWrite()) return;
+    if (!(await confirmGlobalWrite())) return;
 
     setBusyKey(item.key);
     setLoadError(undefined);
@@ -271,7 +275,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
       || item.upstream === undefined
       || busyKey !== undefined
       || props.mcpCapabilities?.mcpAdd !== true
-      || !confirmGlobalWrite()
+      || !(await confirmGlobalWrite())
     ) {
       return;
     }
@@ -303,7 +307,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
       || item.preset === undefined
       || busyKey !== undefined
       || props.mcpCapabilities?.mcpAdd !== true
-      || !confirmGlobalWrite()
+      || !(await confirmGlobalWrite())
     ) {
       return;
     }
@@ -434,7 +438,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
               if (
                 props.mcpService === null
                 || props.mcpCapabilities?.mcpAdd !== true
-                || !confirmGlobalWrite()
+                || !(await confirmGlobalWrite())
               ) {
                 return;
               }
@@ -530,6 +534,19 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
                 busy={busyKey === item.key}
                 blocked={busyKey !== undefined}
                 capabilities={props.mcpCapabilities}
+                health={item.upstream?.tools.some(tool => (
+                  tool.upstreamName === 'clawee_submit_task' || tool.upstreamName === 'clawee_get_agent_health'
+                )) ? (
+                  <AgentHealth
+                    key={`${props.session.agentId ?? ''}:${props.session.account?.subjectId ?? ''}`}
+                    upstreamId={item.upstream.upstreamId}
+                    name={item.name}
+                    connected={props.connected}
+                    signedIn={props.session.status === 'signed_in'}
+                    service={props.service}
+                    onSessionExpired={props.onSessionExpired}
+                  />
+                ) : undefined}
                 onInstall={() => installConnection(item)}
                 onAction={action => void runNativeAction(item, action)}
               />
@@ -537,6 +554,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
           </section>
         )}
       </div>
+      {confirmDialog}
     </main>
   );
 }
@@ -546,9 +564,14 @@ function ConnectionCard(props: {
   busy: boolean;
   blocked: boolean;
   capabilities?: McpCapabilities;
+  health?: ReactNode;
   onInstall(): void;
   onAction(action: 'enable' | 'disable' | 'login' | 'logout' | 'remove'): void;
 }) {
+  const supportsAuth = props.item.upstream === undefined && (
+    props.item.server?.authStatus === 'not_logged_in'
+    || props.item.server?.authStatus === 'oauth'
+  );
   const description = props.item.upstream?.tools.find(tool => (
     tool.authorized && tool.description.trim().length > 0
   ))?.description
@@ -588,6 +611,8 @@ function ConnectionCard(props: {
 
       <p className="connection-card__description">{description}</p>
 
+      {props.health}
+
       <div className="connection-card__meta">
         <span>{props.item.server?.transport ?? props.item.upstream?.namespace}</span>
         <span>
@@ -602,32 +627,28 @@ function ConnectionCard(props: {
       <footer>
         {props.item.installed && props.item.server !== undefined ? (
           <>
-            <button
-              className="connection-icon-action"
-              type="button"
-              aria-label={`登录 ${props.item.server.name}`}
-              title="登录"
-              disabled={
-                props.blocked
-                || props.capabilities?.mcpLogin !== true
-              }
-              onClick={() => props.onAction('login')}
-            >
-              <LogIn size={15} aria-hidden="true" />
-            </button>
-            <button
-              className="connection-icon-action"
-              type="button"
-              aria-label={`退出 ${props.item.server.name}`}
-              title="退出"
-              disabled={
-                props.blocked
-                || props.capabilities?.mcpLogout !== true
-              }
-              onClick={() => props.onAction('logout')}
-            >
-              <LogOut size={15} aria-hidden="true" />
-            </button>
+            {supportsAuth && props.capabilities?.mcpLogin === true ? (
+              <button
+                className="connection-auth-action"
+                type="button"
+                aria-label={`登录 ${props.item.server.name}`}
+                disabled={props.blocked}
+                onClick={() => props.onAction('login')}
+              >
+                登录
+              </button>
+            ) : null}
+            {supportsAuth && props.capabilities?.mcpLogout === true ? (
+              <button
+                className="connection-auth-action"
+                type="button"
+                aria-label={`退出 ${props.item.server.name}`}
+                disabled={props.blocked}
+                onClick={() => props.onAction('logout')}
+              >
+                退出
+              </button>
+            ) : null}
             <button
               className="connection-icon-action connection-icon-action--danger"
               type="button"

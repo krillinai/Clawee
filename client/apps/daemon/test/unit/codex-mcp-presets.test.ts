@@ -35,7 +35,7 @@ describe('local MCP presets', () => {
     expect(commandRunner).not.toHaveBeenCalled();
   });
 
-  it('discovers the signed OpenAI Computer Use client', async () => {
+  it.runIf(process.platform !== 'win32')('discovers the signed OpenAI Computer Use client', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-mcp-presets-'));
     const command = createComputerUseLayout(tempDir);
     const commandRunner = createValidCodesignRunner();
@@ -63,7 +63,7 @@ describe('local MCP presets', () => {
     const external = join(tempDir, 'external');
     mkdirSync(home, { recursive: true });
     createComputerUseLayout(external);
-    symlinkSync(join(external, '.codex'), join(home, '.codex'), 'dir');
+    symlinkSync(join(external, '.codex'), join(home, '.codex'), process.platform === 'win32' ? 'junction' : 'dir');
     const commandRunner = createValidCodesignRunner();
 
     await expect(discoverLocalMcpPresets({

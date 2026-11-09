@@ -147,6 +147,27 @@ func TestPostgresStoreDoesNotMigrateAccountTokens(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreRejectsMergeWithPersonalSpaceWithoutChanges(t *testing.T) {
+	pool := openGovernanceTestPool(t)
+	ctx := context.Background()
+	seedGovernanceFixture(t, pool, time.Now().UTC())
+	if _, err := pool.Exec(ctx, `INSERT INTO shared_spaces (space_id, personal_owner_user_id) VALUES ('personal', 'user-disabled')`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewPostgresStore(pool).MergeAccounts(ctx, MergeAccountsInput{
+		SourceUserID: "user-disabled", TargetUserID: "user-target",
+		Reason: "personal space", OperatorUserID: "user-admin",
+	})
+	if err != ErrPersonalSpaceConflict {
+		t.Fatalf("error = %v", err)
+	}
+	assertCount(t, pool, `SELECT count(*) FROM accounts WHERE user_id = 'user-disabled'`, 1)
+	assertCount(t, pool, `SELECT count(*) FROM shared_spaces WHERE personal_owner_user_id = 'user-disabled'`, 1)
+	assertAgentOwner(t, pool, "agent-merge", "user-disabled")
+	assertAccountAccessRows(t, pool, "user-disabled", "token-merge", "grant-merge")
+	assertCount(t, pool, `SELECT count(*) FROM account_governance_audits`, 0)
+}
+
 func seedGovernanceFixture(t *testing.T, pool *pgxpool.Pool, now time.Time) {
 	t.Helper()
 	batch := &pgx.Batch{}
@@ -258,6 +279,7 @@ func openGovernanceTestPool(t *testing.T) *pgxpool.Pool {
 
 const governanceTestSchema = `
 	CREATE TABLE accounts (user_id TEXT PRIMARY KEY, status TEXT NOT NULL);
+	CREATE TABLE shared_spaces (space_id TEXT PRIMARY KEY, personal_owner_user_id TEXT UNIQUE REFERENCES accounts(user_id) ON DELETE RESTRICT);
 	CREATE TABLE mcp_agents (agent_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
 	CREATE TABLE account_agents (user_id TEXT NOT NULL REFERENCES accounts(user_id) ON DELETE CASCADE, agent_id TEXT NOT NULL UNIQUE REFERENCES mcp_agents(agent_id), created_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (user_id, agent_id));
 	CREATE TABLE mcp_account_tokens (token_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES accounts(user_id) ON DELETE CASCADE, token_hash TEXT NOT NULL);

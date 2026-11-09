@@ -15,6 +15,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/rbac"
 	"github.com/krillinai/Clawee/server/internal/sharedfiles"
+	"github.com/krillinai/Clawee/server/internal/workflow"
 )
 
 type sharedSpaceRequest struct {
@@ -45,11 +46,11 @@ func mountSharedFileRoutes(app, admin *gin.RouterGroup, opts Options) {
 	}
 	appFiles := app.Group("")
 	appFiles.Use(requireClaweeFileCaller())
-	appFiles.GET("/shared-spaces", handleAppSharedSpaces(opts.SharedFilesService))
+	appFiles.GET("/shared-spaces", handleAppSharedSpacesWithMetadata(opts.SharedFilesService, opts.WorkflowService))
 	appFiles.GET("/shared-files", handleAppSharedFiles(opts.SharedFilesService))
 	appFiles.GET("/shared-files/detail", handleAppSharedFileDetail(opts.SharedFilesService))
 	appFiles.GET("/shared-files/content", handleAppSharedFileDownload(opts.SharedFilesService))
-	appFiles.POST("/shared-files/content", handleAppSharedFileUpload(opts.SharedFilesService))
+	appFiles.POST("/shared-files/content", sharedFileOperationLog(opts.Logger, "upload"), handleAppSharedFileUpload(opts.SharedFilesService, opts.RBACService))
 
 	read := requirePermission(opts.RBACService, rbac.PermissionSharedFilesRead)
 	admin.GET("/shared-spaces", read, handleAdminSharedSpaces(opts.SharedFilesService))
@@ -79,6 +80,10 @@ func requireClaweeFileCaller() gin.HandlerFunc {
 }
 
 func handleAppSharedSpaces(service *sharedfiles.Service) gin.HandlerFunc {
+	return handleAppSharedSpacesWithMetadata(service, nil)
+}
+
+func handleAppSharedSpacesWithMetadata(service *sharedfiles.Service, workflowService *workflow.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		account, _ := currentAccount(c)
 		limit, ok := parseLimit(c)
@@ -90,7 +95,31 @@ func handleAppSharedSpaces(service *sharedfiles.Service) gin.HandlerFunc {
 			writeSharedFileError(c, err)
 			return
 		}
+		decorateAppSpaceNames(c, page.Items, workflowService)
 		c.JSON(http.StatusOK, gin.H{"data": page.Items, "meta": gin.H{"next_cursor": page.NextCursor, "has_next": page.HasNext, "max_file_size_bytes": sharedfiles.MaxFileSizeBytes}})
+	}
+}
+
+func decorateAppSpaceNames(c *gin.Context, spaces []sharedfiles.Space, workflowService *workflow.Service) {
+	if workflowService == nil || workflowService.DB == nil {
+		return
+	}
+	rows, err := workflowService.DB.Query(c.Request.Context(), `SELECT shared_space_id,name FROM workflow_templates WHERE shared_space_id IS NOT NULL AND shared_space_id<>''`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	names := map[string]string{}
+	for rows.Next() {
+		var spaceID, name string
+		if rows.Scan(&spaceID, &name) == nil && strings.TrimSpace(spaceID) != "" && strings.TrimSpace(name) != "" {
+			names[spaceID] = strings.TrimSpace(name)
+		}
+	}
+	for index := range spaces {
+		if name := names[spaces[index].SpaceID]; name != "" {
+			spaces[index].WorkflowTemplateName = name
+		}
 	}
 }
 
@@ -134,7 +163,7 @@ func handleAppSharedFileDownload(service *sharedfiles.Service) gin.HandlerFunc {
 	}
 }
 
-func handleAppSharedFileUpload(service *sharedfiles.Service) gin.HandlerFunc {
+func handleAppSharedFileUpload(service *sharedfiles.Service, permissions ...*rbac.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		expectedRevision, ok := parseSharedFileUpload(c)
 		if !ok {
@@ -142,12 +171,27 @@ func handleAppSharedFileUpload(service *sharedfiles.Service) gin.HandlerFunc {
 		}
 		account, _ := currentAccount(c)
 		principal, _ := currentPrincipal(c)
-		result, err := service.Upload(c.Request.Context(), account.UserID, principal.AgentID, c.Query("space_id"), c.Query("logical_path"),
+		effectiveUser := strings.TrimSpace(c.Query("for_user_id"))
+		if effectiveUser == "" {
+			effectiveUser = account.UserID
+		}
+		if effectiveUser != account.UserID {
+			var permissionService *rbac.Service
+			if len(permissions) > 0 {
+				permissionService = permissions[0]
+			}
+			if !authorizeAnyPermission(c, permissionService, rbac.PermissionSharedFilesUpload) {
+				return
+			}
+		}
+		result, err := service.UploadForUser(c.Request.Context(), account.UserID, principal.AgentID, effectiveUser, c.Query("space_id"), c.Query("logical_path"),
 			c.GetHeader("Content-Type"), c.Request.ContentLength, strings.TrimSpace(c.GetHeader("X-Content-SHA256")), expectedRevision, c.Request.Body)
 		if err != nil {
 			writeSharedFileError(c, err)
 			return
 		}
+		c.Set(sharedFileLogFileIDKey, result.FileID)
+		c.Set(sharedFileLogSpaceIDKey, result.SpaceID)
 		status := http.StatusOK
 		if result.Created {
 			status = http.StatusCreated
@@ -286,6 +330,8 @@ func sharedFileOperationLog(logger *zap.Logger, action string) gin.HandlerFunc {
 			zap.String("request_id", requestIDFromContext(c.Request.Context())),
 			zap.String("operator_user_id", account.UserID),
 			zap.String("action", action),
+			zap.String("target_user_id", firstNonEmpty(strings.TrimSpace(c.Query("for_user_id")), account.UserID)),
+			zap.String("agent_id", func() string { p, _ := currentPrincipal(c); return p.AgentID }()),
 			zap.String("space_id", firstNonEmpty(contextString(c, sharedFileLogSpaceIDKey), strings.TrimSpace(c.Query("space_id")))),
 			zap.String("file_id", firstNonEmpty(contextString(c, sharedFileLogFileIDKey), strings.TrimSpace(c.Query("file_id")))),
 			zap.String("result", result),
@@ -305,7 +351,7 @@ func handleAdminSharedSpaces(service *sharedfiles.Service) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		page, err := service.ListAdminSpaces(c.Request.Context(), c.Query("query"), limit, c.Query("cursor"))
+		page, err := service.ListAdminSpacesForOwner(c.Request.Context(), c.Query("query"), c.Query("personal_owner_user_id"), limit, c.Query("cursor"))
 		if err != nil {
 			writeSharedFileError(c, err)
 			return

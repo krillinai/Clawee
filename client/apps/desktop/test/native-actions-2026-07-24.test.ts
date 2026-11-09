@@ -1,13 +1,59 @@
-import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const shellOpenExternal = vi.hoisted(() => vi.fn(async () => undefined));
+const shellOpenPath = vi.hoisted(() => vi.fn(async (_path: string) => ''));
 
 vi.mock('electron', () => ({
-  shell: { openExternal: shellOpenExternal }
+  shell: { openExternal: shellOpenExternal, openPath: shellOpenPath }
 }));
 
-import { openExternal } from '../src/main/native-actions.js';
+import { openExternal, openFile } from '../src/main/native-actions.js';
+
+describe('桌面默认应用打开', () => {
+  let directory: string;
+  beforeEach(() => {
+    directory = realpathSync(mkdtempSync(join(tmpdir(), 'clawee-open-file-')));
+    shellOpenPath.mockReset().mockResolvedValue('');
+  });
+  afterEach(() => rmSync(directory, { recursive: true, force: true }));
+
+  it('通过系统关联打开含中文、空格和单引号的原文档', async () => {
+    const path = join(directory, "培训方案 O'Brien.pptx");
+    writeFileSync(path, 'presentation');
+    await expect(openFile(path)).resolves.toEqual({ ok: true });
+    expect(shellOpenPath).toHaveBeenCalledExactlyOnceWith(path);
+  });
+
+  it('拒绝相对路径、网址、不存在的文件、目录和可执行文件', async () => {
+    const executable = join(directory, 'report.exe');
+    writeFileSync(executable, 'executable');
+    for (const path of ['relative.pptx', 'https://example.com/report.pptx', join(directory, 'missing.pptx'), directory, executable]) {
+      await expect(openFile(path)).resolves.toMatchObject({ ok: false, code: 'FAILED' });
+    }
+    expect(shellOpenPath).not.toHaveBeenCalled();
+  });
+
+  (process.platform === 'win32' ? it.skip : it)('拒绝伪装成文档的可执行文件链接', async () => {
+    const executable = join(directory, 'report.sh');
+    writeFileSync(executable, 'executable');
+    const alias = join(directory, 'report.pdf');
+    symlinkSync(executable, alias);
+    await expect(openFile(alias)).resolves.toMatchObject({ ok: false });
+    expect(shellOpenPath).not.toHaveBeenCalled();
+  });
+
+  it('系统未能打开文件时返回用户可读错误', async () => {
+    const path = join(directory, 'report.pdf');
+    writeFileSync(path, 'pdf');
+    shellOpenPath.mockResolvedValueOnce('No application associated');
+    await expect(openFile(path)).resolves.toMatchObject({ ok: false, message: expect.stringContaining('默认应用') });
+    shellOpenPath.mockRejectedValueOnce(new Error('OS failure'));
+    await expect(openFile(path)).resolves.toMatchObject({ ok: false });
+  });
+});
 
 describe('desktop external URL boundary', () => {
   beforeEach(() => {
@@ -42,7 +88,7 @@ describe('desktop external URL boundary', () => {
 describe('desktop project boundary', () => {
   it('keeps project creation in the Runtime instead of the native bridge', () => {
     const nativeActions = readFileSync('src/main/native-actions.ts', 'utf8');
-    const main = readFileSync('src/main/main.ts', 'utf8');
+    const main = readFileSync('src/main/desktop-main.ts', 'utf8');
     const ipc = readFileSync('src/shared/ipc.ts', 'utf8');
     const preload = readFileSync('src/preload/index.ts', 'utf8');
 
@@ -57,7 +103,7 @@ describe('desktop project boundary', () => {
   });
 
   it('passes the system documents directory to the Runtime managed project root', () => {
-    const main = readFileSync('src/main/main.ts', 'utf8');
+    const main = readFileSync('src/main/desktop-main.ts', 'utf8');
     const bootstrap = readFileSync('src/main/bootstrap-controller.ts', 'utf8');
     const daemonManager = readFileSync('src/main/daemon-manager.ts', 'utf8');
 

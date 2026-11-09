@@ -169,11 +169,13 @@ func TestOfficeAppActivityDetailRequiresDataViewGrant(t *testing.T) {
 	accountSvc := newTestAccountService(accounts.NewMemoryStore())
 	dataService := dataaccess.NewService(dataaccess.NewMemoryStore())
 	reader := &fakeDashboardReaderForRouteTest{}
+	dashboardAPI := httpapi.NewDashboardAPI(reader, nil, func() time.Time { return time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC) })
 	router := newTestRouter(t, server.Options{
-		ProxyGateway:       testProxyGateway(mcpgateway.NewMemoryStore()),
-		AccountService:     accountSvc,
-		DataAccessService:  dataService,
-		OfficeDashboardAPI: httpapi.NewDashboardAPI(reader, nil, func() time.Time { return time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC) }),
+		ProxyGateway:           testProxyGateway(mcpgateway.NewMemoryStore()),
+		AccountService:         accountSvc,
+		DataAccessService:      dataService,
+		OfficeDashboardAPI:     dashboardAPI,
+		OfficeUserDashboardAPI: dashboardAPI.UserHandler(nil, reader),
 	})
 	cookies := register(t, router, `{"email":"activity-detail@example.com","password":"passw0rd!"}`)
 
@@ -199,6 +201,16 @@ func TestOfficeAppActivityDetailRequiresDataViewGrant(t *testing.T) {
 	if reader.lastDetailCollectorID != "" || reader.lastDetailAgentID != "" {
 		t.Fatalf("unauthorized detail reached reader: %#v", reader)
 	}
+	requestRuntime := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/app/activity/runtime", nil)
+		req.AddCookie(frontendCookie(t, cookies))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := requestRuntime(); rec.Code != http.StatusForbidden {
+		t.Fatalf("runtime without grant status = %d body=%s", rec.Code, rec.Body.String())
+	}
 
 	if _, err := dataService.Create(ctx, dataaccess.SetInput{
 		UserID: accountsList[0].UserID, ResourceType: dataaccess.ResourceDataView,
@@ -206,20 +218,42 @@ func TestOfficeAppActivityDetailRequiresDataViewGrant(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if rec := request(); rec.Code != http.StatusOK {
-		t.Fatalf("detail with grant status = %d body=%s", rec.Code, rec.Body.String())
+	reader.userCollectors = map[string]map[string]bool{
+		accountsList[0].UserID: {"collector/owned": true},
 	}
-	if reader.lastDetailCollectorID != "collector/other" || reader.lastDetailAgentID != "agent/other" {
-		t.Fatalf("detail target = %q/%q", reader.lastDetailCollectorID, reader.lastDetailAgentID)
+	if rec := request(); rec.Code != http.StatusNotFound {
+		t.Fatalf("detail for another account status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if reader.lastDetailCollectorID != "" || reader.lastDetailAgentID != "" {
+		t.Fatalf("other account detail reached user reader: %#v", reader)
+	}
+	ownedRequest := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/app/activity/detail?collector_id=collector%2Fowned&agent_id=agent%2Fowned", nil)
+		req.AddCookie(frontendCookie(t, cookies))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := ownedRequest(); rec.Code != http.StatusOK {
+		t.Fatalf("detail for owned account status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if reader.lastDetailCollectorID != "collector/owned" || reader.lastDetailAgentID != "agent/owned" {
+		t.Fatalf("owned detail target = %q/%q", reader.lastDetailCollectorID, reader.lastDetailAgentID)
+	}
+	if rec := requestRuntime(); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"scope":"organization"`) {
+		t.Fatalf("runtime with grant status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestOfficeAppActivityDetailFailsClosedWithoutDataAccessService(t *testing.T) {
 	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	reader := &fakeDashboardReaderForRouteTest{}
+	dashboardAPI := httpapi.NewDashboardAPI(reader, nil, func() time.Time { return time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC) })
 	router := newTestRouter(t, server.Options{
-		ProxyGateway:       testProxyGateway(mcpgateway.NewMemoryStore()),
-		AccountService:     accountSvc,
-		OfficeDashboardAPI: httpapi.NewDashboardAPI(&fakeDashboardReaderForRouteTest{}, nil, func() time.Time { return time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC) }),
+		ProxyGateway:           testProxyGateway(mcpgateway.NewMemoryStore()),
+		AccountService:         accountSvc,
+		OfficeDashboardAPI:     dashboardAPI,
+		OfficeUserDashboardAPI: dashboardAPI.UserHandler(nil, reader),
 	})
 	cookies := register(t, router, `{"email":"activity-detail-unavailable@example.com","password":"passw0rd!"}`)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/activity/detail?collector_id=collector_1&agent_id=agent_1", nil)
@@ -582,6 +616,7 @@ func (s *captureManagementStoreForRouteTest) DeleteOfficeAgent(_ context.Context
 type fakeDashboardReaderForRouteTest struct {
 	office                   dashboard.OfficeSnapshot
 	agents                   []dashboard.AgentListItem
+	userCollectors           map[string]map[string]bool
 	lastDetailCollectorID    string
 	lastDetailAgentID        string
 	lastSubAgentsCollectorID string
@@ -606,8 +641,29 @@ func (r *fakeDashboardReaderForRouteTest) AgentDetailWithOptions(ctx context.Con
 	return r.AgentDetail(ctx, collectorID, agentID, now)
 }
 
-func (r *fakeDashboardReaderForRouteTest) UserAgentDetailWithOptions(_ context.Context, _, _, _ string, _ time.Time, _ dashboard.AgentDetailOptions) (dashboard.AgentDetail, error) {
+func (r *fakeDashboardReaderForRouteTest) UserAgentDetailWithOptions(_ context.Context, userID, collectorID, agentID string, _ time.Time, _ dashboard.AgentDetailOptions) (dashboard.AgentDetail, error) {
+	if !r.userCollectors[userID][collectorID] {
+		return dashboard.AgentDetail{}, httpapi.ErrNotFound
+	}
+	r.lastDetailCollectorID = collectorID
+	r.lastDetailAgentID = agentID
 	return dashboard.AgentDetail{}, nil
+}
+
+func (r *fakeDashboardReaderForRouteTest) UserOfficeSnapshot(_ context.Context, _ string, _ time.Time) (dashboard.OfficeSnapshot, error) {
+	return r.office, nil
+}
+
+func (r *fakeDashboardReaderForRouteTest) UserAgents(_ context.Context, _ string, _ time.Time) ([]dashboard.AgentListItem, error) {
+	return r.agents, nil
+}
+
+func (r *fakeDashboardReaderForRouteTest) UserSubAgents(_ context.Context, _, _, _ string, _ time.Time) ([]dashboard.SubAgentItem, error) {
+	return nil, nil
+}
+
+func (r *fakeDashboardReaderForRouteTest) UserRecentActivities(_ context.Context, _ string, _ int, _ time.Time) ([]dashboard.ActivityFeedItem, error) {
+	return nil, nil
 }
 
 func (r *fakeDashboardReaderForRouteTest) SubAgents(_ context.Context, collectorID, agentID string, _ time.Time) ([]dashboard.SubAgentItem, error) {

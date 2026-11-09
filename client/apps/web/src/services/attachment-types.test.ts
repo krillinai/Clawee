@@ -14,6 +14,9 @@ describe('attachment types', () => {
     ['html', 'text/html'],
     ['htm', 'text/html'],
     ['css', 'text/css'],
+    ['doc', 'application/msword'],
+    ['xls', 'application/vnd.ms-excel'],
+    ['ppt', 'application/vnd.ms-powerpoint'],
     ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
     ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     ['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
@@ -36,7 +39,10 @@ describe('attachment types', () => {
     ['config.yaml', 'application/yaml', 'text/yaml'],
     ['config.xml', 'application/xml', 'text/xml'],
     ['index.js', 'application/javascript', 'text/plain'],
-    ['config.json', 'text/plain', 'application/json']
+    ['config.json', 'text/plain', 'application/json'],
+    ['report.doc', 'application/octet-stream', 'application/msword'],
+    ['report.xls', '', 'application/vnd.ms-excel'],
+    ['report.ppt', 'application/octet-stream', 'application/vnd.ms-powerpoint']
   ])('uses the supported extension for %s regardless of browser MIME', (name, type, mime) => {
     expect(resolveAttachmentMime({ name, type })).toBe(mime);
   });
@@ -62,7 +68,7 @@ describe('attachment types', () => {
       .toBeUndefined();
     expect(resolveAttachmentMime({ name: 'photo.svg', type: 'image/svg+xml' }))
       .toBeUndefined();
-    expect(resolveAttachmentMime({ name: 'workbook.xls', type: 'application/vnd.ms-excel' }))
+    expect(resolveAttachmentMime({ name: 'workbook.xlsm', type: 'application/vnd.ms-excel.sheet.macroEnabled.12' }))
       .toBeUndefined();
   });
 });

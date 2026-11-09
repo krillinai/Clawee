@@ -1,5 +1,5 @@
 import type { ConversationSummary, MemoryEntry } from '@clawee/protocol';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '../../runtime/errors.js';
@@ -54,6 +54,7 @@ describe('MemorySettingsView', () => {
     await waitFor(() => expect(service.updateMemory).toHaveBeenCalledWith('mem_1', { enabled: false }));
 
     await user.click(screen.getByRole('button', { name: '删除记忆' }));
+    await user.click(within(await screen.findByRole('alertdialog', { name: '删除记忆' })).getByRole('button', { name: '删除' }));
     await waitFor(() => expect(service.deleteMemory).toHaveBeenCalledWith('mem_1'));
 
     await user.click(screen.getByRole('button', { name: '全部停用' }));
@@ -103,7 +104,47 @@ describe('MemorySettingsView', () => {
     expect(await screen.findByText('版本 2')).toBeInTheDocument();
     expect(screen.getByText('用户：继续开发')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '删除摘要' }));
+    await user.click(within(await screen.findByRole('alertdialog', { name: '删除摘要' })).getByRole('button', { name: '删除' }));
     await waitFor(() => expect(service.deleteSummary).toHaveBeenCalledWith('summary_1'));
+  });
+
+  it('只展示当前运行端对应的 Agent 提示词片段', async () => {
+    const service = createService();
+    const { rerender } = render(
+      <MemorySettingsView
+        connected
+        service={service}
+        projects={[]}
+        threads={[]}
+        agentPromptPolicyStatus={{
+          version: 3,
+          prompt: 'Clawee prompt',
+          promptType: 'clawee_agent',
+          fetchedAt: '2026-10-30T02:00:00Z'
+        }}
+      />
+    );
+
+    expect(await screen.findByLabelText('Clawee Agent 提示词')).toHaveValue('Clawee prompt');
+    expect(screen.queryByLabelText('服务端 Agent 提示词')).not.toBeInTheDocument();
+
+    rerender(
+      <MemorySettingsView
+        connected
+        service={service}
+        projects={[]}
+        threads={[]}
+        agentPromptPolicyStatus={{
+          version: 4,
+          prompt: 'Server prompt',
+          promptType: 'server_agent',
+          fetchedAt: '2026-10-30T03:00:00Z'
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText('服务端 Agent 提示词')).toHaveValue('Server prompt');
+    expect(screen.queryByLabelText('Clawee Agent 提示词')).not.toBeInTheDocument();
   });
 });
 

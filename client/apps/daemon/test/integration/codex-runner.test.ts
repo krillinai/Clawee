@@ -129,6 +129,25 @@ describe('codex runner', () => {
     ).rejects.toMatchObject({ terminationReason: 'timeout' });
   });
 
+  it('保留强制退出等待期间最先触发的超时原因', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-runner-'));
+    const fake = createFakeCodex(tempDir, {
+      stdoutLines: [{ type: 'turn.started' }],
+      hang: true,
+      ignoreSigterm: true
+    });
+    await expect(runCodexExec({
+      codexBin: fake.bin,
+      codexHome: join(tempDir, 'codex-home'),
+      cwd: tempDir,
+      args: ['exec', '--json'],
+      prompt: 'hello',
+      timeoutMs: 1_000,
+      inactivityTimeoutMs: 1_500,
+      forceKillGraceMs: 1_000
+    })).rejects.toMatchObject({ terminationReason: 'timeout' });
+  });
+
   it('can cancel a running codex process', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-runner-'));
     const fake = createFakeCodex(tempDir, {

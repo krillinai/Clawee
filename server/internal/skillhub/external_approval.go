@@ -263,6 +263,7 @@ func (s *MemoryStore) ApplyApprovalResult(_ context.Context, providerID, templat
 						item.Decision = "rejected"
 						if result == "agree" {
 							item.Decision = "approved"
+							s.recordFirstApprovalLocked(skill, version, "dingtalk", item.ID, nil, now)
 						}
 						version.ApprovalStatus, version.ApprovedSpaceID, version.ReviewedAt = item.Decision, skill.SpaceID, &now
 						s.versions[skillID][j] = version

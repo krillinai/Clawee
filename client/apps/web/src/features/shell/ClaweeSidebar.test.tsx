@@ -50,7 +50,6 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ClaweeSidebar>> 
       tasks={[]}
       currentProjectId="content-design"
       activeView="conversation"
-      activityAllowed
       onNewConversation={vi.fn()}
       onSelectProject={vi.fn()}
       onSelectConversation={vi.fn()}
@@ -64,7 +63,72 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ClaweeSidebar>> 
   );
 }
 
+it('企业登录后在工作流旁提供独立审批中心入口', () => {
+  const onOpenView = vi.fn();
+  renderSidebar({
+    enterpriseSession: { status: 'signed_in', transportSecurity: 'secure_https', account: { subjectId: 'user-1', name: '张三', email: 'user@example.test' } },
+    activeView: 'enterprise-approvals', onOpenView
+  });
+  const button = screen.getByRole('button', { name: '审批中心' });
+  expect(screen.getByRole('button', { name: '工作流' }).nextElementSibling).toBe(button);
+  expect(button).toHaveAttribute('aria-current', 'page');
+  fireEvent.click(button);
+  expect(onOpenView).toHaveBeenCalledWith('enterprise-approvals');
+});
+
 describe('ClaweeSidebar', () => {
+  it.each([false, true])('姓名为手机号时账户入口使用默认名称，折叠状态=%s', collapsed => {
+    const onOpenAccount = vi.fn();
+    const { container } = renderSidebar({
+      collapsed,
+      onOpenAccount,
+      enterpriseSession: {
+        status: 'signed_in',
+        account: { subjectId: 'acct-phone', email: '', phone: '13800000000', name: '+86 138-0000-0000' },
+        transportSecurity: 'secure_https'
+      }
+    });
+
+    const button = screen.getByRole('button', { name: '企业用户' });
+    if (collapsed) expect(button).toHaveAttribute('title', '企业用户');
+    expect(container.innerHTML).not.toContain('13800000000');
+    expect(container.innerHTML).not.toContain('+86 138-0000-0000');
+    fireEvent.click(button);
+    expect(onOpenAccount).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])('深色版缺失时沿用浅色版，折叠状态=%s', collapsed => {
+    renderSidebar({ collapsed, colorMode: 'dark', sidebarLogoUrl: 'blob:light', sidebarCompactLogoUrl: 'blob:compact-light' });
+    expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', collapsed ? 'blob:compact-light' : 'blob:light');
+  });
+
+  it.each([false, true])('按主题切换自定义 Logo，折叠状态=%s', collapsed => {
+    const { rerender } = renderSidebar({
+      collapsed, colorMode: 'light', sidebarLogoUrl: 'blob:light', sidebarCompactLogoUrl: 'blob:compact-light',
+      sidebarLogoDarkUrl: 'blob:dark', sidebarCompactLogoDarkUrl: 'blob:compact-dark'
+    });
+    expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', collapsed ? 'blob:compact-light' : 'blob:light');
+    rerender(<ClaweeSidebar projects={projects} conversations={conversations} tasks={[]} activeView="conversation"
+      collapsed={collapsed} colorMode="dark" sidebarLogoUrl="blob:light" sidebarCompactLogoUrl="blob:compact-light"
+      sidebarLogoDarkUrl="blob:dark" sidebarCompactLogoDarkUrl="blob:compact-dark"
+      onNewConversation={vi.fn()} onSelectProject={vi.fn()} onSelectConversation={vi.fn()} onSelectTask={vi.fn()}
+      onOpenView={vi.fn()} onOpenAccount={vi.fn()} onOpenSettings={vi.fn()} onToggleCollapsed={vi.fn()} />);
+    expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', collapsed ? 'blob:compact-dark' : 'blob:dark');
+  });
+
+  it.each([false, true])('贡献页只高亮工作台，折叠状态=%s', collapsed => {
+    const onOpenView = vi.fn();
+    const onToggleCollapsed = vi.fn();
+    renderSidebar({ activeView: 'skill-contributions', collapsed, onOpenView, onToggleCollapsed });
+    expect(screen.queryByRole('button', { name: 'Skill 贡献' })).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: '工作台' });
+    expect(button).toHaveAttribute('aria-current', 'page');
+    if (collapsed) expect(button).toHaveAttribute('title', '工作台');
+    fireEvent.click(button);
+    expect(onOpenView).toHaveBeenCalledWith('dashboard');
+    expect(onToggleCollapsed).not.toHaveBeenCalled();
+  });
+
   it('shows the admin link only with admin access and a configured address', () => {
     const session = { status: 'signed_in' as const, adminAllowed: true, account: { subjectId: 'u1', email: 'a@example.com', name: 'Admin' }, transportSecurity: 'secure_https' as const };
     const { rerender } = renderSidebar({ enterpriseSession: session, adminUrl: 'https://gateway.example/admin' });
@@ -94,7 +158,7 @@ describe('ClaweeSidebar', () => {
 
   it('falls back independently for unconfigured menu names', () => {
     renderSidebar({ sidebarMenuLabels: { skills: '技能' } });
-    for (const name of ['技能', '企业知识库', '共享网盘', '数据看板']) {
+    for (const name of ['技能', '企业知识库', '共享网盘', '工作台']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
   });
@@ -142,13 +206,13 @@ describe('ClaweeSidebar', () => {
     expect(screen.queryByRole('img', { name: 'Clawee' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '收起侧栏' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '数据看板' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '工作台' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '工作流' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
     const primaryActions = screen.getByRole('button', { name: '新建会话' }).parentElement;
-    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '数据看板' }));
+    expect(primaryActions?.children[1]).toBe(screen.getByRole('button', { name: '工作台' }));
     expect(primaryActions?.children[2]).toBe(screen.getByRole('button', { name: '工作流' }));
-    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: 'Agent动态' }));
+    expect(primaryActions?.children[3]).toBe(screen.getByRole('button', { name: '企业Skill' }));
     const searchButton = screen.getByRole('button', { name: '搜索' });
     expect(searchButton.parentElement).toHaveClass('sidebar-section-actions');
     expect(searchButton.previousElementSibling).toBeNull();
@@ -191,11 +255,11 @@ describe('ClaweeSidebar', () => {
     const onOpenView = vi.fn();
     const user = userEvent.setup();
     const { rerender } = renderSidebar({ onOpenView });
-    await user.click(screen.getByRole('button', { name: '数据看板' }));
+    await user.click(screen.getByRole('button', { name: '工作台' }));
     expect(onOpenView).toHaveBeenCalledWith('dashboard');
     rerender(<ClaweeSidebar projects={projects} conversations={conversations} tasks={[]} activeView="dashboard" collapsed onNewConversation={vi.fn()} onSelectProject={vi.fn()} onSelectConversation={vi.fn()} onSelectTask={vi.fn()} onOpenView={onOpenView} onOpenAccount={vi.fn()} onOpenSettings={vi.fn()} onToggleCollapsed={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '数据看板' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: '数据看板' })).toHaveAttribute('title', '数据看板');
+    expect(screen.getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: '工作台' })).toHaveAttribute('title', '工作台');
   });
 
   it('opens the knowledge base and exposes selected and collapsed states', async () => {
@@ -207,41 +271,6 @@ describe('ClaweeSidebar', () => {
     rerender(<ClaweeSidebar projects={projects} conversations={conversations} tasks={[]} activeView="knowledge" collapsed onNewConversation={vi.fn()} onSelectProject={vi.fn()} onSelectConversation={vi.fn()} onSelectTask={vi.fn()} onOpenView={onOpenView} onOpenAccount={vi.fn()} onOpenSettings={vi.fn()} onToggleCollapsed={vi.fn()} />);
     expect(screen.getByRole('button', { name: '企业知识库' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: '企业知识库' })).toHaveAttribute('title', '企业知识库');
-  });
-
-  it('opens Agent activity and exposes its selected and collapsed states', async () => {
-    const onOpenView = vi.fn();
-    const user = userEvent.setup();
-    const { rerender } = renderSidebar({ onOpenView });
-
-    await user.click(screen.getByRole('button', { name: 'Agent动态' }));
-    expect(onOpenView).toHaveBeenCalledWith('activity');
-
-    rerender(
-      <ClaweeSidebar
-        projects={projects}
-        conversations={conversations}
-        tasks={[]}
-        activeView="activity"
-        activityAllowed
-        collapsed
-        onNewConversation={vi.fn()}
-        onSelectProject={vi.fn()}
-        onSelectConversation={vi.fn()}
-        onSelectTask={vi.fn()}
-        onOpenView={onOpenView}
-        onOpenAccount={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onToggleCollapsed={vi.fn()}
-      />
-    );
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('title', 'Agent动态');
-  });
-
-  it('hides Agent activity unless the data-view capability is allowed', () => {
-    renderSidebar({ activityAllowed: false });
-    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
   });
 
   it('selects a project directly while keeping recent conversations global', async () => {
@@ -279,6 +308,25 @@ describe('ClaweeSidebar', () => {
     expect(onSelectProject).toHaveBeenNthCalledWith(1, 'content-design');
     expect(onSelectProject).toHaveBeenNthCalledWith(2, 'content-design');
     expect(screen.getByRole('button', { name: '整理本周项目进展 4天' })).toBeInTheDocument();
+  });
+
+  it('collapses the project section while keeping project rows unchanged', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    const collapseButton = screen.getByRole('button', { name: '收起项目' });
+    expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+    const projectRow = screen.getByRole('region', { name: '项目' }).querySelector<HTMLButtonElement>('.project-row');
+    expect(projectRow).toBeVisible();
+
+    await user.click(screen.getByText('项目', { selector: '.sidebar-section-toggle span' }));
+
+    expect(screen.getByRole('button', { name: '展开项目' })).toHaveAttribute('aria-expanded', 'false');
+    expect(projectRow).not.toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '展开项目' }));
+    expect(screen.getByRole('button', { name: '收起项目' })).toHaveAttribute('aria-expanded', 'true');
+    expect(projectRow).toBeVisible();
   });
 
   it('shows at most five conversations per project until expanded', async () => {
@@ -370,7 +418,7 @@ describe('ClaweeSidebar', () => {
     expect(screen.getByRole('button', { name: '整理本周项目进展 4天' }))
       .toHaveAttribute('aria-current', 'page');
 
-    await user.click(collapseButton);
+    await user.click(screen.getByText('最近会话', { selector: '.sidebar-section-toggle span' }));
 
     const expandButton = screen.getByRole('button', { name: '展开最近会话' });
     expect(expandButton).toHaveAttribute('aria-expanded', 'false');
@@ -466,6 +514,21 @@ describe('ClaweeSidebar', () => {
 
     expect(screen.getByLabelText('正在运行')).toHaveClass('conversation-run-spinner');
     expect(screen.getByRole('button', { name: /整理本周项目进展.*正在运行.*4天/ })).toBeInTheDocument();
+  });
+
+  it('项目列表和最近会话展示同一未读蓝点，运行时优先显示转圈', () => {
+    const { container } = renderSidebar({
+      unreadConversationIds: new Set(['weekly-progress-brief', 'bili-cover']),
+      runningConversationIds: new Set(['bili-cover'])
+    });
+    const projectRow = container.querySelector('.sidebar-project-conversations a');
+    expect(projectRow).not.toBeNull();
+    expect(within(projectRow as HTMLElement).getByLabelText('未读结果')).toBeInTheDocument();
+    const recentRow = screen.getByRole('button', { name: /整理本周项目进展.*未读结果/ });
+    expect(within(recentRow).getByLabelText('未读结果')).toBeInTheDocument();
+    const runningRow = screen.getByRole('button', { name: /生成 B 站封面.*正在运行/ });
+    expect(within(runningRow).queryByLabelText('未读结果')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('未读结果')).toHaveLength(2);
   });
 
   it('renders every openable task thread as the same kind of recent conversation row', () => {

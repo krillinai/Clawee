@@ -37,7 +37,16 @@ export type FakeCodexInvocation = {
   approval?: boolean;
   command?: string;
   agentSchedule?: Record<string, unknown>;
-  files?: Record<string, string>;
+  files?: Record<string, string | { base64: string }>;
+  responseErrors?: Array<{ message: string; codexErrorInfo: unknown; additionalDetails?: string }>;
+  responseDelayMs?: number;
+  turnError?: { message: string; codexErrorInfo: unknown; additionalDetails?: string };
+  steps?: Array<
+    | { kind: 'reasoning'; text: string; pauseMs?: number }
+    | { kind: 'command'; command: string; output?: string; exitCode?: number; durationMs?: number; pauseMs?: number }
+    | { kind: 'mcp'; server: string; tool: string; arguments?: Record<string, unknown>; durationMs?: number; pauseMs?: number }
+    | { kind: 'message_delta' | 'message_complete'; text: string; barrier?: string; pauseMs?: number }
+  >;
 };
 
 export type FakeCodexThread = {
@@ -87,6 +96,7 @@ export type RuntimeFixture = {
   ): Promise<Record<string, unknown>>;
   readInvocationCount(): number;
   readCodexMethods(): string[];
+  releaseStage(name: string): void;
 };
 
 type ScheduleFixture = {
@@ -308,6 +318,10 @@ export const test = base.extend<TestFixtures>({
         configureInvocations(invocations) {
           writeCodexConfig({ invocations });
         },
+        releaseStage(name) {
+          if (!/^[a-z0-9_-]+$/i.test(name)) throw new Error('无效阶段名称');
+          writeFileSync(join(stateDir, `stage-${name}`), 'ready');
+        },
         configureCodex(config) {
           writeCodexConfig(config);
         },
@@ -440,7 +454,22 @@ export const test = base.extend<TestFixtures>({
       await stopProcessTree(child);
       await enterpriseServer.close();
       if (process.env.CLAWEE_E2E_KEEP_TEMP !== '1') {
-        rmSync(rootDir, { recursive: true, force: true });
+        try {
+          rmSync(rootDir, {
+            recursive: true,
+            force: true,
+            maxRetries: process.platform === 'win32' ? 10 : 0,
+            retryDelay: 100
+          });
+        } catch (error) {
+          if (
+            process.platform !== 'win32'
+            || !['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(
+              (error as NodeJS.ErrnoException).code ?? ''
+            )
+          ) throw error;
+          console.warn(`[web-e2e] 隔离目录仍被外部进程占用，已保留：${rootDir}`);
+        }
       }
     }
   },
@@ -571,21 +600,40 @@ async function waitForModelServiceReady(
 }
 
 async function stopProcessTree(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.pid === undefined) return;
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
   const exited = new Promise<void>(resolveExit => {
     child.once('exit', () => resolveExit());
   });
+  if (process.platform === 'win32') {
+    const killExitCode = await new Promise<number | null>((resolveKill, rejectKill) => {
+      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      killer.once('error', rejectKill);
+      killer.once('exit', resolveKill);
+    });
+    await Promise.race([exited, delay(3_000)]);
+    if (child.exitCode === null && child.signalCode === null) {
+      try {
+        process.kill(child.pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+        throw error;
+      }
+      throw new Error(`无法关闭 Web E2E 进程树：${child.pid}，taskkill=${killExitCode}`);
+    }
+    return;
+  }
   try {
-    if (process.platform === 'win32') child.kill('SIGTERM');
-    else process.kill(-child.pid, 'SIGTERM');
+    process.kill(-child.pid, 'SIGTERM');
   } catch {
     child.kill('SIGTERM');
   }
   await Promise.race([exited, delay(3_000)]);
   if (child.exitCode !== null) return;
   try {
-    if (process.platform === 'win32') child.kill('SIGKILL');
-    else process.kill(-child.pid, 'SIGKILL');
+    process.kill(-child.pid, 'SIGKILL');
   } catch {
     child.kill('SIGKILL');
   }

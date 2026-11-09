@@ -17,19 +17,23 @@ export function createThreadService(client: RuntimeClient) {
   return {
     async listActiveThreads(): Promise<ThreadListResponse> {
       try {
-        const [interactive, scheduleTasks] = await Promise.all([
+        const [interactive, scheduleTasks, skillReviews] = await Promise.all([
           client.get<ThreadListResponse>(
             '/threads?status=active&purpose=conversation&limit=50'
           ),
           client.get<ThreadListResponse>(
             '/threads?status=active&purpose=schedule_task&limit=100'
+          ),
+          client.get<ThreadListResponse>(
+            '/threads?status=active&purpose=skill_review&limit=50'
           )
         ]);
-        if (!hasExpectedPurposePartitions(interactive, scheduleTasks)) {
+        if (!hasExpectedPurposePartitions(interactive, scheduleTasks)
+          || !skillReviews.threads.every(thread => thread.purpose === 'skill_review')) {
           return client.get('/threads?status=active&limit=50');
         }
         return {
-          threads: mergeThreadLists(interactive.threads, scheduleTasks.threads)
+          threads: mergeThreadLists(mergeThreadLists(interactive.threads, scheduleTasks.threads), skillReviews.threads)
         };
       } catch {
         return client.get('/threads?status=active&limit=50');

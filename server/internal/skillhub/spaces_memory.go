@@ -179,6 +179,12 @@ func (s *MemoryStore) spaceSummaryLocked(space Space) SpaceSummary {
 	if space.Approvers == nil {
 		space.Approvers = []Approver{}
 	}
+	if space.ApproverRoleIDs == nil {
+		space.ApproverRoleIDs = []string{}
+	}
+	if space.ApproverRoles == nil {
+		space.ApproverRoles = []ApprovalRole{}
+	}
 	var summary SpaceSummary
 	summary.Space = space
 	for _, spaces := range s.grants {

@@ -369,6 +369,34 @@ ssh <SSH 用户>@<服务器地址> \
 
 客户端访问地址为 `http://<服务器地址>:19860`。正式对外提供服务时，应通过 HTTPS 反向代理访问，并按企业防火墙策略限制 `19860` 端口。已有客户端运行数据时，迁移前应先停止服务并备份 `/home/<SSH 用户>/data/clawee-agent`。
 
+#### 自动安装和更新企业 Skill
+
+此功能默认关闭，生成的配置文件不会包含开关。管理员需要时，在服务器 Agent 使用的 `server.toml` 的已有 `[server]` 段中手动添加：
+
+```toml
+auto_install_update_skills = true
+```
+
+修改后重启 Agent。打包部署使用 `config/server.toml`；源码启动需通过 `server:start -- --server --server-config=/绝对路径/server.toml` 加载服务器配置，只有 `--server` 而未加载配置时保持关闭。
+
+开启后，以 Agent 当前登录的企业身份查询有权使用且已发布的 Skill，登录成功后同步一次，后续任务实际开始前再检查。缺失时安装，版本 ID 不同时更新，相同版本跳过；个人或其他来源的同名 Skill 不自动覆盖。未登录时跳过，单项失败记日志并继续，不阻断业务任务。
+
+设为 `false` 或删除字段并重启，可关闭自动同步，原有手动安装不受影响。本功能不自动卸载本地 Skill，也不提供撤权后的执行门禁。
+
+当前已知限制：企业 Skill 被手工替换为同名个人 Skill 后，旧企业安装记录仍可能导致自动更新覆盖个人内容；不带 `threadId` 的普通任务不触发执行前同步，登录同步及带会话任务的同步不受影响。
+
+#### 启用 Skill AI 审核
+
+Gateway 在既有 `config.yaml` 的 `skillhub` 段设置 `review_agent_id: "既有服务端Agent的稳定ID"`，限定唯一审核执行者。服务端 Agent 在既有 `server.toml` 的 `[server]` 段添加：
+
+```toml
+skill_ai_review_worker_enabled = true
+```
+
+源码启动通过 `pnpm server:start -- --server --server-config=/绝对路径/server.toml` 加载该文件；打包部署沿用 `config/server.toml`。配置保存在源码目录外，修改后重启对应服务。字段未配置时兼容 `CLAWEE_SKILL_REVIEW_WORKER_ENABLED=true`；显式 `true` 或 `false` 优先于环境变量，两者都未设置时关闭。开关只控制本机执行，账号仍须登录，具有 `console:skill:read`、待审空间及规则空间读取权限，且 Agent ID 须与 Gateway 配置一致。
+
+规则优先使用 Skill Hub 同名 `skill-review` 的当前已发布版本，无同名 Skill 或无已发布版本时使用随包规则；其他读取或校验异常不静默回退。完整配置、范围与故障处理见 [Skill AI 审批工作流运维说明](../../server/docs/skill-review-workflow.md)。
+
 ### 6.5 将客户端 Server 模式接入 Gateway MCP 上游
 
 完成 6.4 的部署后，可以将该远程 Agent 注册为现有 Go Gateway 的 MCP 上游，让已授权用户通过 Gateway 提交远程任务并查询结果。此操作需要 Gateway 已部署且操作者具备 MCP 上游、能力和授权管理权限；源码部署命令不会自动完成后台配置。
@@ -421,6 +449,10 @@ ssh <SSH 用户>@<服务器地址> \
 
 `clawee_submit_task` 会实际启动远程执行，应按业务风险配置用户确认或管理员审批。所有获授权调用均使用同一远程 Agent 的运行环境；Gateway 的账号授权不等于远程工作区或任务数据的账号级隔离，不应将该服务直接作为不互信用户的共享执行环境。
 
+Gateway 调用 `clawee_submit_task` 时，沿用上游配置的 `server-token`，并从已认证身份生成 `X-Claw-User-ID` 和 `X-Claw-Agent-ID` 请求头。远程 Runtime 将两者保存为任务来源，任务 API 返回可选的 `initiatorUserId` 和 `initiatorAgentId`。反向代理需透传这两个请求头；无需配置额外凭据。其他上游工具调用不附加这份来源身份。
+
+来源字段用于记录和续聊来源一致性校验，不提供账户查询过滤或工作区隔离。持有 `server-token` 的直连调用方也可以构造这些请求头，不能将其视为可信身份委派。未携带身份的任务和历史任务保持来源为空，不自动补齐，也不能通过 MCP 续聊。
+
 #### 6.5.3 验证调用和排查故障
 
 用已授权账号通过 Gateway 调用提交工具，先使用不修改文件的测试请求：
@@ -432,6 +464,21 @@ ssh <SSH 用户>@<服务器地址> \
 ```
 
 不指定项目时使用远程 Agent 的默认项目；也可以提交 `project_id` 或 `project_name`，但对应项目必须已存在、处于活动状态且目录可访问。提交后用返回的 `task_id` 调用状态查询工具，再查询终态结果，并检查后台代理审计。工具同步成功只说明 MCP 发现可用，不代表模型配置、Runtime 和实际任务执行均正常。
+
+用户继续修改原任务时，将同一远程 Agent 先前返回的 `thread_id` 传回提交工具。例如，第一轮生成海报并返回 `thread_id: "thread_1"`，下一轮请求：
+
+```json
+{
+  "thread_id": "thread_1",
+  "prompt": "修改上一轮生成的海报，使用上一版图片作为编辑输入，保留商品和构图，把背景改成蓝色。"
+}
+```
+
+续聊沿用原会话及项目，每轮返回新的 `task_id`，应使用新 ID 查询本轮状态和结果；同一会话的任务串行排队。项目参数默认省略，填写时必须与原会话一致。独立任务省略 `thread_id`，创建新会话。客户端 Agent 从当前对话中的工具返回值选取对应 ID，不按用户或 Agent 身份自动合并不同任务。
+
+续聊要求请求头中的用户和 Agent ID 均完整，且与该会话最近一轮任务记录的来源一致。会话不存在、已归档、原项目不可用或 Runtime 会话未建立时直接返回工具错误；持久化的 Runtime 会话在执行时无法恢复，则本轮任务失败，查询结果包含对应错误，不会自动新建会话。应先核对上一轮状态或处理错误原因，不得省略 `thread_id` 静默重做。
+
+修改图片时需由现有 Skill 或工具支持原图编辑，原图引用可写入 `prompt`；会话续聊本身不替代图片编辑能力。新成果另存到 `outputs/` 并上传交付，保留上一版。升级后需在 Gateway 同步上游工具并按现有流程核对能力 Schema，客户端重新加载工具清单后才能使用 `thread_id` 参数。
 
 终端 MCP Client 应使用后台上游详情提供的 Gateway MCP 地址，例如 `https://<Gateway 域名>/mcp/servers/remote-agent`，并携带 Gateway 账号 MCP Token（`Authorization: Bearer <账号 MCP Token>`）和属于该账号且已启用的 `X-Claw-Agent-ID: <agent_id>`。不要向终端用户分发远程 Agent 的 `server-token`。
 
@@ -449,6 +496,10 @@ ssh <SSH 用户>@<服务器地址> \
 完成解析后，在客户端或浏览器中使用该域名访问 Gateway，不使用 `127.0.0.1`、`localhost` 或 `0.0.0.0`。
 
 ### 7.1 反向代理和 CDN 缓存策略
+
+客户端更新渠道必须为 HTTPS origin。HTTPS 在代理或 CDN 终止、以 HTTP 回源时，应由可信代理设置 `X-Forwarded-Proto: https`；客户端分发与更新接口在该头缺失时，也兼容 `X-Client-Scheme: https`，后者只接受单一的 `http` 或 `https` 值。两者同时存在时以 `X-Forwarded-Proto` 为准。
+
+这些协议头必须由可信代理覆盖，不得透传客户端自行指定的值；生产环境应限制源站访问，仅允许可信代理或受控运维入口连接。协议头用于识别外部地址，不替代 TLS 或访问控制。
 
 如果 Gateway 前面使用 Nginx、云负载均衡或 CDN，必须将带认证、运行时状态或部署配置的响应设置为不缓存。不能只依赖浏览器的 `Cache-Control` 处理，也不能按 URL 缓存而忽略 Cookie、`Authorization` 或其他认证信息。
 

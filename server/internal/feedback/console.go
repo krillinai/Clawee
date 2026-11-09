@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"image"
-	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,8 +13,6 @@ import (
 
 	"github.com/krillinai/Clawee/server/internal/buildinfo"
 )
-
-const consoleFeedbackOrigin = "https://gateway.clawee.work/api/v1/feedback"
 
 type ConsoleError struct {
 	At      string `json:"at"`
@@ -144,55 +140,13 @@ func prepareConsoleFeedback(input ConsoleInput, screenshots []ConsoleScreenshot)
 }
 
 // 同一浏览器快照重复提交复用创建幂等契约，不另建队列或存储原始材料。
-func SubmitConsoleFeedback(ctx context.Context, input ConsoleInput, screenshots []ConsoleScreenshot, client *http.Client, allowed func() bool) (ConsoleReceipt, error) {
+func (s *Service) SubmitConsoleFeedback(ctx context.Context, input ConsoleInput, screenshots []ConsoleScreenshot, ip string) (ConsoleReceipt, error) {
 	in, materials, err := prepareConsoleFeedback(input, screenshots)
 	if err != nil {
 		return ConsoleReceipt{}, err
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
-	request := func(method, path, credential, mime string, body []byte) (json.RawMessage, error) {
-		if allowed != nil && !allowed() {
-			return nil, fail(403, "feedback_policy_disabled")
-		}
-		req, err := http.NewRequestWithContext(ctx, method, consoleFeedbackOrigin+path, bytes.NewReader(body))
-		if err != nil {
-			return nil, fail(503, "feedback_unavailable")
-		}
-		req.Header.Set("Content-Type", mime)
-		if credential != "" {
-			req.Header.Set("Authorization", "Bearer "+credential)
-		}
-		if method == http.MethodPut {
-			req.Header.Set("X-Content-SHA256", Hash(body))
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fail(503, "feedback_unavailable")
-		}
-		defer resp.Body.Close()
-		data, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
-		if err != nil || len(data) > 2<<20 {
-			return nil, fail(503, "feedback_unavailable")
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			status := resp.StatusCode
-			if status < 400 || status > 599 {
-				status = 503
-			}
-			return nil, fail(status, "feedback_centre_request_failed")
-		}
-		var envelope struct {
-			Data json.RawMessage `json:"data"`
-		}
-		if json.Unmarshal(data, &envelope) != nil || len(envelope.Data) == 0 {
-			return nil, fail(503, "feedback_unavailable")
-		}
-		return envelope.Data, nil
-	}
-	body, _ := json.Marshal(in)
-	data, err := request(http.MethodPost, "/reports", "", "application/json", body)
+	out, _, err := s.Create(ctx, in, ip, "")
+	data, _ := json.Marshal(out)
 	var progress struct {
 		ConsoleReceipt
 		UploadToken string   `json:"upload_token"`
@@ -223,13 +177,13 @@ func SubmitConsoleFeedback(ctx context.Context, input ConsoleInput, screenshots 
 		if received {
 			continue
 		}
-		if _, err = request(http.MethodPut, "/reports/"+progress.ReportID+"/artifacts/"+artifact.ID, progress.UploadToken, artifact.ContentType, materials[index]); err != nil {
+		if _, err = s.Upload(ctx, progress.ReportID, artifact.ID, progress.UploadToken, artifact.ContentType, artifact.SHA256, artifact.Size, bytes.NewReader(materials[index])); err != nil {
 			return ConsoleReceipt{}, err
 		}
 	}
 	mh, _ := CanonicalHash(in.Manifest)
-	body, _ = json.Marshal(map[string]any{"manifest_sha256": mh, "accept_partial": true})
-	data, err = request(http.MethodPost, "/reports/"+progress.ReportID+"/submit", progress.UploadToken, "application/json", body)
+	out, err = s.Submit(ctx, progress.ReportID, progress.UploadToken, mh, true)
+	data, _ = json.Marshal(out)
 	if err != nil {
 		return ConsoleReceipt{}, err
 	}

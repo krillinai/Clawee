@@ -14,6 +14,8 @@ const SERVER_FIELDS = new Set([
   'port',
   'data_dir',
   'default_project_root',
+  'auto_install_update_skills',
+  'skill_ai_review_worker_enabled',
   'token',
   'token_file'
 ]);
@@ -26,6 +28,8 @@ export type PackagedServerConfiguration = {
   port: number;
   dataDir: string;
   defaultProjectRoot: string;
+  autoInstallUpdateSkills: boolean;
+  skillAIReviewWorkerEnabled?: boolean;
   tokenSource: 'config' | 'file';
   token?: string;
   tokenFile?: string;
@@ -54,6 +58,17 @@ export function readPackagedServerConfiguration(
     || !isRecord(enterprise)
     || hasUnknownFields(enterprise, ENTERPRISE_FIELDS)
   ) {
+    throw new Error('SERVER_CONFIG_INVALID');
+  }
+
+  const autoInstallUpdateSkills = server.auto_install_update_skills === undefined
+    ? false
+    : server.auto_install_update_skills;
+  if (typeof autoInstallUpdateSkills !== 'boolean') {
+    throw new Error('SERVER_CONFIG_INVALID');
+  }
+  const skillAIReviewWorkerEnabled = server.skill_ai_review_worker_enabled;
+  if (skillAIReviewWorkerEnabled !== undefined && typeof skillAIReviewWorkerEnabled !== 'boolean') {
     throw new Error('SERVER_CONFIG_INVALID');
   }
 
@@ -96,6 +111,8 @@ export function readPackagedServerConfiguration(
       port: Number(port),
       dataDir,
       defaultProjectRoot,
+      autoInstallUpdateSkills,
+      ...(skillAIReviewWorkerEnabled === undefined ? {} : { skillAIReviewWorkerEnabled }),
       tokenSource: 'config',
       token: server.token.trim(),
       enterpriseConfigFile
@@ -108,6 +125,8 @@ export function readPackagedServerConfiguration(
     port: Number(port),
     dataDir,
     defaultProjectRoot,
+    autoInstallUpdateSkills,
+    ...(skillAIReviewWorkerEnabled === undefined ? {} : { skillAIReviewWorkerEnabled }),
     tokenSource: 'file',
     tokenFile: resolveConfigPath(
       configDirectory,

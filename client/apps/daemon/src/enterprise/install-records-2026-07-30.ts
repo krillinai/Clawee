@@ -79,8 +79,17 @@ export function createEnterpriseInstallRecordRepository(
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
   `);
+  const clearPreviousName = db.prepare(`
+    DELETE FROM enterprise_skill_installs
+    WHERE name = @name AND skill_id <> @skillId
+  `);
+  const clearMarketSource = db.prepare(`
+    DELETE FROM codex_skill_market_installs WHERE skill_id = @name
+  `);
   const upsertAndMap = db.transaction((input: EnterpriseSkillInstallRecordInput) => {
+    clearPreviousName.run(input);
     const row = upsert.get(input) as EnterpriseSkillInstallRow;
+    clearMarketSource.run(input);
     return mapRow(row);
   });
 

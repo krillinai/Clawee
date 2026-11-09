@@ -46,7 +46,7 @@ describe('主动会话反馈', () => {
     const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl: vi.fn(async url => String(url).endsWith('/policy') ? Response.json({ external_feedback_allowed: true }) : Response.json(draft)) });
     localStorage.setItem('clawee-feedback:thread_test', draft.local_feedback_id);
     render(<FeedbackButton client={client} threadId="thread_test" />); fireEvent.click(await screen.findByRole('button', { name: '反馈当前会话问题' }));
-    expect(await screen.findByText(/请联系维护方调整限额/)).toBeInTheDocument();
+    expect(await screen.findByText(/请联系当前后台管理员调整限额/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '本地导出' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '确认发送' })).not.toBeInTheDocument();
@@ -62,7 +62,7 @@ describe('主动会话反馈', () => {
   });
   it('禁用策略隐藏入口', async () => { const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl: vi.fn(async () => Response.json({ external_feedback_allowed: false })) }); render(<FeedbackButton client={client} threadId="thread_test" />); await waitFor(() => expect(screen.queryByRole('button', { name: '反馈当前会话问题' })).not.toBeInTheDocument()); });
   it('发送前必须授权并显示接收方和partial缺失', async () => {
-    const draft = { local_feedback_id: 'receipt_test', thread_id: 'thread_test', description: '问题', state: 'awaiting_consent', origin: 'https://gateway.clawee.work', size_bytes: 10, screenshots: [], retry_count: 0, expires_at: new Date().toISOString(), manifest_sha256: 'a'.repeat(64), external_feedback_allowed: true, manifest: { collection_scope: 'basic', completeness: 'partial', artifacts: [], missing_items: ['collection:interrupted'] } };
+    const draft = { local_feedback_id: 'receipt_test', thread_id: 'thread_test', description: '问题', state: 'awaiting_consent', origin: 'https://customer.test', size_bytes: 10, screenshots: [], retry_count: 0, expires_at: new Date().toISOString(), manifest_sha256: 'a'.repeat(64), external_feedback_allowed: true, manifest: { collection_scope: 'basic', completeness: 'partial', artifacts: [], missing_items: ['collection:interrupted'] } };
     const client = new RuntimeClient({ baseUrl: 'http://local', fetchImpl: vi.fn(async url => String(url).endsWith('/policy') ? Response.json({ external_feedback_allowed: true }) : Response.json(draft)) });
     localStorage.setItem('clawee-feedback:thread_test', draft.local_feedback_id);
     render(<FeedbackButton client={client} threadId="thread_test" />);
@@ -72,7 +72,7 @@ describe('主动会话反馈', () => {
     expect(send).toBeDisabled();
     for (const check of screen.getAllByRole('checkbox')) fireEvent.click(check);
     expect(send).toBeEnabled();
-    expect(screen.getByText(/接收域名：gateway.clawee.work/)).toBeInTheDocument();
+    expect(screen.getByText(/接收地址：https:\/\/customer.test/)).toBeInTheDocument();
   });
   it('旧版完整采集草稿不能继续发送', async () => {
     const draft = { local_feedback_id: 'receipt_test', description: '问题', state: 'awaiting_consent', size_bytes: 10, screenshots: [], expires_at: new Date().toISOString(), manifest: { artifacts: [], missing_items: [] } };

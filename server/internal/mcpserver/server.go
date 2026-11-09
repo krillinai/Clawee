@@ -382,6 +382,9 @@ func addGateTools(server *mcp.Server, proxy *mcpgateway.Service) {
 			return nil, nil, err
 		}
 		content := gateStatusContent(gate)
+		if err := proxy.CheckGateResultAccess(ctx, identity, gate); err != nil {
+			return nil, nil, err
+		}
 		content["response_body"] = gate.ResponseBody
 		return nil, content, nil
 	})

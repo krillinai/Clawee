@@ -9,7 +9,8 @@ publish:
 npmRebuild: false
 electronFuses:
   runAsNode: false
-  enableCookieEncryption: true
+  # 登录凭据由 daemon 保存，Cookie 不使用系统钥匙串加密。
+  enableCookieEncryption: false
   enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
@@ -66,6 +67,8 @@ extraResources:
       - "!**/{test,tests,__tests__,example,examples}/**/*"
   - from: .pack/daemon/package.json
     to: daemon/package.json
+  - from: .pack/daemon/resources
+    to: daemon/resources
   - from: .pack/deployment
     to: deployment
   - from: ../web/dist
@@ -101,6 +104,7 @@ win:
     - nsis
   icon: resources/icon.png
 nsis:
+  include: resources/windows-update.nsh
   artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true

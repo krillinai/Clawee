@@ -26,8 +26,14 @@ test('手动创建后可从最近进入专属会话，并可暂停、恢复、�
   await expectTaskInSidebar(page, '每周端到端简报');
 
   await openSchedules(page);
-  page.once('dialog', dialog => void dialog.accept());
   await page.getByRole('button', { name: '删除每周端到端简报' }).click();
+  const confirmDelete = page.getByRole('alertdialog', { name: '删除任务' });
+  await expect(confirmDelete).toContainText('确认删除任务“每周端到端简报”？');
+  await confirmDelete.getByRole('button', { name: '取消' }).click();
+  await expect(page.getByRole('button', { name: '打开任务会话 每周端到端简报' }))
+    .toBeVisible();
+  await page.getByRole('button', { name: '删除每周端到端简报' }).click();
+  await confirmDelete.getByRole('button', { name: '删除', exact: true }).click();
   await expect(page.getByRole('button', { name: '打开任务会话 每周端到端简报' }))
     .toHaveCount(0);
   await expectTaskAbsentFromSidebar(page, '每周端到端简报');
@@ -156,7 +162,10 @@ test('失败通知深链到正确任务和 Run', async ({ page, runtime }) => {
   ));
   await expect(page.getByRole('heading', { name: '失败通知任务' })).toBeVisible();
   await expect(page.getByText('失败前的公开摘要')).toBeVisible();
-  await expect(page.getByText('Codex 输出异常')).toBeVisible();
+  await expect(page.getByText('本次任务失败；最后已知原因：Runtime 请求失败，具体原因未明确', {
+    exact: true
+  })).toBeVisible();
+  await expect(page.getByText('异常来源：Codex Runtime（模型执行层）', { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CodexMcpServerResponse } from '@clawee/protocol';
 import type { McpManager } from '../../src/codex/mcp/manager.js';
-import type { EnterpriseHttpClient } from '../../src/enterprise/http-client-2026-07-30.js';
+import type { EnterpriseHttpClient, EnterpriseRemoteMcpCatalog } from '../../src/enterprise/http-client-2026-07-30.js';
 import { EnterpriseHttpError } from '../../src/enterprise/http-client-2026-07-30.js';
+import * as mcpHealth from '../../src/enterprise/mcp-health.js';
 import {
   createEnterpriseMcpManager,
   ENTERPRISE_MCP_TOKEN_ENV
@@ -25,6 +26,45 @@ afterEach(() => {
 });
 
 describe('enterprise MCP manager', () => {
+  it('健康检查使用当前目录和账号凭据，经 Gateway 的上游入口调用授权工具', async () => {
+    const checkHealth = vi.spyOn(mcpHealth, 'checkEnterpriseMcpHealth').mockResolvedValue({
+      status: 'ready', message: '连接正常', checkedAt: '2026-10-29T06:00:00Z'
+    });
+    const fixture = createFixture({ taskService: true });
+    const catalog = mcpCatalog(true);
+    catalog.upstreams[0]!.tools.push({
+      ...catalog.upstreams[0]!.tools[0]!, toolId: 'health', upstreamName: 'clawee_get_agent_health',
+      name: 'health_alias', exposedName: 'crm.health_alias'
+    });
+    fixture.getMcpCatalog.mockResolvedValue(catalog);
+    await fixture.manager.listConnections();
+    const result = await fixture.manager.checkHealth('crm-main');
+    expect(fixture.getMcpCatalog).toHaveBeenCalledTimes(2);
+    expect(checkHealth).toHaveBeenCalledWith({ endpoint, toolName: 'health_alias', token: 'agent-mcp-secret', agentId });
+    expect(result.status).toBe('ready');
+    expect(JSON.stringify(result)).not.toContain('agent-mcp-secret');
+  });
+
+  it.each(['missing', 'forbidden', 'expired', 'disabled', 'confirmation'])(
+    '健康检查在 %s 时提示处理原因，不绕过权限调用上游', async condition => {
+      const checkHealth = vi.spyOn(mcpHealth, 'checkEnterpriseMcpHealth');
+      const fixture = createFixture({ taskService: true });
+      const catalog = mcpCatalog(true);
+      if (condition !== 'missing') catalog.upstreams[0]!.tools.push({
+        ...catalog.upstreams[0]!.tools[0]!, toolId: 'health', upstreamName: 'clawee_get_agent_health',
+        name: 'clawee_get_agent_health', exposedName: 'crm.clawee_get_agent_health',
+        authorized: condition !== 'forbidden', status: condition === 'disabled' ? 'disabled' : 'active',
+        authorizationExpiresAt: condition === 'expired' ? '2026-08-01T00:00:00Z' : null,
+        confirmRequired: condition === 'confirmation'
+      });
+      fixture.getMcpCatalog.mockResolvedValue(catalog);
+      const result = await fixture.manager.checkHealth('crm-main');
+      expect(result.status).toBe(condition === 'missing' ? 'unknown' : 'attention');
+      expect(result.message.length).toBeGreaterThan(0);
+      expect(checkHealth).not.toHaveBeenCalled();
+    }
+  );
+
   it('derives install and enable state from the Codex native server list', async () => {
     const fixture = createFixture({
       nativeServers: [nativeServer({
@@ -115,7 +155,7 @@ describe('enterprise MCP manager', () => {
 
   it('renames an installed enterprise MCP when its catalog namespace changes', async () => {
     const fixture = createFixture({
-      namespace: 'rose',
+      namespace: 'assistant',
       nativeServers: [nativeServer({
         name: 'enterprise_linux',
         enabled: true,
@@ -128,12 +168,12 @@ describe('enterprise MCP manager', () => {
 
     expect(fixture.mcpManager.renameServer).toHaveBeenCalledWith(
       'enterprise_linux',
-      'enterprise_rose',
+      'enterprise_assistant',
       true
     );
     expect(response.upstreams[0]).toMatchObject({
-      codexServerName: 'enterprise_rose',
-      installedServerName: 'enterprise_rose',
+      codexServerName: 'enterprise_assistant',
+      installedServerName: 'enterprise_assistant',
       installed: true,
       enabled: true
     });
@@ -141,10 +181,10 @@ describe('enterprise MCP manager', () => {
 
   it('uses a stable suffix when the renamed namespace is already occupied', async () => {
     const fixture = createFixture({
-      namespace: 'rose',
+      namespace: 'assistant',
       nativeServers: [
         nativeServer({ name: 'enterprise_linux', enabled: true, url: endpoint }),
-        nativeServer({ name: 'enterprise_rose', url: 'https://custom.example/mcp' })
+        nativeServer({ name: 'enterprise_assistant', url: 'https://custom.example/mcp' })
       ]
     });
 
@@ -152,11 +192,11 @@ describe('enterprise MCP manager', () => {
 
     expect(fixture.mcpManager.renameServer).toHaveBeenCalledWith(
       'enterprise_linux',
-      'enterprise_rose_b58032',
+      'enterprise_assistant_b58032',
       true
     );
     expect(response.upstreams[0]).toMatchObject({
-      installedServerName: 'enterprise_rose_b58032'
+      installedServerName: 'enterprise_assistant_b58032'
     });
   });
 
@@ -795,7 +835,7 @@ function nativeServer(
   };
 }
 
-function mcpCatalog(taskService = false, namespace = 'crm') {
+function mcpCatalog(taskService = false, namespace = 'crm'): EnterpriseRemoteMcpCatalog {
   return {
     upstreams: [{
       upstreamId: 'crm-main',

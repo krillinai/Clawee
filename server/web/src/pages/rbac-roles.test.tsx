@@ -9,6 +9,7 @@ import {
   createRole,
   listPermissions,
   listRoles,
+  updateRole,
   permissions,
   type Permission,
   type Role
@@ -106,6 +107,25 @@ const nestedPermissionCatalog: Permission[] = [
 ];
 
 describe("RBACRolesPage", () => {
+  it("部门默认角色名称只读、权限可编辑且不能删除", async () => {
+    listRolesMock.mockResolvedValue([{...auditorRole, departmentId:"dept"}]);
+    renderPage();
+    const row = await rowFor("安全审计员");
+    expect(within(row).getByText("部门默认")).toBeInTheDocument();
+    expect(within(row).queryByRole("button",{name:"删除 安全审计员"})).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button",{name:"编辑"}));
+    expect(screen.getByLabelText("角色名称")).toHaveAttribute("readonly");
+    expect(screen.getByRole("button",{name:"保存角色"})).not.toBeDisabled();
+  });
+  it("受管名称原样提交，不裁剪上游名称", async () => {
+    listRolesMock.mockResolvedValue([{...auditorRole,name:" 研发默认角色",departmentId:"dept"}]);
+    vi.mocked(updateRole).mockResolvedValue({...auditorRole,name:" 研发默认角色",departmentId:"dept"});
+    renderPage();
+    const row = await rowFor("研发默认角色");
+    fireEvent.click(within(row).getByRole("button",{name:"编辑"}));
+    fireEvent.click(screen.getByRole("button",{name:"保存角色"}));
+    await waitFor(() => expect(updateRole).toHaveBeenCalledWith({roleId:auditorRole.roleId,name:" 研发默认角色",permissionCodes:auditorRole.permissionCodes}));
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     listRolesMock.mockResolvedValue([adminRole, auditorRole]);
@@ -129,48 +149,40 @@ describe("RBACRolesPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
-    fireEvent.change(screen.getByLabelText("角色编码"), { target: { value: "security_reader" } });
+    expect(screen.queryByLabelText("角色编码")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "安全只读" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 MCP 治理 全部权限" }));
     fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
 
     await waitFor(() => expect(createRoleMock).toHaveBeenCalledWith({
-      code: "security_reader",
       name: "安全只读",
       permissionCodes: [permissions.mcpAuditRead]
     }));
   });
 
-  it("清理角色编码中的空白和不可见格式字符后提交", async () => {
+  it("创建角色只提交名称和权限，名称去除首尾空白", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
-    const code = screen.getByLabelText<HTMLInputElement>("角色编码");
-    fireEvent.change(code, { target: { value: "  skillreviewer\u200C  " } });
-    expect(code).toHaveValue("skillreviewer");
-    fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "技能审核员" } });
+    fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "  技能审核员  " } });
     fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
     await waitFor(() => expect(createRoleMock).toHaveBeenCalledWith({
-      code: "skillreviewer", name: "技能审核员", permissionCodes: []
+      name: "技能审核员", permissionCodes: []
     }));
   });
 
-  it("角色编码按具体原因提示格式错误及保留编码", async () => {
+  it("编辑角色不要求输入编码，保留原有角色身份", async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
-    const code = screen.getByLabelText<HTMLInputElement>("角色编码");
-    fireEvent.change(code, { target: { value: "Skill-reviewer" } });
-    fireEvent.invalid(code);
-    expect(code.validationMessage).toMatch(/小写英文字母开头/);
-    fireEvent.change(code, { target: { value: "skill-reviewer" } });
-    fireEvent.invalid(code);
-    expect(code.validationMessage).toMatch(/只能使用小写英文字母、数字和下划线/);
-    fireEvent.change(code, { target: { value: "admin" } });
-    expect(code.validationMessage).toMatch(/系统保留/);
-    fireEvent.change(code, { target: { value: "skillreviewer" } });
-    expect(code.validationMessage).toBe("");
+    const row = await rowFor("安全审计员");
+    fireEvent.click(within(row).getByRole("button", { name: "编辑" }));
+    expect(screen.queryByLabelText("角色编码")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "审计查看员" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
+    await waitFor(() => expect(updateRole).toHaveBeenCalledWith({
+      roleId: auditorRole.roleId, name: "审计查看员", permissionCodes: auditorRole.permissionCodes
+    }));
   });
 
-  it("名称全为空白及角色编码重复时给出可理解的提示", async () => {
+  it("名称全为空白及角色创建冲突时给出可理解的提示", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "创建角色" }));
     const name = screen.getByLabelText<HTMLInputElement>("角色名称");
@@ -179,9 +191,8 @@ describe("RBACRolesPage", () => {
     fireEvent.change(name, { target: { value: "技能审核员" } });
     expect(name.validationMessage).toBe("");
     createRoleMock.mockRejectedValue(new APIError("rbac role code already exists", 409, "conflict"));
-    fireEvent.change(screen.getByLabelText("角色编码"), { target: { value: "skillreviewer" } });
     fireEvent.click(screen.getByRole("button", { name: "保存角色" }));
-    expect(await screen.findByText("角色编码已存在，请更换编码")).toBeInTheDocument();
+    expect(await screen.findByText("角色创建冲突，请重试")).toBeInTheDocument();
   });
 
   it("支持按模块批量选择权限并显示半选状态", async () => {
@@ -266,3 +277,17 @@ async function rowFor(text: string) {
   if (!row) throw new Error(`row not found for ${text}`);
   return row;
 }
+
+it("区分两种部门角色，名称只读且不能删除，管理员权限仍可编辑", async () => {
+  const manager: Role = {...auditorRole,roleId:"manager",departmentId:"dept",departmentRoleType:"manager",name:"研发管理员角色"};
+  listRolesMock.mockResolvedValue([{...auditorRole,departmentId:"dept",departmentRoleType:"default"},manager]);
+  vi.mocked(updateRole).mockResolvedValue(manager);
+  renderPage();
+  expect(await screen.findByText("部门管理员")).toBeInTheDocument();
+  expect(screen.getByText("部门默认")).toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:/删除/})).not.toBeInTheDocument();
+  fireEvent.click(within(screen.getByText(manager.name).closest("tr")!).getByRole("button",{name:"编辑"}));
+  expect(screen.getByLabelText("角色名称")).toHaveAttribute("readonly");
+  fireEvent.click(screen.getByRole("button",{name:"保存角色"}));
+  await waitFor(() => expect(updateRole).toHaveBeenCalledWith({roleId:manager.roleId,name:manager.name,permissionCodes:manager.permissionCodes}));
+});

@@ -1,17 +1,36 @@
 package dingtalk
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
 
 type Member struct {
-	UnionID   string
-	UserID    string
-	Name      string
-	Email     string
-	AvatarURL string
+	Organization     json.RawMessage
+	UnionID          string
+	UserID           string
+	Name             string
+	Email            string
+	Phone            string
+	EnterpriseUserID string
+	AvatarURL        string
 }
+
+type EmployeeProfile struct {
+	Organization     json.RawMessage
+	Name             string
+	Phone            string
+	EnterpriseUserID string
+}
+
+type EmployeeDirectory interface {
+	LookupEmployee(context.Context, string) (EmployeeProfile, error)
+}
+
+var ErrEmployeeNotFound = errors.New("enterprise employee not found")
+var ErrEmployeePhoneMissing = errors.New("enterprise employee phone is missing or invalid")
 
 type APIError struct {
 	Step       string
@@ -25,5 +44,5 @@ func (e *APIError) Error() string {
 
 func IsNotEnterpriseMember(err error) bool {
 	var apiErr *APIError
-	return errors.As(err, &apiErr) && (apiErr.Code == "60011" || apiErr.Code == "60121" || apiErr.Code == "not_found")
+	return errors.Is(err, ErrEmployeeNotFound) || errors.As(err, &apiErr) && (apiErr.Code == "60011" || apiErr.Code == "60121" || apiErr.Code == "not_found")
 }

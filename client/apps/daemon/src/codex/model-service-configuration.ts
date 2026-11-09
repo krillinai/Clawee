@@ -1,4 +1,7 @@
+import { isModelResponseEvent, safeIncidentIdentifier } from '@clawee/protocol';
 import type {
+  AgentEventEnvelope,
+  CodexAvailabilityProbe,
   ConfigureModelServiceRequest,
   ConfigureModelServiceResponse,
   ModelAccessMode,
@@ -6,6 +9,7 @@ import type {
   ModelServiceConfiguration,
   ModelServiceConfigurationStatusResponse
 } from '@clawee/protocol';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -28,6 +32,10 @@ import type {
 import type {
   EnterpriseModelConfiguration
 } from '../enterprise/http-client-2026-07-30.js';
+import { checkModelServiceConnection } from './model-service-connection.js';
+import { classifyProxyFailure, describeProxyEnvironment, proxyErrorMessage } from './network-diagnostics.js';
+import { emitIncident, endpointFingerprint } from '../feedback/incidents.js';
+import type { GatewayProfileStore } from '../enterprise/gateway-profile-store.js';
 
 export type ResolvedModelServiceConfiguration = {
   status: ModelServiceConfigurationStatusResponse;
@@ -42,12 +50,17 @@ export type ModelServiceRuntime = {
     accessToken: string,
     fetchConfiguration: (
       accessToken: string
-    ) => Promise<EnterpriseModelConfiguration>
+    ) => Promise<EnterpriseModelConfiguration>,
+    gateway?: string
   ): Promise<void>;
   signOut(): Promise<void>;
   configure(
     input: ConfigureModelServiceRequest
   ): Promise<ConfigureModelServiceResponse>;
+  check(input?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe>;
+  checkRuntime?(): Promise<CodexAvailabilityProbe>;
+  createResponseObserver?(model?: string | null): ((event: AgentEventEnvelope) => void) | undefined;
+  readApiKey(): Promise<string | null>;
   subscribeReady(listener: () => void): () => void;
 };
 
@@ -129,6 +142,8 @@ export async function resolveStoredModelServiceConfiguration(input: {
 
 export function createModelServiceRuntime(input: {
   credentialStore: ModelServiceCredentialStore;
+  gatewayProfiles?: GatewayProfileStore;
+  legacyGateway?: string;
   loadStored(): Promise<ResolvedModelServiceConfiguration>;
   validate(
     request: ConfigureModelServiceRequest
@@ -136,6 +151,7 @@ export function createModelServiceRuntime(input: {
     configuration: ModelServiceConfiguration;
     apiKey: string;
   }>;
+  checkConnection?(request: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe>;
   preparePlatformCatalog?(
     configuration: ModelServiceConfiguration,
     apiKey: string,
@@ -147,12 +163,25 @@ export function createModelServiceRuntime(input: {
     context: ModelServiceActivationContext
   ): Promise<void>;
   deactivate(): Promise<void>;
+  onAvailabilityChange?(probe: CodexAvailabilityProbe): void;
+  onPerformanceEvent?(details: Record<string, unknown>): void;
 }): ModelServiceRuntime {
   let current: ModelAccessState = { status: 'resolving' };
   let configuring = false;
   let resolutionId = 0;
+  let checkId = 0;
+  let activeRequest: ConfigureModelServiceRequest | undefined;
+  let activeGateway: string | undefined;
+  let legacyPending = true;
   let transition = Promise.resolve();
   const listeners = new Set<() => void>();
+  const reportPerformance = (details: Record<string, unknown>): void => {
+    try {
+      input.onPerformanceEvent?.(details);
+    } catch {
+      // 诊断记录失败不能影响 Runtime 检测结果。
+    }
+  };
 
   async function runTransition<T>(operation: () => Promise<T>): Promise<T> {
     const previous = transition;
@@ -170,8 +199,10 @@ export function createModelServiceRuntime(input: {
 
   function publishReady(
     mode: ModelAccessMode,
-    configuration: ModelServiceConfiguration
+    configuration: ModelServiceConfiguration,
+    apiKey: string
   ): void {
+    activeRequest = { ...configuration, apiKey };
     current = { status: 'ready', mode, configuration };
     for (const listener of listeners) listener();
   }
@@ -193,8 +224,124 @@ export function createModelServiceRuntime(input: {
         await input.deactivate();
         return;
       }
-      publishReady(mode, configuration);
+      publishReady(mode, configuration, apiKey);
     });
+  }
+
+  async function checkRuntimeAvailability(): Promise<CodexAvailabilityProbe> {
+    const target = activeRequest;
+    if (target === undefined || current.status === 'resolving' || configuring) {
+      throw new ModelServiceConfigurationError(
+        'MODEL_SERVICE_CONFIGURATION_BUSY', '模型配置尚未就绪，请稍后重试'
+      );
+    }
+    const operationId = resolutionId;
+    const detectionId = ++checkId;
+    const publish = (probe: CodexAvailabilityProbe) => {
+      if (detectionId === checkId && operationId === resolutionId) {
+        input.onAvailabilityChange?.(probe);
+      }
+    };
+    publish({ status: 'pending' });
+    const startedAt = Date.now();
+    const fingerprint = endpointFingerprint(target.baseUrl);
+    const model = safeIncidentIdentifier(target.model);
+    const requestId = randomUUID();
+    const network = describeProxyEnvironment(target.baseUrl);
+    reportPerformance({
+      component: 'model_service',
+      event: 'runtime_check_started',
+      request_path: '/runtime/model-service/check-runtime',
+      ...(fingerprint === undefined ? {} : { endpoint_fingerprint: fingerprint }),
+      ...(model === undefined ? {} : { model }),
+      request_id: requestId,
+      network_path: network.networkPath,
+      proxy_env_keys: network.proxyEnvKeys,
+      proxy_applies: network.proxyApplies
+    });
+    let result: CodexAvailabilityProbe;
+    try {
+      await input.validate(target);
+      result = { status: 'succeeded', responseReceived: true };
+    } catch (error) {
+      const details = error instanceof ModelServiceConfigurationError ? error.details : undefined;
+      const timedOut = typeof details?.terminationReason === 'string' && details.terminationReason.includes('timeout');
+      const diagnostic = typeof details?.message === 'string' ? details.message : '';
+      const proxyErrorCode = typeof details?.proxyErrorCode === 'string' ? details.proxyErrorCode : undefined;
+      const proxyCopy = proxyErrorCode !== undefined && isProxyErrorCode(proxyErrorCode) ? proxyErrorMessage(proxyErrorCode) : undefined;
+      const message = proxyCopy?.message ?? (timedOut ? '模型检测超时，请检查网络后重试'
+        : /\b401\b|unauthorized|invalid.?api.?key/i.test(diagnostic) ? '模型服务认证失败，请检查 API Key'
+        : /\b403\b|forbidden/i.test(diagnostic) ? '模型服务拒绝访问，请检查密钥权限'
+        : /model[^\n]*(?:not found|does not exist)/i.test(diagnostic) ? '模型不存在或不可访问，请检查模型名称'
+        : '模型检测失败，请检查网络、Base URL、API Key 和模型名称');
+      result = {
+        status: 'failed',
+        errorCode: proxyErrorCode !== undefined && isProxyErrorCode(proxyErrorCode)
+          ? `MODEL_SERVICE_${proxyErrorCode}`
+          : error instanceof ModelServiceConfigurationError ? error.code : 'MODEL_SERVICE_VALIDATION_FAILED',
+        message,
+        ...(details?.responseReceived === undefined ? {} : { responseReceived: details.responseReceived === true }),
+        ...(typeof details?.terminationReason === 'string' ? { terminationReason: details.terminationReason } : {}),
+        ...(typeof details?.stderrSummary === 'string' ? { diagnostic: details.stderrSummary.slice(0, 1024) } : {}),
+        requestId,
+        networkPath: typeof details?.networkPath === 'string' ? details.networkPath as CodexAvailabilityProbe['networkPath'] : network.networkPath,
+        proxyEnvKeys: Array.isArray(details?.proxyEnvKeys) ? details.proxyEnvKeys.filter((value): value is string => typeof value === 'string') : network.proxyEnvKeys,
+        proxyApplies: typeof details?.proxyApplies === 'boolean' ? details.proxyApplies : network.proxyApplies,
+        ...(proxyErrorCode !== undefined && isProxyErrorCode(proxyErrorCode) ? { proxyErrorCode } : {}),
+        ...(typeof details?.proxyStage === 'string' ? { proxyStage: details.proxyStage as CodexAvailabilityProbe['proxyStage'] } : {}),
+        ...(typeof details?.failureOrigin === 'string' ? { failureOrigin: details.failureOrigin as CodexAvailabilityProbe['failureOrigin'] } : {}),
+        ...(proxyCopy === undefined ? {} : { suggestion: proxyCopy.suggestion, retryable: proxyCopy.retryable })
+      };
+      emitIncident({
+        event_type: 'error',
+        layer: 'codex_model',
+        stage: 'runtime_check',
+        scope_id: `runtime-check:${createHash('sha256').update(JSON.stringify([fingerprint, target.model])).digest('hex')}`,
+        error_code: safeIncidentIdentifier(result.errorCode) ?? 'MODEL_SERVICE_VALIDATION_FAILED',
+        environment: {
+          protocol: 'responses',
+          transport: 'codex_probe',
+          ...(fingerprint === undefined ? {} : { endpoint_fingerprint: fingerprint }),
+          ...(model === undefined ? {} : { model }),
+          network_path: result.networkPath ?? network.networkPath,
+          proxy_env_keys: result.proxyEnvKeys ?? network.proxyEnvKeys,
+          proxy_applies: result.proxyApplies ?? network.proxyApplies,
+          ...(result.proxyStage === undefined ? {} : { proxy_stage: result.proxyStage }),
+          ...(result.proxyErrorCode === undefined ? {} : { proxy_error_code: result.proxyErrorCode }),
+          ...(result.failureOrigin === undefined ? {} : { failure_origin: result.failureOrigin })
+        },
+        diagnostics: {
+          error_name: error instanceof Error ? error.name : 'RuntimeCheckError',
+          request_method: 'POST',
+          request_path: '/runtime/model-service/check-runtime',
+          error_message: `Runtime 链路检测失败；响应头：${result.responseReceived ? '已收到' : '未收到'}；终止原因：${details?.terminationReason ?? '未知'}`,
+          request_id: requestId,
+          ...(typeof details?.stderrSummary === 'string' ? { additional_details: `Runtime stderr：${details.stderrSummary.slice(-1536)}` } : {})
+        }
+      });
+    }
+    result.checkedAt = new Date().toISOString();
+    result.durationMs = Date.now() - startedAt;
+    reportPerformance({
+      component: 'model_service',
+      event: 'runtime_check_completed',
+      request_path: '/runtime/model-service/check-runtime',
+      status: result.status,
+      duration_ms: result.durationMs,
+      ...(result.errorCode === undefined ? {} : { error_code: result.errorCode }),
+      ...(result.responseReceived === undefined ? {} : { response_received: result.responseReceived }),
+      ...(typeof result.terminationReason === 'string' ? { termination_reason: result.terminationReason } : {}),
+      ...(result.requestId === undefined ? {} : { request_id: result.requestId }),
+      ...(result.networkPath === undefined ? {} : { network_path: result.networkPath }),
+      ...(result.proxyEnvKeys === undefined ? {} : { proxy_env_keys: result.proxyEnvKeys }),
+      ...(result.proxyApplies === undefined ? {} : { proxy_applies: result.proxyApplies }),
+      ...(result.proxyStage === undefined ? {} : { proxy_stage: result.proxyStage }),
+      ...(result.proxyErrorCode === undefined ? {} : { proxy_error_code: result.proxyErrorCode }),
+      ...(fingerprint === undefined ? {} : { endpoint_fingerprint: fingerprint }),
+      ...(model === undefined ? {} : { model })
+    });
+    publish(result);
+    return result;
   }
 
   return {
@@ -204,8 +351,13 @@ export function createModelServiceRuntime(input: {
     ready() {
       return current.status === 'ready';
     },
-    async resolve(accessToken, fetchConfiguration) {
+    async resolve(accessToken, fetchConfiguration, gateway) {
       const operationId = ++resolutionId;
+      activeGateway = gateway;
+      const loadLegacy = legacyPending && gateway === input.legacyGateway;
+      if (gateway !== input.legacyGateway) legacyPending = false;
+      activeRequest = undefined;
+      input.onAvailabilityChange?.({ status: 'skipped' });
       let resolvedMode: ModelAccessMode | undefined;
       current = { status: 'resolving' };
       try {
@@ -219,7 +371,19 @@ export function createModelServiceRuntime(input: {
         if (remote.mode === 'enterprise_managed') {
           let stored: ResolvedModelServiceConfiguration;
           try {
-            stored = await input.loadStored();
+            const saved = gateway === undefined ? undefined : await input.gatewayProfiles?.readModel(gateway);
+            if (saved !== undefined) {
+              const validated = parseConfigureRequest(saved);
+              stored = { status: { status: 'ready', configuration: validated.configuration, apiKeyConfigured: true }, ...validated };
+            } else if (input.gatewayProfiles === undefined || loadLegacy) {
+              stored = await input.loadStored();
+              if (operationId !== resolutionId) return;
+              if (gateway !== undefined && stored.configuration !== undefined && stored.apiKey !== undefined) {
+                await input.gatewayProfiles?.writeModel(gateway, { ...stored.configuration, apiKey: stored.apiKey });
+              }
+            } else {
+              stored = { status: { status: 'configuration_required', configuration: null, apiKeyConfigured: false } };
+            }
           } catch (error) {
             if (operationId !== resolutionId) return;
             current = {
@@ -243,16 +407,13 @@ export function createModelServiceRuntime(input: {
             return;
           }
           try {
-            const validated = await input.validate({
-              ...stored.configuration,
-              apiKey: stored.apiKey
-            });
             await activateResolved(
               operationId,
               remote.mode,
-              validated.configuration,
-              validated.apiKey
+              stored.configuration,
+              stored.apiKey
             );
+            if (operationId === resolutionId) void checkRuntimeAvailability().catch(() => undefined);
           } catch {
             if (operationId === resolutionId) {
               current = {
@@ -264,6 +425,7 @@ export function createModelServiceRuntime(input: {
           return;
         }
 
+        legacyPending = false;
         const platformConfiguration = {
           baseUrl: remote.baseUrl,
           model: remote.defaultModel ?? remote.model
@@ -274,16 +436,12 @@ export function createModelServiceRuntime(input: {
           remote.credentialVersion
         );
         if (operationId !== resolutionId) return;
-        const validated = await input.validate({
-          ...platformConfiguration,
-          apiKey: remote.apiKey
-        });
         if (operationId !== resolutionId) return;
         await runTransition(async () => {
           if (operationId !== resolutionId) return;
           await input.credentialStore.delete();
           if (operationId !== resolutionId) return;
-          await input.activate(validated.configuration, validated.apiKey, {
+          await input.activate(platformConfiguration, remote.apiKey, {
             mode: remote.mode,
             credentialVersion: remote.credentialVersion,
             ...(preparedCatalog === undefined
@@ -294,8 +452,9 @@ export function createModelServiceRuntime(input: {
             await input.deactivate();
             return;
           }
-          publishReady(remote.mode, validated.configuration);
+          publishReady(remote.mode, platformConfiguration, remote.apiKey);
         });
+        if (operationId === resolutionId) void checkRuntimeAvailability().catch(() => undefined);
       } catch (error) {
         if (operationId !== resolutionId) return;
         current = {
@@ -309,6 +468,8 @@ export function createModelServiceRuntime(input: {
     },
     async signOut() {
       resolutionId += 1;
+      activeRequest = undefined;
+      input.onAvailabilityChange?.({ status: 'skipped' });
       current = { status: 'resolving' };
       await runTransition(() => input.deactivate());
     },
@@ -323,7 +484,7 @@ export function createModelServiceRuntime(input: {
         );
       }
       if (
-        current.status !== 'configuration_required'
+        (current.status !== 'configuration_required' && current.status !== 'ready')
         || current.mode !== 'enterprise_managed'
       ) {
         throw new ModelServiceConfigurationError(
@@ -338,8 +499,11 @@ export function createModelServiceRuntime(input: {
         );
       }
       configuring = true;
-      const operationId = ++resolutionId;
+      const operationId = resolutionId;
+      const gateway = activeGateway;
       try {
+        const validated = parseConfigureRequest(request);
+        const previousModel = gateway === undefined ? undefined : await input.gatewayProfiles?.readModel(gateway);
         let previousApiKey: string | undefined;
         try {
           previousApiKey = await input.credentialStore.read();
@@ -349,7 +513,6 @@ export function createModelServiceRuntime(input: {
             error instanceof Error ? error.message : String(error)
           );
         }
-        const validated = await input.validate(request);
         if (operationId !== resolutionId) {
           throw new ModelServiceConfigurationError(
             'MODEL_SERVICE_CONFIGURATION_BUSY',
@@ -379,6 +542,9 @@ export function createModelServiceRuntime(input: {
                 'model service configuration was superseded'
               );
             }
+            if (gateway !== undefined) {
+              await input.gatewayProfiles?.writeModel(gateway, { ...validated.configuration, apiKey: validated.apiKey });
+            }
             await input.activate(
               validated.configuration,
               validated.apiKey,
@@ -386,17 +552,21 @@ export function createModelServiceRuntime(input: {
             );
           } catch (error) {
             await restoreCredential(input.credentialStore, previousApiKey);
+            if (gateway !== undefined) await input.gatewayProfiles?.writeModel(gateway, previousModel);
             throw error;
           }
           if (operationId !== resolutionId) {
             await input.deactivate();
             await restoreCredential(input.credentialStore, previousApiKey);
+            if (gateway !== undefined) await input.gatewayProfiles?.writeModel(gateway, previousModel);
             throw new ModelServiceConfigurationError(
               'MODEL_SERVICE_CONFIGURATION_BUSY',
               'model service configuration was superseded'
             );
           }
-          publishReady('enterprise_managed', validated.configuration);
+          resolutionId += 1;
+          publishReady('enterprise_managed', validated.configuration, validated.apiKey);
+          input.onAvailabilityChange?.({ status: 'skipped' });
         });
         return {
           status: 'ready',
@@ -406,6 +576,101 @@ export function createModelServiceRuntime(input: {
       } finally {
         configuring = false;
       }
+    },
+    async check(request) {
+      if (request !== undefined && 'mode' in current && current.mode === 'platform_managed') {
+        throw new ModelServiceConfigurationError(
+          'model_configuration_managed_by_platform', '平台托管模型不允许修改检测配置'
+        );
+      }
+      const target = request ?? activeRequest;
+      if (target === undefined || current.status === 'resolving' || configuring) {
+        throw new ModelServiceConfigurationError(
+          'MODEL_SERVICE_CONFIGURATION_BUSY', '模型配置尚未就绪，请稍后重试'
+        );
+      }
+      const validated = parseConfigureRequest(target);
+      const normalized = { ...validated.configuration, apiKey: validated.apiKey };
+      const operationId = resolutionId;
+      const active = activeRequest;
+      const checksActive = active !== undefined && (target === active || (
+        normalized.baseUrl === active.baseUrl && normalized.model === active.model && normalized.apiKey === active.apiKey
+      ));
+      const result = await (input.checkConnection === undefined
+        ? checkModelServiceConnection({ request: normalized })
+        : input.checkConnection(normalized));
+      reportPerformance({
+        component: 'model_service',
+        event: 'model_check_completed',
+        request_path: '/runtime/model-service/check',
+        status: result.status,
+        ...(result.durationMs === undefined ? {} : { duration_ms: result.durationMs }),
+        ...(result.errorCode === undefined ? {} : { error_code: result.errorCode }),
+        ...(result.httpStatus === undefined ? {} : { http_status: result.httpStatus }),
+        ...(result.headersReceived === undefined ? {} : { headers_received: result.headersReceived }),
+        ...(result.responseReceived === undefined ? {} : { response_received: result.responseReceived }),
+        ...(result.requestId === undefined ? {} : { request_id: result.requestId }),
+        ...(result.networkPath === undefined ? {} : { network_path: result.networkPath }),
+        ...(result.proxyEnvKeys === undefined ? {} : { proxy_env_keys: result.proxyEnvKeys }),
+        ...(result.proxyApplies === undefined ? {} : { proxy_applies: result.proxyApplies }),
+        ...(result.proxyStage === undefined ? {} : { proxy_stage: result.proxyStage }),
+        ...(result.proxyErrorCode === undefined ? {} : { proxy_error_code: result.proxyErrorCode })
+      });
+      if (result.status === 'failed' && checksActive && operationId === resolutionId && active === activeRequest && !configuring) {
+        const fingerprint = endpointFingerprint(normalized.baseUrl);
+        const model = safeIncidentIdentifier(normalized.model);
+        const transportCode = safeIncidentIdentifier(result.transportCode);
+        emitIncident({
+          event_type: 'error', layer: 'codex_model', stage: `model_check.${result.stage ?? 'request'}`,
+          scope_id: `model-check:${createHash('sha256').update(JSON.stringify([fingerprint, normalized.model])).digest('hex')}`,
+          error_code: safeIncidentIdentifier(result.errorCode) ?? 'MODEL_SERVICE_CHECK_FAILED',
+          ...(transportCode ? { transport_code: transportCode } : {}),
+          ...(result.httpStatus !== undefined && Number.isInteger(result.httpStatus) && result.httpStatus >= 100 && result.httpStatus <= 599 ? { http_status: result.httpStatus } : {}),
+          ...(result.durationMs !== undefined && Number.isSafeInteger(result.durationMs) && result.durationMs >= 0 ? { duration_ms: result.durationMs } : {}),
+          environment: {
+            protocol: 'responses', transport: 'fetch',
+            ...(fingerprint ? { endpoint_fingerprint: fingerprint } : {}), ...(model ? { model } : {}),
+            ...(result.networkPath === undefined ? {} : { network_path: result.networkPath }),
+            ...(result.proxyEnvKeys === undefined ? {} : { proxy_env_keys: result.proxyEnvKeys }),
+            ...(result.proxyApplies === undefined ? {} : { proxy_applies: result.proxyApplies }),
+            ...(result.proxyStage === undefined ? {} : { proxy_stage: result.proxyStage }),
+            ...(result.proxyErrorCode === undefined ? {} : { proxy_error_code: result.proxyErrorCode }),
+            ...(result.failureOrigin === undefined ? {} : { failure_origin: result.failureOrigin })
+          },
+          diagnostics: {
+            error_name: 'ManualModelCheck', request_method: 'POST', request_path: '/runtime/model-service/check',
+            ...(result.requestId === undefined ? {} : { request_id: result.requestId }),
+            error_message: `手动模型检测失败；响应头：${result.headersReceived === undefined ? '未知' : result.headersReceived ? '已收到' : '未收到'}；有效模型文本：${result.responseReceived === undefined ? '未知' : result.responseReceived ? '已收到' : '未收到'}`
+          }
+        });
+      }
+      return result;
+    },
+    checkRuntime: checkRuntimeAvailability,
+    createResponseObserver(model) {
+      const target = activeRequest;
+      if (target === undefined || current.status !== 'ready' || configuring
+        || (model != null && model !== target.model)) return undefined;
+      const operationId = resolutionId;
+      let observedCheckId: number | undefined;
+      return event => {
+        if (operationId !== resolutionId || target !== activeRequest || configuring
+          || current.status !== 'ready' || observedCheckId === checkId
+          || !isModelResponseEvent(event)) return;
+        // 真实响应优先于此前尚未结束的探测，防止迟到的超时重新覆盖恢复状态。
+        observedCheckId = ++checkId;
+        input.onAvailabilityChange?.({
+          status: 'succeeded', responseReceived: true, checkedAt: new Date().toISOString()
+        });
+      };
+    },
+    async readApiKey() {
+      if (!('mode' in current) || current.mode !== 'enterprise_managed') return null;
+      const operationId = resolutionId;
+      const apiKey = input.gatewayProfiles !== undefined && activeGateway !== undefined
+        ? (await input.gatewayProfiles.readModel(activeGateway))?.apiKey
+        : await input.credentialStore.read();
+      return operationId === resolutionId ? apiKey ?? null : null;
     },
     subscribeReady(listener) {
       listeners.add(listener);
@@ -461,6 +726,8 @@ export async function validateModelServiceConfiguration(input: {
   const codexHome = join(validationRoot, 'codex-home');
   const cwd = join(validationRoot, 'workspace');
   mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  const requestId = randomUUID();
+  const network = describeProxyEnvironment(validated.configuration.baseUrl);
   const env = {
     [CLAWEE_MODEL_API_KEY_ENV]: validated.apiKey
   };
@@ -482,6 +749,12 @@ export async function validateModelServiceConfiguration(input: {
       env
     });
     if (!result.ready) {
+      const proxy = classifyProxyFailure({
+        transportCode: result.terminationReason === 'timeout' ? 'ETIMEDOUT' : undefined,
+        text: result.stderrSummary,
+        stage: result.timings.firstEventMs === undefined ? 'response_headers' : 'stream',
+        proxyApplies: network.proxyApplies
+      });
       throw new ModelServiceConfigurationError(
         'MODEL_SERVICE_VALIDATION_FAILED',
         '模型服务验证失败，请检查 Base URL、API Key 和模型名称',
@@ -493,7 +766,23 @@ export async function validateModelServiceConfiguration(input: {
             : { errorCode: result.errorCode }),
           ...(result.stderrSummary === undefined
             ? {}
-            : { message: result.stderrSummary })
+            : { message: result.stderrSummary }),
+          durationMs: result.durationMs,
+          timings: result.timings,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          markerMatched: result.markerMatched,
+          ...(result.stderrSummary === undefined ? {} : { stderrSummary: result.stderrSummary }),
+          requestId,
+          networkPath: network.networkPath,
+          proxyEnvKeys: network.proxyEnvKeys,
+          proxyApplies: network.proxyApplies,
+          ...(proxy === undefined ? {} : {
+            proxyErrorCode: proxy.proxyErrorCode,
+            failureOrigin: proxy.failureOrigin,
+            proxyStage: proxy.proxyErrorCode === 'PROXY_STREAM_INTERRUPTED' ? 'stream' : proxy.proxyErrorCode === 'PROXY_TUNNEL_FAILED' ? 'tunnel' : 'connect',
+            retryable: proxyErrorMessage(proxy.proxyErrorCode).retryable
+          })
         }
       );
     }
@@ -501,6 +790,10 @@ export async function validateModelServiceConfiguration(input: {
   } finally {
     await rm(validationRoot, { recursive: true, force: true });
   }
+}
+
+function isProxyErrorCode(value: string): value is NonNullable<ReturnType<typeof classifyProxyFailure>>['proxyErrorCode'] {
+  return ['PROXY_AUTH_REQUIRED', 'PROXY_CONNECT_FAILED', 'PROXY_CONNECT_TIMEOUT', 'PROXY_TUNNEL_FAILED', 'PROXY_POLICY_DENIED', 'PROXY_STREAM_INTERRUPTED'].includes(value);
 }
 
 function parseConfigureRequest(

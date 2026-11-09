@@ -62,6 +62,8 @@ function literalizeUserBlock(block: MarkdownBlock): string {
       return block.text;
     case 'code':
       return block.body;
+    case 'details':
+      return block.source;
     default: {
       const _exhaustive: never = block;
       return _exhaustive;
@@ -124,6 +126,17 @@ function renderBlock(block: MarkdownBlock, key: number, options: MarkdownRendere
           onLinkClick={options.onLinkClick}
           linkifyWorkspaceFiles={options.linkifyWorkspaceFiles}
         />
+      );
+    case 'details':
+      return (
+        <details key={key} className="md-details" open={block.open || undefined}>
+          <summary className="md-details-summary">
+            {renderInlineMarkdown(block.summary, options)}
+          </summary>
+          <div className="md-details-content">
+            {block.blocks.map((child, index) => renderBlock(child, index, options))}
+          </div>
+        </details>
       );
     case 'table':
       return (

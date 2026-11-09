@@ -19,7 +19,15 @@ export async function registerTaskMcpRoutes(
     reply.header('X-Accel-Buffering', 'no');
     enforceMcpResponseHeaders(reply.raw);
 
-    const mcpServer = createTaskMcpServer(input);
+    const userId = request.headers['x-claw-user-id'];
+    const agentId = request.headers['x-claw-agent-id'];
+    const mcpServer = createTaskMcpServer({
+      ...input,
+      caller: {
+        userId: typeof userId === 'string' ? userId.trim() || undefined : undefined,
+        agentId: typeof agentId === 'string' ? agentId.trim() || undefined : undefined
+      }
+    });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined
     });

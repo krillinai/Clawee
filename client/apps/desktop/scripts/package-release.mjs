@@ -6,7 +6,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -37,12 +36,20 @@ import {
   windowsSignatureVerificationCommand
 } from './release-platform.mjs';
 import { runStage } from './script-utils.mjs';
+import { notarytoolCredentialArgs } from './macos-notarization.mjs';
+import { finalizeReleaseDmgArtifacts } from './finalize-macos-release.mjs';
+import {
+  createNotaryRecovery, describeReleaseArtifacts, notaryFailureDiagnostic,
+  saveNotaryRecovery
+} from './notary-recovery.mjs';
 import { collectUpdateArtifacts, refreshUpdateMetadata } from './release-artifacts.mjs';
+import { assertUpdateRuntimeDependencies } from './customer-update-contract.mjs';
 import {
   readCodexRuntimeManifest,
   resolveCodexRuntimeTarget
 } from '../../../scripts/codex-runtime/manifest.mjs';
 import { resolveProductVersion } from '../../../../scripts/version.mjs';
+import { assertLocalPackageVersion } from './package-version-check.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, '..');
@@ -94,13 +101,13 @@ const codexRuntimeManifest = readCodexRuntimeManifest(
 );
 const expectedAppleTeamId =
   process.env.CLAWEE_APPLE_TEAM_ID?.trim() || process.env.APPLE_TEAM_ID?.trim();
-const defaultNotaryKeychainProfile = 'clawee-notary';
 const manifestPath = resolveDesktopBuildManifestPath(
   rootDir,
   releaseDir,
   process.env.CLAWEE_DESKTOP_BUILD_MANIFEST
 );
 const mode = parseMode(process.argv.slice(2));
+if (mode === 'dir') assertLocalPackageVersion(repositoryRoot);
 const platform = normalizeDesktopPlatform(
   process.env.CLAWEE_DESKTOP_TARGET_PLATFORM ?? process.platform
 );
@@ -143,7 +150,8 @@ mkdirSync(releaseDir, { recursive: true });
 mkdirSync(cacheDir, { recursive: true });
 ensureElectronBuilderCacheScope(env.ELECTRON_BUILDER_CACHE);
 rmSync(manifestPath, { force: true });
-const enterpriseRelease = readEnterpriseGatewayPackageConfig(
+rmSync(join(releaseDir, 'notary-recovery'), { force: true, recursive: true });
+const enterpriseRelease = mode !== 'dir' ? { gateway: 'http://127.0.0.1:1904', transportSecurity: 'insecure_http' } : readEnterpriseGatewayPackageConfig(
   enterpriseGatewayConfigSource,
   mode,
   process.env.CLAWEE_DESKTOP_GATEWAY_CONFIG_PATH
@@ -167,6 +175,9 @@ env.CLAWEE_UPDATE_URL = officialRelease
   : 'https://updates.invalid/clawee/disabled';
 if (officialRelease) {
   writeFileSync(join(dirname(enterpriseGatewayConfigStage), 'official-release.json'), '{"channel":"stable"}\n');
+}
+for (const filename of ['customer-update-manifest.json', 'customer-update-manifest.template.json']) {
+  rmSync(join(releaseDir, filename), { force: true });
 }
 console.log(
   `[desktop-package] 企业网关：`
@@ -281,16 +292,6 @@ await runStage(
 
 const packageRoot = findFreshPackageRoot(candidates);
 const artifacts = findFreshArtifacts(packageStartedAt, mode);
-if (releaseContext.distributableMac) {
-  finalizeReleaseDmgArtifacts(
-    artifacts.filter(path => path.endsWith('.dmg')),
-    releaseContext.notarytoolCredentialArgs
-  );
-}
-if (releaseContext.distributableWindows) {
-  finalizeReleaseWindowsArtifacts(artifacts.filter(path => path.endsWith('.exe')));
-}
-if (mode !== 'dir') refreshUpdateMetadata(artifacts);
 const webBuild = await inspectDirectory(resolve(rootDir, 'apps/web/dist'));
 const manifest = {
   version: 2,
@@ -323,44 +324,79 @@ const manifest = {
   codexRuntimeFileCount: codexRuntimeBuild.fileCount,
   codexRuntimeContentSha256: codexRuntimeBuild.contentSha256,
   codexRuntimeArchiveSha256: codexRuntimeTarget.archiveSha256,
-  artifacts: artifacts.map(path => ({
-    path,
-    relativePath: relative(rootDir, path),
-    bytes: statSync(path).size,
-    sha256: hashFile(path)
-  }))
+  artifacts: await describeReleaseArtifacts(artifacts, rootDir)
 };
-writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`[desktop-package] 构建清单：${manifestPath}`);
-console.log(`[desktop-package] 包根目录：${packageRoot}`);
-if (process.env.GITHUB_ENV) {
-  appendFileSync(
-    process.env.GITHUB_ENV,
-    `CLAWEE_DESKTOP_BUILD_MANIFEST=${manifestPath}\n`
-    + `CLAWEE_DESKTOP_PACKAGE_ROOT=${packageRoot}\n`
-  );
-}
+let recovery;
+try {
+  if (releaseContext.distributableMac) {
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await runStage('验证待公证安装包的静态内容', process.execPath, [
+      resolve(scriptDir, 'verify-package.mjs')
+    ], {
+      cwd: rootDir,
+      env: {
+        ...builderEnv,
+        CLAWEE_DESKTOP_BUILD_MANIFEST: manifestPath,
+        CLAWEE_DESKTOP_PACKAGE_ROOT: packageRoot,
+        CLAWEE_REQUIRE_DISTRIBUTABLE_MAC: '0'
+      },
+      timeoutMs: 5 * 60_000
+    });
+    recovery = await createNotaryRecovery({
+      directory: join(releaseDir, 'notary-recovery'),
+      rootDir, manifest, teamId: expectedAppleTeamId
+    });
+    await finalizeReleaseDmgArtifacts(
+      artifacts.filter(path => path.endsWith('.dmg')),
+      releaseContext.notarytoolCredentialArgs,
+      recovery
+    );
+  }
+  if (releaseContext.distributableWindows) {
+    finalizeReleaseWindowsArtifacts(artifacts.filter(path => path.endsWith('.exe')));
+  }
+  if (mode !== 'dir') refreshUpdateMetadata(artifacts);
+  manifest.artifacts = await describeReleaseArtifacts(artifacts, rootDir);
+  if (recovery) await saveNotaryRecovery(recovery, { stage: 'package' });
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`[desktop-package] 构建清单：${manifestPath}`);
+  console.log(`[desktop-package] 包根目录：${packageRoot}`);
+  if (process.env.GITHUB_ENV) {
+    appendFileSync(
+      process.env.GITHUB_ENV,
+      `CLAWEE_DESKTOP_BUILD_MANIFEST=${manifestPath}\n`
+      + `CLAWEE_DESKTOP_PACKAGE_ROOT=${packageRoot}\n`
+    );
+  }
 
-await runStage('验证桌面包', process.execPath, [
-  resolve(scriptDir, 'verify-package.mjs')
-], {
-  cwd: rootDir,
-  env: {
-    ...builderEnv,
-    CLAWEE_DESKTOP_BUILD_MANIFEST: manifestPath,
-    CLAWEE_DESKTOP_PACKAGE_ROOT: packageRoot,
-    ...(releaseContext.distributableMac
-      ? {
-          CLAWEE_REQUIRE_DISTRIBUTABLE_MAC: '1',
-          CLAWEE_APPLE_TEAM_ID: expectedAppleTeamId
-        }
-      : {}),
-    ...(releaseContext.distributableWindows
-      ? { CLAWEE_REQUIRE_DISTRIBUTABLE_WINDOWS: '1' }
-      : {})
-  },
-  timeoutMs: 5 * 60_000
-});
+  await runStage('验证桌面包', process.execPath, [
+    resolve(scriptDir, 'verify-package.mjs')
+  ], {
+    cwd: rootDir,
+    env: {
+      ...builderEnv,
+      CLAWEE_DESKTOP_BUILD_MANIFEST: manifestPath,
+      CLAWEE_DESKTOP_PACKAGE_ROOT: packageRoot,
+      ...(releaseContext.distributableMac
+        ? {
+            CLAWEE_REQUIRE_DISTRIBUTABLE_MAC: '1',
+            CLAWEE_APPLE_TEAM_ID: expectedAppleTeamId
+          }
+        : {}),
+      ...(releaseContext.distributableWindows
+        ? { CLAWEE_REQUIRE_DISTRIBUTABLE_WINDOWS: '1' }
+        : {})
+    },
+    timeoutMs: 5 * 60_000
+  });
+  if (recovery) await saveNotaryRecovery(recovery, { stage: 'verified' });
+} catch (error) {
+  if (releaseContext.distributableMac) rmSync(manifestPath, { force: true });
+  if (recovery) {
+    await saveNotaryRecovery(recovery, { failure: notaryFailureDiagnostic(error) });
+  }
+  throw error;
+}
 for (const artifact of manifest.artifacts) {
   console.log(
     `[desktop-package] 产物：${artifact.path} `
@@ -389,6 +425,9 @@ function electronBuilderArguments(packageMode, targetPlatform, targetArch, baseE
     args.push(`--config.publish.channel=${targetArch === 'arm64' ? 'latest-arm64' : 'latest'}`);
     if (packageMode !== 'release') {
       disableImplicitMacSigning(targetPlatform, nextEnv, args);
+    } else {
+      args.push('--config.mac.notarize=false');
+      args.push(`--config.afterSign=${resolve(scriptDir, 'notarize-after-sign.mjs')}`);
     }
   } else if (targetPlatform === 'win32') {
     args.push('--win', 'nsis', `--${targetArch}`);
@@ -559,7 +598,9 @@ function assertNoSymbolicLinks(root) {
 function assertDesktopRuntimeDependencies() {
   for (const relativePath of [
     'node_modules/@clawee/protocol/dist/index.js',
-    'node_modules/@iarna/toml/package.json'
+    'node_modules/@iarna/toml/package.json',
+    'node_modules/electron-updater/out/main.js',
+    'node_modules/js-yaml/package.json'
   ]) {
     const path = resolve(desktopRuntimeStage, relativePath);
     if (!existsSync(path)) {
@@ -568,6 +609,7 @@ function assertDesktopRuntimeDependencies() {
       );
     }
   }
+  assertUpdateRuntimeDependencies(desktopRuntimeStage);
 }
 
 function prepareReleaseContext(input) {
@@ -655,65 +697,12 @@ function assertMacSigningConfigured(targetEnv, teamId) {
 }
 
 function configureMacNotarization(targetEnv, teamId) {
-  const passwordCredentials = [
-    targetEnv.APPLE_ID,
-    targetEnv.APPLE_APP_SPECIFIC_PASSWORD,
-    targetEnv.APPLE_TEAM_ID
-  ];
-  const apiKeyCredentials = [
-    targetEnv.APPLE_API_KEY,
-    targetEnv.APPLE_API_KEY_ID,
-    targetEnv.APPLE_API_ISSUER
-  ];
-  if (passwordCredentials.some(hasValue)) {
-    if (!passwordCredentials.every(hasValue)) {
-      throw new Error(
-        'APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID '
-        + 'must be configured together'
-      );
-    }
-    if (targetEnv.APPLE_TEAM_ID.trim() !== teamId) {
-      throw new Error(
-        `APPLE_TEAM_ID ${targetEnv.APPLE_TEAM_ID.trim()} does not match `
-        + `the Clawee release Team ID ${teamId}`
-      );
-    }
-    return [
-      '--apple-id',
-      targetEnv.APPLE_ID.trim(),
-      '--password',
-      targetEnv.APPLE_APP_SPECIFIC_PASSWORD.trim(),
-      '--team-id',
-      targetEnv.APPLE_TEAM_ID.trim()
-    ];
+  const args = notarytoolCredentialArgs(targetEnv, teamId);
+  if (args[0] === '--keychain-profile') {
+    validateNotaryKeychainProfile(args[1], targetEnv.APPLE_KEYCHAIN);
+    targetEnv.APPLE_KEYCHAIN_PROFILE = args[1];
   }
-  if (apiKeyCredentials.some(hasValue)) {
-    if (!apiKeyCredentials.every(hasValue)) {
-      throw new Error(
-        'APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER '
-        + 'must be configured together'
-      );
-    }
-    return [
-      '--key',
-      targetEnv.APPLE_API_KEY.trim(),
-      '--key-id',
-      targetEnv.APPLE_API_KEY_ID.trim(),
-      '--issuer',
-      targetEnv.APPLE_API_ISSUER.trim()
-    ];
-  }
-  const profile = targetEnv.APPLE_KEYCHAIN_PROFILE?.trim()
-    || defaultNotaryKeychainProfile;
-  validateNotaryKeychainProfile(profile, targetEnv.APPLE_KEYCHAIN);
-  targetEnv.APPLE_KEYCHAIN_PROFILE = profile;
-  return [
-    '--keychain-profile',
-    profile,
-    ...(hasValue(targetEnv.APPLE_KEYCHAIN)
-      ? ['--keychain', targetEnv.APPLE_KEYCHAIN.trim()]
-      : [])
-  ];
+  return args;
 }
 
 function validateNotaryKeychainProfile(profile, keychain) {
@@ -734,59 +723,6 @@ function validateNotaryKeychainProfile(profile, keychain) {
     throw new Error(
       `Apple notarization Keychain profile "${profile}" is unavailable or `
       + 'invalid. Run pnpm desktop:notary:setup -- <APPLE_ID> first.'
-    );
-  }
-}
-
-function finalizeReleaseDmgArtifacts(artifacts, notarytoolCredentialArgs) {
-  for (const artifact of artifacts) {
-    runVerificationCommand(
-      'DMG filesystem',
-      'hdiutil',
-      ['verify', artifact]
-    );
-    runVerificationCommand(
-      'DMG code signature',
-      'codesign',
-      ['--verify', '--verbose=4', artifact]
-    );
-    runVerificationCommand(
-      'DMG notarization',
-      'xcrun',
-      [
-        'notarytool',
-        'submit',
-        artifact,
-        ...notarytoolCredentialArgs,
-        '--wait',
-        '--output-format',
-        'json'
-      ],
-      30 * 60_000
-    );
-    runVerificationCommand(
-      'DMG notarization ticket staple',
-      'xcrun',
-      ['stapler', 'staple', artifact],
-      5 * 60_000
-    );
-    runVerificationCommand(
-      'DMG notarization ticket',
-      'xcrun',
-      ['stapler', 'validate', artifact]
-    );
-    runVerificationCommand(
-      'DMG Gatekeeper assessment',
-      'spctl',
-      [
-        '--assess',
-        '--type',
-        'open',
-        '--context',
-        'context:primary-signature',
-        '--verbose=4',
-        artifact
-      ]
     );
   }
 }
@@ -831,10 +767,6 @@ function runVerificationCommand(
       `${label} verification failed: ${result.stderr || result.stdout}`
     );
   }
-}
-
-function hashFile(path) {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 function gitOutput(args) {

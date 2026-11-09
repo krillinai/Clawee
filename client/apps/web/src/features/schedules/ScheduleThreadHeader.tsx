@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import { createPortal } from 'react-dom';
 import type { ClaweeProject } from '../projects/project-model.js';
 import type { ScheduleSidebarTaskStatus } from '../shell/sidebar-task-model.js';
@@ -67,14 +68,11 @@ export function ScheduleThreadHeader(props: {
     setOperation(undefined);
   }, [props.schedule.id]);
 
-  useEffect(() => {
-    if (!editorOpen) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && operation !== 'save_editor') closeEditor();
-    }
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [editorOpen, operation]);
+  useModalBehavior(editorDialogRef, {
+    open: editorOpen,
+    onClose: () => closeEditor(),
+    closeDisabled: operation === 'save_editor'
+  });
 
   useEffect(() => {
     if (!editorOpen) return;

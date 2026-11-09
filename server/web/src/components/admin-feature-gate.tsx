@@ -13,6 +13,7 @@ const featurePages: { path: string; feature: AdminFeature; title: string }[] = [
   { path: "/admin/platform-branding", feature: "platform_branding", title: "平台外观" },
   { path: "/admin/client-downloads", feature: "client_downloads", title: "客户端下载" },
   { path: "/admin/mcp", feature: "mcp", title: "MCP 网关" },
+  { path: "/admin/agent-prompt-policy", feature: "agent_management", title: "智能体提示词" },
   { path: "/admin/activity", feature: "activity", title: "智能体活动" },
   { path: "/admin/knowledge-bases", feature: "knowledge", title: "知识库" },
   { path: "/admin/skills/source-detail", feature: "skill_sources", title: "GitHub 来源" },

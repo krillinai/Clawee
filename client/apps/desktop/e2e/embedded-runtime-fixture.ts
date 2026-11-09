@@ -62,8 +62,11 @@ import {
 } from './packaged-app.js';
 import {
   CONTROLLED_MODEL_API_KEY,
-  ControlledModelServer
+  ControlledModelServer,
+  type ControlledModelResponseMode
 } from './controlled-model-server.js';
+import { captureDesktopE2EEvidence } from './desktop-e2e-evidence.js';
+import { redactText, redactValue } from '../src/main/redaction.js';
 
 const e2eDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(e2eDir, '..');
@@ -107,10 +110,12 @@ export type EmbeddedRuntimeFixture = {
   sourceRolloutsAreUnchanged(): boolean;
   targetRolloutPaths(): string[];
   dispose(): Promise<void>;
+  captureEvidence(name: string, details?: Record<string, unknown>): Promise<void>;
 };
 
 export async function createEmbeddedRuntimeFixture(input: {
   legacyThreadCount?: number;
+  responseMode?: ControlledModelResponseMode;
 } = {}): Promise<EmbeddedRuntimeFixture> {
   const manifest = readDesktopBuildManifest(desktopDir);
   const fixtureBase = embeddedRuntimeFixtureBase();
@@ -135,7 +140,7 @@ export async function createEmbeddedRuntimeFixture(input: {
   const hostileBin = join(root, 'hostile-bin');
   const hostileSentinelPath = join(root, 'hostile-codex-invoked.txt');
   const enterpriseConfigPath = join(root, 'enterprise', 'config.toml');
-  const modelServer = new ControlledModelServer();
+  const modelServer = new ControlledModelServer(input.responseMode);
   const enterpriseServer = new FakeEnterpriseAuthServer();
   mkdirSync(home, { recursive: true });
   mkdirSync(workspace, { recursive: true });
@@ -180,6 +185,15 @@ export async function createEmbeddedRuntimeFixture(input: {
       enterpriseRunId
     });
 
+    const launchedApps: PackagedApp[] = [];
+    const captureEvidence = (name: string, details?: Record<string, unknown>) => (
+      captureDesktopE2EEvidence({
+        userData,
+        rootPids: launchedApps.flatMap(app => app.process.pid === undefined ? [] : [app.process.pid]),
+        outputDir: test.info().outputPath('desktop-evidence', name),
+        details
+      })
+    );
     return {
       root,
       home,
@@ -199,6 +213,7 @@ export async function createEmbeddedRuntimeFixture(input: {
       manifest,
       legacyThreads,
       modelServer,
+      captureEvidence,
       async launch() {
         const app = await launchPackagedApp({
           executablePath,
@@ -207,11 +222,13 @@ export async function createEmbeddedRuntimeFixture(input: {
           timeoutMs: 45_000
         });
         startupEvidence.set(app.page, { userData, modelServer });
+        launchedApps.push(app);
         return app;
       },
       async relaunch(app) {
         const relaunched = await relaunchPackagedApp(app, 45_000);
         startupEvidence.set(relaunched.page, { userData, modelServer });
+        launchedApps.push(relaunched);
         return relaunched;
       },
       writeControlledRuntimeConfig() {
@@ -248,6 +265,9 @@ export async function createEmbeddedRuntimeFixture(input: {
         return findFiles(join(targetHome, 'sessions'), '.jsonl');
       },
       async dispose() {
+        await captureEvidence('fixture-dispose').catch(error => {
+          console.warn(`[desktop-e2e] 证据采集失败：${redactText(String(error))}`);
+        });
         await Promise.all([
           modelServer.close(),
           enterpriseServer.close()
@@ -450,6 +470,7 @@ export async function waitForAvailabilityProbe(
     if (
       status.availabilityProbe !== undefined
       && status.availabilityProbe.status !== 'pending'
+      && status.availabilityProbe.status !== 'skipped'
     ) {
       return status.availabilityProbe;
     }
@@ -494,7 +515,19 @@ export function writeDesktopE2EReport(
   const reportDir = resolve(desktopDir, '../../test-results');
   mkdirSync(reportDir, { recursive: true });
   const path = join(reportDir, filename);
-  writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+  const testInfo = test.info();
+  const contents = `${JSON.stringify(redactValue({
+    ...report,
+    attempt: {
+      testId: testInfo.testId,
+      retry: testInfo.retry,
+      repeatEachIndex: testInfo.repeatEachIndex
+    }
+  }), null, 2)}\n`;
+  const attemptPath = testInfo.outputPath(filename);
+  mkdirSync(dirname(attemptPath), { recursive: true });
+  writeFileSync(attemptPath, contents);
+  writeFileSync(path, contents);
   return path;
 }
 

@@ -1,5 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, normalize, parse, sep } from 'node:path';
 import { WorkspaceFileError } from './errors.js';
 
 const ignoredNames = new Set([
@@ -18,7 +19,7 @@ const ignoredNames = new Set([
 ]);
 
 export function validateRelativePath(raw: string | undefined, allowEmpty: boolean): string {
-  const value = raw ?? '';
+  const value = (raw ?? '').replace(/\\/g, '/');
   if (value.length === 0) {
     if (allowEmpty) return '';
     throw new WorkspaceFileError('PATH_INVALID', 'Path is required.');
@@ -27,9 +28,10 @@ export function validateRelativePath(raw: string | undefined, allowEmpty: boolea
   if (/^[A-Za-z]:[\\/]/.test(value)) throw new WorkspaceFileError('PATH_INVALID', 'Absolute Windows paths are not allowed.');
   if (isAbsolute(value)) throw new WorkspaceFileError('PATH_INVALID', 'Absolute paths are not allowed.');
 
-  const rawSegments = value.replace(/\\/g, '/').split('/');
+  const rawSegments = value.split('/');
   for (const segment of rawSegments) {
     if (!segment || segment === '.') continue;
+    if (segment.length > 255) throw new WorkspaceFileError('PATH_INVALID', 'File path is too long.');
     if (segment === '..') throw new WorkspaceFileError('PATH_INVALID', 'Path traversal is not allowed.');
     if (isIgnoredDir(segment)) throw new WorkspaceFileError('PATH_IGNORED', 'Ignored paths are not available.');
   }
@@ -46,6 +48,17 @@ export function validateRelativePath(raw: string | undefined, allowEmpty: boolea
   }
 
   return segments.filter((segment) => segment.length > 0 && segment !== '.').join('/');
+}
+
+export function validateFilePath(raw: string): string {
+  const value = raw.replace(/\\/g, '/');
+  if (raw.startsWith('\\') || value.startsWith('//')) {
+    throw new WorkspaceFileError('PATH_INVALID', 'Network paths are not allowed.');
+  }
+  const expanded = value.startsWith('~/') ? join(homedir(), value.slice(2)) : value;
+  if (!isAbsolute(expanded)) return validateRelativePath(expanded, false);
+  const root = parse(expanded).root;
+  return join(root, validateRelativePath(expanded.slice(root.length), false));
 }
 
 export function resolveSafeExisting(root: string, relativePath: string): string {

@@ -229,13 +229,14 @@ export function AdminOverviewPage() {
   const hasWorkbenchAccess = canReadGates || canReadCapabilities || canAssessAgentCoverage || canReadUpstreams;
   const showWorkbench = hasWorkbenchAccess && (isWorkbenchLoading || governanceActionCount > 0);
   const hasEnterpriseAccess = canReadKnowledge || canReadSkills || canReadSharedFiles;
-  const showAccessAndResources =
-    (canReadAgents && canReadActivity && canReadUpstreams) || hasEnterpriseAccess;
+  const showTopology = canReadAgents && canReadActivity && canReadUpstreams;
+  const showAccessAndResources = showTopology || hasEnterpriseAccess;
+  const accessResourcesTitle = showTopology ? "接入与资源" : "企业资源";
   const overviewNavigationItems = useMemo<OverviewNavigationItem[]>(() => [
     ...(hasMetricAccess ? [{ id: "governance-overview", label: "治理概况" }] : []),
-    ...(showAccessAndResources ? [{ id: "access-resources", label: "接入与资源" }] : []),
+    ...(showAccessAndResources ? [{ id: "access-resources", label: accessResourcesTitle }] : []),
     ...(canReadAudits || showWorkbench ? [{ id: "analysis-actions", label: "分析与处置" }] : [])
-  ], [canReadAudits, hasMetricAccess, showAccessAndResources, showWorkbench]);
+  ], [accessResourcesTitle, canReadAudits, hasMetricAccess, showAccessAndResources, showWorkbench]);
   const knowledgeBases = enterpriseResourcesQuery.data?.knowledgeBases ?? [];
   const skills = enterpriseResourcesQuery.data?.skills ?? [];
   const sharedSpaces = enterpriseResourcesQuery.data?.sharedSpaces.items ?? [];
@@ -273,6 +274,7 @@ export function AdminOverviewPage() {
     } : null
   ].filter((item): item is NonNullable<typeof item> => item !== null);
   const enterpriseResourceCount = sum(enterpriseResourceData.map((item) => item.count));
+  const showEnterpriseDistribution = enterpriseResourceData.length > 1 && enterpriseResourceCount > 0;
   const enterpriseOverviewHref = enterpriseResourceData[0]?.href ?? "/admin";
   const auditResults = summarizeAuditResults(audits);
   const auditTotalLabel = audits.length >= AUDIT_SAMPLE_LIMIT ? `${AUDIT_SAMPLE_LIMIT}+` : String(audits.length);
@@ -338,10 +340,10 @@ export function AdminOverviewPage() {
             </div>
           }
         >
-          <p>统一查看 Agent 接入、企业能力纳管、授权门禁与调用审计，快速定位需要介入的治理风险。</p>
+          <p>查看当前账号权限范围内的 Agent 接入、企业资源、授权门禁与调用审计。</p>
         </PageHeader>
 
-        {overviewNavigationItems.length > 0 ? (
+        {overviewNavigationItems.length > 1 ? (
           <OverviewSectionNavigation items={overviewNavigationItems} />
         ) : null}
 
@@ -353,7 +355,6 @@ export function AdminOverviewPage() {
         ) : null}
         {canReadActivity && officeActivityQuery.isError ? <ErrorAlert error={officeActivityQuery.error}>Agent 运行状态加载失败。</ErrorAlert> : null}
         {canReadGates && pendingGatesQuery.isError ? <ErrorAlert error={pendingGatesQuery.error}>门禁待办加载失败。</ErrorAlert> : null}
-        {hasEnterpriseAccess && enterpriseResourcesQuery.isError ? <ErrorAlert error={enterpriseResourcesQuery.error}>企业资源状态加载失败。</ErrorAlert> : null}
 
         {hasMetricAccess ? (
           <OverviewSection
@@ -361,7 +362,7 @@ export function AdminOverviewPage() {
             id="governance-overview"
             title="治理概况"
           >
-            <section aria-label="核心治理指标" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <section aria-label="核心治理指标" className="grid gap-4 md:grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
             {canAssessAgentCoverage ? (
               <OverviewMetric
                 badgeLabel={ungovernedAgentCount > 0 ? "需接入" : "已纳管"}
@@ -426,11 +427,11 @@ export function AdminOverviewPage() {
 
         {showAccessAndResources ? (
           <OverviewSection
-            description="查看 Agent 接入链路与企业资源纳管范围。"
+            description={showTopology ? "查看 Agent 接入链路与企业资源纳管范围。" : "当前账号有权查看的企业资源状态。"}
             id="access-resources"
-            title="接入与资源"
+            title={accessResourcesTitle}
           >
-            {canReadAgents && canReadActivity && canReadUpstreams ? (
+            {showTopology ? (
               <MCPGatewayTopology
                 agents={topologyAgents}
                 loading={isAgentLoading}
@@ -448,18 +449,19 @@ export function AdminOverviewPage() {
                   查看已经进入统一权限与审计边界的企业知识、技能和共享文件。
                 </HelpTooltip>
               </CardTitle>
-              <Button asChild size="sm" variant="ghost">
+              {enterpriseResourceData.length > 1 ? <Button asChild size="sm" variant="ghost">
                 <Link to={enterpriseOverviewHref}>
                   查看企业资源
                   <ArrowRight data-icon="inline-end" aria-hidden="true" />
                 </Link>
-              </Button>
+              </Button> : null}
             </CardHeader>
             <CardContent>
               {enterpriseResourcesQuery.isLoading ? <LoadingState label="正在加载企业资源" /> : null}
-              {!enterpriseResourcesQuery.isLoading ? (
-                <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
-                  <div className="grid items-center gap-5 sm:grid-cols-[minmax(180px,0.8fr)_minmax(220px,1fr)]">
+              {enterpriseResourcesQuery.isError ? <ErrorAlert error={enterpriseResourcesQuery.error}>企业资源状态加载失败。</ErrorAlert> : null}
+              {enterpriseResourcesQuery.isSuccess ? (
+                <div className={cn("grid items-center gap-8", showEnterpriseDistribution && "lg:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]")}>
+                  {showEnterpriseDistribution ? <div className="grid items-center gap-5 sm:grid-cols-[minmax(180px,0.8fr)_minmax(220px,1fr)]">
                     <ChartContainer
                       aria-label={`纳管资源分布，共 ${enterpriseResourceCount} 项`}
                       className="mx-auto h-52 w-full max-w-[260px]"
@@ -506,7 +508,7 @@ export function AdminOverviewPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </div> : null}
                   <div className="grid">
                     {enterpriseResourceData.map((item, index) => {
                       const Icon = item.icon;

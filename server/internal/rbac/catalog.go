@@ -74,6 +74,8 @@ const (
 	PermissionKnowledgeDocumentSync           = "console:knowledge:document_sync"
 	PermissionKnowledgeDocumentDelete         = "console:knowledge:document_delete"
 	PermissionSkillRead                       = "console:skill:read"
+	PermissionSkillDownload                   = "console:skill:download"
+	PermissionSkillPermissionCheck            = "console:skill:permission_check"
 	PermissionSkillManage                     = "console:skill:manage"
 	PermissionSkillVersionUpload              = "console:skill:version_upload"
 	PermissionSkillMove                       = "console:skill:move"
@@ -199,6 +201,8 @@ var permissionCatalog = []Permission{
 	{PermissionKnowledgeDocumentSync, "knowledge", "document_sync", "同步知识库文档", "触发知识库文档同步"},
 	{PermissionKnowledgeDocumentDelete, "knowledge", "document_delete", "删除知识库文档", "删除知识库文档"},
 	{PermissionSkillRead, "skill", "read", "技能查看", "查看技能版本、文件和发布管理信息"},
+	{PermissionSkillDownload, "skill", "download", "下载技能包", "在管理后台下载技能任意版本的 ZIP 包"},
+	{PermissionSkillPermissionCheck, "skill", "permission_check", "代查技能使用权限", "代查指定账户是否拥有技能读取权限，供服务端 Agent 使用前检查"},
 	{PermissionSkillManage, "skill", "manage", "技能管理", "查看并执行技能的全部操作"},
 	{PermissionSkillVersionUpload, "skill", "version_upload", "上传技能版本", "上传技能版本"},
 	{PermissionSkillMove, "skill", "move", "移动技能", "将技能移动到其他空间"},
@@ -242,9 +246,9 @@ var permissionCatalog = []Permission{
 	{PermissionPlatformBrandingUpdate, "platform_branding", "update", "更新平台外观", "修改客户端平台外观"},
 	{PermissionClientDownloadsRead, "client_downloads", "read", "客户端发布查看", "查看客户端发布配置"},
 	{PermissionClientDownloadsUpdate, "client_downloads", "update", "更新客户端发布", "修改客户端发布配置"},
-	{PermissionWorkflowTemplateManage, "workflow", "template_manage", "工作流模板管理", "创建、编辑和启停工作流模板"},
-	{PermissionWorkflowInstanceRead, "workflow", "instance_read", "工作流实例查看", "查看全部工作流实例"},
-	{PermissionWorkflowInstanceTerminate, "workflow", "instance_terminate", "工作流实例终止", "终止运行中的工作流实例"},
+	{PermissionWorkflowTemplateManage, "workflow", "template_manage", "流程模板管理", "创建、编辑和启停流程模板"},
+	{PermissionWorkflowInstanceRead, "workflow", "instance_read", "流程任务查看", "查看全部流程任务"},
+	{PermissionWorkflowInstanceTerminate, "workflow", "instance_terminate", "流程任务终止", "终止运行中的流程任务"},
 }
 
 func PermissionCatalog() []Permission {

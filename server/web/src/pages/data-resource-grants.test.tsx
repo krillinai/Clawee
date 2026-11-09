@@ -9,6 +9,8 @@ import {
   createDataResourceGrant,
   listDataResourceGrantMemberCandidates,
   listDataResourceGrantMembers,
+  listDataResourceGrantRoleMembers,
+  listDataResourceGrantRoleCandidates,
   listDataResourceTypes,
   removeDataResourceGrant,
   replaceDataResourceGrant,
@@ -20,6 +22,8 @@ vi.mock("@/lib/data-resource-grants-api", () => ({
   createDataResourceGrant: vi.fn(),
   listDataResourceGrantMemberCandidates: vi.fn(),
   listDataResourceGrantMembers: vi.fn(),
+  listDataResourceGrantRoleMembers: vi.fn(),
+  listDataResourceGrantRoleCandidates: vi.fn(),
   listDataResourceTypes: vi.fn(),
   removeDataResourceGrant: vi.fn(),
   replaceDataResourceGrant: vi.fn(),
@@ -52,6 +56,44 @@ const agentActivity = {
 };
 
 describe("DataResourceGrantsPage", () => {
+  it("技能空间角色授权与账户直授并存，角色 CRUD 始终只发送 roleId", async () => {
+    const resource = { ...sharedSpace, resourceType: "skill_space", resourceId: "skillspace_1", name: "研发技能" };
+    vi.mocked(searchDataResourceGrantResources).mockResolvedValue({ items: [resource], meta: { page: 1, page_size: 20, total: 1 } });
+    const role = { roleId: "reviewers", name: "审核组", actions: ["read"], granted: true, updatedAt: "2026-09-30T00:00:00Z" };
+    vi.mocked(listDataResourceGrantRoleMembers).mockResolvedValue({ items: [role], meta: { next_cursor: "", has_next: false } });
+    vi.mocked(listDataResourceGrantRoleCandidates).mockResolvedValue({ items: [{ ...role, roleId: "writers", name: "编写组" }], meta: { next_cursor: "", has_next: false } });
+    renderPage([permissions.dataResourceGrantRead, permissions.dataResourceGrantManage]);
+    fireEvent.click(await screen.findByRole("radio", { name: /技能空间/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "管理研发技能角色授权" }));
+    expect(await screen.findByText("审核组")).toBeInTheDocument();
+    expect(screen.getByText(/角色继承授权管理/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "添加角色授权" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择授权角色" }));
+    fireEvent.click(await screen.findByText("编写组"));
+    fireEvent.click(screen.getByRole("button", { name: "添加 1 个角色" }));
+    await waitFor(() => expect(createDataResourceGrant).toHaveBeenCalledWith({ roleId: "writers", resourceType: "skill_space", resourceId: "skillspace_1", actions: ["read", "write"] }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑审核组角色授权" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "上传及修改文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(replaceDataResourceGrant).toHaveBeenCalledWith({ roleId: "reviewers", resourceType: "skill_space", resourceId: "skillspace_1", actions: ["read", "write"] }));
+    fireEvent.click(screen.getByRole("button", { name: "删除审核组角色授权" }));
+    expect(screen.getByText(/其他直接或角色授权来源仍然保留/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "删除角色授权" })).getByRole("button", { name: /确认|删除/ }));
+    await waitFor(() => expect(removeDataResourceGrant).toHaveBeenCalledWith({ roleId: "reviewers", resourceType: "skill_space", resourceId: "skillspace_1" }));
+  });
+
+  it("其他资源不显示角色授权入口，只读管理人不能修改角色授权", async () => {
+    renderPage();
+    await screen.findByText("市场资料库");
+    expect(screen.queryByRole("button", { name: /角色授权/ })).not.toBeInTheDocument();
+    const resource = { ...sharedSpace, resourceType: "skill_space", name: "研发技能" };
+    vi.mocked(searchDataResourceGrantResources).mockResolvedValue({ items: [resource], meta: { page: 1, page_size: 20, total: 1 } });
+    vi.mocked(listDataResourceGrantRoleMembers).mockResolvedValue({ items: [], meta: { next_cursor: "", has_next: false } });
+    fireEvent.click(screen.getByRole("radio", { name: /技能空间/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看研发技能角色授权" }));
+    expect(await screen.findByText("暂无角色授权")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "添加角色授权" })).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.mocked(listDataResourceTypes).mockResolvedValue([
       { resourceType: "shared_space", name: "共享空间", resourceCount: 1, actionCount: 2, userCount: 1, updatedAt: "2026-08-07T10:30:00Z" },

@@ -16,6 +16,7 @@ import (
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/feedback"
 	"github.com/krillinai/Clawee/server/internal/server"
+	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 )
 
 func consoleSubmissionRequest(t *testing.T, metadata string, screenshots int, cookie *http.Cookie) *http.Request {
@@ -58,8 +59,8 @@ func TestConsoleFeedbackCollectionRequiresAuthenticatedAdmin(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feedback/collection-policy", nil)
 	req.AddCookie(adminCookie(t, cookies))
 	router.ServeHTTP(w, req)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"external_feedback_allowed":true`) {
-		t.Fatalf("reporting must work without local centre service: %d %s", w.Code, w.Body.String())
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("reporting must be disabled without local service: %d %s", w.Code, w.Body.String())
 	}
 	regular, err := accountSvc.Register(context.Background(), accounts.RegisterRequest{Email: "console-user@example.com", Name: "普通用户", Password: "passw0rd!"})
 	if err != nil {
@@ -80,7 +81,11 @@ func TestConsoleFeedbackCollectionRequiresAuthenticatedAdmin(t *testing.T) {
 func TestConsoleFeedbackCollectionPolicyAndConsent(t *testing.T) {
 	for _, allowed := range []bool{false, true} {
 		accountSvc := newTestAccountService(accounts.NewMemoryStore())
-		router := newTestRouter(t, server.Options{AccountService: accountSvc, ExternalFeedbackAllowed: &allowed})
+		opts := server.Options{AccountService: accountSvc}
+		if allowed {
+			opts.FeedbackService = feedback.NewService(feedback.NewMemoryStore(), nil, nil, 0)
+		}
+		router := newTestRouter(t, opts)
 		cookies := register(t, router, `{"email":"console-admin@example.com","name":"管理员","password":"passw0rd!"}`)
 		w := httptest.NewRecorder()
 		req := consoleSubmissionRequest(t, `{"confirmed":false,"accept_partial":false}`, 0, adminCookie(t, cookies))
@@ -111,7 +116,7 @@ func TestConsoleFeedbackCollectionValidatesMultipartAndCleansTemporaryFiles(t *t
 	temporary := t.TempDir()
 	t.Setenv("TMPDIR", temporary)
 	accountSvc := newTestAccountService(accounts.NewMemoryStore())
-	router := newTestRouter(t, server.Options{AccountService: accountSvc})
+	router := newTestRouter(t, server.Options{AccountService: accountSvc, FeedbackService: feedback.NewService(feedback.NewMemoryStore(), nil, nil, 0)})
 	cookies := register(t, router, `{"email":"console-admin@example.com","name":"管理员","password":"passw0rd!"}`)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	metadata, _ := json.Marshal(feedback.ConsoleInput{ClientID: "console_test0001", RecoveryToken: strings.Repeat("a", 43), StatusToken: strings.Repeat("b", 43), Description: "异常反馈", OccurredAt: now, SnapshotAt: now, ConfirmedAt: now, Page: "/admin", Confirmed: true, AcceptPartial: true})
@@ -134,5 +139,34 @@ func TestConsoleFeedbackCollectionValidatesMultipartAndCleansTemporaryFiles(t *t
 		if err != nil || len(entries) != 0 {
 			t.Fatalf("temporary material left behind: %v %v", entries, err)
 		}
+	}
+}
+
+func TestConsoleFeedbackStoredLocallyWhenExternalFeedbackIsDisabled(t *testing.T) {
+	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	store := feedback.NewMemoryStore()
+	storage, err := sharedfiles.NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalAllowed := false
+	router := newTestRouter(t, server.Options{AccountService: accountSvc, ExternalFeedbackAllowed: &externalAllowed, FeedbackService: feedback.NewService(store, storage, nil, 0)})
+	cookies := register(t, router, `{"email":"console-admin@example.com","name":"管理员","password":"passw0rd!"}`)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata, _ := json.Marshal(feedback.ConsoleInput{ClientID: "console_local0001", RecoveryToken: strings.Repeat("a", 43), StatusToken: strings.Repeat("b", 43), Description: "本部署异常", OccurredAt: now, SnapshotAt: now, ConfirmedAt: now, Page: "/admin", Confirmed: true, AcceptPartial: true})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, consoleSubmissionRequest(t, string(metadata), 0, adminCookie(t, cookies)))
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var receipt struct {
+		Data feedback.ConsoleReceipt `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	report, err := store.Get(receipt.Data.ReportID)
+	if err != nil || report.UploadState != "ready" {
+		t.Fatalf("local feedback missing: %v", err)
 	}
 }

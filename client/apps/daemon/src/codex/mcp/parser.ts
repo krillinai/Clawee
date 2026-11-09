@@ -196,6 +196,16 @@ function mapServer(
     result.bearerTokenEnvVar = bearerTokenEnvVar;
   }
 
+  if (
+    server.auth_status === 'unknown'
+    || server.auth_status === 'unsupported'
+    || server.auth_status === 'not_logged_in'
+    || server.auth_status === 'bearer_token'
+    || server.auth_status === 'oauth'
+  ) {
+    result.authStatus = server.auth_status;
+  }
+
   return result;
 }
 

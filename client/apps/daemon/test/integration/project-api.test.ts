@@ -39,7 +39,7 @@ describe('project API', () => {
     expect(first.statusCode).toBe(200);
     expect(first.json().project).toMatchObject({
       name: '默认项目',
-      cwd: join(tempDir, 'Clawee', 'Default Project'),
+      cwd: join(tempDir, 'Clawee', 'DefaultProject'),
       directoryState: 'available'
     });
     expect(repeated.statusCode).toBe(200);

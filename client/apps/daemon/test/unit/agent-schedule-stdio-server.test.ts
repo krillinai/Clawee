@@ -11,6 +11,24 @@ afterEach(async () => {
 });
 
 describe('agent schedule MCP server', () => {
+  it('exposes workflow files only for an explicit grant and rejects arbitrary spaces', async () => {
+    const request = vi.fn(async () => ({ artifact: { file_id: 'file-1' } }));
+    const server = createAgentScheduleMcpServer({ request, enabledTools: ['clawee_workflow_upload_file', 'clawee_workflow_read_file'] });
+    const client = new Client({ name: 'workflow-files-test', version: '0.1.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    closeWork.push(() => client.close(), () => server.close());
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['clawee_workflow_upload_file', 'clawee_workflow_read_file']);
+    const uploaded = await client.callTool({ name: 'clawee_workflow_upload_file', arguments: { path: 'output/report.txt' } });
+    expect(uploaded.isError).not.toBe(true);
+    expect(request).toHaveBeenCalledWith({ method: 'POST', path: '/internal/agent-tools/workflow/files/upload', body: { path: 'output/report.txt' } });
+    request.mockClear();
+    const forged = await client.callTool({ name: 'clawee_workflow_upload_file', arguments: { path: 'output/report.txt', spaceId: 'other' } });
+    expect(forged.isError).toBe(true);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('registers all schedule tools and executes structured create input', async () => {
     const request = vi.fn(async () => ({
       id: 'schedule-1',

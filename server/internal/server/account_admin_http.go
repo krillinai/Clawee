@@ -16,6 +16,7 @@ import (
 
 type createAccountRequest struct {
 	Email    string `json:"email"`
+	Phone    string `json:"phone"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 	Status   string `json:"status"`
@@ -77,6 +78,7 @@ func handleCreateAccount(accountSvc *accounts.Service, proxyGateway *mcpgateway.
 		}
 		account, err := accountSvc.CreateAccount(c.Request.Context(), accounts.CreateAccountRequest{
 			Email:    req.Email,
+			Phone:    req.Phone,
 			Name:     req.Name,
 			Password: req.Password,
 			Status:   req.Status,
@@ -230,6 +232,8 @@ func accountError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "账户 ID 不能为空"})
 	case errors.Is(err, accounts.ErrAccountNameRequired):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "账户昵称不能为空"})
+	case errors.Is(err, accounts.ErrPhoneExists):
+		c.JSON(http.StatusConflict, gin.H{"error": "该手机号已注册"})
 	case errors.Is(err, accounts.ErrInvalidAccountRequest), errors.Is(err, accounts.ErrPasswordTooShort), errors.Is(err, accounts.ErrEmailExists), errors.Is(err, rbac.ErrLastActiveAdmin), errors.Is(err, rbac.ErrAccountRoleExists), errors.Is(err, rbac.ErrAccountRoleNotFound):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, accounts.ErrAccountNotFound):

@@ -103,6 +103,37 @@ func TestAdminStatusReportsEnabledFeatures(t *testing.T) {
 	}
 }
 
+func TestAdminStatusReportsModelGatewayByAccessMode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode server.ModelAccessMode
+		want bool
+	}{
+		{name: "平台托管", mode: server.ModelAccessPlatformManaged, want: true},
+		{name: "企业托管", mode: server.ModelAccessEnterpriseManaged, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newTestRouter(t, server.Options{ModelAccessMode: tc.mode})
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+			}
+			var response struct {
+				Data struct {
+					Features map[string]bool `json:"features"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if got := response.Data.Features["model_gateway"]; got != tc.want {
+				t.Fatalf("model_gateway = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAdminStatusStillRequiresAuthentication(t *testing.T) {
 	router := server.NewRouter(server.Options{AccountService: newTestAccountService(nil)})
 	rec := httptest.NewRecorder()

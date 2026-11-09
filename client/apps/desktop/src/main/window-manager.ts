@@ -12,6 +12,7 @@ import {
 } from './development-web.js';
 import {
   DESKTOP_TITLE_BAR_HEIGHT,
+  DESKTOP_PACKAGED_ARGUMENT,
   type DesktopStartupMetrics
 } from '../shared/types.js';
 
@@ -76,6 +77,7 @@ export class WindowManager {
     appEntryAt: number;
     workspaceReadyTimeoutMs?: number;
     requestQuit(): void;
+    onActivate?(): void;
   }) {
     this.startupMetrics = {
       appEntryAt: input.appEntryAt
@@ -84,6 +86,12 @@ export class WindowManager {
 
   get metrics(): DesktopStartupMetrics {
     return { ...this.startupMetrics };
+  }
+
+  get hasWorkspace(): boolean {
+    const window = this.window;
+    return window !== undefined && !window.isDestroyed() && !window.webContents.isDestroyed()
+      && !window.webContents.isCrashed() && isWorkspaceUrl(window.webContents.getURL(), this.input.development);
   }
 
   create(): BrowserWindow {
@@ -103,13 +111,16 @@ export class WindowManager {
         contextIsolation: true,
         sandbox: true,
         plugins: true,
-        preload: this.input.preloadPath
+        preload: this.input.preloadPath,
+        additionalArguments: this.input.development ? [] : [DESKTOP_PACKAGED_ARGUMENT]
       }
     });
     const zoomFactor = nativePageZoomFactor(process.platform);
     if (zoomFactor !== undefined) window.webContents.setZoomFactor(zoomFactor);
     this.startupMetrics.windowCreatedAt ??= Date.now();
     this.window = window;
+    window.on('show', () => this.input.onActivate?.());
+    window.on('focus', () => this.input.onActivate?.());
     if (settings.window?.maximized === true) window.maximize();
     window.webContents.setWindowOpenHandler(({ url }) => {
       if (isAllowedExternalUrl(url)) void shell.openExternal(url);
@@ -274,6 +285,10 @@ export class WindowManager {
     this.windowStateWriter?.flush();
     this.cancelWorkspaceLoad(new Error('Application is quitting'));
     if (this.window !== undefined && !this.window.isDestroyed()) this.window.hide();
+  }
+
+  cancelQuit(): void {
+    this.quitting = false;
   }
 
   flushState(): void {

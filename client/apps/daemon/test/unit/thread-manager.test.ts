@@ -175,6 +175,20 @@ describe('thread manager', () => {
     expect(manager.listKnowledgeThreads('acct_a')).toEqual([thread]);
   });
 
+  it('仅允许无项目受控企业会话执行，普通未绑定会话仍要求项目', () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-projectless-enterprise-'));
+    const database = openTestDatabase(tempDir);
+    const manager = createThreadManager({ db: database, dataDir: tempDir });
+    const contribution = manager.createKnowledgeThread({ enterpriseSubjectId: 'acct_a', title: '贡献对话' });
+    expect(manager.assertRunnableThread(contribution.id)).toEqual(contribution);
+    expect(manager.getPublicThread(contribution.id)).toBeUndefined();
+    expect(manager.listPublicThreads({ purpose: 'conversation', assignment: 'unassigned' })).toEqual([]);
+    const ordinary = manager.createThread({ sandbox: 'read-only' });
+    expectThreadError(() => manager.assertRunnableThread(ordinary.id), 'PROJECT_NOT_FOUND');
+    manager.updateThread(contribution.id, { sandbox: 'workspace-write' });
+    expectThreadError(() => manager.assertRunnableThread(contribution.id), 'PROJECT_NOT_FOUND');
+  });
+
   it('stores an absolute managed workspace when dataDir is relative', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-thread-relative-'));
     const database = openTestDatabase(tempDir);

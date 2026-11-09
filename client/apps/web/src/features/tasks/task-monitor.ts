@@ -12,12 +12,15 @@ const NOTIFIABLE_STATUSES: ReadonlySet<TaskItem['status']> = new Set([
 export function collectTaskTransitions(
   previous: ReadonlyMap<string, TaskItem['status']>,
   tasks: TaskItem[],
-  baselineReady: boolean
+  baselineReady: boolean,
+  observedSince: number
 ): {
   statuses: Map<string, TaskItem['status']>;
   transitions: TaskItem[];
 } {
-  const statuses = new Map(tasks.map(task => [task.id, task.status]));
+  // 当前页之外的任务也要保留，避免重新进入列表时被当成新结果。
+  const statuses = new Map(previous);
+  for (const task of tasks) statuses.set(task.id, task.status);
   if (!baselineReady) return { statuses, transitions: [] };
 
   return {
@@ -25,6 +28,11 @@ export function collectTaskTransitions(
     transitions: tasks.filter(task => (
       NOTIFIABLE_STATUSES.has(task.status)
       && previous.get(task.id) !== task.status
+      && (
+        previous.has(task.id)
+        || task.status === 'waiting_approval'
+        || Date.parse(task.endedAt ?? task.updatedAt) >= observedSince
+      )
     ))
   };
 }

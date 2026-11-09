@@ -23,6 +23,7 @@ import type {
   UpdateRuntimeThreadInput,
   UpdateScheduleThreadInput
 } from './types.js';
+import type { AgentPromptPolicySnapshot } from './types.js';
 import { ThreadManagerError } from './types.js';
 
 export type CreateThreadManagerInput = {
@@ -82,6 +83,9 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
     },
 
     createKnowledgeThread(request: CreateKnowledgeThreadInput): RuntimeThread {
+      if (request.projectId === undefined) {
+        return createRuntimeThread({ title: request.title, sandbox: 'read-only', purpose: 'conversation', projectId: null, enterpriseSubjectId: request.enterpriseSubjectId, origin: 'clawee_created' });
+      }
       const project = projects.getProject(request.projectId);
       if (project === undefined) {
         throw new ThreadManagerError('PROJECT_NOT_FOUND', 'Project not found');
@@ -125,8 +129,12 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
         throw new ThreadManagerError('THREAD_NOT_FOUND', 'Thread not found');
       }
       const thread = mapThreadRow(row);
+      if (thread.purpose === 'skill_review') {
+        throw new ThreadManagerError('THREAD_READ_ONLY', 'AI 审核会话只读，请在审批页面重试审核');
+      }
       if (thread.purpose !== 'conversation') return thread;
       if (thread.projectId === null) {
+        if (isProjectlessEnterpriseConversation(thread)) return thread;
         throw new ThreadManagerError('PROJECT_NOT_FOUND', 'Thread is not assigned to a project');
       }
       const project = projects.getProject(thread.projectId);
@@ -152,7 +160,7 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
 
     getPublicThread(id: string): RuntimeThread | undefined {
       const row = threads.getThread(id);
-      if (row === undefined || isHiddenDiscoveredConversation(row)) return undefined;
+      if (row === undefined || row.enterprise_subject_id !== null || isHiddenDiscoveredConversation(row)) return undefined;
       return mapThreadRow(row);
     },
 
@@ -174,6 +182,7 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
       return threads.listKnowledgeThreads({
         enterpriseSubjectId,
         status: filter.status,
+        assignment: filter.assignment,
         limit: filter.limit
       }).map(mapThreadRow);
     },
@@ -186,6 +195,7 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
       const existing = threads.getThread(id);
       if (
         existing === undefined
+        || existing.enterprise_subject_id !== null
         || existing.origin !== 'clawee_created'
         || existing.purpose !== 'conversation'
       ) {
@@ -215,6 +225,7 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
 
     updateThread(id: string, request: UpdateRuntimeThreadInput): RuntimeThread {
       const existing = getRequiredThread(id);
+      assertMutableThread(existing);
       if (existing.purpose === 'schedule_task') throw new Error('THREAD_MANAGED_BY_SCHEDULE');
       if (request.sandbox !== undefined) {
         threads.updateThreadSandbox({ id, sandbox: request.sandbox });
@@ -261,13 +272,14 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
     },
 
     setPurpose(id: string, purpose: RuntimeThread['purpose']): RuntimeThread {
-      getRequiredThread(id);
+      assertMutableThread(getRequiredThread(id));
       threads.setThreadPurpose({ id, purpose });
       return mapThreadRow(threads.getThread(id)!);
     },
 
     archiveThread(id: string): RuntimeThread {
       const existing = getRequiredThread(id);
+      assertMutableThread(existing);
       if (existing.purpose === 'schedule_task') throw new Error('THREAD_MANAGED_BY_SCHEDULE');
       threads.archiveThread(id);
       return mapThreadRow(threads.getThread(id)!);
@@ -275,6 +287,7 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
 
     deleteThread(id: string): void {
       const existing = getRequiredThread(id);
+      assertMutableThread(existing);
       if (existing.purpose === 'schedule_task') throw new Error('THREAD_MANAGED_BY_SCHEDULE');
       threads.deleteThread(id);
     },
@@ -333,6 +346,10 @@ export function createThreadManager(input: CreateThreadManagerInput): ThreadMana
         }
         throw error;
       }
+    },
+
+    setAgentPromptPolicySnapshot(threadId: string, snapshot: AgentPromptPolicySnapshot): void {
+      threads.setAgentPromptPolicySnapshot(threadId, JSON.stringify(snapshot));
     },
 
     touchThread(threadId: string): void {
@@ -399,7 +416,7 @@ function mapThreadRow(row: ThreadRow): RuntimeThread {
   return {
     id: row.id,
     ...(row.schedule_id === null ? {} : { scheduleId: row.schedule_id }),
-    title: row.title === null ? null : createConversationTitle(row.title),
+    title: row.title === null ? null : row.purpose === 'skill_review' ? row.title : createConversationTitle(row.title),
     projectId: row.project_id,
     enterpriseSubjectId: row.enterprise_subject_id,
     origin: row.origin,
@@ -413,11 +430,21 @@ function mapThreadRow(row: ThreadRow): RuntimeThread {
     sandbox: row.sandbox as RuntimeThread['sandbox'],
     status: row.status,
     purpose: row.purpose,
+    ...(row.skill_review_json == null ? {} : { skillReview: JSON.parse(row.skill_review_json) as RuntimeThread['skillReview'] }),
     createdAt: normalizeDatabaseTimestamp(row.created_at),
     updatedAt: normalizeDatabaseTimestamp(row.updated_at),
     archivedAt: normalizeNullableDatabaseTimestamp(row.archived_at),
-    pinnedAt: normalizeNullableDatabaseTimestamp(row.pinned_at ?? null)
+    pinnedAt: normalizeNullableDatabaseTimestamp(row.pinned_at ?? null),
+    ...(row.agent_prompt_policy_json == null ? {} : {
+      agentPromptPolicySnapshot: JSON.parse(row.agent_prompt_policy_json) as AgentPromptPolicySnapshot
+    })
   };
+}
+
+function assertMutableThread(row: ThreadRow): void {
+  if (row.purpose === 'skill_review') {
+    throw new ThreadManagerError('THREAD_READ_ONLY', 'AI 审核会话只读');
+  }
 }
 
 function isSqliteUniqueConstraintError(error: unknown): boolean {
@@ -425,6 +452,16 @@ function isSqliteUniqueConstraintError(error: unknown): boolean {
     && 'code' in error
     && typeof error.code === 'string'
     && error.code.startsWith('SQLITE_CONSTRAINT');
+}
+
+export function isProjectlessEnterpriseConversation(thread: RuntimeThread | undefined): thread is RuntimeThread {
+  return thread !== undefined
+    && thread.enterpriseSubjectId !== null
+    && thread.projectId === null
+    && thread.purpose === 'conversation'
+    && thread.origin === 'clawee_created'
+    && thread.workspaceMode === 'managed'
+    && thread.sandbox === 'read-only';
 }
 
 function isHiddenDiscoveredConversation(row: ThreadRow): boolean {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -579,8 +580,21 @@ WHERE capability_id = $1`, capabilityID)
 }
 
 func (s *MCPGatewayStore) SaveGrant(ctx context.Context, grant mcpgateway.AccountGrant) error {
+	userID := strings.TrimSpace(grant.UserID)
+	roleID := strings.TrimSpace(grant.RoleID)
+	if (userID == "") == (roleID == "") {
+		return mcpgateway.ErrInvalidGrantTarget
+	}
 	if s == nil || s.pool == nil {
 		return nil
+	}
+	var userTarget any = userID
+	if userID == "" {
+		userTarget = nil
+	}
+	var roleTarget any = roleID
+	if roleID == "" {
+		roleTarget = nil
 	}
 	scope, err := marshalJSONMap(grant.DataScope)
 	if err != nil {
@@ -593,19 +607,20 @@ func (s *MCPGatewayStore) SaveGrant(ctx context.Context, grant mcpgateway.Accoun
 	grant.UpdatedAt = now
 	_, err = s.pool.Exec(ctx, `
 INSERT INTO mcp_account_grants (
-	grant_id, user_id, capability_id, grant_type, data_scope, expires_at,
+	grant_id, user_id, role_id, capability_id, grant_type, data_scope, expires_at,
 	created_by, created_at, updated_at
 ) VALUES (
-	$1, $2, $3, $4, $5, $6, $7, $8, $9
+	$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 ) ON CONFLICT (grant_id) DO UPDATE SET
 	user_id = EXCLUDED.user_id,
+	role_id = EXCLUDED.role_id,
 	capability_id = EXCLUDED.capability_id,
 	grant_type = EXCLUDED.grant_type,
 	data_scope = EXCLUDED.data_scope,
 	expires_at = EXCLUDED.expires_at,
 	created_by = EXCLUDED.created_by,
 	updated_at = EXCLUDED.updated_at`,
-		grant.ID, grant.UserID, grant.CapabilityID, grant.GrantType, scope,
+		grant.ID, userTarget, roleTarget, grant.CapabilityID, grant.GrantType, scope,
 		grant.ExpiresAt, grant.CreatedBy, grant.CreatedAt, grant.UpdatedAt,
 	)
 	return normalizeGrantInsertError(err)
@@ -640,12 +655,13 @@ func (s *MCPGatewayStore) ListGrants(ctx context.Context, filter mcpgateway.Gran
 		return []mcpgateway.AccountGrant{}, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-SELECT grant_id, user_id, capability_id, grant_type, data_scope, expires_at, created_by, created_at, updated_at
+SELECT grant_id, user_id, role_id, capability_id, grant_type, data_scope, expires_at, created_by, created_at, updated_at
 FROM mcp_account_grants
 WHERE ($1 = '' OR user_id = $1)
-  AND ($2 = '' OR capability_id = $2)
-  AND ($3 = '' OR grant_type = $3)
-ORDER BY grant_id ASC`, filter.UserID, filter.CapabilityID, filter.GrantType)
+  AND ($2 = '' OR role_id = $2)
+  AND ($3 = '' OR capability_id = $3)
+  AND ($4 = '' OR grant_type = $4)
+ORDER BY grant_id ASC`, filter.UserID, filter.RoleID, filter.CapabilityID, filter.GrantType)
 	if err != nil {
 		return nil, err
 	}
@@ -766,6 +782,240 @@ LIMIT $1`, normalizeLimit(filter.Limit), filter.ID, filter.Decision, filter.Agen
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func (s *MCPGatewayStore) CreateModelProxyAuditRecord(ctx context.Context, record mcpgateway.ModelProxyAuditRecord) error {
+	if s == nil || s.pool == nil {
+		return mcpgateway.ErrModelProxyAuditUnavailable
+	}
+	requestHeaders, err := marshalJSONMap(record.RequestHeaders)
+	if err != nil {
+		return err
+	}
+	requestBody, err := marshalJSONMap(record.RequestBody)
+	if err != nil {
+		return err
+	}
+	responseHeaders, err := marshalJSONMap(record.ResponseHeaders)
+	if err != nil {
+		return err
+	}
+	responseBody, err := marshalJSONMap(record.ResponseBody)
+	if err != nil {
+		return err
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.UsageStatus == "" {
+		record.UsageStatus = mcpgateway.ModelProxyAuditUsageStatus(record)
+	}
+	if record.UsageSource == "" {
+		record.UsageSource = mcpgateway.ModelProxyAuditUsageSource(record)
+	}
+	_, err = s.pool.Exec(ctx, `
+INSERT INTO model_proxy_audit_records (
+ audit_id, request_id, user_id, user_name_snapshot, api_key_id, api_key_fingerprint,
+	 endpoint, method, model, requested_model, upstream_model, response_model, request_type, status, gateway_status, upstream_status, error_code, error_message,
+	 input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, usage_available, usage_status, usage_source, request_headers, request_body,
+ response_headers, response_body, request_bytes, response_bytes, response_chunks, truncated,
+	 duration_ms, first_byte_ms, created_at, completed_at
+) VALUES (
+	 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+	 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39
+)`,
+		record.AuditID, record.RequestID, record.UserID, record.UserNameSnapshot, record.APIKeyID, record.APIKeyFingerprint,
+		record.Endpoint, record.Method, record.Model, record.RequestedModel, record.UpstreamModel, record.ResponseModel, record.RequestType, record.Status, record.GatewayStatus,
+		record.UpstreamStatus, record.ErrorCode, record.ErrorMessage, record.InputTokens, record.OutputTokens,
+		record.TotalTokens, record.CacheReadTokens, record.CacheCreationTokens, record.ReasoningTokens, record.UsageAvailable,
+		record.UsageStatus, record.UsageSource, requestHeaders, requestBody, responseHeaders, responseBody, record.RequestBytes, record.ResponseBytes, record.ResponseChunks, record.Truncated,
+		record.DurationMS, record.FirstByteMS, record.CreatedAt, record.CompletedAt,
+	)
+	return err
+}
+
+func (s *MCPGatewayStore) FinalizeModelProxyAuditRecord(ctx context.Context, update mcpgateway.ModelProxyAuditFinalize) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, mcpgateway.ErrModelProxyAuditUnavailable
+	}
+	responseHeaders, err := marshalJSONMap(update.ResponseHeaders)
+	if err != nil {
+		return false, err
+	}
+	responseBody, err := marshalJSONMap(update.ResponseBody)
+	if err != nil {
+		return false, err
+	}
+	if update.CompletedAt.IsZero() {
+		update.CompletedAt = time.Now().UTC()
+	}
+	if update.UsageStatus == "" {
+		if update.UsageAvailable {
+			update.UsageStatus = mcpgateway.ModelProxyUsageComplete
+		} else {
+			update.UsageStatus = mcpgateway.ModelProxyUsageUnavailable
+		}
+	}
+	if update.UsageSource == "" {
+		if update.UsageAvailable {
+			update.UsageSource = mcpgateway.ModelProxyUsageSourceUpstream
+		} else {
+			update.UsageSource = mcpgateway.ModelProxyUsageSourceUnavailable
+		}
+	}
+	tag, err := s.pool.Exec(ctx, `
+UPDATE model_proxy_audit_records
+SET model = CASE WHEN $2 = '' THEN model ELSE $2 END,
+	requested_model = CASE WHEN $3 = '' THEN requested_model ELSE $3 END,
+	upstream_model = CASE WHEN $4 = '' THEN upstream_model ELSE $4 END,
+	response_model = CASE WHEN $5 = '' THEN response_model ELSE $5 END,
+    status = $6, gateway_status = $7, upstream_status = $8, error_code = $9, error_message = $10,
+	    input_tokens = $11, output_tokens = $12, total_tokens = $13, cache_read_tokens = $14,
+	    cache_creation_tokens = $15, reasoning_tokens = $16, usage_available = $17, usage_status = $18, usage_source = $19,
+	    response_headers = $20, response_body = $21, response_bytes = $22, response_chunks = $23,
+	    truncated = $24, duration_ms = $25, first_byte_ms = $26, completed_at = $27
+	WHERE audit_id = $1 AND status = $28`,
+		update.AuditID, update.Model, update.RequestedModel, update.UpstreamModel, update.ResponseModel, update.Status,
+		update.GatewayStatus, update.UpstreamStatus, update.ErrorCode, update.ErrorMessage, update.InputTokens, update.OutputTokens,
+		update.TotalTokens, update.CacheReadTokens, update.CacheCreationTokens, update.ReasoningTokens, update.UsageAvailable,
+		update.UsageStatus, update.UsageSource, responseHeaders, responseBody, update.ResponseBytes, update.ResponseChunks,
+		update.Truncated, update.DurationMS, update.FirstByteMS, update.CompletedAt, mcpgateway.ModelProxyAuditStarted,
+	)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_proxy_audit_records WHERE audit_id = $1)`, update.AuditID).Scan(&exists); err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, mcpgateway.ErrModelProxyAuditNotFound
+	}
+	return false, nil
+}
+
+func (s *MCPGatewayStore) GetModelProxyAuditRecord(ctx context.Context, auditID string) (mcpgateway.ModelProxyAuditRecord, error) {
+	if s == nil || s.pool == nil {
+		return mcpgateway.ModelProxyAuditRecord{}, mcpgateway.ErrModelProxyAuditUnavailable
+	}
+	row := s.pool.QueryRow(ctx, modelProxyAuditSelectSQL()+` WHERE audit_id = $1`, auditID)
+	record, err := scanModelProxyAuditRecord(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mcpgateway.ModelProxyAuditRecord{}, mcpgateway.ErrModelProxyAuditNotFound
+	}
+	return record, err
+}
+
+func (s *MCPGatewayStore) ListModelProxyAuditRecords(ctx context.Context, filter mcpgateway.ModelProxyAuditFilter) (mcpgateway.ModelProxyAuditPage, error) {
+	if s == nil || s.pool == nil {
+		return mcpgateway.ModelProxyAuditPage{}, mcpgateway.ErrModelProxyAuditUnavailable
+	}
+	where := []string{
+		"($2 = '' OR user_id = $2)",
+		"($3 = '' OR model = $3)",
+		"($4 = '' OR endpoint = $4)",
+		"($5 = '' OR status = $5)",
+		"($6 = '' OR usage_status = $6)",
+		"($7 = '' OR usage_source = $7)",
+		"($8 = FALSE OR error_code <> '')",
+		"($9::timestamptz IS NULL OR created_at >= $9)",
+		"($10::timestamptz IS NULL OR created_at <= $10)",
+		"($11::timestamptz IS NULL OR created_at < $11 OR (created_at = $11 AND audit_id < $12))",
+	}
+	rows, err := s.pool.Query(ctx, modelProxyAuditSelectSQL()+` WHERE `+strings.Join(where, " AND ")+` ORDER BY created_at DESC, audit_id DESC LIMIT $1`,
+		normalizeLimit(filter.Limit)+1, filter.UserID, filter.Model, filter.Endpoint, filter.Status, filter.UsageStatus,
+		filter.UsageSource, filter.ErrorOnly, nullableTime(filter.CreatedFrom), nullableTime(filter.CreatedTo), nullableTime(filter.CursorCreatedAt), filter.CursorID)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditPage{}, err
+	}
+	defer rows.Close()
+	items := make([]mcpgateway.ModelProxyAuditRecord, 0, normalizeLimit(filter.Limit)+1)
+	for rows.Next() {
+		record, err := scanModelProxyAuditRecord(rows)
+		if err != nil {
+			return mcpgateway.ModelProxyAuditPage{}, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return mcpgateway.ModelProxyAuditPage{}, err
+	}
+	page := mcpgateway.ModelProxyAuditPage{}
+	limit := normalizeLimit(filter.Limit)
+	if len(items) > limit {
+		page.NextCreatedAt = items[limit-1].CreatedAt
+		page.NextID = items[limit-1].AuditID
+		items = items[:limit]
+	}
+	page.Items = items
+	return page, nil
+}
+
+func (s *MCPGatewayStore) SummarizeModelProxyAuditRecords(ctx context.Context, filter mcpgateway.ModelProxyAuditSummaryFilter) ([]mcpgateway.ModelProxyAuditSummary, error) {
+	if s == nil || s.pool == nil {
+		return nil, mcpgateway.ErrModelProxyAuditUnavailable
+	}
+	where := []string{
+		"($1 = '' OR user_id = $1)",
+		"($2 = '' OR model = $2)",
+		"($3 = '' OR endpoint = $3)",
+		"($4 = '' OR status = $4)",
+		"($5 = '' OR usage_status = $5)",
+		"($6 = '' OR usage_source = $6)",
+		"($7 = FALSE OR error_code <> '')",
+		"($8::timestamptz IS NULL OR created_at >= $8)",
+		"($9::timestamptz IS NULL OR created_at <= $9)",
+	}
+	rows, err := s.pool.Query(ctx, `
+SELECT user_id, MAX(user_name_snapshot), model, COUNT(*),
+       COUNT(*) FILTER (WHERE status = 'succeeded'),
+       COUNT(*) FILTER (WHERE usage_status = 'complete'),
+       COUNT(*) FILTER (WHERE usage_status = 'partial'),
+       COUNT(*) FILTER (WHERE usage_status = 'unavailable'),
+       COALESCE(SUM(input_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COALESCE(SUM(output_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COALESCE(SUM(total_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COALESCE(SUM(cache_read_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COALESCE(SUM(cache_creation_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COALESCE(SUM(reasoning_tokens) FILTER (WHERE usage_status IN ('complete', 'partial')), 0),
+       COUNT(*) FILTER (WHERE usage_status IN ('complete', 'partial'))
+FROM model_proxy_audit_records
+WHERE `+strings.Join(where, " AND ")+`
+GROUP BY user_id, model
+ORDER BY COUNT(*) DESC, user_id, model`,
+		filter.UserID, filter.Model, filter.Endpoint, filter.Status, filter.UsageStatus, filter.UsageSource, filter.ErrorOnly,
+		nullableTime(filter.CreatedFrom), nullableTime(filter.CreatedTo))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []mcpgateway.ModelProxyAuditSummary
+	for rows.Next() {
+		var summary mcpgateway.ModelProxyAuditSummary
+		if err := rows.Scan(&summary.UserID, &summary.UserNameSnapshot, &summary.Model, &summary.RequestCount,
+			&summary.SucceededCount, &summary.UsageCompleteCount, &summary.UsagePartialCount, &summary.UsageUnavailableCount,
+			&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.CacheReadTokens,
+			&summary.CacheCreationTokens, &summary.ReasoningTokens, &summary.UsageCount); err != nil {
+			return nil, err
+		}
+		if summary.RequestCount > 0 {
+			summary.SuccessRate = float64(summary.SucceededCount) / float64(summary.RequestCount)
+			summary.UsageCoverageRate = float64(summary.UsageCompleteCount+summary.UsagePartialCount) / float64(summary.RequestCount)
+		}
+		out = append(out, summary)
+	}
+	return out, rows.Err()
+}
+
+func modelProxyAuditSelectSQL() string {
+	return `SELECT audit_id, request_id, user_id, user_name_snapshot, api_key_id, api_key_fingerprint,
+	 endpoint, method, model, requested_model, upstream_model, response_model, request_type, status, gateway_status, upstream_status, error_code, error_message,
+	 input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, usage_available, usage_status, usage_source, request_headers, request_body,
+ response_headers, response_body, request_bytes, response_bytes, response_chunks, truncated,
+	 duration_ms, first_byte_ms, created_at, completed_at FROM model_proxy_audit_records`
 }
 
 func (s *MCPGatewayStore) SaveGateRequest(ctx context.Context, gate mcpgateway.GateRequest) error {
@@ -1101,11 +1351,18 @@ func scanCapability(row rowScanner) (mcpgateway.Capability, error) {
 
 func scanGrant(row rowScanner) (mcpgateway.AccountGrant, error) {
 	var grant mcpgateway.AccountGrant
+	var userID, roleID sql.NullString
 	var dataScope []byte
-	err := row.Scan(&grant.ID, &grant.UserID, &grant.CapabilityID, &grant.GrantType,
+	err := row.Scan(&grant.ID, &userID, &roleID, &grant.CapabilityID, &grant.GrantType,
 		&dataScope, &grant.ExpiresAt, &grant.CreatedBy, &grant.CreatedAt, &grant.UpdatedAt)
 	if err != nil {
 		return mcpgateway.AccountGrant{}, err
+	}
+	if userID.Valid {
+		grant.UserID = userID.String
+	}
+	if roleID.Valid {
+		grant.RoleID = roleID.String
 	}
 	grant.DataScope, err = unmarshalJSONMap(dataScope)
 	if err != nil {
@@ -1146,6 +1403,42 @@ func scanProxyAuditRecord(row rowScanner) (mcpgateway.ProxyAuditRecord, error) {
 	record.ResolvedDataScope, err = unmarshalJSONMap(resolvedDataScope)
 	if err != nil {
 		return mcpgateway.ProxyAuditRecord{}, fmt.Errorf("decode resolved data scope: %w", err)
+	}
+	return record, nil
+}
+
+func scanModelProxyAuditRecord(row rowScanner) (mcpgateway.ModelProxyAuditRecord, error) {
+	var record mcpgateway.ModelProxyAuditRecord
+	var requestHeaders, requestBody, responseHeaders, responseBody []byte
+	var completedAt *time.Time
+	err := row.Scan(&record.AuditID, &record.RequestID, &record.UserID, &record.UserNameSnapshot,
+		&record.APIKeyID, &record.APIKeyFingerprint, &record.Endpoint, &record.Method, &record.Model,
+		&record.RequestedModel, &record.UpstreamModel, &record.ResponseModel, &record.RequestType, &record.Status, &record.GatewayStatus, &record.UpstreamStatus,
+		&record.ErrorCode, &record.ErrorMessage, &record.InputTokens, &record.OutputTokens, &record.TotalTokens, &record.CacheReadTokens,
+		&record.CacheCreationTokens, &record.ReasoningTokens, &record.UsageAvailable, &record.UsageStatus, &record.UsageSource,
+		&requestHeaders, &requestBody, &responseHeaders, &responseBody, &record.RequestBytes, &record.ResponseBytes,
+		&record.ResponseChunks, &record.Truncated, &record.DurationMS, &record.FirstByteMS, &record.CreatedAt, &completedAt)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditRecord{}, err
+	}
+	record.RequestHeaders, err = unmarshalJSONMap(requestHeaders)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditRecord{}, fmt.Errorf("decode model request headers: %w", err)
+	}
+	record.RequestBody, err = unmarshalJSONMap(requestBody)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditRecord{}, fmt.Errorf("decode model request body: %w", err)
+	}
+	record.ResponseHeaders, err = unmarshalJSONMap(responseHeaders)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditRecord{}, fmt.Errorf("decode model response headers: %w", err)
+	}
+	record.ResponseBody, err = unmarshalJSONMap(responseBody)
+	if err != nil {
+		return mcpgateway.ModelProxyAuditRecord{}, fmt.Errorf("decode model response body: %w", err)
+	}
+	if completedAt != nil {
+		record.CompletedAt = *completedAt
 	}
 	return record, nil
 }

@@ -44,6 +44,50 @@ export type ActivitySkillUsage = {
   implicit_runs: number;
 };
 
+export type ActivityEmployeeSkillUsage = {
+  employee_id: string;
+  employee_name: string;
+  observed_skill_count: number;
+  requested_skill_runs: number;
+  observed_skill_runs: number;
+  explicit_skill_runs: number;
+  implicit_skill_runs: number;
+  last_observed_at?: string;
+};
+
+export type ActivitySkillUsageTotals = {
+  requested_skill_runs: number;
+  observed_skill_runs: number;
+  explicit_skill_runs: number;
+  implicit_skill_runs: number;
+};
+
+export type ActivityAgentUsage = {
+  collector_id: string;
+  agent_id: string;
+  range: ActivityRange;
+  timezone: string;
+  start_date: string;
+  end_date: string;
+  generated_at: string;
+  session_count: number;
+  turn_count: number;
+  completed_turns: number;
+  tool_call_count: number;
+  granularity: "hour" | "day";
+  points: Array<{
+    bucket_start: string;
+    session_count: number;
+    turn_count: number;
+    completed_turns: number;
+    tool_call_count: number;
+  }>;
+  mcp_distribution: ActivityMCPUsage[];
+  mcp_status: string;
+  skill_usage: ActivitySkillUsage[];
+  skill_usage_totals: ActivitySkillUsageTotals;
+};
+
 export type ActivityAgent = {
   collector_id: string;
   agent_id: string;
@@ -65,15 +109,16 @@ export type ActivityStatistics = {
     active_employees: number;
     active_agents: number;
     completed_turns: number;
+    platform_activity?: {
+      active_users: number;
+      total_users: number;
+      rate: number;
+    };
     mcp_distribution: ActivityMCPUsage[];
     skill_usage: ActivitySkillUsage[];
     skill_contributions?: { created_count: number; updated_count: number };
-    skill_usage_totals?: {
-      requested_skill_runs: number;
-      observed_skill_runs: number;
-      explicit_skill_runs: number;
-      implicit_skill_runs: number;
-    };
+    skill_usage_totals?: ActivitySkillUsageTotals;
+    employee_skill_usage?: ActivityEmployeeSkillUsage[];
   };
   trend: {
     granularity: "hour" | "day";
@@ -90,4 +135,10 @@ export type ActivityStatistics = {
 
 export function getMyActivityStatistics(range: ActivityRange): Promise<ActivityStatistics> {
   return appApi.get<ActivityStatistics>(`/activity/statistics?range=${range}`);
+}
+
+export function getMyAgentUsage(collectorId: string, agentId: string, range: ActivityRange): Promise<ActivityAgentUsage> {
+  return appApi.get<ActivityAgentUsage>(
+    `/activity/agent-usage?collector_id=${encodeURIComponent(collectorId)}&agent_id=${encodeURIComponent(agentId)}&range=${range}`,
+  );
 }

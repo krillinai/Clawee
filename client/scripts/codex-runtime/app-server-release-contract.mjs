@@ -148,6 +148,7 @@ export async function verifyCodexAppServerReleaseContract(input = {}) {
       ...business.sentMethods
     ]);
     assertNoSubThreads(business.messages, threadId);
+    assertAgentMessageStream(business.messages, threadId);
 
     return {
       runtimeDirectory,
@@ -197,6 +198,18 @@ export function assertNoMultiAgentTools(toolNames) {
 export function assertNoUsageRequest(methods) {
   if (methods.includes('account/usage/read')) {
     throw new Error('CODEX_RUNTIME_THREAD_USAGE_REQUESTED');
+  }
+}
+
+export function assertAgentMessageStream(messages, threadId) {
+  const deltas = messages.filter(message => message.method === 'item/agentMessage/delta' && message.params?.threadId === threadId);
+  const completed = messages.find(message => message.method === 'item/completed'
+    && message.params?.threadId === threadId && message.params?.item?.type === 'agentMessage');
+  const itemId = completed?.params?.item?.id;
+  if (typeof itemId !== 'string' || deltas.length < 2 || deltas.some(message => message.params.itemId !== itemId
+    || typeof message.params.turnId !== 'string' || typeof message.params.delta !== 'string')
+    || deltas.map(message => message.params.delta).join('') !== completed.params.item.text) {
+    throw new Error('CODEX_RUNTIME_AGENT_MESSAGE_STREAM_MISMATCH');
   }
 }
 
@@ -445,7 +458,22 @@ function modelResponseBody() {
       response: { id: 'resp-clawee-release-contract' }
     },
     {
+      type: 'response.output_item.added',
+      output_index: 0,
+      item: { type: 'message', role: 'assistant', id: 'msg-clawee-release-contract', content: [] }
+    },
+    {
+      type: 'response.content_part.added',
+      item_id: 'msg-clawee-release-contract', output_index: 0, content_index: 0,
+      part: { type: 'output_text', text: '', annotations: [] }
+    },
+    ...['do', 'ne'].map(delta => ({
+      type: 'response.output_text.delta', item_id: 'msg-clawee-release-contract',
+      output_index: 0, content_index: 0, delta
+    })),
+    {
       type: 'response.output_item.done',
+      output_index: 0,
       item: {
         type: 'message',
         role: 'assistant',

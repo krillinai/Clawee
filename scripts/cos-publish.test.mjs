@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
+import fs, {
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -13,7 +12,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import childProcess, { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import {
   coscliSha256,
@@ -33,7 +33,7 @@ test('固定 COSCLI 版本和官方摘要', () => {
   assert.equal(coscliSha256, 'a07de5ba2800147a700ed29036b0c76a4229088cee68e1682d0eae19b638a915');
 });
 
-test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 凭据文件', async () => {
+test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 凭据文件', async t => {
   const root = mkdtempSync(join(tmpdir(), 'clawee-fake-coscli-'));
   const previousRoot = process.env.FAKE_COS_ROOT;
   const previousLog = process.env.FAKE_COS_LOG;
@@ -43,7 +43,19 @@ test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 �
     const logPath = join(root, 'calls.log');
     mkdirSync(objectRoot);
     writeFileSync(executable, fakeCoscliSource());
-    chmodSync(executable, 0o700);
+    const spawn = childProcess.spawnSync;
+    // 仅为测试中的 JS 假程序补充 Node 启动器，保留真实子进程和参数校验。
+    t.mock.method(childProcess, 'spawnSync', (command, args, options) => (
+      command === executable
+        ? spawn(process.execPath, [executable, ...args], options)
+        : spawn(command, args, options)
+    ));
+    const writes = t.mock.method(fs, 'writeFileSync');
+    syncBuiltinESMExports();
+    t.after(() => {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    });
     process.env.FAKE_COS_ROOT = objectRoot;
     process.env.FAKE_COS_LOG = logPath;
     const storage = createCoscliStorage({
@@ -88,7 +100,10 @@ test('COSCLI 适配器使用加速端点、HEAD 元数据校验并清理 0600 �
     assert.match(upload[upload.indexOf('--meta') + 1], /x-cos-meta-sha256:[0-9a-f]{64}/);
     const configPath = upload[upload.indexOf('-c') + 1];
     assert.match(readFileSync(configPath, 'utf8'), /endpoint: "cos\.accelerate\.myqcloud\.com"/);
-    assert.equal(statSync(configPath).mode & 0o777, 0o600);
+    const configWrite = writes.mock.calls.find(call => call.arguments[0] === configPath);
+    assert.deepEqual(configWrite?.arguments[2], { mode: 0o600 });
+    // Windows 文件权限由 ACL 表达；POSIX 平台继续检查实际 mode。
+    if (process.platform !== 'win32') assert.equal(statSync(configPath).mode & 0o777, 0o600);
     storage.close();
     assert.equal(existsSync(configPath), false);
   } finally {

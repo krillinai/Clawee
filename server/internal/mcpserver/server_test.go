@@ -211,6 +211,9 @@ func TestMCPUpstreamEndpointUsesLocalToolNamesAndOmitsGateTools(t *testing.T) {
 func TestMCPServerSyncConfirmationUsesClientElicitation(t *testing.T) {
 	ctx := context.Background()
 	store := mcpgateway.NewMemoryStore()
+	if err := store.RotateAccountToken(ctx, "sales_zhang", mcpgateway.AccountToken{ID: "token_zhang_001", UserID: "sales_zhang", TokenHash: mcpgateway.HashToken("demo-zhang-token"), Status: mcpgateway.StatusActive, Scopes: []string{"mcp:call"}}); err != nil {
+		t.Fatal(err)
+	}
 	upstream := &testProxyUpstreamClient{result: mcpgateway.UpstreamCallResult{StructuredContent: mcpgateway.JSONMap{"ok": true}}}
 	server := mcpgateway.UpstreamServer{ID: "crm-main", Name: "CRM", Transport: mcpgateway.TransportStreamableHTTP, Endpoint: "http://crm.example/mcp", Namespace: "crm", Status: mcpgateway.StatusActive}
 	if err := store.SaveUpstreamServer(ctx, server); err != nil {
@@ -290,6 +293,9 @@ func TestMCPServerSyncConfirmationUsesClientElicitation(t *testing.T) {
 func TestMCPServerMultiRoundTripConfirmation(t *testing.T) {
 	ctx := context.Background()
 	store := mcpgateway.NewMemoryStore()
+	if err := store.RotateAccountToken(ctx, "sales_zhang", mcpgateway.AccountToken{ID: "demo-zhang-token", UserID: "sales_zhang", TokenHash: mcpgateway.HashToken("demo-zhang-token"), Status: mcpgateway.StatusActive, Scopes: []string{"mcp:call"}}); err != nil {
+		t.Fatal(err)
+	}
 	upstream := &testProxyUpstreamClient{result: mcpgateway.UpstreamCallResult{StructuredContent: mcpgateway.JSONMap{"ok": true}}}
 	server := mcpgateway.UpstreamServer{ID: "crm-main", Name: "CRM", Transport: mcpgateway.TransportStreamableHTTP, Endpoint: "http://crm.example/mcp", Namespace: "crm", Status: mcpgateway.StatusActive}
 	if err := store.SaveUpstreamServer(ctx, server); err != nil {

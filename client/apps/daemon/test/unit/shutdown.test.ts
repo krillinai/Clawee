@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installGracefulShutdown, installParentPortShutdown } from '../../src/shutdown.js';
 
 describe('graceful shutdown', () => {
@@ -48,6 +48,103 @@ describe('graceful shutdown', () => {
 });
 
 describe('parent port shutdown', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([true, false])('更新清理结束才发送确认，失败不发送成功确认：%s', async success => {
+    const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn() });
+    let complete!: () => void;
+    const close = vi.fn(() => new Promise<void>((resolve, reject) => { complete = () => success ? resolve() : reject(new Error('数据库未关闭')); }));
+    const finish = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError: vi.fn() });
+    parentPort.emit('message', { type: 'shutdown', requestId: 'update-1' });
+    parentPort.emit('message', { type: 'shutdown', requestId: 'update-1' });
+    expect(parentPort.postMessage).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    complete();
+    await vi.waitFor(() => expect(finish).toHaveBeenCalledOnce());
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'shutdown-complete', requestId: 'update-1', ok: success }));
+    dispose();
+  });
+
+  it('更新清理使用统一期限；超时后的迟到完成不能发送成功确认', async () => {
+    vi.useFakeTimers();
+    const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn() });
+    let complete!: () => void;
+    const finish = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close: () => new Promise<void>(resolve => { complete = resolve; }), finish, onError: vi.fn() });
+    parentPort.emit('message', { type: 'shutdown', requestId: 'update-1' });
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(finish).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(finish).toHaveBeenCalledOnce();
+    complete();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(parentPort.postMessage).toHaveBeenCalledTimes(1);
+    expect(parentPort.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: false, code: 'DAEMON_SHUTDOWN_TIMEOUT' }));
+    dispose();
+  });
+
+  it('休眠后先执行超时检查时，仍允许恢复心跳到达', async () => {
+    vi.useFakeTimers();
+    const parentPort = new EventEmitter();
+    const close = vi.fn(async () => undefined);
+    const finish = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError: vi.fn() });
+    vi.setSystemTime(Date.now() + 30 * 60_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(close).not.toHaveBeenCalled();
+    parentPort.emit('message', { data: { type: 'parent-heartbeat' } });
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(close).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it('心跳短暂延迟时请求确认，收到新心跳后取消退出', async () => {
+    vi.useFakeTimers();
+    const parentPort = Object.assign(new EventEmitter(), { postMessage: vi.fn() });
+    const close = vi.fn(async () => undefined);
+    const dispose = installParentPortShutdown({ parentPort, close, finish: vi.fn(), onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(parentPort.postMessage).toHaveBeenCalledWith({ type: 'parent-heartbeat-request' });
+    expect(close).not.toHaveBeenCalled();
+    parentPort.emit('message', { type: 'parent-heartbeat' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(close).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it('self-exits after the desktop stops sending heartbeats, even if startup cleanup hangs', async () => {
+    vi.useFakeTimers();
+    const parentPort = new EventEmitter();
+    const close = vi.fn(() => new Promise<void>(() => undefined));
+    const finish = vi.fn();
+    const onError = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError });
+    parentPort.emit('message', { data: { type: 'parent-heartbeat' } });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(close).toHaveBeenCalledOnce();
+    expect(finish).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'DAEMON_SHUTDOWN_TIMEOUT' }));
+    expect(finish).toHaveBeenCalledOnce();
+    dispose?.();
+  });
+
+  it('keeps running while the desktop heartbeats continue', async () => {
+    vi.useFakeTimers();
+    const parentPort = new EventEmitter();
+    const close = vi.fn(async () => undefined);
+    const finish = vi.fn();
+    const dispose = installParentPortShutdown({ parentPort, close, finish, onError: vi.fn() });
+    for (let tick = 0; tick < 20; tick += 1) {
+      parentPort.emit('message', { type: 'parent-heartbeat' });
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(close).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
+    dispose?.();
+  });
+
   it('exits only after cleanup completes and ignores repeated requests', async () => {
     const parentPort = new EventEmitter();
     let releaseClose!: () => void;

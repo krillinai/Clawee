@@ -7,11 +7,13 @@ export type ActiveView =
   | 'schedules'
   | 'tasks'
   | 'dashboard'
+  | 'skill-contributions'
   | 'activity'
   | 'plugins'
   | 'connections'
   | 'knowledge'
   | 'workflow'
+  | 'enterprise-approvals'
   | 'drive'
   | 'account'
   | 'settings'
@@ -32,6 +34,7 @@ export type AppState = {
 
 export type AppAction =
   | { type: 'new_conversation' }
+  | { type: 'reset_workspace' }
   | { type: 'select_project'; projectId: string }
   | { type: 'set_current_project'; projectId?: string }
   | { type: 'set_active_view'; activeView: ActiveView }
@@ -57,6 +60,8 @@ export const initialAppState: AppState = {
 
 export function reduceAppState(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'reset_workspace':
+      return { ...initialAppState, activeView: state.activeView };
     case 'set_current_project':
       return {
         ...state,

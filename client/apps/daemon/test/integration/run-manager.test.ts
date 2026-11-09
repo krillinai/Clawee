@@ -1,4 +1,4 @@
-import type { SandboxMode } from '@clawee/protocol';
+import type { CodexAvailabilityProbe, SandboxMode } from '@clawee/protocol';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createFakeCodex } from '../helpers/fake-codex.js';
 import { createAgentCapabilityTokenStore } from '../../src/agent-tools/capability-token.js';
 import { createAgentScheduleRunInjector } from '../../src/agent-tools/run-injection.js';
+import { createApprovalManager } from '../../src/approvals/manager.js';
 import { CodexExecError } from '../../src/codex/runner.js';
+import { createModelServiceRuntime } from '../../src/codex/model-service-configuration.js';
 import { createMemoryService } from '../../src/memory/service.js';
 import { createProjectManager } from '../../src/projects/manager.js';
 import { openRuntimeDatabase } from '../../src/storage/database.js';
@@ -25,6 +27,8 @@ import {
   type OrderedLogWriter
 } from '../../src/runs/ordered-log-writer.js';
 import { createThreadManager } from '../../src/threads/manager.js';
+import { createTaskMcpService } from '../../src/task-mcp/service.js';
+import { createTaskService } from '../../src/tasks/service.js';
 import { createEnterpriseActivityReporter } from '../../src/enterprise/activity-reporter-2026-08-28.js';
 import type { EnterpriseActivityEventsRequest } from '../../src/enterprise/activity-event-projector-2026-08-28.js';
 
@@ -46,6 +50,7 @@ function createTestRunManager(input: {
   resumeCapabilityVerified?: boolean;
   logWriterFactory?(runDir: string): OrderedLogWriter;
   runtimeTransport?: 'exec' | 'app-server';
+  createModelResponseObserver?: Parameters<typeof createRunManager>[0]['createModelResponseObserver'];
   persistentAppServerExecutor?: PersistentAppServerExecutor;
   onBeforeCodexWritableRequest?:
     Parameters<typeof createRunManager>[0]['onBeforeCodexWritableRequest'];
@@ -70,6 +75,7 @@ function createTestRunManager(input: {
     resumeCapabilityVerified: input.resumeCapabilityVerified ?? true,
     logWriterFactory: input.logWriterFactory,
     runtimeTransport: input.runtimeTransport,
+    createModelResponseObserver: input.createModelResponseObserver,
     persistentAppServerExecutor: input.persistentAppServerExecutor,
     onBeforeCodexWritableRequest: input.onBeforeCodexWritableRequest,
     beforeRunSpawn: input.beforeRunSpawn
@@ -161,6 +167,91 @@ async function waitForRunStatus(
 }
 
 describe('run manager', () => {
+  it.each(['structured', 'text'] as const)('保存远程任务交付状态（%s），重复查询更新对应任务并保留其他失败', async format => {
+    const persistent = createControllablePersistentExecutor();
+    const { manager, threadManager } = createTestRunManager({ runtimeTransport: 'app-server', persistentAppServerExecutor: persistent.executor });
+    try {
+      const thread = createPersistedThread(threadManager);
+      const run = manager.startRun(threadRun(thread, '取回远程成果'));
+      await expect.poll(() => persistent.starts.length).toBe(1);
+      const notify = async (taskId: string, status: string, options: { tool?: string; ready?: boolean; isError?: boolean } = {}) => {
+        const result = { ready: options.ready ?? true, task_id: taskId, delivery_status: status, delivery_errors: [{ file_name: 'second.pdf', code: 'UPLOAD_FAILED', message: '文件传输失败' }] };
+        await persistent.starts[0]!.onNotification?.({ method: 'item/completed', params: { item: {
+          id: 'tool_1', type: 'mcpToolCall', server: 'remote', tool: options.tool ?? 'clawee_get_task_result', status: 'completed',
+          result: { ...(format === 'structured' ? { structuredContent: result } : {}), content: [{ type: 'text', text: JSON.stringify(result) }], isError: options.isError ?? false }
+        } } });
+      };
+      await notify('unrelated', 'incomplete', { tool: 'other_tool' });
+      await notify('not_ready', 'incomplete', { ready: false });
+      await notify('error', 'incomplete', { isError: true });
+      await notify('invalid', 'unknown');
+      await notify('remote_1', 'incomplete');
+      await notify('remote_2', 'incomplete');
+      await notify('remote_1', 'complete');
+      expect(manager.getRun(run.id)?.sharedDriveState).toMatchObject({ uploads: [], downloads: [], remoteDeliveries: [
+        { taskId: 'remote_1', status: 'complete' },
+        { taskId: 'remote_2', status: 'incomplete', errors: [{ file_name: 'second.pdf', code: 'UPLOAD_FAILED' }] }
+      ] });
+      const restoredDb = openRuntimeDatabase(join(tempDir, 'app.sqlite'));
+      try {
+        const row = restoredDb.prepare<[string], { shared_drive_state_json: string }>('SELECT shared_drive_state_json FROM runs WHERE id=?').get(run.id)!;
+        expect(JSON.parse(row.shared_drive_state_json).remoteDeliveries).toHaveLength(2);
+      } finally { restoredDb.close(); }
+      persistent.complete(run.id);
+      await waitForRunStatus(manager, run.id, 'succeeded');
+    } finally { await manager.close(); }
+  });
+  it.each(['exec', 'app-server'] as const)('%s 的真实输出在通知订阅者前恢复模型可用性', async runtimeTransport => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-model-recovery-'));
+    let availability: CodexAvailabilityProbe | undefined;
+    const runtime = createModelServiceRuntime({
+      credentialStore: { async read() { return undefined; }, async write() {}, async delete() {} },
+      async loadStored() { throw new Error('unexpected'); },
+      async validate() { throw new Error('probe failed'); },
+      async activate() {},
+      async deactivate() {},
+      onAvailabilityChange: probe => { availability = probe; }
+    });
+    await runtime.resolve('token', async () => ({
+      mode: 'platform_managed', baseUrl: 'https://api.example.test/v1', model: 'model-1', apiKey: 'secret', credentialVersion: 1
+    }));
+    await expect.poll(() => availability?.status).toBe('failed');
+    const persistent = createControllablePersistentExecutor();
+    const fake = createFakeCodex(tempDir, { stdoutLines: [
+      { type: 'thread.started', thread_id: 'codex-recovery' },
+      { type: 'turn.started' },
+      { type: 'item.completed', item: { type: 'agent_message', text: '已恢复' } },
+      { type: 'turn.completed' }
+    ] });
+    const { manager, threadManager } = createTestRunManager({
+      tempDir, codexBin: fake.bin, runtimeTransport,
+      persistentAppServerExecutor: runtimeTransport === 'app-server' ? persistent.executor : undefined,
+      createModelResponseObserver: model => runtime.createResponseObserver?.(model)
+    });
+    let observedAvailability: string | undefined;
+    try {
+      const thread = createPersistedThread(threadManager);
+      const run = manager.startRun({ ...threadRun(thread, '恢复验证'), model: 'model-1' });
+      expect(availability?.status).toBe('failed');
+      manager.subscribe(run.id, event => {
+        if (event.type === 'assistant_message') observedAvailability = availability?.status;
+      });
+      if (runtimeTransport === 'app-server') {
+        await expect.poll(() => persistent.starts.length).toBe(1);
+        await persistent.starts[0]!.onNotification?.({
+          method: 'item/agentMessage/delta',
+          params: { itemId: 'message_1', delta: '已恢复' }
+        });
+        persistent.complete(run.id);
+      }
+      await waitForRunStatus(manager, run.id, 'succeeded');
+      expect(observedAvailability).toBe('succeeded');
+      expect(availability).toMatchObject({ status: 'succeeded', responseReceived: true });
+    } finally {
+      await manager.close();
+    }
+  });
+
   it('reports requested and successful observed Skill evidence without reporting failed reads', async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-manager-skill-'));
     const skillPath = join(tempDir, 'codex-home', 'skills', 'reports');
@@ -287,9 +378,9 @@ describe('run manager', () => {
     const runB1 = manager.startRun(threadRun(threadB, 'B1'));
 
     expect(runA1.status).toBe('running');
-    expect(runA2).toMatchObject({ status: 'queued', queuePosition: 1 });
+    expect(runA2).toMatchObject({ status: 'queued', queuePosition: 1, queueReason: 'thread_active' });
     expect(runB1.status).toBe('running');
-    expect(manager.getRun(runA2.id)?.queuePosition).toBe(1);
+    expect(manager.getRun(runA2.id)).toMatchObject({ queuePosition: 1, queueReason: 'thread_active' });
     await expect.poll(() => persistent.starts.length).toBe(2);
     expect(persistent.starts.map(item => item.runId)).toEqual([
       runA1.id,
@@ -314,6 +405,93 @@ describe('run manager', () => {
     await waitForRunStatus(manager, runA2.id, 'succeeded');
   });
 
+  it('收到完成事件时已释放执行占用，同会话下一问立即开始', async () => {
+    const persistent = createControllablePersistentExecutor();
+    const { manager, threadManager } = createTestRunManager({
+      runtimeTransport: 'app-server', persistentAppServerExecutor: persistent.executor
+    });
+    const thread = createPersistedThread(threadManager);
+    const first = manager.startRun(threadRun(thread, 'first'));
+    await expect.poll(() => persistent.starts.length).toBe(1);
+    let statusAtDone: string | undefined;
+    let activeAtDone: boolean | undefined;
+    let next: ReturnType<typeof manager.startRun> | undefined;
+    manager.subscribe(first.id, event => {
+      if (event.type !== 'done') return;
+      statusAtDone = manager.getRun(first.id)?.status;
+      activeAtDone = manager.hasActiveRunForThread(thread.id);
+      next = manager.startRun(threadRun(thread, 'next'));
+    });
+    persistent.complete(first.id);
+    await expect.poll(() => next).toBeDefined();
+    expect(statusAtDone).toBe('succeeded');
+    expect(activeAtDone).toBe(false);
+    expect(next!.status).toBe('running');
+    await expect.poll(() => persistent.starts.length).toBe(2);
+    persistent.complete(next!.id);
+    await manager.close();
+  });
+
+  it('收尾未完成时不发送完成事件，后续消息明确等待上一轮收尾', async () => {
+    const persistent = createControllablePersistentExecutor();
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>(resolve => { releaseClose = resolve; });
+    let closeStarted = false;
+    let writerCount = 0;
+    const { manager, threadManager } = createTestRunManager({
+      runtimeTransport: 'app-server', persistentAppServerExecutor: persistent.executor,
+      logWriterFactory(runDir) {
+        const writer = createOrderedLogWriter({ directory: runDir });
+        if (++writerCount !== 1) return writer;
+        return { ...writer, async close() {
+          closeStarted = true;
+          await closeGate;
+          await writer.close();
+        } };
+      }
+    });
+    try {
+      const thread = createPersistedThread(threadManager);
+      const first = manager.startRun(threadRun(thread, 'first'));
+      await expect.poll(() => persistent.starts.length).toBe(1);
+      persistent.complete(first.id);
+      await expect.poll(() => closeStarted).toBe(true);
+      expect(manager.listEvents(first.id).some(event => event.type === 'done')).toBe(false);
+      expect(manager.cancelRun(first.id)).toBe(false);
+      const next = manager.startRun(threadRun(thread, 'next'));
+      expect(next).toMatchObject({ status: 'queued', queueReason: 'thread_finalizing' });
+      expect(manager.getRun(next.id)?.queueReason).toBe('thread_finalizing');
+      releaseClose();
+      await expect.poll(() => persistent.starts.length).toBe(2);
+      persistent.complete(next.id);
+      await waitForRunStatus(manager, next.id, 'succeeded');
+    } finally {
+      releaseClose();
+      await manager.close();
+    }
+  });
+
+  it('用户取消后原始Runtime错误不进入自动故障队列', async () => {
+    const originalPort = Object.getOwnPropertyDescriptor(process, 'parentPort');
+    const messages: Array<{ type?: string; observation?: { event_type?: string } }> = [];
+    Object.defineProperty(process, 'parentPort', { configurable: true, value: { postMessage: (message: typeof messages[number]) => messages.push(message) } });
+    const persistent = createControllablePersistentExecutor();
+    const { manager, threadManager } = createTestRunManager({ runtimeTransport: 'app-server', persistentAppServerExecutor: persistent.executor });
+    try {
+      const thread = createPersistedThread(threadManager);
+      const run = manager.startRun(threadRun(thread, 'cancel'));
+      await expect.poll(() => persistent.starts.length).toBe(1);
+      expect(manager.cancelRun(run.id)).toBe(true);
+      await persistent.starts[0]!.onNotification?.({ method: 'error', params: { error: { codexErrorInfo: 'responseStreamDisconnected', message: 'interrupted transport' } } });
+      await waitForRunStatus(manager, run.id, 'canceled');
+      expect(messages.filter(message => message.type === 'clawee_incident' && message.observation?.event_type === 'error')).toEqual([]);
+    } finally {
+      await manager.close();
+      if (originalPort) Object.defineProperty(process, 'parentPort', originalPort);
+      else Reflect.deleteProperty(process, 'parentPort');
+    }
+  });
+
   it('queues a thread while its persistent app-server slot is unavailable', async () => {
     const persistent = createControllablePersistentExecutor(2);
     const { manager, threadManager } = createTestRunManager({
@@ -329,7 +507,7 @@ describe('run manager', () => {
     const runB = manager.startRun(threadRun(threadB, 'B'));
 
     expect(runA.status).toBe('running');
-    expect(runB).toMatchObject({ status: 'queued', queuePosition: 1 });
+    expect(runB).toMatchObject({ status: 'queued', queuePosition: 1, queueReason: 'capacity' });
     expect(persistent.starts).toHaveLength(1);
 
     persistent.setThreadBlocked(threadB.id, false);
@@ -357,7 +535,7 @@ describe('run manager', () => {
     const waitingThread = createPersistedThread(threadManager);
     const waiting = manager.startRun(threadRun(waitingThread, 'waiting'));
 
-    expect(waiting).toMatchObject({ status: 'queued', queuePosition: 1 });
+    expect(waiting).toMatchObject({ status: 'queued', queuePosition: 1, queueReason: 'capacity' });
     await expect.poll(() => manager.listEvents(waiting.id).find(event =>
       event.type === 'diagnostic'
       && event.payload.type === 'diagnostic'
@@ -1828,6 +2006,139 @@ describe('run manager', () => {
     expect(readFileSync(join(tempDir, 'runs', run.id, 'diagnostics.json'), 'utf8')).toContain(
       'RESUME_TARGET_NOT_FOUND'
     );
+  });
+
+  it('MCP 多轮任务在重建服务后恢复同一 Runtime 会话，串行执行并保留各轮结果', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-mcp-continuation-'));
+    const fake = createFakeCodex(tempDir, {
+      stdoutLines: [],
+      invocations: ['海报第一版', '蓝色背景版本', '调整标题版本'].map(text => ({
+        initialDelayMs: 100,
+        stdoutLines: [
+          { type: 'thread.started', thread_id: 'codex-original' },
+          { type: 'turn.started' },
+          { type: 'item.completed', item: { type: 'agent_message', text } },
+          { type: 'turn.completed' }
+        ]
+      }))
+    });
+    let { manager, threadManager } = createTestRunManager({ tempDir, codexBin: fake.bin });
+    const createService = () => createTaskMcpService({
+      projects: createProjectManager({ db: db!, homeDir: tempDir }),
+      threads: threadManager,
+      runs: manager,
+      tasks: createTaskService({ db: db!, runs: manager, approvals: createApprovalManager({ db: db! }) }),
+      threadRunOptions: { threadManager }
+    });
+    const caller = { initiatorUserId: 'employee_1', initiatorAgentId: 'client_agent_1' };
+    let service = createService();
+    try {
+      const first = await service.submit({ prompt: '生成海报', ...caller });
+      await waitForRunStatus(manager, first.taskId, 'succeeded');
+      await manager.close();
+
+      threadManager = createThreadManager({ db: db!, dataDir: tempDir });
+      manager = createRunManager({
+        db: db!, dataDir: tempDir, codexBin: fake.bin, codexHome: join(tempDir, 'codex-home'),
+        threadAccess: threadManager, resumeCapabilityVerified: true
+      });
+      service = createService();
+      const second = await service.submit({ prompt: '背景改为蓝色', threadId: first.threadId, ...caller });
+      const third = await service.submit({ prompt: '再调整标题', threadId: first.threadId, ...caller });
+      expect(third.status).toBe('queued');
+      await waitForRunStatus(manager, second.taskId, 'succeeded');
+      await waitForRunStatus(manager, third.taskId, 'succeeded');
+
+      expect(new Set([first.taskId, second.taskId, third.taskId]).size).toBe(3);
+      expect([second.threadId, third.threadId]).toEqual([first.threadId, first.threadId]);
+      expect(fake.readArgvs().slice(1)).toEqual([
+        expect.arrayContaining(['exec', 'resume', 'codex-original']),
+        expect.arrayContaining(['exec', 'resume', 'codex-original'])
+      ]);
+      expect(manager.listRunsByThread(first.threadId)).toHaveLength(3);
+      expect(threadManager.getThread(first.threadId)?.codexThreadId).toBe('codex-original');
+      for (const [task, result] of [
+        [first, '海报第一版'], [second, '蓝色背景版本'], [third, '调整标题版本']
+      ] as const) {
+        expect(await service.getTaskResult(task.taskId)).toMatchObject({
+          task_id: task.taskId, thread_id: first.threadId, result, status: 'succeeded'
+        });
+      }
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it('MCP 续聊的 Runtime 会话丢失时返回失败，不触发自动新建会话恢复', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'clawee-mcp-resume-missing-'));
+    const fake = createFakeCodex(tempDir, {
+      stdoutLines: [],
+      invocations: [
+        { stdoutLines: [
+          { type: 'thread.started', thread_id: 'codex-original' },
+          { type: 'turn.started' }, { type: 'turn.completed' }
+        ] },
+        { stdoutLines: [], stderrLines: ['No session found for codex-original'], exitCode: 1 }
+      ]
+    });
+    const { manager, threadManager } = createTestRunManager({ tempDir, codexBin: fake.bin });
+    const service = createTaskMcpService({
+      projects: createProjectManager({ db: db!, homeDir: tempDir }),
+      threads: threadManager,
+      runs: manager,
+      tasks: createTaskService({ db: db!, runs: manager, approvals: createApprovalManager({ db: db! }) }),
+      threadRunOptions: { threadManager }
+    });
+    const caller = { initiatorUserId: 'employee_1', initiatorAgentId: 'client_agent_1' };
+    try {
+      const first = await service.submit({ prompt: '生成海报', ...caller });
+      await waitForRunStatus(manager, first.taskId, 'succeeded');
+      const second = await service.submit({ prompt: '修改原图', threadId: first.threadId, ...caller });
+      await waitForRunStatus(manager, second.taskId, 'failed');
+
+      expect(fake.readInvocationCount()).toBe(2);
+      expect(fake.readArgvs()[1]).toEqual(expect.arrayContaining(['exec', 'resume', 'codex-original']));
+      expect(threadManager.getThread(first.threadId)?.codexThreadId).toBe('codex-original');
+      expect(await service.getTaskResult(second.taskId)).toMatchObject({
+        thread_id: first.threadId, status: 'failed', error_code: 'RESUME_TARGET_NOT_FOUND'
+      });
+    } finally {
+      await manager.close();
+    }
+  });
+
+  it('MCP 续聊向持久 App Server 传入原 Runtime 会话 ID', async () => {
+    const control = createControllablePersistentExecutor();
+    const { manager, threadManager } = createTestRunManager({
+      runtimeTransport: 'app-server', persistentAppServerExecutor: control.executor
+    });
+    const service = createTaskMcpService({
+      projects: createProjectManager({ db: db!, homeDir: tempDir }),
+      threads: threadManager,
+      runs: manager,
+      tasks: createTaskService({ db: db!, runs: manager, approvals: createApprovalManager({ db: db! }) }),
+      threadRunOptions: { threadManager }
+    });
+    const caller = { initiatorUserId: 'employee_1', initiatorAgentId: 'client_agent_1' };
+    try {
+      const first = await service.submit({ prompt: '生成海报', ...caller });
+      await expect.poll(() => control.starts.length).toBe(1);
+      control.complete(first.taskId);
+      await waitForRunStatus(manager, first.taskId, 'succeeded');
+      const originalId = threadManager.getThread(first.threadId)!.codexThreadId;
+      expect(originalId).toBeTruthy();
+
+      const second = await service.submit({ prompt: '修改原图', threadId: first.threadId, ...caller });
+      await expect.poll(() => control.starts.length).toBe(2);
+      expect(control.starts[1]).toMatchObject({
+        thread: { id: first.threadId }, codexThreadId: originalId, prompt: '修改原图'
+      });
+      control.complete(second.taskId);
+      await waitForRunStatus(manager, second.taskId, 'succeeded');
+      expect(threadManager.getThread(first.threadId)?.codexThreadId).toBe(originalId);
+    } finally {
+      await manager.close();
+    }
   });
 
   it('maps other resume non-zero exits to a generic resume error code', async () => {

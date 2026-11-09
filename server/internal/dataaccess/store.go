@@ -32,7 +32,7 @@ func (s *MemoryStore) CreateGrants(ctx context.Context, grants []Grant, audit Au
 	defer s.mu.Unlock()
 	audit.BeforeActions = audit.BeforeActions[:0]
 	for _, existing := range s.grants {
-		if len(grants) > 0 && existing.UserID == grants[0].UserID && existing.ResourceType == grants[0].ResourceType && existing.ResourceID == grants[0].ResourceID {
+		if len(grants) > 0 && existing.UserID == grants[0].UserID && existing.RoleID == grants[0].RoleID && existing.ResourceType == grants[0].ResourceType && existing.ResourceID == grants[0].ResourceID {
 			audit.BeforeActions = append(audit.BeforeActions, existing.Action)
 		}
 		for _, grant := range grants {
@@ -60,7 +60,7 @@ func (s *MemoryStore) ReplaceGrants(ctx context.Context, userID, resourceType, r
 	found := false
 	audit.BeforeActions = audit.BeforeActions[:0]
 	for id, grant := range s.grants {
-		if grant.UserID == userID && grant.ResourceType == resourceType && grant.ResourceID == resourceID {
+		if grant.UserID == userID && grant.RoleID == audit.TargetRoleID && grant.ResourceType == resourceType && grant.ResourceID == resourceID {
 			audit.BeforeActions = append(audit.BeforeActions, grant.Action)
 			delete(s.grants, id)
 			found = true
@@ -86,7 +86,7 @@ func (s *MemoryStore) DeleteGrants(ctx context.Context, userID, resourceType, re
 	found := false
 	audit.BeforeActions = audit.BeforeActions[:0]
 	for id, grant := range s.grants {
-		if grant.UserID == userID && grant.ResourceType == resourceType && grant.ResourceID == resourceID {
+		if grant.UserID == userID && grant.RoleID == audit.TargetRoleID && grant.ResourceType == resourceType && grant.ResourceID == resourceID {
 			audit.BeforeActions = append(audit.BeforeActions, grant.Action)
 			delete(s.grants, id)
 			found = true
@@ -126,6 +126,9 @@ func (s *MemoryStore) ListGrants(ctx context.Context, filter Filter) ([]Grant, e
 	defer s.mu.RUnlock()
 	out := []Grant{}
 	for _, grant := range s.grants {
+		if filter.RoleGrants != (grant.RoleID != "") || (filter.RoleID != "" && grant.RoleID != filter.RoleID) {
+			continue
+		}
 		if filter.UserID != "" && grant.UserID != filter.UserID {
 			continue
 		}
@@ -141,6 +144,9 @@ func (s *MemoryStore) ListGrants(ctx context.Context, filter Filter) ([]Grant, e
 		out = append(out, grant)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].RoleID != out[j].RoleID {
+			return out[i].RoleID < out[j].RoleID
+		}
 		if out[i].UserID != out[j].UserID {
 			return out[i].UserID < out[j].UserID
 		}
@@ -153,5 +159,5 @@ func (s *MemoryStore) ListGrants(ctx context.Context, filter Filter) ([]Grant, e
 }
 
 func sameGrantKey(left, right Grant) bool {
-	return left.UserID == right.UserID && left.ResourceType == right.ResourceType && left.ResourceID == right.ResourceID && left.Action == right.Action
+	return left.UserID == right.UserID && left.RoleID == right.RoleID && left.ResourceType == right.ResourceType && left.ResourceID == right.ResourceID && left.Action == right.Action
 }

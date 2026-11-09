@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageUp, Moon, RotateCcw, Save, Sun, Trash2 } from "lucide-react";
+import { ImageUp, Moon, PanelLeftClose, PanelLeftOpen, RotateCcw, Save, Sun, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ErrorAlert, LoadingState, PageHeader, PageShell } from "@/components/governance-ui";
@@ -59,8 +59,11 @@ export function PlatformBrandingPage() {
   const [background, setBackground] = useState<"light" | "dark">("light");
   const [sidebarLogo, setSidebarLogo] = useState<LogoDraft>({ action: "keep" });
   const [compactLogo, setCompactLogo] = useState<LogoDraft>({ action: "keep" });
+  const [sidebarLogoDark, setSidebarLogoDark] = useState<LogoDraft>({ action: "keep" });
+  const [compactLogoDark, setCompactLogoDark] = useState<LogoDraft>({ action: "keep" });
   const [menuDraft, setMenuDraft] = useState<Partial<Record<SidebarMenuKey, string | null>>>({});
   const [adminUrlDraft, setAdminUrlDraft] = useState<string>();
+  const [accentColorDraft, setAccentColorDraft] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string }>();
   const [previewRevision, setPreviewRevision] = useState(0);
@@ -77,13 +80,20 @@ export function PlatformBrandingPage() {
   }
 
   const branding = query.data;
-  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep" || Object.keys(menuDraft).length > 0 || adminUrlDraft !== undefined;
+  const hasChanges = sidebarLogo.action !== "keep" || compactLogo.action !== "keep"
+    || sidebarLogoDark.action !== "keep" || compactLogoDark.action !== "keep"
+    || Object.keys(menuDraft).length > 0 || adminUrlDraft !== undefined || accentColorDraft !== undefined;
   const hasInvalidMenu = Object.values(menuDraft).some(value => menuLabelError(value) !== undefined);
   const urlError = adminUrlDraft === undefined ? undefined : adminUrlError(adminUrlDraft);
+  const accentError = accentColorDraft?.trim() && !/^#[\da-f]{6}$/i.test(accentColorDraft.trim())
+    ? "请输入 #RRGGBB 格式的 HEX 色值" : undefined;
   const hasCustomBranding = hasCustomLogo(sidebarLogo, branding.sidebarLogoConfigured)
     || hasCustomLogo(compactLogo, branding.sidebarCompactLogoConfigured)
+    || hasCustomLogo(sidebarLogoDark, branding.sidebarLogoDarkConfigured)
+    || hasCustomLogo(compactLogoDark, branding.sidebarCompactLogoDarkConfigured)
     || sidebarMenus.some(({ key }) => (menuDraft[key] === undefined ? branding.sidebarMenuLabels?.[key] : menuDraft[key]) != null)
-    || Boolean(adminUrlDraft === undefined ? branding.adminUrl : adminUrlDraft);
+    || Boolean(adminUrlDraft === undefined ? branding.adminUrl : adminUrlDraft)
+    || Boolean(accentColorDraft === undefined ? branding.accentColor : accentColorDraft);
 
   function replaceDraft(current: LogoDraft, file: File, update: (draft: LogoDraft) => void) {
     if (!isSupportedImage(file)) {
@@ -106,14 +116,17 @@ export function PlatformBrandingPage() {
   function restoreDefaults() {
     resetDraft(sidebarLogo, setSidebarLogo);
     resetDraft(compactLogo, setCompactLogo);
+    resetDraft(sidebarLogoDark, setSidebarLogoDark);
+    resetDraft(compactLogoDark, setCompactLogoDark);
     setMenuDraft(current => Object.fromEntries(sidebarMenus
       .filter(({ key }) => current[key] !== undefined || branding.sidebarMenuLabels?.[key] !== undefined)
       .map(({ key }) => [key, null])));
     if (adminUrlDraft !== undefined || branding.adminUrl) setAdminUrlDraft("");
+    if (accentColorDraft !== undefined || branding.accentColor) setAccentColorDraft("");
   }
 
   async function save() {
-    if (hasInvalidMenu || urlError) return;
+    if (hasInvalidMenu || urlError || accentError) return;
     setSaving(true);
     setNotice(undefined);
     try {
@@ -122,17 +135,27 @@ export function PlatformBrandingPage() {
         sidebarLogo: sidebarLogo.file,
         sidebarCompactLogoAction: compactLogo.action,
         sidebarCompactLogo: compactLogo.file,
+        sidebarLogoDarkAction: sidebarLogoDark.action,
+        sidebarLogoDark: sidebarLogoDark.file,
+        sidebarCompactLogoDarkAction: compactLogoDark.action,
+        sidebarCompactLogoDark: compactLogoDark.file,
         ...(adminUrlDraft === undefined ? {} : { adminUrl: adminUrlDraft.trim() }),
+        ...(accentColorDraft === undefined ? {} : { accentColor: accentColorDraft.trim() }),
         ...(Object.keys(menuDraft).length === 0 ? {} : {
           sidebarMenuLabels: Object.fromEntries(Object.entries(menuDraft).map(([key, value]) => [key, value == null ? null : trimInput(value)]))
         })
       });
       releaseObjectUrl(sidebarLogo.objectUrl);
       releaseObjectUrl(compactLogo.objectUrl);
+      releaseObjectUrl(sidebarLogoDark.objectUrl);
+      releaseObjectUrl(compactLogoDark.objectUrl);
       setSidebarLogo({ action: "keep" });
       setCompactLogo({ action: "keep" });
+      setSidebarLogoDark({ action: "keep" });
+      setCompactLogoDark({ action: "keep" });
       setMenuDraft({});
       setAdminUrlDraft(undefined);
+      setAccentColorDraft(undefined);
       queryClient.setQueryData(["platform-branding"], updated);
       setPreviewRevision((value) => value + 1);
       setNotice({ kind: "success", message: "平台外观已保存。" });
@@ -156,7 +179,7 @@ export function PlatformBrandingPage() {
               <RotateCcw aria-hidden="true" />
               恢复默认配置
             </Button>
-            <Button disabled={!hasChanges || saving || hasInvalidMenu || Boolean(urlError)} onClick={() => void save()}>
+            <Button disabled={!hasChanges || saving || hasInvalidMenu || Boolean(urlError) || Boolean(accentError)} onClick={() => void save()}>
               <Save aria-hidden="true" />
               {saving ? "保存中" : "保存"}
             </Button>
@@ -164,17 +187,17 @@ export function PlatformBrandingPage() {
         }
       />
 
-      <div className="mb-5 flex items-center justify-between gap-4 border-b pb-5">
-        <span className="text-sm font-medium">预览背景</span>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b pb-5">
+        <span className="text-sm font-medium">Logo 适用主题</span>
         <ToggleGroup
-          aria-label="预览背景"
+          aria-label="Logo 适用主题"
           onValueChange={(value) => value && setBackground(value as "light" | "dark")}
           type="single"
           value={background}
           variant="outline"
         >
-          <ToggleGroupItem aria-label="浅色背景" value="light"><Sun aria-hidden="true" /></ToggleGroupItem>
-          <ToggleGroupItem aria-label="深色背景" value="dark"><Moon aria-hidden="true" /></ToggleGroupItem>
+          <ToggleGroupItem aria-label="浅色模式" value="light"><Sun aria-hidden="true" />浅色模式</ToggleGroupItem>
+          <ToggleGroupItem aria-label="深色模式" value="dark"><Moon aria-hidden="true" />深色模式</ToggleGroupItem>
         </ToggleGroup>
       </div>
 
@@ -187,29 +210,39 @@ export function PlatformBrandingPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <LogoEditor
           background={background}
-          configured={branding.sidebarLogoConfigured}
-          draft={sidebarLogo}
-          editable={canUpdate}
-          inputId="sidebar-logo-file"
+          configured={background === "light" ? branding.sidebarLogoConfigured : branding.sidebarLogoDarkConfigured}
+          draft={background === "light" ? sidebarLogo : sidebarLogoDark}
+          editable={canUpdate && !saving}
+          inputId={background === "light" ? "sidebar-logo-file" : "sidebar-logo-dark-file"}
           kind="expanded"
           label="展开态 Logo"
-          onFile={(file) => replaceDraft(sidebarLogo, file, setSidebarLogo)}
-          onReset={() => resetDraft(sidebarLogo, setSidebarLogo)}
+          onFile={(file) => background === "light"
+            ? replaceDraft(sidebarLogo, file, setSidebarLogo)
+            : replaceDraft(sidebarLogoDark, file, setSidebarLogoDark)}
+          onReset={() => background === "light"
+            ? resetDraft(sidebarLogo, setSidebarLogo)
+            : resetDraft(sidebarLogoDark, setSidebarLogoDark)}
           previewRevision={previewRevision}
-          savedUrl={branding.sidebarLogoUrl}
+          savedUrl={background === "light" ? branding.sidebarLogoUrl : branding.sidebarLogoDarkUrl}
+          fallbackSource={background === "dark" ? logoSource(sidebarLogo, branding.sidebarLogoConfigured, branding.sidebarLogoUrl, previewRevision) : undefined}
         />
         <LogoEditor
           background={background}
-          configured={branding.sidebarCompactLogoConfigured}
-          draft={compactLogo}
-          editable={canUpdate}
-          inputId="sidebar-compact-logo-file"
+          configured={background === "light" ? branding.sidebarCompactLogoConfigured : branding.sidebarCompactLogoDarkConfigured}
+          draft={background === "light" ? compactLogo : compactLogoDark}
+          editable={canUpdate && !saving}
+          inputId={background === "light" ? "sidebar-compact-logo-file" : "sidebar-compact-logo-dark-file"}
           kind="compact"
           label="折叠态小 Logo"
-          onFile={(file) => replaceDraft(compactLogo, file, setCompactLogo)}
-          onReset={() => resetDraft(compactLogo, setCompactLogo)}
+          onFile={(file) => background === "light"
+            ? replaceDraft(compactLogo, file, setCompactLogo)
+            : replaceDraft(compactLogoDark, file, setCompactLogoDark)}
+          onReset={() => background === "light"
+            ? resetDraft(compactLogo, setCompactLogo)
+            : resetDraft(compactLogoDark, setCompactLogoDark)}
           previewRevision={previewRevision}
-          savedUrl={branding.sidebarCompactLogoUrl}
+          savedUrl={background === "light" ? branding.sidebarCompactLogoUrl : branding.sidebarCompactLogoDarkUrl}
+          fallbackSource={background === "dark" ? logoSource(compactLogo, branding.sidebarCompactLogoConfigured, branding.sidebarCompactLogoUrl, previewRevision) : undefined}
         />
       </div>
       <section className="mt-6 border-t pt-5" aria-labelledby="sidebar-menu-names-title">
@@ -249,6 +282,16 @@ export function PlatformBrandingPage() {
           })}
         </div>
       </section>
+      <section className="mt-6 border-t pt-5" aria-labelledby="accent-color-title">
+        <h2 id="accent-color-title" className="mb-4 text-sm font-semibold">客户端品牌重点色</h2>
+        <Label htmlFor="brand-accent-color">品牌重点色 HEX</Label>
+        <Input className="mt-2 max-w-sm" id="brand-accent-color" type="text" placeholder="#RRGGBB"
+          value={accentColorDraft ?? branding.accentColor ?? ""} disabled={!canUpdate || saving}
+          aria-invalid={Boolean(accentError)} aria-describedby={accentError ? "brand-accent-error" : "brand-accent-help"}
+          onChange={event => setAccentColorDraft(event.target.value)} />
+        {accentError ? <p id="brand-accent-error" className="mt-1 text-xs text-destructive">{accentError}</p> : null}
+        <p id="brand-accent-help" className="mt-2 text-xs text-muted-foreground">留空使用客户端现有默认颜色；员工可在客户端设置中覆盖。不影响管理后台主题。</p>
+      </section>
       <section className="mt-6 border-t pt-5" aria-labelledby="admin-url-title">
         <h2 id="admin-url-title" className="mb-4 text-sm font-semibold">客户端管理后台入口</h2>
         <Label htmlFor="admin-url">管理后台地址</Label>
@@ -286,12 +329,10 @@ function LogoEditor(props: {
   onReset(): void;
   previewRevision: number;
   savedUrl: string | null;
+  fallbackSource?: string;
 }) {
-  const customSource = props.draft.action === "replace"
-    ? props.draft.objectUrl
-    : props.draft.action === "keep" && props.configured && props.savedUrl
-      ? `${props.savedUrl}?v=${props.previewRevision}`
-      : undefined;
+  const customSource = logoSource(props.draft, props.configured, props.savedUrl, props.previewRevision);
+  const source = customSource ?? props.fallbackSource;
   const defaultSource = props.kind === "expanded"
     ? `/krillinai-wordmark-${props.background === "light" ? "black" : "white"}.png`
     : `/krillinai-mark-${props.background === "light" ? "black" : "white"}.png`;
@@ -311,7 +352,8 @@ function LogoEditor(props: {
             建议尺寸：{props.kind === "expanded" ? "1050 × 240" : "330 × 300"} px
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {props.draft.action === "replace" ? props.draft.file?.name : customSource ? "已配置" : "使用默认"}
+            {props.draft.action === "replace" ? props.draft.file?.name
+              : customSource ? "已配置" : props.fallbackSource ? "未配置深色版，沿用浅色版" : "使用默认"}
           </p>
         </div>
         {props.editable ? <div className="flex items-center gap-2">
@@ -339,30 +381,59 @@ function LogoEditor(props: {
       </div>
       <div
         className={cn(
-          "min-h-36 px-5 py-7",
-          props.background === "light" ? "bg-[#f7f7f5] text-[#202020]" : "bg-[#202221] text-white"
+          "grid min-h-36 place-items-center overflow-hidden py-7",
+          props.background === "light" ? "bg-[#f3f3f4] text-[#18181b]" : "bg-[#111214] text-[#f4f4f5]"
         )}
       >
-        <div className="flex min-h-20 items-start justify-between gap-5 rounded-md border border-current/10 px-3 py-3">
-          {props.kind === "expanded" ? (
-            <div className="flex flex-col items-start gap-0.5 pt-1">
-              <span className="block h-[17px] w-[72px]">
-                <img alt="展开态 Logo 预览" className="h-full w-full object-contain object-left" src={customSource ?? defaultSource} />
-              </span>
-              <span className="flex items-center gap-1 text-xs opacity-55"><strong>Clawee</strong><span>v1.0.0</span></span>
-            </div>
-          ) : (
-            <span className="grid size-10 place-items-center">
-              <span className="block size-7">
-                <img alt="折叠态 Logo 预览" className="h-full w-full object-contain object-center" src={customSource ?? defaultSource} />
-              </span>
-            </span>
+        {/* Match ClaweeSidebar and its sidebar-brand styles in client/apps/web. */}
+        <div
+          className={cn(
+            "box-border max-w-full border-r",
+            props.kind === "expanded" ? "w-[248px] px-3 pb-2 pt-[13px]" : "w-[72px] px-2 pb-3 pt-5"
           )}
-          <span className="size-9 rounded-md border border-current/10" aria-hidden="true" />
+          style={{ borderColor: props.background === "light" ? "rgba(24, 24, 27, 0.07)" : "rgba(245, 245, 246, 0.08)" }}
+        >
+          <div className={cn(
+            "flex min-h-[42px] min-w-0 items-center",
+            props.kind === "expanded" ? "gap-1 pl-1.5 pr-2" : "justify-center"
+          )}>
+            {props.kind === "expanded" ? (
+              <>
+                <span className="block h-[34px] min-w-0 flex-1">
+                  <img alt="展开态 Logo 预览" className="block h-full w-full object-contain object-left" src={source ?? defaultSource} />
+                </span>
+                <span className="grid h-[34px] w-7 shrink-0 place-items-center opacity-[0.68]" aria-hidden="true">
+                  <PanelLeftClose size={18} strokeWidth={1.85} />
+                </span>
+              </>
+            ) : (
+              <span className="group relative grid size-[38px] place-items-center overflow-hidden rounded-lg hover:bg-[color-mix(in_srgb,currentColor_8%,transparent)]">
+                <span className="block size-7">
+                  <img
+                    alt="折叠态 Logo 预览"
+                    className="block h-full w-full object-contain transition-[opacity,transform] duration-[180ms] group-hover:scale-[0.84] group-hover:opacity-0 motion-reduce:transition-none"
+                    src={source ?? defaultSource}
+                  />
+                </span>
+                <PanelLeftOpen
+                  aria-hidden="true"
+                  className="absolute scale-[0.84] opacity-0 transition-[opacity,transform] duration-[180ms] group-hover:scale-100 group-hover:opacity-100 motion-reduce:transition-none"
+                  size={19}
+                  strokeOpacity={0.72}
+                  strokeWidth={1.85}
+                />
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </section>
   );
+}
+
+function logoSource(draft: LogoDraft, configured: boolean, savedUrl: string | null, revision: number) {
+  return draft.action === "replace" ? draft.objectUrl
+    : draft.action === "keep" && configured && savedUrl ? `${savedUrl}?v=${revision}` : undefined;
 }
 
 function isSupportedImage(file: File) {

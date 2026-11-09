@@ -3,7 +3,7 @@ import type {
   EnterpriseHttpClient,
   EnterprisePlatformBrandingImage
 } from '../enterprise/http-client-2026-07-30.js';
-import { EnterpriseHttpError } from '../enterprise/http-client-2026-07-30.js';
+import { EnterpriseHttpError, enterpriseHttpErrorDetails } from '../enterprise/http-client-2026-07-30.js';
 import type { EnterpriseSessionManager } from '../enterprise/session-manager-2026-07-30.js';
 import { EnterpriseSessionError } from '../enterprise/session-manager-2026-07-30.js';
 import { apiError } from './errors.js';
@@ -27,7 +27,7 @@ export async function registerEnterprisePlatformBrandingRoutes(
     }
   });
 
-  for (const kind of ['sidebar-logo', 'sidebar-compact-logo'] as const) {
+  for (const kind of ['sidebar-logo', 'sidebar-compact-logo', 'sidebar-logo-dark', 'sidebar-compact-logo-dark'] as const) {
     server.get(`/enterprise/platform-branding/${kind}`, async (_request, reply) => {
       try {
         const accessToken = await input.sessionManager.requireAccessToken();
@@ -66,9 +66,9 @@ async function brandingError(
   if (error instanceof EnterpriseHttpError) {
     if (error.code === 'ENTERPRISE_UNAUTHORIZED') {
       await sessionManager.invalidateUnauthorized();
-      return reply.code(401).send(apiError('ENTERPRISE_SESSION_EXPIRED', 'Enterprise session expired'));
+      return reply.code(401).send(apiError('ENTERPRISE_SESSION_EXPIRED', 'Enterprise session expired', enterpriseHttpErrorDetails(error)));
     }
-    return reply.code(error.statusCode ?? 502).send(apiError(error.code, 'Enterprise platform branding is unavailable'));
+    return reply.code(error.statusCode ?? 502).send(apiError(error.code, 'Enterprise platform branding is unavailable', enterpriseHttpErrorDetails(error)));
   }
   throw error;
 }

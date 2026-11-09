@@ -24,6 +24,8 @@ vi.mock("@/lib/shared-files-api", async () => {
   return { ...actual, addSharedSpaceMember: vi.fn(), createSharedSpace: vi.fn(), getSharedSpace: vi.fn(), listSharedSpaceCandidates: vi.fn(), listSharedSpaceMembers: vi.fn(), listSharedSpaces: vi.fn(), removeSharedSpaceMember: vi.fn(), updateSharedSpaceMember: vi.fn(), updateSharedSpace: vi.fn() };
 });
 
+vi.mock("@/lib/accounts-api", () => ({ listAccounts: vi.fn().mockResolvedValue([]) }));
+
 const space = { spaceId: "space_1", name: "季度空间", description: "协作文件", memberCount: 1, fileCount: 3, sizeBytes: 1024, createdBy: "admin", createdAt: "2026-08-01T00:00:00Z", updatedBy: "admin", updatedAt: "2026-08-05T00:00:00Z" };
 const member = { userId: "usr_1", name: "张三", email: "zhang@example.com", accountStatus: "active", grantStatus: "complete" as const, actions: ["read", "write"] as Array<"read" | "write">, joinedAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-05T00:00:00Z" };
 
@@ -39,6 +41,16 @@ describe("SharedFilesPage", () => {
     vi.mocked(addSharedSpaceMember).mockResolvedValue({ ...member, userId: "usr_2", name: "李四" });
     vi.mocked(updateSharedSpaceMember).mockResolvedValue(member);
     vi.mocked(removeSharedSpaceMember).mockResolvedValue(undefined);
+  });
+
+  it("显示员工归属并禁止个人空间成员操作，按员工 ID 筛选", async () => {
+    vi.mocked(listSharedSpaces).mockResolvedValue({ items: [{ ...space, personalOwnerUserId: "usr_1", personalOwnerName: "张三", personalOwnerEmail: "zhang@example.com" }], meta: { next_cursor: "", has_next: false } });
+    renderPage([permissions.sharedFilesRead, permissions.sharedFilesMemberCreate]);
+    expect(await screen.findByText("张三")).toBeInTheDocument();
+    expect(screen.getByText("个人空间")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "管理季度空间成员授权" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("所属员工 ID"), { target: { value: "usr_1" } });
+    await waitFor(() => expect(listSharedSpaces).toHaveBeenCalledWith(expect.objectContaining({ personalOwnerUserId: "usr_1", cursor: "" })));
   });
 
   it("creates a space with shadcn field composition", async () => {

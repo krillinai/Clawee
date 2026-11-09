@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/krillinai/Clawee/server/internal/mcpauth"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
+	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 	"github.com/krillinai/Clawee/server/internal/workflow"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,9 +23,10 @@ type workflowGetInput struct {
 	TaskID string `json:"task_id"`
 }
 type workflowCompleteInput struct {
-	TaskID string          `json:"task_id"`
-	Output json.RawMessage `json:"output"`
-	Key    string          `json:"idempotency_key"`
+	Attachments []workflow.Artifact `json:"attachments,omitempty"`
+	TaskID      string              `json:"task_id"`
+	Output      json.RawMessage     `json:"output"`
+	Key         string              `json:"idempotency_key"`
 }
 type workflowListOutput struct {
 	Tasks      []workflow.Task `json:"tasks"`
@@ -47,6 +50,8 @@ func workflowObjectSchema[T any](nullable bool) *jsonschema.Schema {
 func workflowToolError(err error) *mcp.CallToolResult {
 	code := "internal_error"
 	switch {
+	case errors.Is(err, workflow.ErrAssignees):
+		code = "invalid_assignees"
 	case errors.Is(err, workflow.ErrInvalid):
 		code = "invalid_request"
 	case errors.Is(err, workflow.ErrLarge):
@@ -57,6 +62,10 @@ func workflowToolError(err error) *mcp.CallToolResult {
 		code = "forbidden"
 	case errors.Is(err, workflow.ErrConflict):
 		code = "conflict"
+	case errors.Is(err, sharedfiles.ErrStorageUnavailable):
+		code = "storage_unavailable"
+	case errors.Is(err, sharedfiles.ErrRevisionConflict):
+		code = "revision_conflict"
 	}
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: code}}}
 }
@@ -111,11 +120,11 @@ func addWorkflowTools(server *mcp.Server, opts Options) {
 		if err != nil {
 			return workflowToolError(err), nil, nil
 		}
-		result, err := opts.Workflow.Complete(ctx, input.TaskID, identity.UserID, identity.AgentID, input.Key, "", "", input.Output)
+		result, err := opts.Workflow.Complete(ctx, input.TaskID, identity.UserID, identity.AgentID, input.Key, "", "", input.Output, input.Attachments...)
 		if err != nil {
 			return workflowToolError(err), nil, nil
 		}
-		if result.NextTask != nil && result.NextTask.Assignee != identity.UserID {
+		if result.NextTask != nil && !slices.Contains(result.NextTask.AssigneeUsers, identity.UserID) {
 			result.NextTask.ID = ""
 		}
 		return nil, &result, nil

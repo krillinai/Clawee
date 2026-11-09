@@ -1,15 +1,20 @@
+import type { SharedDriveState } from '@clawee/protocol';
+import { createSharedDriveRepository, parseSharedDriveState } from '../storage/shared-drive.js';
 import type {
   AgentEventEnvelope,
   PublicRunStatus,
   RuntimeApproval,
+  RunQueueReason,
   RunSubmissionMode,
   TerminationReason
 } from '@clawee/protocol';
 import type Database from 'better-sqlite3';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { appServerFailureFacts, emitIncident, incidentEnvironment, observeRuntimeNotification } from '../feedback/incidents.js';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
+import { z } from 'zod';
 import type { ApprovalManager } from '../approvals/manager.js';
 import type {
   AgentToolRunInjection,
@@ -42,12 +47,14 @@ import { parseJsonLine } from '../events/parser.js';
 import { redactText, redactValue } from '../security/redaction.js';
 import {
   createRunRepository,
+  createThreadRepository,
   type ResolvedResumeMode,
+  type RunHistoryEvents,
   type RunQueueState,
   type RunRow
 } from '../storage/repositories.js';
 import { normalizeDatabaseTimestamp } from '../storage/database.js';
-import type { RuntimeThread } from '../threads/types.js';
+import type { AgentPromptPolicySnapshot, RuntimeThread } from '../threads/types.js';
 import { expandHome } from '../platform/paths.js';
 import {
   createOrderedLogWriter,
@@ -68,6 +75,15 @@ import type {
 } from '../enterprise/activity-reporter-2026-08-28.js';
 import { createSkillUsageTracker } from '../enterprise/skill-usage-tracker.js';
 import { MCP_TASK_MAX_EXECUTION_MS } from '../task-mcp/constants.js';
+import { prepareSkillAIReviewRuntime, SKILL_AI_REVIEW_TOOLS } from './skill-ai-review-policy.js';
+import { SKILL_AI_REVIEW_TIMEOUT_MS } from '../enterprise/skill-ai-review-schema.js';
+
+const remoteTaskDeliverySchema = z.object({
+  ready: z.literal(true),
+  task_id: z.string().min(1),
+  delivery_status: z.enum(['none', 'complete', 'incomplete']),
+  delivery_errors: z.array(z.object({ file_name: z.string(), code: z.string(), message: z.string() }))
+});
 
 export type ThreadAccess = {
   getThread(id: string): RuntimeThread | undefined;
@@ -77,6 +93,7 @@ export type ThreadAccess = {
     unresolvedThreadIds: string[];
   };
   setCodexThreadId(threadId: string, codexThreadId: string): void;
+  setAgentPromptPolicySnapshot?(threadId: string, snapshot: AgentPromptPolicySnapshot): void;
   touchThread(threadId: string): void;
 };
 
@@ -96,6 +113,7 @@ export type RunManagerOptions = {
     validateProfileForRun(name: string): { ok: true } | { ok: false; code: string; message: string };
   };
   runtimeTransport?: 'exec' | 'app-server';
+  createModelResponseObserver?(model?: string | null): ((event: AgentEventEnvelope) => void) | undefined;
   approvalManager?: ApprovalManager;
   recordRunContext?(runId: string, items: NonNullable<CreateRunInput['contextItems']>): void;
   prepareThreadRotationContext?(input: {
@@ -111,6 +129,10 @@ export type RunManagerOptions = {
   agentToolInjector?: RunMcpInjector;
   persistentAppServerExecutor?: PersistentAppServerExecutor;
   serverDeployment?: boolean;
+  agentPromptPolicy?: {
+    refresh(): Promise<{ version: number; serverAgentPrompt: string; claweeAgentPrompt: string } | undefined>;
+    getCached(): { version: number; serverAgentPrompt: string; claweeAgentPrompt: string };
+  };
   onBeforeCodexWritableRequest?(): Promise<void>;
   beforeRunSpawn?(input: {
     runId: string;
@@ -121,12 +143,14 @@ export type RunManagerOptions = {
 };
 
 export type RuntimeRun = {
+  sharedDriveState?: SharedDriveState;
   id: string;
   threadId?: string;
   codexThreadId?: string;
   status: PublicRunStatus;
   submissionMode: RunSubmissionMode;
   queuePosition?: number;
+  queueReason?: RunQueueReason;
   cwd: string;
   profile: string;
   sandbox: string;
@@ -147,21 +171,33 @@ export type RuntimeRun = {
 export type RunEventSubscriber = (event: AgentEventEnvelope) => void;
 
 export type RunManager = {
-  startRun(input: CreateRunInput): CreatedRun;
+  startRun(input: CreateRunInput, onCreated?: (runId: string) => void): CreatedRun;
   createAndRun(input: CreateRunInput): Promise<CreatedRun>;
+  prepareDesktopUpdate?(): boolean;
+  cancelDesktopUpdate?(): void;
   cancelAll(): void;
   cancelRun(id: string): boolean;
   steerRun?(id: string): boolean;
   getRun(id: string): RuntimeRun | undefined;
   hasActiveRunForThread(threadId: string): boolean;
   hasActiveRunForProject(projectId: string): boolean;
-  listRuns(limit?: number): RuntimeRun[];
+  listRuns(limit?: number, options?: { publicOnly?: boolean }): RuntimeRun[];
   listRunsByThread(threadId: string, limit?: number): RuntimeRun[];
   getLastEventSeq(runId: string): number;
   listEvents(runId: string, afterSeq?: number): AgentEventEnvelope[];
+  listHistoryEvents(runId: string): RunHistoryEvents;
   subscribe(runId: string, subscriber: RunEventSubscriber): () => void;
   close(options?: { timeoutMs?: number }): Promise<void>;
 };
+
+export class DesktopUpdatePreparedError extends Error {
+  readonly code = 'DESKTOP_UPDATE_PREPARED';
+
+  constructor() {
+    super('客户端正在准备安装更新，暂不接受新任务');
+    this.name = 'DesktopUpdatePreparedError';
+  }
+}
 
 const INTERACTIVE_RUN_TIMEOUT_MS = MCP_TASK_MAX_EXECUTION_MS;
 const SCHEDULED_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -194,6 +230,14 @@ type CodexThreadRotation = {
 
 export function createRunManager(options: RunManagerOptions): RunManager {
   const runs = createRunRepository(options.db);
+  const sharedDrive = createSharedDriveRepository(options.db);
+  const threads = createThreadRepository(options.db);
+  const findUnfinishedRun = options.db.prepare(`
+    SELECT 1 FROM runs
+    WHERE public_status NOT IN ('succeeded', 'failed', 'canceled', 'orphaned')
+       OR internal_status NOT IN ('succeeded', 'failed', 'canceled', 'orphaned')
+    LIMIT 1
+  `);
   const codexThreadRotationRunThreshold = normalizeRotationRunThreshold(
     options.codexThreadRotationRunThreshold
   );
@@ -238,8 +282,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     seen: Set<string>;
   }>();
   const skillTrackerInit = new Map<string, Promise<void>>();
+  const skillAIReviewRunIds = new Set<string>();
   const activityWork = new Map<string, Promise<void>>();
   let closing = false;
+  let desktopUpdatePrepared = false;
   let closeWork: Promise<void> | undefined;
   const runningPersistentRunIds = new Set<string>();
   let persistentSubmissionSequence = 0;
@@ -251,6 +297,11 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       'events.ndjson',
       `${JSON.stringify(event)}\n`
     );
+    broadcastRunEvent(event, logWrite);
+    return logWrite;
+  };
+
+  function broadcastRunEvent(event: AgentEventEnvelope, logWrite: Promise<void>): void {
     for (const subscriber of subscribers.get(event.runId) ?? []) {
       try {
         subscriber(event);
@@ -258,7 +309,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         // Subscriber failures must not affect durable Run processing.
       }
     }
-    if (options.activityReporter !== undefined) {
+    if (options.activityReporter !== undefined && !skillAIReviewRunIds.has(event.runId)) {
       const previous = activityWork.get(event.runId) ?? Promise.resolve();
       const next = previous.then(() => logWrite).then(async () => {
         const trackerReady = skillTrackerInit.get(event.runId);
@@ -299,8 +350,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       activityWork.set(event.runId, next);
       if (event.type === 'done') void next.then(() => activityWork.delete(event.runId));
     }
-    return logWrite;
-  };
+  }
 
   const updateStatus = (
     id: string,
@@ -335,15 +385,30 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   recoverOrphanedRuns();
 
   const manager: RunManager = {
-    startRun(input: CreateRunInput): CreatedRun {
+    prepareDesktopUpdate() {
       if (closing) throw new Error('Run manager is closing');
+      desktopUpdatePrepared = true;
+      return activeRuns.size === 0 && findUnfinishedRun.get() === undefined;
+    },
+
+    cancelDesktopUpdate() {
+      desktopUpdatePrepared = false;
+    },
+
+    startRun(input: CreateRunInput, onCreated?: (runId: string) => void): CreatedRun {
+      if (closing) throw new Error('Run manager is closing');
+      if (desktopUpdatePrepared) throw new DesktopUpdatePreparedError();
       const runInput = resolveCreateRunInput(input);
       const thread = runInput.threadId === undefined
         ? undefined
         : options.threadAccess?.getThread(runInput.threadId);
       const resolvedResumeMode = resolveResumeMode(runInput, thread);
       const codexThreadId = thread?.codexThreadId ?? undefined;
-      const id = insertInitialRun(runInput, resolvedResumeMode, codexThreadId);
+      const id = onCreated === undefined ? insertInitialRun(runInput, resolvedResumeMode, codexThreadId) : options.db.transaction(() => {
+        const runId = insertInitialRun(runInput, resolvedResumeMode, codexThreadId);
+        onCreated(runId);
+        return runId;
+      })();
       const runDir = join(options.dataDir, 'runs', id);
       if (
         runInput.createdBy === 'schedule'
@@ -429,6 +494,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
               publish,
               {
                 maxConcurrency: options.persistentAppServerExecutor!.maxConcurrency,
+                activeRunCount: runningPersistentRunIds.size,
                 queuePosition
               }
             )
@@ -439,7 +505,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           threadId: runInput.threadId,
           status: 'queued',
           submissionMode,
-          queuePosition
+          queuePosition,
+          queueReason: activeThreadQueueReason(thread.id) ?? (persistentRunQueue.slice(0, queuePosition - 1).some(
+            item => item.input.threadId === thread.id
+          ) ? 'thread_active' : 'capacity')
         };
       }
 
@@ -484,7 +553,8 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           threadId: runInput.threadId,
           status: 'queued',
           submissionMode,
-          queuePosition
+          queuePosition,
+          queueReason: activeThreadQueueReason(runInput.threadId) ?? 'thread_active'
         };
       }
 
@@ -509,6 +579,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     cancelRun(id: string): boolean {
       const active = activeRuns.get(id);
       if (active !== undefined) {
+        if (runs.getRun(id)?.internal_status === 'finalizing') return false;
         active.cancel();
         return true;
       }
@@ -621,8 +692,8 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       return findActiveRunByProject.get({ projectId }) !== undefined;
     },
 
-    listRuns(limit?: number): RuntimeRun[] {
-      return runs.listRuns(limit).map(row => decorateQueuePosition(mapRunRow(row)));
+    listRuns(limit?: number, options?: { publicOnly?: boolean }): RuntimeRun[] {
+      return runs.listRuns(limit, options).map(row => decorateQueuePosition(mapRunRow(row)));
     },
 
     listRunsByThread(threadId: string, limit?: number): RuntimeRun[] {
@@ -636,6 +707,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
 
     listEvents(runId: string, afterSeq?: number): AgentEventEnvelope[] {
       return runs.listRunEvents(runId, afterSeq);
+    },
+
+    listHistoryEvents(runId: string): RunHistoryEvents {
+      return runs.listRunHistoryEvents(runId);
     },
 
     subscribe(runId: string, subscriber: RunEventSubscriber): () => void {
@@ -772,6 +847,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     publish: (event: AgentEventEnvelope) => Promise<void>;
   }): Promise<void> {
     const writer = getLogWriter(input.id);
+    updateStatus(input.id, 'running', 'finalizing');
+    for (const layer of ['daemon_codex', 'codex_model'] as const) emitIncident({ event_type: 'finished', layer, stage: 'run_finished', error_code: 'RUN_FINISHED', run_id: input.id,
+      task_outcome: input.publicStatus === 'canceled' ? 'cancelled' : input.publicStatus });
     const beforeCloseMetrics = writer.getMetrics();
     if (beforeCloseMetrics.failureCount > 0) {
       await safePublish(publishDiagnostic(
@@ -786,13 +864,17 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         }
       ));
     }
+    let doneEvent: AgentEventEnvelope | undefined;
     if (!hasDoneEvent(input.id)) {
       await safePublish(publishDone(
         input.id,
         input.nextSeq(),
         input.publicStatus,
         input.terminationReason,
-        input.publish
+        event => {
+          doneEvent = event;
+          return appendRunLog(input.id, 'events.ndjson', `${JSON.stringify(event)}\n`);
+        }
       ));
     }
 
@@ -801,20 +883,34 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       ...input.diagnostics,
       logWriter
     });
-    updateStatus(input.id, input.publicStatus, input.publicStatus, {
-      terminationReason: input.terminationReason,
-      ...input.statusExtra,
-      endedAt: new Date().toISOString()
-    });
-    notifyRunTerminal(input.id);
+    // 收尾完成后才让完成事件对查询和订阅可见。
+    options.db.transaction(() => {
+      updateStatus(input.id, input.publicStatus, input.publicStatus, {
+        terminationReason: input.terminationReason,
+        ...input.statusExtra,
+        endedAt: new Date().toISOString()
+      });
+      if (doneEvent !== undefined) runs.insertRunEvent(doneEvent);
+      if (input.runInput.threadId !== undefined) runs.setRunQueueState(input.id, 'none');
+    })();
     activeRuns.delete(input.id);
-    if (input.runInput.threadId !== undefined) runs.setRunQueueState(input.id, 'none');
     completeThreadRun(input.runInput.threadId, input.id);
+    notifyRunTerminal(input.id);
+    if (doneEvent !== undefined) broadcastRunEvent(doneEvent, Promise.resolve());
+    if (input.runInput.executionPolicy === 'skill-ai-review') {
+      rmSync(input.runInput.cwd!, { recursive: true, force: true });
+      skillAIReviewRunIds.delete(input.id);
+    }
   }
 
   function startExistingRun(input: QueuedRun): CreatedRun {
     const { id, runDir } = input;
     const runInput = input.input;
+    const isSkillAIReview = runInput.executionPolicy === 'skill-ai-review';
+    const observeModelResponse = isSkillAIReview
+      ? undefined
+      : options.createModelResponseObserver?.(runInput.model);
+    let reviewRuntime: ReturnType<typeof prepareSkillAIReviewRuntime> | undefined;
     const usePersistentAppServer = input.usePersistentAppServer === true;
     const executionStartedAt = new Date().toISOString();
     const submittedAt = normalizeDatabaseTimestamp(
@@ -830,6 +926,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     const codexThreadId = thread?.codexThreadId ?? undefined;
     let resolvedCodexThreadId = resolvedResumeMode === 'resume_thread' ? codexThreadId : undefined;
     let executionRunInput = runInput;
+    let agentPromptPolicy: AgentPromptPolicySnapshot | undefined = thread?.agentPromptPolicySnapshot;
     let rotation: CodexThreadRotation | undefined;
     if (
       resolvedResumeMode === 'resume_thread'
@@ -873,6 +970,8 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       message: string;
       terminationReason: TerminationReason;
     }): CreatedRun => {
+      emitIncident({ event_type: 'error', layer: 'daemon_codex', stage: 'execution', error_code: failure.code,
+        run_id: id, thread_id: runInput.threadId, diagnostics: appServerFailureFacts(new Error(failure.message)).diagnostics });
       const run = failRunBeforeSpawn({
         id,
         runDir,
@@ -896,6 +995,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       resolveRunCompletion(id, run);
       if (runInput.threadId !== undefined) runs.setRunQueueState(id, 'none');
       completeThreadRun(runInput.threadId, id);
+      if (isSkillAIReview) {
+        rmSync(runInput.cwd, { recursive: true, force: true });
+        skillAIReviewRunIds.delete(id);
+      }
       return run;
     };
 
@@ -933,6 +1036,34 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     let agentToolInjection: AgentToolRunInjection | undefined;
     const stdoutLines: string[] = [];
     let stderr = '';
+    const runtimeErrorSummaries: Array<Record<string, unknown>> = [];
+    let runtimeErrorCount = 0;
+    const recordRuntimeError = (error: unknown, fallbackCode?: string): void => {
+      const message = redactText(error instanceof Error ? error.message : String(error)).trim().slice(0, 2048);
+      const facts = appServerFailureFacts(error);
+      const summary: Record<string, unknown> = {
+        at: new Date().toISOString(),
+        stage: facts.stage ?? 'execution',
+        errorCode: fallbackCode ?? facts.transport_code ?? 'RUNTIME_ERROR',
+        message,
+        ...(facts.transport_code === undefined ? {} : { transportCode: facts.transport_code }),
+        ...(facts.duration_ms === undefined ? {} : { durationMs: facts.duration_ms }),
+        ...(facts.unresponsive_ms === undefined ? {} : { unresponsiveMs: facts.unresponsive_ms })
+      };
+      runtimeErrorCount += 1;
+      if (runtimeErrorSummaries.length === 0) runtimeErrorSummaries.push(summary);
+      else if (runtimeErrorSummaries.length === 1) runtimeErrorSummaries.push(summary);
+      else runtimeErrorSummaries[1] = summary;
+    };
+    const runtimeErrorDiagnostics = (): Record<string, unknown> => runtimeErrorSummaries.length === 0
+      ? {}
+      : {
+          runtimeErrors: {
+            first: runtimeErrorSummaries[0],
+            ...(runtimeErrorSummaries.length > 1 ? { latest: runtimeErrorSummaries[1] } : {}),
+            count: runtimeErrorCount
+          }
+        };
     let seq = lastSeqForRun(id);
     let sawTurnCompleted = false;
     let sawCodexThreadId = resolvedResumeMode === 'resume_thread';
@@ -1058,7 +1189,37 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     }
 
     async function prepareRunInjection(): Promise<void> {
-      agentToolInjection = usePersistentAppServer || thread === undefined
+      if (!isSkillAIReview && options.agentPromptPolicy !== undefined && agentPromptPolicy === undefined) {
+        const cache = resolvedResumeMode === 'resume_thread'
+          ? options.agentPromptPolicy.getCached()
+          : await options.agentPromptPolicy.refresh();
+        if (cache !== undefined) {
+          agentPromptPolicy = {
+            ...(cache.version > 0 ? { version: cache.version } : {}),
+            serverAgentPrompt: cache.serverAgentPrompt,
+            claweeAgentPrompt: cache.claweeAgentPrompt
+          };
+          if (runInput.threadId !== undefined) {
+            options.threadAccess?.setAgentPromptPolicySnapshot?.(runInput.threadId, agentPromptPolicy);
+          }
+        }
+      }
+      if (isSkillAIReview) {
+        await withTimeout(
+          options.onBeforeCodexWritableRequest?.() ?? Promise.resolve(),
+          30_000,
+          'Skill AI 审核模型准备超时'
+        );
+        reviewRuntime = prepareSkillAIReviewRuntime({
+          codexBin: options.codexBin,
+          codexHome: options.codexHome,
+          cwd: runInput.cwd,
+          env: options.env
+        });
+      }
+      agentToolInjection = isSkillAIReview
+        ? { mcpServers: [], env: reviewRuntime!.env, builtInTools: SKILL_AI_REVIEW_TOOLS }
+        : usePersistentAppServer || thread === undefined
         ? undefined
         : await options.agentToolInjector?.prepare({
             runId: id,
@@ -1078,6 +1239,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           'CODEX_THREAD_ID_MISSING: unable to build Codex runtime arguments'
         );
       }
+      if (reviewRuntime !== undefined) codexArgs.push(...reviewRuntime.configArgs);
       writeCurrentRunMeta();
     }
 
@@ -1127,8 +1289,19 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       let turnStartSentAt: string | undefined;
       let turnStartedAt: string | undefined;
       let firstModelEventAt: string | undefined;
+      let cancelRequested = false;
+      const automaticIncidentContext = { run_id: id, ...(runInput.threadId ? { thread_id: runInput.threadId } : {}),
+        startedAt: Date.now(), isCancelled: () => cancelRequested || closing,
+        environment: { ...incidentEnvironment(options.codexHome, { ...process.env, ...options.env }, executionRunInput.model),
+          timeout_ms: runTimeouts.timeoutMs, inactivity_timeout_ms: runTimeouts.inactivityTimeoutMs, spawn_timeout_ms: runTimeouts.spawnTimeoutMs } };
 
       function startAppServerAttempt() {
+        automaticIncidentContext.environment = {
+          ...incidentEnvironment(reviewRuntime?.path ?? options.codexHome,
+            isSkillAIReview ? reviewRuntime!.env : { ...process.env, ...mergeCodexEnvironment(options.env, agentToolInjection?.env) },
+            executionRunInput.model, executionRunInput.profile),
+          timeout_ms: runTimeouts.timeoutMs, inactivity_timeout_ms: runTimeouts.inactivityTimeoutMs, spawn_timeout_ms: runTimeouts.spawnTimeoutMs
+        };
         const executionPrompt = resolveCodexExecutionPrompt(
           executionRunInput
         );
@@ -1146,9 +1319,10 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           timeoutMs: runTimeouts.timeoutMs,
           spawnTimeoutMs: runTimeouts.spawnTimeoutMs,
           inactivityTimeoutMs: runTimeouts.inactivityTimeoutMs,
-          serverDeployment: options.serverDeployment,
+          serverDeployment: isSkillAIReview ? false : options.serverDeployment,
+          agentPromptPolicy: isSkillAIReview ? undefined : agentPromptPolicy,
           onBeforeWritableRequest:
-            options.onBeforeCodexWritableRequest,
+            isSkillAIReview ? undefined : options.onBeforeCodexWritableRequest,
           beforeSpawn: thread === undefined || options.beforeRunSpawn === undefined
             ? undefined
             : () => options.beforeRunSpawn!({ runId: id, thread }),
@@ -1164,6 +1338,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             await announceRotation(parsedCodexThreadId);
           },
           async onNotification(notification) {
+            const modelResponse = observeRuntimeNotification(notification, automaticIncidentContext);
             const method = typeof notification.method === 'string'
               ? notification.method
               : undefined;
@@ -1188,13 +1363,35 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             ) {
               sawTurnCompleted = true;
             }
-            await publish(normalizeAppServerEvent({
+            const event = normalizeAppServerEvent({
               runId: id,
               seq: ++seq,
-              raw: redactedNotification
-            }));
+              raw: redactedNotification,
+              modelResponse
+            });
+            const item = isRecord(redactedNotification) && isRecord(redactedNotification.params) && isRecord(redactedNotification.params.item)
+              ? redactedNotification.params.item : undefined;
+            if (!options.serverDeployment && !isSkillAIReview && item?.type === 'mcpToolCall'
+              && item.tool === 'clawee_get_task_result' && event.type === 'tool_result' && !event.payload.isError) {
+              let result = event.payload.response;
+              if (result === undefined) {
+                try { result = JSON.parse(event.payload.output); } catch { /* 兼容不含交付字段的旧任务结果。 */ }
+              }
+              const parsed = remoteTaskDeliverySchema.safeParse(result);
+              if (parsed.success) {
+                const delivery = { taskId: parsed.data.task_id, status: parsed.data.delivery_status, errors: parsed.data.delivery_errors };
+                sharedDrive.merge(id, state => {
+                  const deliveries = state.remoteDeliveries ??= [];
+                  const index = deliveries.findIndex(previous => previous.taskId === delivery.taskId);
+                  if (index < 0) deliveries.push(delivery); else deliveries[index] = delivery;
+                });
+              }
+            }
+            observeModelResponse?.(event);
+            await publish(event);
           },
           async onApprovalRequest(request) {
+            if (isSkillAIReview) return 'rejected';
             if (options.approvalManager === undefined) return 'rejected';
             const pending = options.approvalManager.request(
               buildApprovalRequest({
@@ -1242,11 +1439,13 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         return startCodexAppServer({
           ...commonInput,
           codexBin: options.codexBin,
-          codexHome: options.codexHome,
+          codexHome: reviewRuntime?.path ?? options.codexHome,
           profile: executionRunInput.profile,
           mcpServers: agentToolInjection?.mcpServers,
-          env: mergeCodexEnvironment(options.env, agentToolInjection?.env),
-          builtInTools: agentToolInjection?.builtInTools
+          env: isSkillAIReview ? reviewRuntime!.env : mergeCodexEnvironment(options.env, agentToolInjection?.env),
+          builtInTools: agentToolInjection?.builtInTools,
+          configOverrides: reviewRuntime?.configArgs,
+          isolatedEnvironment: isSkillAIReview
         });
       }
 
@@ -1297,6 +1496,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             : result.turnStatus === 'completed'
               ? 'completed'
               : 'stream_error';
+        if (publicStatus === 'failed') {
+          recordRuntimeError(new Error(`Codex turn ended with status ${result.turnStatus}`), 'CODEX_STREAM_ERROR');
+        }
         const diagnostics = {
           ...buildThreadRunDiagnosticsMetadata({
             runInput,
@@ -1312,6 +1514,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           }),
           ...rotationDiagnostics(),
           runtimeTransport: 'app-server',
+          ...runtimeErrorDiagnostics(),
           submittedAt,
           executionStartedAt,
           turnStartSentAt: turnStartSentAt ?? null,
@@ -1355,7 +1558,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         if (appServerStarted !== undefined) {
           appServerProcessInfo = await appServerStarted.catch(() => undefined);
         }
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = redactText(error instanceof Error ? error.message : String(error));
         const bindingConflict = isThreadCodexIdConflict(error);
         if (
           resolvedResumeMode === 'resume_thread'
@@ -1379,6 +1582,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         const terminationReason = appServerErrorToTerminationReason(errorMessage);
         const publicStatus: 'failed' | 'canceled' =
           terminationReason === 'user_canceled' ? 'canceled' : 'failed';
+        const expectedStop = error instanceof Error && 'incidentExpectedStop' in error && error.incidentExpectedStop === true;
+        if (publicStatus !== 'canceled') recordRuntimeError(error, errorCodeForTermination(terminationReason));
+        if (publicStatus !== 'canceled' && !automaticIncidentContext.isCancelled() && !expectedStop) emitIncident({
+          run_id: id, thread_id: runInput.threadId, environment: automaticIncidentContext.environment,
+          ...appServerFailureFacts(error), event_type: 'error', layer: 'daemon_codex', error_code: errorCodeForTermination(terminationReason)
+        });
         const injectionErrorCode = runtimeInjectionErrorCode(error);
         const errorCode = injectionErrorCode
           ?? (bindingConflict
@@ -1407,6 +1616,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             }),
             ...rotationDiagnostics(),
             runtimeTransport: 'app-server',
+            ...runtimeErrorDiagnostics(),
             submittedAt,
             executionStartedAt,
             turnStartSentAt: turnStartSentAt ?? null,
@@ -1436,15 +1646,16 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         | ReturnType<typeof startCodexAppServer>
         | PersistentAppServerExecution
         | undefined;
-      let cancelRequested = false;
       updateStatus(id, 'running', 'running', { startedAt: new Date().toISOString() });
       const done = prepareRunInjection()
         .then(() => {
+          if (isSkillAIReview && cancelRequested) throw new Error('Skill AI review canceled before spawn');
           currentProcess = startAppServerAttempt();
           if (cancelRequested) currentProcess.cancel();
           return currentProcess.result;
         })
-        .then(handleAppServerResult, handleAppServerError);
+        .then(handleAppServerResult, handleAppServerError)
+        .finally(() => reviewRuntime?.cleanup());
 
       activeRuns.set(id, {
         cancel() {
@@ -1487,7 +1698,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         return;
       }
       if (isTurnCompleted(parsed.value)) sawTurnCompleted = true;
-      await publish(normalizeCodexEvent({ runId: id, seq, raw: parsed.value }));
+      const event = normalizeCodexEvent({ runId: id, seq, raw: parsed.value });
+      observeModelResponse?.(event);
+      await publish(event);
     }
 
     async function onExecStderrChunk(chunk: string): Promise<void> {
@@ -1498,10 +1711,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
 
     function startExecAttempt() {
       const beforeSpawn =
-        options.onBeforeCodexWritableRequest === undefined
-        && (
-          thread === undefined
-          || options.beforeRunSpawn === undefined
+        isSkillAIReview || (
+          options.onBeforeCodexWritableRequest === undefined
+          && (
+            thread === undefined
+            || options.beforeRunSpawn === undefined
+          )
         )
           ? undefined
           : async () => {
@@ -1512,11 +1727,12 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             };
       return startCodexExec({
         codexBin: options.codexBin,
-        codexHome: options.codexHome,
+        codexHome: reviewRuntime?.path ?? options.codexHome,
         cwd: executionRunInput.cwd,
         args: codexArgs!,
         prompt: resolveCodexExecutionPrompt(executionRunInput),
-        env: mergeCodexEnvironment(options.env, agentToolInjection?.env),
+        env: isSkillAIReview ? reviewRuntime!.env : mergeCodexEnvironment(options.env, agentToolInjection?.env),
+        isolatedEnvironment: isSkillAIReview,
         timeoutMs: runTimeouts.timeoutMs,
         spawnTimeoutMs: runTimeouts.spawnTimeoutMs,
         inactivityTimeoutMs: runTimeouts.inactivityTimeoutMs,
@@ -1593,6 +1809,8 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           ? 'succeeded'
           : 'failed';
       const terminationReason = streamError ? 'stream_error' : resultToTerminationReason(result);
+      if (publicStatus === 'failed') emitIncident({ event_type: 'error', layer: 'daemon_codex', stage: 'execution', error_code: errorCodeForTermination(terminationReason), run_id: id,
+        ...(result.exitCode === null ? {} : { exit_code: result.exitCode }), ...(result.signal ? { exit_signal: result.signal } : {}) });
       const errorCode = missingCodexThreadId
         ? 'CODEX_THREAD_ID_MISSING'
         : resumeFailureCode
@@ -1608,6 +1826,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
             : errorCode === 'THREAD_CODEX_ROTATION_FAILED'
               ? 'Codex thread rotation failed'
               : undefined;
+      if (publicStatus === 'failed') {
+        recordRuntimeError(new Error(errorMessage ?? 'Codex stream failed'), errorCodeForTermination(terminationReason));
+      }
       const diagnostics = {
         ...buildThreadRunDiagnosticsMetadata({
           runInput,
@@ -1620,6 +1841,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           terminationReason
         }),
         ...rotationDiagnostics(),
+        ...runtimeErrorDiagnostics(),
         exitCode: result.exitCode,
         signal: result.signal,
         terminationReason,
@@ -1664,7 +1886,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     }
 
     async function handleExecError(error: unknown): Promise<CreatedRun> {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = redactText(error instanceof Error ? error.message : String(error));
       const bindingConflict = isThreadCodexIdConflict(error);
       const shutdownTimeoutAfterCompletedTurn = isShutdownTimeoutAfterCompletedTurn({
         error,
@@ -1719,6 +1941,9 @@ export function createRunManager(options: RunManagerOptions): RunManager {
 
       const missingCodexThreadId = runInput.threadId !== undefined && sawTurnCompleted && !sawCodexThreadId;
       const terminationReason = missingCodexThreadId ? 'stream_error' : errorToTerminationReason(error);
+      if (terminationReason !== 'user_canceled') recordRuntimeError(error, errorCodeForTermination(terminationReason));
+      if (terminationReason !== 'user_canceled') emitIncident({ event_type: 'error', layer: 'daemon_codex',
+        ...appServerFailureFacts(error), error_code: errorCodeForTermination(terminationReason), run_id: id, thread_id: runInput.threadId });
       const publicStatus: 'failed' | 'canceled' =
         terminationReason === 'user_canceled' ? 'canceled' : 'failed';
       const injectionErrorCode = runtimeInjectionErrorCode(error);
@@ -1747,6 +1972,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
           terminationReason
         }),
         ...rotationDiagnostics(),
+        ...runtimeErrorDiagnostics(),
         error: finalErrorMessage,
         errorMessage: finalErrorMessage,
         terminationReason,
@@ -1791,11 +2017,13 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     updateStatus(id, 'running', 'running', { startedAt: new Date().toISOString() });
     const done = prepareRunInjection()
       .then(() => {
+        if (isSkillAIReview && cancelRequested) throw new Error('Skill AI review canceled before spawn');
         currentProcess = startExecAttempt();
         if (cancelRequested) currentProcess.cancel();
         return currentProcess.result;
       })
-      .then(handleExecResult, handleExecError);
+      .then(handleExecResult, handleExecError)
+      .finally(() => reviewRuntime?.cleanup());
 
     activeRuns.set(id, {
       cancel() {
@@ -1857,6 +2085,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     codexThreadId?: string
   ): string {
     const id = `run_${nanoid(10)}`;
+    if (input.executionPolicy === 'skill-ai-review') skillAIReviewRunIds.add(id);
     const runDir = join(options.dataDir, 'runs', id);
     const canonicalCwd = resolve(input.cwd);
     const args = buildRuntimeArgv(
@@ -1871,33 +2100,48 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     writeFileSync(join(runDir, 'events.ndjson'), '');
     writeFileSync(join(runDir, 'stderr.redacted.log'), '');
     getLogWriter(id);
-    runs.insertRun({
-      id,
-      publicStatus: 'queued',
-      internalStatus: 'created',
-      createdBy: input.createdBy ?? 'api',
-      sourceId: input.sourceId,
-      publicPrompt: input.publicPrompt ?? null,
-      triggeredAt: input.createdBy === 'schedule' ? input.triggeredAt : null,
-      timeoutMs: input.timeoutMs ?? null,
-      threadId: input.threadId,
-      codexThreadId: resolvedResumeMode === 'resume_thread' ? codexThreadId : undefined,
-      profile: input.profile,
-      cwd: input.cwd,
-      canonicalCwd,
-      workspaceMode: 'managed',
-      model: input.model,
-      reasoning: input.reasoning,
-      sandbox: input.sandbox,
-      codexVersion: 'unknown',
-      codexBin: options.codexBin,
-      codexHome: options.codexHome,
-      resumeMode: resolvedResumeMode,
-      submissionMode: input.submissionMode ?? 'enqueue',
-      normalizerVersion
-    });
+    const review = input.skillReview;
+    const displayThreadId = review === undefined ? input.threadId : `thread_review_${nanoid(10)}`;
+    options.db.transaction(() => {
+      if (review !== undefined) {
+        threads.insertThread({
+          id: displayThreadId!,
+          title: redactText(`AI 审核 · 只读 · ${review.skillName} · ${review.version ? `v${review.version}` : review.versionId} · ${review.attemptNumber ? `第 ${review.attemptNumber} 次` : review.attemptId}`),
+          cwd: input.cwd, canonicalCwd, workspaceMode: 'managed', profile: '', sandbox: 'read-only',
+          status: 'active', purpose: 'skill_review', skillReviewJSON: JSON.stringify(review)
+        });
+      }
+      runs.insertRun({
+        id,
+        publicStatus: 'queued',
+        internalStatus: 'created',
+        createdBy: input.createdBy ?? 'api',
+        sourceId: input.sourceId,
+        initiatorUserId: input.initiatorUserId,
+        initiatorAgentId: input.initiatorAgentId,
+        publicPrompt: review === undefined ? input.publicPrompt ?? null
+          : `审核 Skill：${review.skillName}\n版本：${review.version ?? review.versionId}\n审核尝试：${review.attemptId}\n审核规则：${review.reviewSkillVersion}`,
+        triggeredAt: input.createdBy === 'schedule' ? input.triggeredAt : null,
+        timeoutMs: input.timeoutMs ?? null,
+        threadId: displayThreadId,
+        codexThreadId: resolvedResumeMode === 'resume_thread' ? codexThreadId : undefined,
+        profile: input.profile,
+        cwd: input.cwd,
+        canonicalCwd,
+        workspaceMode: 'managed',
+        model: input.model,
+        reasoning: input.reasoning,
+        sandbox: input.sandbox,
+        codexVersion: 'unknown',
+        codexBin: options.codexBin,
+        codexHome: options.codexHome,
+        resumeMode: resolvedResumeMode,
+        submissionMode: input.submissionMode ?? 'enqueue',
+        normalizerVersion
+      });
+    })();
     try {
-      options.activityReporter?.registerRun({
+      if (input.executionPolicy !== 'skill-ai-review') options.activityReporter?.registerRun({
         runId: id,
         ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
         prompt: input.createdBy === 'schedule'
@@ -1907,7 +2151,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
         workspaceName: basename(canonicalCwd),
         createdAt: normalizeDatabaseTimestamp(runs.getRun(id)!.created_at)
       });
-      if (options.activityReporter?.isActive()) {
+      if (input.executionPolicy !== 'skill-ai-review' && options.activityReporter?.isActive()) {
         const ready = (async () => {
           try {
             const tracker = await withTimeout(
@@ -1945,7 +2189,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       cwd: input.cwd,
       profile: input.profile,
       sandbox: input.sandbox,
-      threadId: input.threadId,
+      threadId: displayThreadId,
       resumeMode: resolvedResumeMode,
       submissionMode: input.submissionMode ?? 'enqueue',
       attachmentIds: input.attachmentIds ?? [],
@@ -1956,6 +2200,23 @@ export function createRunManager(options: RunManagerOptions): RunManager {
   }
 
   function resolveCreateRunInput(input: CreateRunInput): ResolvedCreateRunInput {
+    if (input.executionPolicy === 'skill-ai-review') {
+      if (input.threadId !== undefined || input.codexThreadId !== undefined || input.resumeMode !== undefined
+        || input.executionPrompt !== undefined || (input.contextItems?.length ?? 0) > 0
+        || (input.imagePaths?.length ?? 0) > 0 || (input.attachmentIds?.length ?? 0) > 0) {
+        throw new Error('Skill AI 审核必须为独立材料运行');
+      }
+      return {
+        executionPolicy: 'skill-ai-review',
+        skillReview: input.skillReview,
+        prompt: input.prompt,
+        cwd: mkdtempSync(join(tmpdir(), 'clawee-skill-ai-review-')),
+        profile: '',
+        sandbox: 'read-only',
+        timeoutMs: Math.min(input.timeoutMs ?? SKILL_AI_REVIEW_TIMEOUT_MS, SKILL_AI_REVIEW_TIMEOUT_MS)
+      };
+    }
+    if (input.skillReview !== undefined) throw new Error('审核会话仅允许内部审核任务创建');
     const normalizedInput: CreateRunInput = input.createdBy === 'schedule'
       ? {
           ...input,
@@ -1975,6 +2236,7 @@ export function createRunManager(options: RunManagerOptions): RunManager {
       const thread = options.threadAccess.assertRunnableThread?.(normalizedInput.threadId)
         ?? options.threadAccess.getThread(normalizedInput.threadId);
       if (thread === undefined) throw new Error(`Thread not found: ${normalizedInput.threadId}`);
+      if (thread.purpose === 'skill_review') throw new Error('AI 审核会话只读');
       if (thread.status === 'archived') throw new Error(`Thread is archived: ${normalizedInput.threadId}`);
       return {
         ...normalizedInput,
@@ -2037,15 +2299,32 @@ export function createRunManager(options: RunManagerOptions): RunManager {
     return undefined;
   }
 
+  function activeThreadQueueReason(threadId: string): RunQueueReason | undefined {
+    const activeRunId = runningThreadRun.get(threadId);
+    if (activeRunId === undefined) return undefined;
+    return runs.getRun(activeRunId)?.internal_status === 'finalizing'
+      ? 'thread_finalizing'
+      : 'thread_active';
+  }
+
   function decorateQueuePosition(run: RuntimeRun): RuntimeRun {
     if (run.status !== 'queued' || run.threadId === undefined) return run;
     const persistentIndex = persistentRunQueue.findIndex(item => item.id === run.id);
     if (persistentIndex !== -1) {
-      return { ...run, queuePosition: persistentIndex + 1 };
+      return {
+        ...run,
+        queuePosition: persistentIndex + 1,
+        queueReason: activeThreadQueueReason(run.threadId)
+          ?? (persistentRunQueue.slice(0, persistentIndex).some(item => item.input.threadId === run.threadId)
+            ? 'thread_active' : 'capacity')
+      };
     }
     const queue = threadQueues.get(run.threadId) ?? [];
     const index = queue.findIndex(item => item.id === run.id);
-    return index === -1 ? run : { ...run, queuePosition: index + 1 };
+    return index === -1 ? run : {
+      ...run, queuePosition: index + 1,
+      queueReason: activeThreadQueueReason(run.threadId) ?? 'thread_active'
+    };
   }
 
   function writeQueuedCancelDiagnostics(
@@ -2652,6 +2931,7 @@ function resolveResumeMode(
 function resolveCodexExecutionPrompt(
   input: ResolvedCreateRunInput
 ): string {
+  if (input.executionPolicy === 'skill-ai-review') return input.prompt;
   return buildEnterpriseKnowledgeExecutionPrompt({
     publicPrompt: input.publicPrompt ?? input.prompt,
     executionPrompt: input.executionPrompt ?? input.prompt
@@ -2755,6 +3035,7 @@ function resolveRunTimeouts(
 
 function mapRunRow(row: RunRow): RuntimeRun {
   return {
+    sharedDriveState: parseSharedDriveState(row.shared_drive_state_json),
     id: row.id,
     ...(row.thread_id === null ? {} : { threadId: row.thread_id }),
     ...(row.codex_thread_id === null ? {} : { codexThreadId: row.codex_thread_id }),

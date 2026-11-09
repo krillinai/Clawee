@@ -35,7 +35,7 @@ describe('Desktop deep links', () => {
     const packageJson = JSON.parse(
       readFileSync('package.json', 'utf8')
     ) as { scripts: Record<string, string> };
-    const mainSource = readFileSync('src/main/main.ts', 'utf8');
+    const mainSource = readFileSync('src/main/desktop-main.ts', 'utf8');
     const developmentScript = readFileSync('scripts/dev.mjs', 'utf8');
 
     expect(packageJson.scripts['build:main']).toContain(

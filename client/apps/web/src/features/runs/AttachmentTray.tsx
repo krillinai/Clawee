@@ -1,6 +1,7 @@
-import { FileText, LoaderCircle, RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { FileText, Folder, LoaderCircle, RotateCcw, X } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import { isImageAttachmentMime } from '../../services/attachment-types.js';
 
 export type AttachmentTrayItem = {
@@ -11,6 +12,7 @@ export type AttachmentTrayItem = {
   status: 'uploading' | 'ready' | 'error';
   error?: string;
   retryable?: boolean;
+  directoryPath?: string;
 };
 
 export function AttachmentTray(props: {
@@ -21,6 +23,7 @@ export function AttachmentTray(props: {
   const [previewLocalId, setPreviewLocalId] = useState<string>();
   const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement>(null);
+  const previewDialogRef = useRef<HTMLElement>(null);
   const previewItem = props.items.find(item => (
     item.localId === previewLocalId && isImageAttachmentMime(item.mime)
   ));
@@ -30,23 +33,12 @@ export function AttachmentTray(props: {
     window.setTimeout(() => trigger?.focus(), 0);
   }, []);
 
-  useEffect(() => {
-    if (previewItem === undefined) return;
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closePreview();
-      } else if (event.key === 'Tab') {
-        event.preventDefault();
-        previewCloseRef.current?.focus();
-      }
-    };
-
-    previewCloseRef.current?.focus();
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closePreview, previewItem?.localId]);
+  useModalBehavior(previewDialogRef, {
+    open: previewItem !== undefined,
+    onClose: closePreview,
+    initialFocusRef: previewCloseRef
+  });
 
   if (props.items.length === 0) return null;
 
@@ -58,7 +50,7 @@ export function AttachmentTray(props: {
           return (
             <div
               key={item.localId}
-              className={`composer-attachment composer-attachment-${item.status}${isImage ? '' : ' composer-attachment-non-image'}`}
+              className={`composer-attachment composer-attachment-${item.status}${isImage ? '' : ' composer-attachment-non-image'}${item.directoryPath === undefined ? '' : ' composer-attachment-directory'}`}
             >
               {isImage ? (
                 <button
@@ -74,8 +66,10 @@ export function AttachmentTray(props: {
                   <img src={item.previewUrl} alt={item.fileName} />
                 </button>
               ) : (
-                <div className="composer-attachment-file" title={item.fileName}>
-                  <FileText aria-hidden="true" size={16} />
+                <div className="composer-attachment-file" title={item.directoryPath ?? item.fileName}>
+                  {item.directoryPath === undefined
+                    ? <FileText aria-hidden="true" size={16} />
+                    : <Folder aria-hidden="true" size={16} />}
                   <span>{item.fileName}</span>
                 </div>
               )}
@@ -111,8 +105,8 @@ export function AttachmentTray(props: {
                 ) : null}
                 <button
                   type="button"
-                  aria-label={`移除附件 ${item.fileName}`}
-                  title="移除附件"
+                  aria-label={`移除${item.directoryPath === undefined ? '附件' : '文件夹'} ${item.fileName}`}
+                  title={item.directoryPath === undefined ? '移除附件' : '移除文件夹'}
                   onClick={() => props.onRemove(item.localId)}
                 >
                   <X aria-hidden="true" size={13} />
@@ -130,6 +124,7 @@ export function AttachmentTray(props: {
           }}
         >
           <section
+            ref={previewDialogRef}
             className="attachment-image-preview"
             role="dialog"
             aria-modal="true"

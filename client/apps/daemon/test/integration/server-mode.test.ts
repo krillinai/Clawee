@@ -116,7 +116,8 @@ describe('Server Mode', () => {
       expect((await mcpClient.listTools()).tools.map(tool => tool.name)).toEqual([
         'clawee_submit_task',
         'clawee_get_task',
-        'clawee_get_task_result'
+        'clawee_get_task_result',
+        'clawee_get_agent_health'
       ]);
       expect(responseHeaders.length).toBeGreaterThan(0);
       for (const headers of responseHeaders) {
@@ -128,7 +129,10 @@ describe('Server Mode', () => {
     }
   });
 
-  it('submits and recovers a task through the real HTTP task service', async () => {
+  it.each([
+    { userId: 'user_1', agentId: 'agent_1' },
+    { userId: undefined, agentId: undefined }
+  ])('真实 HTTP 任务保存可选来源，重启后不限制其他账户查询：%j', async caller => {
     tempDir = mkdtempSync(join(tmpdir(), 'clawee-server-mode-'));
     const fake = createFakeCodex(tempDir, {
       stdoutLines: [
@@ -142,14 +146,15 @@ describe('Server Mode', () => {
       ],
       lineDelayMs: 100
     });
-    server = await buildServer({
+    const serverOptions = {
       token: 'fixed-token',
       dataDir: join(tempDir, 'data'),
       defaultProjectRoot: join(tempDir, 'projects'),
       codexBin: fake.bin,
       codexHome: join(tempDir, 'codex-home'),
       taskMcpEnabled: true
-    });
+    };
+    server = await buildServer(serverOptions);
     const address = await server.listen({ host: '127.0.0.1', port: 0 });
     const defaultProjectResponse = await fetch(new URL('/projects/default', address), {
       method: 'POST',
@@ -161,10 +166,15 @@ describe('Server Mode', () => {
     };
     const transport = new StreamableHTTPClientTransport(new URL('/mcp', address), {
       requestInit: {
-        headers: { Authorization: 'Bearer fixed-token' }
+        headers: {
+          Authorization: 'Bearer fixed-token',
+          ...(caller.userId === undefined ? {} : { 'X-Claw-User-ID': caller.userId }),
+          ...(caller.agentId === undefined ? {} : { 'X-Claw-Agent-ID': caller.agentId })
+        }
       }
     });
     const mcpClient = new Client({ name: 'server-mode-task-test', version: '1.0.0' });
+    let taskId = '';
     try {
       await mcpClient.connect(transport);
       const submitted = await mcpClient.callTool({
@@ -184,6 +194,7 @@ describe('Server Mode', () => {
       if (result === undefined) {
         throw new Error(`Unexpected submit result: ${JSON.stringify(submitted)}`);
       }
+      taskId = result.task_id;
 
       expect(result).toMatchObject({
         task_id: expect.stringMatching(/^run_/),
@@ -222,6 +233,35 @@ describe('Server Mode', () => {
       });
     } finally {
       await mcpClient.close();
+    }
+
+    await server.close();
+    server = await buildServer(serverOptions);
+    const restartedAddress = await server.listen({ host: '127.0.0.1', port: 0 });
+    const tasks = await server.inject({
+      method: 'GET', url: '/tasks',
+      headers: { authorization: 'Bearer fixed-token', 'x-claw-user-id': 'user_other' }
+    });
+    const saved = tasks.json().tasks.find((task: { id: string }) => task.id === taskId);
+    expect(saved).toBeDefined();
+    expect(saved.initiatorUserId).toBe(caller.userId);
+    expect(saved.initiatorAgentId).toBe(caller.agentId);
+
+    const otherClient = new Client({ name: 'other-user-test', version: '1.0.0' });
+    try {
+      await otherClient.connect(new StreamableHTTPClientTransport(new URL('/mcp', restartedAddress), {
+        requestInit: { headers: {
+          Authorization: 'Bearer fixed-token',
+          'X-Claw-User-ID': 'user_other', 'X-Claw-Agent-ID': 'agent_other'
+        } }
+      }));
+      for (const name of ['clawee_get_task', 'clawee_get_task_result']) {
+        const queried = await otherClient.callTool({ name, arguments: { task_id: taskId } });
+        expect(queried.isError).not.toBe(true);
+        expect(queried.structuredContent).toMatchObject({ task_id: taskId, status: 'succeeded' });
+      }
+    } finally {
+      await otherClient.close();
     }
   });
 });

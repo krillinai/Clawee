@@ -2,7 +2,7 @@ import type { CodexAppServerRequestClient } from './app-server-client.js';
 
 export type DeferredCodexAppServerClient =
   CodexAppServerRequestClient & {
-    activate(client: CodexAppServerRequestClient): void;
+    activate(client: CodexAppServerRequestClient): Promise<void>;
     deactivate(): Promise<void>;
     ready(): boolean;
   };
@@ -13,16 +13,14 @@ DeferredCodexAppServerClient {
   let closed = false;
 
   return {
-    activate(client) {
+    async activate(client) {
       if (closed) {
-        void client.close();
+        await client.close();
         throw new Error('Deferred Codex app-server client is closed');
       }
-      if (active !== undefined) {
-        void client.close();
-        throw new Error('Deferred Codex app-server client is already active');
-      }
+      const previous = active;
       active = client;
+      await previous?.close();
     },
     ready() {
       return active !== undefined;

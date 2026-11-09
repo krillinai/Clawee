@@ -87,6 +87,6 @@ describe("ThemeSwitcher", () => {
     );
 
     expect(screen.getByRole("radiogroup", { name: "界面主题" })).toHaveClass("gap-0.5");
-    expect(screen.getByRole("radio", { name: "浅色主题" })).toHaveClass("h-6", "min-w-6");
+    expect(screen.getByRole("radio", { name: "浅色主题" })).toHaveClass("h-7", "min-w-7");
   });
 });

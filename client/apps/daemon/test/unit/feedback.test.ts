@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import type { ReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,6 +15,47 @@ async function fixture() {
   db.prepare(`INSERT INTO threads(id,cwd,canonical_cwd,workspace_mode,profile,sandbox,status) VALUES('thread_test','/test','/test','project','test','read-only','active')`).run();
   cleanup.push(async () => { db.close(); await rm(dir, { recursive: true, force: true }); }); return { dir, db };
 }
+it('反馈策略按后台隔离，无目标或新后台不可达时不回退维护中心', async () => {
+  const { dir, db } = await fixture(); let origin: string | undefined = 'https://first.test'; let available = true;
+  const requests: string[] = [];
+  const service = new FeedbackService({ db, dataDir: dir, origin: () => origin, environment: () => ({}), fetchImpl: async url => {
+    requests.push(String(url)); if (!available) throw new Error('offline');
+    return Response.json({ data: { enabled: true, policy_version: 1, expires_at: new Date(Date.now() + 60000).toISOString() } });
+  } }); cleanup.unshift(async () => service.close());
+  expect(await service.allowed()).toBe(true);
+  origin = 'https://second.test'; available = false;
+  expect(await service.allowed()).toBe(false);
+  expect(requests).toEqual(['https://first.test/api/v1/feedback/policy', 'https://second.test/api/v1/feedback/policy']);
+  origin = undefined; expect(await service.allowed()).toBe(false); expect(requests).toHaveLength(2);
+});
+it('上传期间切换后台中止旧链路，旧草稿不可改投新后台', async () => {
+  const { dir, db } = await fixture(); let origin = 'https://first.test'; const requests: string[] = [];
+  const service = new FeedbackService({ db, dataDir: dir, origin: () => origin, environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async url => {
+    requests.push(String(url)); origin = 'https://second.test';
+    return Response.json({ data: { report_id: 'fb_first0001', upload_token: 'first-only', received_artifact_ids: [], upload_state: 'uploading' } });
+  } }); cleanup.unshift(async () => service.close());
+  const draft = await service.create({ thread_id: 'thread_test', description: '目标隔离', occurred_at: new Date().toISOString() });
+  await service.collect(draft.local_feedback_id);
+  await expect.poll(async () => (await service.get(draft.local_feedback_id)).state).toBe('awaiting_consent');
+  const ready = await service.get(draft.local_feedback_id);
+  await service.send(draft.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true });
+  await (service as unknown as { work(): Promise<void> }).work();
+  expect(requests).toEqual(['https://first.test/api/v1/feedback/reports']);
+  expect(await service.get(draft.local_feedback_id)).toMatchObject({ origin: 'https://first.test', state: 'failed', error_code: 'FEEDBACK_TARGET_CHANGED', external_feedback_allowed: false });
+  await expect(service.retry(draft.local_feedback_id)).rejects.toThrow('FEEDBACK_TARGET_CHANGED');
+});
+it('旧维护中心草稿缺少目标绑定版本时只能本地查看，不能续传', async () => {
+  const { dir, db } = await fixture(); let requests = 0;
+  const service = new FeedbackService({ db, dataDir: dir, origin: () => 'https://customer.test', environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must_not_send'); } });
+  cleanup.unshift(async () => service.close());
+  const draft = await service.create({ thread_id: 'thread_test', description: '旧反馈', occurred_at: new Date().toISOString() });
+  const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+  const stored = JSON.parse(row.draft_json); delete stored.routing_version; stored.state = 'queued';
+  db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+  await (service as unknown as { work(): Promise<void> }).work();
+  expect(requests).toBe(0);
+  expect(await service.get(draft.local_feedback_id)).toMatchObject({ state: 'failed', error_code: 'FEEDBACK_TARGET_CHANGED' });
+});
 describe('会话反馈', () => {
   function addRun(db: ReturnType<typeof openRuntimeDatabase>, id: string, prompt = '用户输入') {
     db.prepare(`INSERT INTO runs(id,thread_id,public_prompt,public_status,internal_status,created_by,profile,cwd,canonical_cwd,workspace_mode,sandbox,codex_version,codex_bin,codex_home,normalizer_version) VALUES(?,'thread_test',?,'failed','failed','user','test','/test','/test','project','read-only','test','test','/runtime',1)`).run(id, prompt);
@@ -23,7 +65,7 @@ describe('会话反馈', () => {
     const { dir, db } = await fixture();
     for (let i = 0; i < 260; i++) addRun(db, `run_quota_${i}`);
     let requests = 0;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must not send'); } });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must not send'); } });
     cleanup.unshift(async () => service.close());
     const draft = await service.create({ thread_id: 'thread_test', description: '超限', occurred_at: new Date().toISOString() });
     await service.collect(draft.local_feedback_id);
@@ -62,7 +104,7 @@ describe('会话反馈', () => {
   });
   it('本地进度和同轮上传复用策略，每轮重新检查禁用', async () => {
     const { dir, db } = await fixture(); let checks = 0; let allowed = true;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async (refresh: boolean) => { if (refresh) checks++; return { allowed }; } });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async (refresh: boolean) => { if (refresh) checks++; return { allowed }; } });
     cleanup.unshift(async () => service.close());
     const draft = await service.create({ thread_id: 'thread_test', description: '策略', occurred_at: new Date().toISOString() });
     const before = checks; await service.get(draft.local_feedback_id); await service.get(draft.local_feedback_id); expect(checks).toBe(before);
@@ -74,7 +116,7 @@ describe('会话反馈', () => {
     const { dir, db } = await fixture(); let allowed = true; let checks = 0; let puts = 0; let submits = 0;
     const received: string[] = [];
     const progress = () => ({ report_id: 'fb_test0001', received_artifact_ids: received, upload_token: 'feedback-only-upload', upload_expires_at: new Date(Date.now() + 60000).toISOString(), recovery_expires_at: new Date(Date.now() + 86400000).toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), upload_state: 'uploading' });
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async (refresh: boolean) => { if (refresh) checks++; return { allowed }; }, fetchImpl: async (url, input) => {
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async (refresh: boolean) => { if (refresh) checks++; return { allowed }; }, fetchImpl: async (url, input) => {
       const path = new URL(String(url)).pathname;
       if (input?.method === 'PUT') { puts++; received.push(path.split('/').at(-1)!); if (puts === 1) allowed = false; return Response.json({ data: { received: true } }); }
       if (path.endsWith('/submit')) { submits++; return Response.json({ data: progress() }); }
@@ -102,7 +144,7 @@ describe('会话反馈', () => {
     const { dir, db } = await fixture(); let first = true; let submitted = false; let creationBody: string | undefined; let creations = 0; let submits = 0; let recoveries = 0; const received = new Set<string>();
     const progress = () => ({ report_id: 'fb_test0001', received_artifact_ids: [...received], upload_token: 'feedback-only-upload', upload_expires_at: new Date(Date.now() + 60000).toISOString(), recovery_expires_at: new Date(Date.now() + 86400000).toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), upload_state: submitted ? 'ready' : 'uploading' });
     const fetchImpl: typeof fetch = async (url, input) => {
-      expect(String(url)).toMatch(/^https:\/\/gateway\.clawee\.work\/api\/v1\/feedback\//); expect(input?.credentials).toBe('omit'); expect(input?.redirect).toBe('error');
+      expect(String(url)).toMatch(/^https:\/\/gateway\.test\/api\/v1\/feedback\//); expect(input?.credentials).toBe('omit'); expect(input?.redirect).toBe('error');
       const path = new URL(String(url)).pathname;
       if (path.endsWith('/status')) return Response.json({ data: { processing_status: 'open' } });
       if (path.endsWith('/reports')) { creations++; if (creationBody) expect(input?.body).toBe(creationBody); else creationBody = String(input?.body); if (mode === 'create_lost' && first) { first = false; throw new Error('response lost'); } return Response.json({ data: progress() }); }
@@ -111,17 +153,17 @@ describe('会话反馈', () => {
       if (path.endsWith('/submit')) { submits++; if (mode === 'submit_expired' && first) { first = false; return new Response('', { status: 401 }); } submitted = true; if (mode === 'submit_lost' && first) { first = false; throw new Error('response lost'); } return Response.json({ data: progress() }); }
       throw new Error('unexpected request');
     };
-    const options = { db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }), fetchImpl };
+    const options = { db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }), fetchImpl };
     let service = new FeedbackService(options); cleanup.unshift(async () => service.close());
     const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.collect(d.local_feedback_id); await expect.poll(async () => (await service.get(d.local_feedback_id)).state).toBe('awaiting_consent');
     const ready = await service.get(d.local_feedback_id); await service.send(d.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true });
-    await (service as unknown as { work(): Promise<void> }).work(); service.close();
+    await (service as unknown as { work(): Promise<void> }).work(); await service.close();
     if (mode !== 'submit_expired') {
       const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string }; const stored = JSON.parse(row.draft_json); stored.next_retry_at = undefined; db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
       service = new FeedbackService(options); await (service as unknown as { work(): Promise<void> }).work();
     }
     expect((await service.get(d.local_feedback_id)).state).toBe('submitted'); expect(received.size).toBe(ready.manifest!.artifacts.length); expect(creations).toBe(mode === 'create_lost' ? 2 : 1); expect(submits).toBe(mode === 'submit_expired' ? 2 : 1); if (mode !== 'create_lost') expect(recoveries).toBe(1);
-    service.close(); service = new FeedbackService(options);
+    await service.close(); service = new FeedbackService(options);
     const saved = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
     const stored = JSON.parse(saved.draft_json);
     expect(Date.parse(stored.materials_expires_at) - Date.now()).toBeGreaterThan(23 * 3600000);
@@ -135,14 +177,14 @@ describe('会话反馈', () => {
   });
   it('策略检查等待期间取消，不发送旧队列副本', async () => {
     const { dir, db } = await fixture(); let block = false; let release!: () => void; let started!: () => void; const pending = new Promise<void>(resolve => { release = resolve; }); const checking = new Promise<void>(resolve => { started = resolve; }); let requests = 0;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => { if (block) { started(); await pending; } return { allowed: true }; }, fetchImpl: async () => { requests++; throw new Error('must not send'); } }); cleanup.unshift(async () => service.close());
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async () => { if (block) { started(); await pending; } return { allowed: true }; }, fetchImpl: async () => { requests++; throw new Error('must not send'); } }); cleanup.unshift(async () => service.close());
     const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.collect(d.local_feedback_id); await expect.poll(async () => (await service.get(d.local_feedback_id)).state).toBe('awaiting_consent'); const ready = await service.get(d.local_feedback_id); await service.send(d.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true }); block = true;
     const work = (service as unknown as { work(): Promise<void> }).work(); await checking; await service.cancel(d.local_feedback_id); release(); await work; expect(requests).toBe(0); expect((await service.get(d.local_feedback_id)).state).toBe('cancelled');
   });
   it('保留 prompt 正文，遮盖秘密和路径', () => { expect(redactFeedback({ prompt: '正文 sk-testsecretvalue', api_key: 'private', path: '/test/a.ts' }, ['/test'])).toEqual({ prompt: '正文 [REDACTED]', api_key: '[REDACTED]', path: '[PATH_1]/a.ts' }); expect(redactFeedback('"token": "private_value"')).toBe('"token": "[REDACTED]"'); });
   it('草稿和采集不联网，禁用策略拒绝采集发送', async () => {
     const { dir, db } = await fixture(); let network = 0; let allowed = true;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: '1.0.0' }), policy: async () => ({ allowed }), fetchImpl: async () => { network++; throw new Error('offline'); } });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: '1.0.0' }), policy: async () => ({ allowed }), fetchImpl: async () => { network++; throw new Error('offline'); } });
     cleanup.unshift(async () => service.close());
     const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() });
     await service.collect(d.local_feedback_id);
@@ -159,7 +201,7 @@ describe('会话反馈', () => {
   });
   it('旧版完整草稿不能发送或自动续传', async () => {
     const { dir, db } = await fixture(); let requests = 0;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must not send'); } });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async () => { requests++; throw new Error('must not send'); } });
     cleanup.unshift(async () => service.close());
     const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() });
     await service.collect(d.local_feedback_id);
@@ -176,7 +218,7 @@ describe('会话反馈', () => {
   });
   it('远端状态查询等待时，本地成功回执仍立即可读', async () => {
     const { dir, db } = await fixture(); let querying = false;
-    const service = new FeedbackService({ db, dataDir: dir, environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async (_url, input) => {
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async (_url, input) => {
       querying = true;
       return new Promise((_resolve, reject) => input?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
     } });
@@ -189,5 +231,72 @@ describe('会话反馈', () => {
     await expect.poll(() => querying).toBe(true);
     expect((await service.get(draft.local_feedback_id)).state).toBe('submitted');
   });
-  it('取消阻止队列继续发送且允许本地回执读取', async () => { const { dir, db } = await fixture(); const service = new FeedbackService({ db, dataDir: dir, environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }) }); cleanup.unshift(async () => service.close()); const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.cancel(d.local_feedback_id); expect((await service.get(d.local_feedback_id)).state).toBe('cancelled'); await expect(service.collect(d.local_feedback_id)).rejects.toThrow('FEEDBACK_SNAPSHOT_FROZEN'); });
+  it('关闭等待已取消的后台状态查询结束', async () => {
+    const { dir, db } = await fixture();
+    let started!: () => void; let release!: () => void;
+    const querying = new Promise<void>(resolve => { started = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async (_url, input) => {
+      started();
+      return new Promise((_resolve, reject) => input?.signal?.addEventListener('abort', () => { void pending.then(() => reject(new Error('aborted'))); }, { once: true }));
+    } });
+    cleanup.unshift(async () => { release(); await service.close(); });
+    const draft = await service.create({ thread_id: 'thread_test', description: '关闭状态查询', occurred_at: new Date().toISOString() });
+    const row = db.prepare('SELECT draft_json FROM feedback_queue').get() as { draft_json: string };
+    const stored = JSON.parse(row.draft_json); stored.state = 'submitted'; stored.report_id = 'fb_test0001';
+    db.prepare('UPDATE feedback_queue SET draft_json=?').run(JSON.stringify(stored));
+    await service.get(draft.local_feedback_id); await querying;
+    let closed = false;
+    const closing = Promise.resolve(service.close()).then(() => { closed = true; });
+    try { await Promise.resolve(); expect(closed).toBe(false); }
+    finally { release(); await closing; }
+    expect(closed).toBe(true);
+  });
+  it('关闭等待上传前的策略写入，随后可以立即清理目录', async () => {
+    const { dir, db } = await fixture();
+    let block = false; let started!: () => void; let release!: () => void; let requests = 0;
+    const checking = new Promise<void>(resolve => { started = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({}), policy: async () => {
+      if (block) { started(); await pending; }
+      return { allowed: true };
+    }, fetchImpl: async () => { requests++; throw new Error('must not send'); } });
+    cleanup.unshift(async () => { release(); await service.close(); });
+    const draft = await service.create({ thread_id: 'thread_test', description: '关闭策略检查', occurred_at: new Date().toISOString() });
+    await service.collect(draft.local_feedback_id);
+    await expect.poll(async () => (await service.get(draft.local_feedback_id)).state).toBe('awaiting_consent');
+    const ready = await service.get(draft.local_feedback_id);
+    await service.send(draft.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true });
+    block = true;
+    const work = (service as unknown as { work(): Promise<void> }).work(); await checking;
+    let closed = false;
+    const closing = Promise.resolve(service.close()).then(() => { closed = true; });
+    try { await Promise.resolve(); expect(closed).toBe(false); }
+    finally { release(); await work; await closing; }
+    expect(requests).toBe(0);
+    await rm(join(dir, 'feedback'), { recursive: true, force: true });
+  });
+  it('上传失败返回前关闭文件句柄，不与目录清理竞争', async () => {
+    const { dir, db } = await fixture();
+    let stream: ReadStream | undefined; let closed: Promise<void> | undefined;
+    const progress = { report_id: 'fb_test0001', received_artifact_ids: [], upload_token: 'feedback-only-upload', upload_expires_at: new Date(Date.now() + 60000).toISOString(), recovery_expires_at: new Date(Date.now() + 86400000).toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), upload_state: 'uploading' };
+    const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({}), policy: async () => ({ allowed: true }), fetchImpl: async (_url, input) => {
+      if (input?.method === 'PUT') {
+        stream = input.body as unknown as ReadStream;
+        closed = new Promise<void>(resolve => stream!.once('close', resolve));
+        throw new Error('upload failed');
+      }
+      return Response.json({ data: progress });
+    } });
+    cleanup.unshift(async () => { await service.close(); await closed; });
+    const draft = await service.create({ thread_id: 'thread_test', description: '上传句柄', occurred_at: new Date().toISOString() });
+    await service.collect(draft.local_feedback_id);
+    await expect.poll(async () => (await service.get(draft.local_feedback_id)).state).toBe('awaiting_consent');
+    const ready = await service.get(draft.local_feedback_id);
+    await service.send(draft.local_feedback_id, { confirmed: true, manifest_sha256: ready.manifest_sha256!, accept_partial: true });
+    await (service as unknown as { work(): Promise<void> }).work();
+    expect(stream).toBeDefined(); expect(stream!.closed).toBe(true);
+    expect(await service.get(draft.local_feedback_id)).toMatchObject({ state: 'queued', error_code: 'FEEDBACK_UPLOAD_FAILED' });
+  });
+  it('取消阻止队列继续发送且允许本地回执读取', async () => { const { dir, db } = await fixture(); const service = new FeedbackService({ db, dataDir: dir, origin: () => "https://gateway.test", environment: () => ({ app_version: 'test' }), policy: async () => ({ allowed: true }) }); cleanup.unshift(async () => service.close()); const d = await service.create({ thread_id: 'thread_test', description: '问题', occurred_at: new Date().toISOString() }); await service.cancel(d.local_feedback_id); expect((await service.get(d.local_feedback_id)).state).toBe('cancelled'); await expect(service.collect(d.local_feedback_id)).rejects.toThrow('FEEDBACK_SNAPSHOT_FROZEN'); });
 });

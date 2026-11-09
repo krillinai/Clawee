@@ -120,7 +120,7 @@ describe("OfficeAgentActivityPage", () => {
 
   it("safely truncates long current turn text in the activity table", async () => {
     const longTurnTitle =
-      "按照 http://192.168.3.167:1904/office/collectors/install?code=reg_07008336ffec32d1 指南重新安装；要求先删除旧的采集器。";
+      "按照 http://192.0.2.30:1904/office/collectors/install?code=reg_07008336ffec32d1 指南重新安装；要求先删除旧的采集器。";
 
     getOfficeSnapshotMock.mockResolvedValue({
       ...fixtureOffice,

@@ -352,7 +352,7 @@ export async function revealMyAccountToken() {
 }
 
 export async function rotateMyAccountToken() {
-		return mapTokenCopy(await appApi.post<AccountTokenSecretResponse>("/mcp/token/rotate", { scopes: ["mcp:call"] }));
+		return mapTokenCopy(await appApi.post<AccountTokenSecretResponse>("/mcp/token/rotate", {}));
 }
 
 export async function revokeMyAccountToken(): Promise<AccountTokenRevocation> {

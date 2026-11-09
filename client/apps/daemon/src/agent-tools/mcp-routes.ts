@@ -23,6 +23,11 @@ export async function registerAgentScheduleMcpRoute(
     getBaseUrl(): string | undefined;
   }
 ): Promise<void> {
+  fastify.get('/internal/agent-tools/capabilities', async (request, reply) => {
+    const auth = authorizeMcpRequest(request, reply, input.capabilities);
+    if (auth) return { tools: toolNamesForScopes(auth.grant.scopes) };
+  });
+
   fastify.post<{ Body: unknown }>(
     AGENT_SCHEDULE_MCP_ROUTE,
     async (request, reply) => {

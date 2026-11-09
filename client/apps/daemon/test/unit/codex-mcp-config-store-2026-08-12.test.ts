@@ -66,7 +66,7 @@ describe('Codex MCP config store', () => {
         'X-Claw-Agent-ID': 'agent_1'
       }
     });
-    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it('does not overwrite an existing MCP while renaming', async () => {
@@ -189,7 +189,7 @@ describe('Codex MCP config store', () => {
         local: { command: 'node' }
       }
     });
-    expect(statSync(configPath).mode & 0o777).toBe(0o640);
+    if (process.platform !== 'win32') expect(statSync(configPath).mode & 0o777).toBe(0o640);
   });
 
   it('persists a safe override for an MCP supplied by a Codex plugin', async () => {

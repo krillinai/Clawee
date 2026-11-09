@@ -45,6 +45,7 @@ type Service struct {
 
 type CreateAccountRequest struct {
 	Email    string
+	Phone    string
 	Name     string
 	Password string
 	Status   string
@@ -116,8 +117,9 @@ func NewService(cfg Config) *Service {
 
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (RegistrationResult, error) {
 	email := normalizeEmail(req.Email)
+	phone := NormalizePhone(req.Phone)
 	name := normalizeAccountName(req.Name)
-	if email == "" || name == "" {
+	if (email == "" && phone == "") || (req.Phone != "" && phone == "") || name == "" {
 		return RegistrationResult{}, ErrInvalidAccountRequest
 	}
 	if len(req.Password) < 8 {
@@ -138,6 +140,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (Registrati
 		account := Account{
 			UserID:       generateID("usr"),
 			Email:        email,
+			Phone:        phone,
 			Name:         name,
 			PasswordHash: passwordHash,
 			Status:       StatusActive,
@@ -161,10 +164,17 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (Registrati
 
 func (s *Service) AuthenticateCredentials(ctx context.Context, req LoginRequest) (Account, error) {
 	email := normalizeEmail(req.Email)
-	if email == "" {
+	phone := NormalizePhone(req.Phone)
+	if (email == "" && phone == "") || (email != "" && req.Phone != "") || (req.Phone != "" && phone == "") {
 		return Account{}, ErrInvalidCredentials
 	}
-	account, err := s.store.GetAccountByEmail(ctx, email)
+	var account Account
+	var err error
+	if phone != "" {
+		account, err = s.store.GetAccountByPhone(ctx, phone)
+	} else {
+		account, err = s.store.GetAccountByEmail(ctx, email)
+	}
 	if err != nil {
 		if errors.Is(err, ErrAccountNotFound) {
 			return Account{}, ErrInvalidCredentials
@@ -194,6 +204,9 @@ func (s *Service) ResolveExternalIdentity(ctx context.Context, identity AccountI
 		if err != nil {
 			return err
 		}
+		if existing.EnterpriseUserID != "" && identity.EnterpriseUserID != "" && existing.EnterpriseUserID != identity.EnterpriseUserID {
+			return ErrExternalAccountConflict
+		}
 		account, err = s.store.GetAccount(ctx, existing.UserID)
 		if err != nil {
 			return err
@@ -215,8 +228,9 @@ func (s *Service) ProvisionExternalAccount(ctx context.Context, identity Account
 func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, identity AccountIdentity, req ExternalAccountRequest, autoProvision, hasActiveAdmin bool) (Account, bool, error) {
 	identity = normalizeIdentity(identity)
 	email := normalizeEmail(req.Email)
+	phone := NormalizePhone(req.Phone)
 	name := normalizeAccountName(req.Name)
-	if !validIdentity(identity) {
+	if !validIdentity(identity) || (req.Phone != "" && phone == "") {
 		return Account{}, false, ErrInvalidAccountRequest
 	}
 	var account Account
@@ -224,6 +238,9 @@ func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, ident
 	err := s.store.WithExternalIdentityLock(ctx, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject, func(ctx context.Context) error {
 		existing, err := s.store.GetAccountIdentity(ctx, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject)
 		if err == nil {
+			if existing.EnterpriseUserID != "" && identity.EnterpriseUserID != "" && existing.EnterpriseUserID != identity.EnterpriseUserID {
+				return ErrExternalAccountConflict
+			}
 			account, err = s.store.GetAccount(ctx, existing.UserID)
 			if err != nil {
 				return err
@@ -237,13 +254,22 @@ func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, ident
 		if !errors.Is(err, ErrAccountIdentityNotFound) {
 			return err
 		}
-		if email == "" {
+		if email == "" && phone == "" {
 			return ErrInvalidAccountRequest
 		}
-		if _, err := s.store.GetAccountByEmail(ctx, email); err == nil {
-			return ErrExternalAccountConflict
-		} else if !errors.Is(err, ErrAccountNotFound) {
-			return err
+		if email != "" {
+			if _, err := s.store.GetAccountByEmail(ctx, email); err == nil {
+				return ErrExternalAccountConflict
+			} else if !errors.Is(err, ErrAccountNotFound) {
+				return err
+			}
+		}
+		if phone != "" {
+			if _, err := s.store.GetAccountByPhone(ctx, phone); err == nil {
+				return ErrExternalAccountConflict
+			} else if !errors.Is(err, ErrAccountNotFound) {
+				return err
+			}
 		}
 		if !autoProvision {
 			return ErrExternalAccountProvisionDisabled
@@ -253,14 +279,17 @@ func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, ident
 		}
 		if name == "" {
 			name = email
+			if name == "" {
+				name = phone
+			}
 		}
 		now := s.clock().UTC()
 		account = Account{
-			UserID: generateID("usr"), Email: email, Name: name, PasswordHash: "", Status: StatusActive,
+			UserID: generateID("usr"), Email: email, Phone: phone, Name: name, PasswordHash: "", Status: StatusActive,
 			CreatedAt: now, UpdatedAt: now,
 		}
 		if err := s.store.SaveAccount(ctx, account); err != nil {
-			if errors.Is(err, ErrEmailExists) {
+			if errors.Is(err, ErrEmailExists) || errors.Is(err, ErrPhoneExists) {
 				return ErrExternalAccountConflict
 			}
 			return err
@@ -285,6 +314,17 @@ func (s *Service) ProvisionExternalAccountWithCreated(ctx context.Context, ident
 }
 
 func (s *Service) BindExternalIdentity(ctx context.Context, userID string, identity AccountIdentity) error {
+	return s.bindExternalIdentity(ctx, userID, identity, nil)
+}
+
+func (s *Service) BindExternalIdentityWithProfile(ctx context.Context, userID string, identity AccountIdentity, profile ExternalAccountRequest) error {
+	if NormalizePhone(profile.Phone) == "" {
+		return ErrInvalidAccountRequest
+	}
+	return s.bindExternalIdentity(ctx, userID, identity, &profile)
+}
+
+func (s *Service) bindExternalIdentity(ctx context.Context, userID string, identity AccountIdentity, profile *ExternalAccountRequest) error {
 	userID = strings.TrimSpace(userID)
 	identity = normalizeIdentity(identity)
 	if userID == "" || !validIdentity(identity) {
@@ -312,7 +352,29 @@ func (s *Service) BindExternalIdentity(ctx context.Context, userID string, ident
 		identity.UserID = userID
 		identity.CreatedAt = now
 		identity.UpdatedAt = now
-		return s.store.InsertAccountIdentity(ctx, identity)
+		if profile != nil {
+			phone := NormalizePhone(profile.Phone)
+			if existing, err := s.store.GetAccountByPhone(ctx, phone); err == nil && existing.UserID != userID {
+				return ErrExternalAccountConflict
+			} else if err != nil && !errors.Is(err, ErrAccountNotFound) {
+				return err
+			}
+		}
+		if err := s.store.InsertAccountIdentity(ctx, identity); err != nil {
+			return err
+		}
+		if profile != nil {
+			if _, err := s.store.UpdateExternalAccountProfile(ctx, userID, NormalizePhone(profile.Phone), normalizeAccountName(profile.Name), now); err != nil {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionRollbackTimeout)
+				defer cancel()
+				cleanupErr := s.store.DeleteAccountIdentity(cleanupCtx, userID, identity.ProviderType, identity.ProviderKey)
+				if errors.Is(err, ErrPhoneExists) {
+					err = ErrExternalAccountConflict
+				}
+				return errors.Join(err, cleanupErr)
+			}
+		}
+		return nil
 	})
 }
 
@@ -389,6 +451,7 @@ func normalizeIdentity(identity AccountIdentity) AccountIdentity {
 	identity.ProviderKey = strings.TrimSpace(identity.ProviderKey)
 	identity.ProviderSubject = strings.TrimSpace(identity.ProviderSubject)
 	identity.ExternalUserID = strings.TrimSpace(identity.ExternalUserID)
+	identity.EnterpriseUserID = strings.TrimSpace(identity.EnterpriseUserID)
 	return identity
 }
 
@@ -458,15 +521,26 @@ func (s *Service) AuthenticateToken(ctx context.Context, plaintext, expectedAudi
 	if err != nil || !token.Valid || claims.Subject == "" || claims.ID == "" || claims.IssuedAt == nil || len(claims.Audience) != 1 || claims.Audience[0] != expectedAudience || !validClientForAudience(claims.ClientID, expectedAudience) {
 		return AuthenticatedIdentity{}, ErrInvalidSession
 	}
-	session, err := s.store.GetSessionByHash(ctx, hashSessionToken(plaintext))
+	var session Session
+	if claims.ClientID == ClientClaweeAgent {
+		// 续期沿用同一会话 ID，使退出和密码重置同时撤销新旧 Token。
+		session, err = s.store.GetSessionByID(ctx, claims.ID)
+	} else {
+		session, err = s.store.GetSessionByHash(ctx, hashSessionToken(plaintext))
+	}
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return AuthenticatedIdentity{}, ErrInvalidSession
 		}
 		return AuthenticatedIdentity{}, err
 	}
+	expiryMatches := session.ExpiresAt.Equal(claims.ExpiresAt.Time)
+	if claims.ClientID == ClientClaweeAgent {
+		// 允许尚未过期的在途旧 Token；JWT 自身的 exp 仍由上方解析器严格校验。
+		expiryMatches = !claims.ExpiresAt.Time.After(session.ExpiresAt) && claims.IssuedAt.Time.Equal(session.CreatedAt)
+	}
 	if session.SessionID != claims.ID || session.UserID != claims.Subject || session.AgentID != claims.AgentID ||
-		!validAgentForClient(claims.ClientID, claims.AgentID) || !session.ExpiresAt.Equal(claims.ExpiresAt.Time) || !session.ExpiresAt.After(s.clock()) {
+		!validAgentForClient(claims.ClientID, claims.AgentID) || !expiryMatches || !session.ExpiresAt.After(s.clock()) {
 		return AuthenticatedIdentity{}, ErrInvalidSession
 	}
 	account, err := s.store.GetAccount(ctx, claims.Subject)
@@ -483,6 +557,36 @@ func (s *Service) AuthenticateToken(ctx context.Context, plaintext, expectedAudi
 		Account: account, Session: session,
 		Principal: Principal{UserID: claims.Subject, AgentID: claims.AgentID, SessionID: claims.ID, Audience: expectedAudience, ClientID: claims.ClientID},
 	}, nil
+}
+
+func (s *Service) RenewClaweeSession(ctx context.Context, plaintext string) (IssuedToken, error) {
+	identity, err := s.AuthenticateToken(ctx, plaintext, AudienceFrontend)
+	if err != nil {
+		return IssuedToken{}, err
+	}
+	if identity.Principal.ClientID != ClientClaweeAgent {
+		return IssuedToken{}, ErrInvalidSession
+	}
+	now := s.clock().UTC().Truncate(time.Second)
+	session, err := s.store.ExtendSession(ctx, identity.Session.SessionID, now, now.Add(s.sessionDuration))
+	if errors.Is(err, ErrSessionNotFound) {
+		return IssuedToken{}, ErrInvalidSession
+	}
+	if err != nil {
+		return IssuedToken{}, err
+	}
+	claims := JWTClaims{
+		ClientID: ClientClaweeAgent, AgentID: session.AgentID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: JWTIssuer, Subject: session.UserID, Audience: jwt.ClaimStrings{AudienceFrontend}, ID: session.SessionID,
+			IssuedAt: jwt.NewNumericDate(session.CreatedAt), ExpiresAt: jwt.NewNumericDate(session.ExpiresAt),
+		},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.jwtSigningKey)
+	if err != nil {
+		return IssuedToken{}, err
+	}
+	return IssuedToken{Token: token, Session: session}, nil
 }
 
 func (s *Service) RevokeToken(ctx context.Context, plaintext, expectedAudience string) error {
@@ -508,14 +612,23 @@ func (s *Service) Account(ctx context.Context, userID string) (Account, error) {
 	return s.store.GetAccount(ctx, userID)
 }
 
+func (s *Service) AccountByEmail(ctx context.Context, email string) (Account, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return Account{}, ErrInvalidAccountRequest
+	}
+	return s.store.GetAccountByEmail(ctx, email)
+}
+
 func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (Account, error) {
 	email := normalizeEmail(req.Email)
+	phone := NormalizePhone(req.Phone)
 	name := normalizeAccountName(req.Name)
 	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = StatusActive
 	}
-	if email == "" || name == "" || !validStatus(status) {
+	if (email == "" && phone == "") || (req.Phone != "" && phone == "") || name == "" || !validStatus(status) {
 		return Account{}, ErrInvalidAccountRequest
 	}
 	if len(req.Password) < 8 {
@@ -530,6 +643,7 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 	account := Account{
 		UserID:       generateID("usr"),
 		Email:        email,
+		Phone:        phone,
 		Name:         name,
 		PasswordHash: passwordHash,
 		Status:       status,

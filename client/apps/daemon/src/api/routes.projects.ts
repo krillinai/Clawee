@@ -34,7 +34,8 @@ const REASONING_EFFORTS = [
   'low',
   'medium',
   'high',
-  'xhigh'
+  'xhigh',
+  'max'
 ] as const satisfies readonly ReasoningEffort[];
 
 export async function registerProjectRoutes(

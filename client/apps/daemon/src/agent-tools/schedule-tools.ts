@@ -19,6 +19,7 @@ export type AgentScheduleApiRequest = {
   method: 'GET' | 'POST' | 'PATCH';
   path: string;
   body?: Record<string, unknown>;
+  timeoutMs?: number;
 };
 
 export type AgentScheduleApiClient = {
@@ -202,6 +203,7 @@ export function createAgentScheduleHttpClient(input: {
 
   return {
     async request(request) {
+      const requestTimeoutMs = request.timeoutMs ?? timeoutMs;
       const controller = new AbortController();
       let timeout: NodeJS.Timeout | undefined;
       try {
@@ -243,10 +245,10 @@ export function createAgentScheduleHttpClient(input: {
             timeout = setTimeout(() => {
               reject(new AgentScheduleToolError(
                 'AGENT_TOOL_TIMEOUT',
-                `Clawee schedule tool timed out after ${timeoutMs}ms`
+                `Clawee tool timed out after ${requestTimeoutMs}ms; check the result before retrying uploads`
               ));
               controller.abort();
-            }, timeoutMs);
+            }, requestTimeoutMs);
           })
         ]);
       } catch (error) {

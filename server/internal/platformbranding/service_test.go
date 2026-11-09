@@ -11,6 +11,38 @@ import (
 	"testing"
 )
 
+func TestServiceAccentColorValidationAndReset(t *testing.T) {
+	service := NewService(nil)
+	ctx := context.Background()
+	current, err := service.Get(ctx)
+	if err != nil || current.AccentColor != "" {
+		t.Fatalf("未配置时不应改变默认颜色: %#v, %v", current, err)
+	}
+	value := " #F2E9EA "
+	input := UpdateInput{SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep, AccentColor: &value}
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "#f2e9ea" {
+		t.Fatalf("颜色写入失败: %#v, %v", current, err)
+	}
+	input.AccentColor = nil
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "#f2e9ea" {
+		t.Fatalf("省略字段不应覆盖配置: %#v, %v", current, err)
+	}
+	for _, invalid := range []string{"#abc", "red", "#12345g", "#12345678", "#123456\nred"} {
+		input.AccentColor = &invalid
+		if _, err := service.Update(ctx, input); !errors.Is(err, ErrInvalidAccentColor) {
+			t.Fatalf("未拒绝无效颜色 %q: %v", invalid, err)
+		}
+	}
+	value = ""
+	input.AccentColor = &value
+	current, err = service.Update(ctx, input)
+	if err != nil || current.AccentColor != "" {
+		t.Fatalf("清空颜色失败: %#v, %v", current, err)
+	}
+}
+
 func TestServiceUpdatesLogosIndependently(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	pngImage := encodePNG(t, 12, 8)
@@ -41,6 +73,79 @@ func TestServiceUpdatesLogosIndependently(t *testing.T) {
 	}
 	if configuration.SidebarLogo != nil || configuration.SidebarCompactLogo == nil {
 		t.Fatalf("configuration = %#v", configuration)
+	}
+}
+
+func TestServiceDarkLogosKeepLegacyUpdatesAndResetIndependently(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	light := encodePNG(t, 12, 8)
+	dark := encodeJPEG(t, 8, 12)
+	configuration, err := service.Update(ctx, UpdateInput{
+		SidebarLogoAction: ActionReplace, SidebarLogo: light,
+		SidebarCompactLogoAction: ActionReplace, SidebarCompactLogo: light,
+		SidebarLogoDarkAction: ActionReplace, SidebarLogoDark: dark,
+		SidebarCompactLogoDarkAction: ActionReplace, SidebarCompactLogoDark: dark,
+	})
+	if err != nil || configuration.SidebarLogoDark == nil || configuration.SidebarCompactLogoDark == nil {
+		t.Fatalf("dark logos not saved: %#v, %v", configuration, err)
+	}
+	configuration.SidebarLogoDark.Content[0] = 0
+	configuration, err = NewService(store).Update(ctx, UpdateInput{
+		SidebarLogoAction: ActionReset, SidebarCompactLogoAction: ActionKeep,
+	})
+	if err != nil || configuration.SidebarLogo != nil || configuration.SidebarCompactLogo == nil ||
+		configuration.SidebarLogoDark == nil || !bytes.Equal(configuration.SidebarLogoDark.Content, dark) ||
+		configuration.SidebarCompactLogoDark == nil || !bytes.Equal(configuration.SidebarCompactLogoDark.Content, dark) {
+		t.Fatalf("legacy update changed dark logos: %#v, %v", configuration, err)
+	}
+	configuration, err = service.Update(ctx, UpdateInput{
+		SidebarLogoAction: ActionKeep, SidebarCompactLogoAction: ActionKeep,
+		SidebarLogoDarkAction: ActionReset,
+	})
+	if err != nil || configuration.SidebarLogoDark != nil || configuration.SidebarCompactLogoDark == nil || configuration.SidebarCompactLogo == nil {
+		t.Fatalf("reset changed other logos: %#v, %v", configuration, err)
+	}
+}
+
+func TestServiceRejectsInvalidDarkLogosAtomically(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(nil)
+	original := encodePNG(t, 12, 8)
+	if _, err := service.Update(ctx, UpdateInput{
+		SidebarLogoAction: ActionReplace, SidebarLogo: original, SidebarCompactLogoAction: ActionKeep,
+		SidebarLogoDarkAction: ActionReplace, SidebarLogoDark: original,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, compact := range []bool{false, true} {
+		for _, test := range []struct {
+			action  Action
+			content []byte
+			want    error
+		}{
+			{ActionReplace, []byte("not an image"), ErrInvalidImage},
+			{ActionReplace, make([]byte, MaxImageSize+1), ErrImageTooLarge},
+			{ActionReplace, encodePNG(t, MaxDimension+1, 1), ErrInvalidImage},
+			{ActionKeep, original, ErrInvalidAction},
+			{ActionReset, original, ErrInvalidAction},
+			{Action("invalid"), nil, ErrInvalidAction},
+		} {
+			input := UpdateInput{SidebarLogoAction: ActionReset, SidebarCompactLogoAction: ActionKeep}
+			if compact {
+				input.SidebarCompactLogoDarkAction, input.SidebarCompactLogoDark = test.action, test.content
+			} else {
+				input.SidebarLogoDarkAction, input.SidebarLogoDark = test.action, test.content
+			}
+			if _, err := service.Update(ctx, input); !errors.Is(err, test.want) {
+				t.Fatalf("compact=%v action=%q error=%v, want %v", compact, test.action, err, test.want)
+			}
+			current, err := service.Get(ctx)
+			if err != nil || current.SidebarLogo == nil || current.SidebarLogoDark == nil || !bytes.Equal(current.SidebarLogoDark.Content, original) {
+				t.Fatalf("rejected update changed configuration: %#v, %v", current, err)
+			}
+		}
 	}
 }
 

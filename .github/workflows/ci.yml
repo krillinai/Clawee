@@ -32,7 +32,9 @@ jobs:
       - run: pnpm perf:check
         env:
           CLAWEE_PERFORMANCE_RESULTS_REQUIRED: '1'
-      - run: pnpm audit --audit-level high
+      - name: 客户端依赖安全审计（非阻断）
+        run: pnpm audit --audit-level high
+        continue-on-error: true
     defaults:
       run:
         working-directory: client

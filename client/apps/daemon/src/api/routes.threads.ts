@@ -45,7 +45,7 @@ export async function registerThreadRoutes(
   runManager: Pick<
     RunManager,
     'getLastEventSeq' | 'hasActiveRunForThread' | 'listRunsByThread'
-  > & Partial<Pick<RunManager, 'listEvents'>>,
+  > & Partial<Pick<RunManager, 'listEvents' | 'listHistoryEvents'>>,
   options: {
     profileValidator?: ProfileValidator;
     attachmentService?: AttachmentService;
@@ -128,13 +128,15 @@ export async function registerThreadRoutes(
     const response: ThreadRunsResponse = {
       runs: runManager.listRunsByThread(id, limit.value).map((run): RunResponse => ({
         id: run.id,
+        sharedDriveState: run.sharedDriveState,
         threadId: run.threadId,
         codexThreadId: run.codexThreadId,
         status: run.status,
         lastEventSeq: runManager.getLastEventSeq(run.id),
         attachments: options.attachmentService?.listByRun(run.id) ?? [],
         submissionMode: run.submissionMode,
-        ...(run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition })
+        ...(run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition }),
+        ...(run.queueReason === undefined ? {} : { queueReason: run.queueReason })
       }))
     };
     reportPerformance({
@@ -241,7 +243,7 @@ export async function registerThreadRoutes(
     );
     if (
       query.value.before === undefined
-      && runManager.listEvents !== undefined
+      && (runManager.listHistoryEvents !== undefined || runManager.listEvents !== undefined)
     ) {
       const historyRunIds = eventRuns.map(run => ({
           id: run.id,
@@ -253,16 +255,17 @@ export async function registerThreadRoutes(
       items = mergeRunEventsIntoThreadHistory(
         items,
         historyRunIds,
-        runId => runManager.listEvents!(runId)
+        runId => runManager.listHistoryEvents?.(runId) ?? runManager.listEvents!(runId)
       );
     }
     if (query.value.before === undefined) {
       const workflowItems = options.workflowHistoryItems?.(eventRuns) ?? [];
-      items = [...items, ...workflowItems].sort((left, right) => {
-        const time = Date.parse(left.createdAt) - Date.parse(right.createdAt);
-        if (time !== 0) return time;
-        return (left.type === 'workflow_start' ? -1 : 0) - (right.type === 'workflow_start' ? -1 : 0);
-      });
+      for (const workflowItem of workflowItems) {
+        let index = workflowItem.type === 'workflow_start'
+          ? items.findIndex(item => item.runId === workflowItem.runId) : -1;
+        if (index < 0) index = items.findIndex(item => Date.parse(item.createdAt) > Date.parse(workflowItem.createdAt));
+        items.splice(index < 0 ? items.length : index, 0, workflowItem);
+      }
     }
     history = { ...history, items };
 
@@ -310,6 +313,9 @@ export async function registerThreadRoutes(
     if (existing === undefined || existing.purpose === 'knowledge_conversation') {
       return reply.code(404).send(apiError('THREAD_NOT_FOUND', 'Thread not found'));
     }
+    if (existing.purpose === 'skill_review') {
+      return reply.code(409).send(apiError('THREAD_READ_ONLY', 'AI 审核会话只读'));
+    }
     if (existing.purpose === 'schedule_task') {
       return reply
         .code(409)
@@ -344,6 +350,9 @@ export async function registerThreadRoutes(
     if (existing === undefined || existing.purpose === 'knowledge_conversation') {
       return reply.code(404).send(apiError('THREAD_NOT_FOUND', 'Thread not found'));
     }
+    if (existing.purpose === 'skill_review') {
+      return reply.code(409).send(apiError('THREAD_READ_ONLY', 'AI 审核会话只读'));
+    }
     if (existing.purpose === 'schedule_task') {
       return reply
         .code(409)
@@ -373,6 +382,9 @@ export async function registerThreadRoutes(
     const existing = manager.getPublicThread(id);
     if (existing === undefined || existing.purpose === 'knowledge_conversation') {
       return reply.code(404).send(apiError('THREAD_NOT_FOUND', 'Thread not found'));
+    }
+    if (existing.purpose === 'skill_review') {
+      return reply.code(409).send(apiError('THREAD_READ_ONLY', 'AI 审核会话只读'));
     }
     if (existing.purpose === 'schedule_task') {
       return reply
@@ -427,6 +439,7 @@ function toThreadResponse(thread: RuntimeThread): ThreadResponse {
     sandbox: thread.sandbox,
     status: thread.status,
     purpose: thread.purpose,
+    ...(thread.skillReview === undefined ? {} : { skillReview: thread.skillReview }),
     ...(thread.scheduleId === undefined ? {} : { scheduleId: thread.scheduleId }),
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -488,8 +501,8 @@ function attachScheduleRunMetadata(
 
 const WORKSPACE_MODES = ['managed', 'external'] as const;
 const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
-const REASONING_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh'] as const;
-const THREAD_PURPOSES = ['conversation', 'schedule_draft', 'schedule_task'] as const;
+const REASONING_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const THREAD_PURPOSES = ['conversation', 'schedule_draft', 'schedule_task', 'skill_review'] as const;
 const THREAD_STATUSES = ['active', 'archived', 'all'] as const;
 const LIMIT_PATTERN = /^[1-9]\d*$/;
 const MAX_LIMIT = 100;

@@ -32,7 +32,8 @@ const REASONING_EFFORTS = new Set<ReasoningEffort>([
   'low',
   'medium',
   'high',
-  'xhigh'
+  'xhigh',
+  'max'
 ]);
 const INPUT_MODALITIES = new Set<CodexModelInputModality>(['text', 'image']);
 

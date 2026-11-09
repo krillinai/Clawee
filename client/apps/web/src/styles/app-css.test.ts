@@ -32,14 +32,43 @@ function schedulesCssBlock(selector: string) {
   return match?.groups?.body ?? '';
 }
 
-function hexChannels(value: string): number[] {
-  const normalized = value.length === 3
-    ? value.split('').map(channel => channel.repeat(2)).join('')
-    : value;
-  return [0, 2, 4].map(offset => Number.parseInt(normalized.slice(offset, offset + 2), 16));
-}
-
 describe('app CSS visual contracts', () => {
+  it('客户端更新提示随全局样式加载，固定右下角且不挤占标题栏', () => {
+    expect(mainTsx).toContain("import './styles/app.css';");
+    const notice = cssBlock('.desktop-update-notice');
+    expect(notice).toContain('position: fixed;');
+    expect(notice).toContain('right: 16px;');
+    expect(notice).toContain('bottom: 16px;');
+    expect(notice).toContain('width: min(360px, calc(100% - 32px));');
+    expect(notice).toContain('grid-template-columns: 20px minmax(0, 1fr) 32px;');
+    expect(notice).toContain('overflow-wrap: anywhere;');
+    expect(notice).toContain('background: var(--popover);');
+    expect(settingsCss).not.toContain('.desktop-update-notice');
+  });
+
+  it('keeps desktop update text inset and progress full-width with themed browser styles', () => {
+    expect(settingsCss).toMatch(/\.desktop-update-settings\s*\{[^}]*padding: 14px;/);
+    expect(settingsCss).toMatch(/\.desktop-update-metadata dd\s*\{[^}]*overflow-wrap: anywhere;/);
+    expect(settingsCss).toMatch(/\.desktop-update-progress\s*\{[^}]*width: 100%;[^}]*height: 6px;/);
+    expect(settingsCss).toContain('.desktop-update-progress::-webkit-progress-bar');
+    expect(settingsCss).toContain('.desktop-update-progress::-webkit-progress-value');
+    expect(settingsCss).toContain('.desktop-update-progress::-moz-progress-bar');
+  });
+
+  it('uses theme-specific brand accents and preserves pale branding for selected backgrounds', () => {
+    expect(tokensCss).toContain(':root[data-accent="brand"] {');
+    expect(tokensCss).toContain('--accent: var(--brand-dark-accent);');
+    expect(tokensCss).toContain('--on-accent: var(--brand-dark-on-accent);');
+    expect(tokensCss).toContain(':root[data-theme="light"][data-accent="brand"] {');
+    expect(tokensCss).toContain('--accent: var(--brand-light-accent);');
+    expect(tokensCss).toContain('--accent-soft: var(--brand-light-soft);');
+    expect(tokensCss).toContain('--on-accent: var(--brand-light-on-accent);');
+    expect(appCss).toContain(':root[data-accent="brand"] .sidebar-row[aria-current="page"] > svg,');
+    expect(cssBlock(':root[data-accent="brand"] .sidebar-search-button[aria-current="page"] > svg'))
+      .toContain('color: var(--accent);');
+    expect(appCss).not.toMatch(/:root\[data-accent="brand"\] :is\([^)]*\.sidebar-row\[aria-current="page"\][^)]*\)::before\s*\{/);
+  });
+
   it('keeps document attachments compact and preserves filename extensions', () => {
     expect(cssBlock('.timeline-message-attachments')).toContain('width: min(360px, 100%);');
     expect(cssBlock('.timeline-message-attachment-compact')).toContain('min-height: 64px;');
@@ -64,52 +93,32 @@ describe('app CSS visual contracts', () => {
     expect(productCss).not.toMatch(/font:\s*(?!400|500|600)\d{3}\s/);
   });
 
-  it('uses complete light and dark neutral theme tokens outside approvals', () => {
-    const neutralTokensCss = tokensCss.split(':root[data-accent="blue"]')[0]!;
-    const themeSources = [
-      neutralTokensCss,
-      appCss,
-      skillMarketCss,
-      schedulesCss,
-      settingsCss,
-      taskCenterCss,
-      appControllerTsx,
-    ].join('\n');
-    const neutralThemeSources = themeSources
-      .replaceAll('#f59e0b', '')
-      .replace(/--status-(?:connected|disconnected)(?:-soft)?:\s*[^;]+;/g, '');
-    const colorChannels = [
-      ...Array.from(neutralThemeSources.matchAll(/#([\da-f]{3}|[\da-f]{6})(?![\da-f])/gi), match =>
-        hexChannels(match[1]!)
-      ),
-      ...Array.from(neutralThemeSources.matchAll(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g), match =>
-        [Number(match[1]), Number(match[2]), Number(match[3])]
-      ),
-    ];
-
+  it('uses complete light and dark theme tokens with the reference dark accent', () => {
     expect(tokensCss).toContain(':root[data-theme="dark"]');
     expect(tokensCss).toContain(':root[data-theme="light"]');
     expect(tokensCss).toContain('color-scheme: dark;');
     expect(tokensCss).toContain('color-scheme: light;');
-    expect(tokensCss).toContain('--accent: #d7d7da;');
+    expect(tokensCss).toContain('--accent: #fade1f;');
     expect(tokensCss).toContain('--accent: #303035;');
+    expect(tokensCss).toContain('--surface-page: #0a0a0a;');
+    expect(tokensCss).toContain('--surface-sidebar: #111111;');
     expect(tokensCss).toContain('--surface-page: #fafafa;');
     expect(tokensCss).toContain('--surface-sidebar: #f3f3f4;');
     expect(tokensCss).toContain('--surface-input: #ffffff;');
     expect(tokensCss).toContain('--surface-popover: #ffffff;');
     expect(tokensCss).toContain('--sidebar: var(--surface-sidebar);');
     expect(tokensCss).toContain('--sidebar-hover: #e9e9eb;');
-    expect(colorChannels.length).toBeGreaterThan(0);
-    expect(colorChannels.every(channels => Math.max(...channels) - Math.min(...channels) <= 8)).toBe(true);
   });
 
   it('assigns page, sidebar, composer, and popover surfaces by semantic role', () => {
     expect(tokensCss).toContain('--bg: var(--surface-page);');
     expect(tokensCss).toContain('--conversation-bg: var(--surface-page);');
+    expect(tokensCss).toContain('--surface-popover: rgba(24, 24, 24, 0.88);');
     expect(tokensCss).toContain('--popover: var(--surface-popover);');
     expect(cssBlock('.clawee-sidebar-pane')).toContain('background: var(--sidebar);');
     expect(cssBlock('.clawee-composer::after')).toContain('background: var(--composer-input-background);');
     expect(cssBlock('.composer-popover')).toContain('background: var(--popover);');
+    expect(appCss).toMatch(/:root\[data-theme="dark"\] :is\([^)]*\.composer-popover[^)]*\)\s*\{[^}]*backdrop-filter:\s*blur\(20px\) saturate\(120%\) !important;/);
   });
 
   it('limits ordinary corner radii to the 4px, 6px, and 8px scale', () => {
@@ -178,6 +187,7 @@ describe('app CSS visual contracts', () => {
 
     expect(projectTree).toContain('align-content: start;');
     expect(projectTree).toContain('grid-auto-rows: max-content;');
+    expect(cssBlock('.sidebar-project-tree[hidden]')).toContain('display: none;');
     expect(sidebarContent).toContain('grid-auto-rows: max-content;');
     expect(sidebarContent).toContain('overflow-y: auto;');
     expect(sidebarContent).toContain('margin-right: -12px;');
@@ -290,14 +300,16 @@ describe('app CSS visual contracts', () => {
   it('keeps recent rows flat, stable, and scrollable', () => {
     const recentSection = cssBlock('.sidebar-recent-section');
     const recentHeading = cssBlock('.sidebar-recent-heading');
-    const recentToggle = cssBlock('.sidebar-recent-toggle');
+    const sectionToggle = cssBlock('.sidebar-section-toggle');
     const recentList = cssBlock('.sidebar-recent-list');
     const recentRow = cssBlock('.sidebar-recent-row');
 
     expect(recentSection).toContain('align-content: start;');
-    expect(recentHeading).toContain('grid-template-columns: minmax(0, 1fr) 28px;');
-    expect(recentToggle).toContain('width: 28px;');
-    expect(recentToggle).toContain('height: 28px;');
+    expect(recentHeading).toContain('grid-template-columns: minmax(0, 1fr);');
+    expect(sectionToggle).toContain('max-width: 100%;');
+    expect(sectionToggle).toContain('display: inline-flex;');
+    expect(sectionToggle).toContain('gap: 4px;');
+    expect(sectionToggle).toContain('height: 28px;');
     expect(appCss).toMatch(/\.sidebar-recent-list\s*\{[^}]*align-content: start;/);
     expect(recentRow).toContain('height: 34px;');
     expect(recentRow).toContain('min-height: 34px;');
@@ -321,6 +333,10 @@ describe('app CSS visual contracts', () => {
     expect(taskToolbar).toContain('min-height: 36px;');
     expect(taskToolbar).toContain('flex-wrap: wrap;');
     expect(taskActions).toContain('flex: 0 0 auto;');
+    expect(cssBlock('.workflow-conversation-context--compact')).toContain('position: absolute;');
+    expect(cssBlock('.workflow-conversation-context--compact')).toContain('top: 12px;');
+    expect(cssBlock('.workflow-conversation-context--compact')).toContain('right: 22px;');
+    expect(cssBlock('.workflow-conversation-context--compact')).toContain('padding: 0;');
     expect(appCss).toMatch(
       /@media \(max-width: 720px\)\s*\{[\s\S]*?\.schedule-thread-header\s*\{[^}]*align-items:\s*flex-start;/
     );
@@ -373,14 +389,14 @@ describe('app CSS visual contracts', () => {
     const mainPane = cssBlock('.clawee-main-pane');
 
     expect(appCss).toMatch(/html,\nbody,\n#root\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;[^}]*background:\s*var\(--bg\);/);
-    expect(tokensCss).toContain('--surface-page: #0c0d0f;');
+    expect(tokensCss).toContain('--surface-page: #0a0a0a;');
     expect(tokensCss).toContain('--surface-page: #fafafa;');
     expect(tokensCss).toContain('--bg: var(--surface-page);\n  --conversation-bg: var(--surface-page);');
     expect(mainPane).toContain('background: var(--conversation-bg);');
     expect(mainPane).toContain('overflow: hidden;');
   });
 
-  it('uses local fonts and opaque primary surfaces during viewport changes', () => {
+  it('uses local fonts and stable primary surfaces during viewport changes', () => {
     const body = cssBlock('body');
     const conversationHeader = cssBlock('.conversation-header');
     const composer = cssBlock('.clawee-composer');
@@ -401,7 +417,7 @@ describe('app CSS visual contracts', () => {
     expect(conversationHeader).not.toMatch(/background:\s*(?:linear-gradient|color-mix)/);
     expect(appCss).not.toContain('.conversation-project');
     expect(composer).toContain('background: var(--composer-project-background);');
-    expect(composer).not.toMatch(/background:\s*(?:linear-gradient|color-mix)/);
+    expect(composer).toContain('backdrop-filter: blur(20px) saturate(115%) !important;');
     expect(appCss).toMatch(/\.clawee-sidebar-pane\s*\{[^}]*background:\s*var\(--sidebar\);[^}]*border-right:\s*1px solid var\(--border-hairline\);/);
   });
 
@@ -412,6 +428,11 @@ describe('app CSS visual contracts', () => {
     expect(shell).toContain('height: 100%;');
     expect(shell).toContain('min-height: 0;');
     expect(shell).not.toContain('min-height: 640px;');
+  });
+
+  it('uses the full content area when a workbench module hides navigation', () => {
+    expect(cssBlock('.clawee-shell.sidebar-hidden')).toContain('grid-template-columns: minmax(0, 1fr);');
+    expect(cssBlock('.clawee-shell.sidebar-hidden .clawee-main-pane')).toContain('grid-template-rows: minmax(0, 1fr);');
   });
 
   it('stretches HTML previews across the full editor area', () => {
@@ -692,10 +713,11 @@ describe('app CSS visual contracts', () => {
     expect(composer).toContain('gap: 8px;');
     expect(composer).toContain('padding: 10px 18px;');
     expect(composer).toContain('width: 100%;');
-    expect(composer).toContain('--composer-input-background: #1a1b1e;');
-    expect(composer).toContain('--composer-project-background: #232427;');
-    expect(composer).toContain('--composer-border: rgba(245, 245, 246, 0.12);');
-    expect(composer).toContain('--composer-separator: rgba(245, 245, 246, 0.06);');
+    expect(composer).toContain('--composer-input-background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, rgba(24, 24, 32, 0.92)), color-mix(in srgb, var(--accent) 1%, rgba(27, 27, 24, 0.82)));');
+    expect(composer).toContain('--composer-project-background: rgba(32, 32, 32, 0.72);');
+    expect(composer).toContain('--composer-border: color-mix(in srgb, var(--accent) 8%, transparent);');
+    expect(composer).toContain('--composer-separator: rgba(229, 229, 229, 0.08);');
+    expect(composer).toContain('backdrop-filter: blur(20px) saturate(115%) !important;');
     expect(composer).toContain('border: 1px solid var(--composer-border);');
     expect(cssBlock('.clawee-composer::after')).toContain(
       'background: var(--composer-input-background);'
@@ -728,7 +750,7 @@ describe('app CSS visual contracts', () => {
     expect(cssBlock('.composer-menu-item')).toContain('min-height: var(--control-compact-lg);');
     expect(cssBlock('.composer-menu-item strong')).toContain('font-size: 12px;');
     expect(cssBlock('.composer-menu-item strong')).toContain('font-weight: 400;');
-    expect(cssBlock('.composer-control-wrap[data-composer-menu-root="model"] .composer-popover')).toContain('left: 0;');
+    expect(cssBlock('.composer-control-wrap[data-composer-menu-root="model"] .composer-popover')).toContain('left: var(--composer-model-menu-offset, 0px);');
     expect(cssBlock('.composer-control-wrap[data-composer-menu-root="model"] .composer-popover')).toContain('right: auto;');
     expect(cssBlock('.composer-project-option span')).toContain('font-size: 12px;');
     expect(cssBlock('.composer-project-option span')).toContain('font-weight: 400;');
@@ -771,16 +793,26 @@ describe('app CSS visual contracts', () => {
     expect(cssBlock('.conversation-empty-greeting')).toContain('justify-items: start;');
     expect(cssBlock('.conversation-empty-greeting')).toContain('text-align: left;');
     expect(title).toContain('font-family: var(--font);');
-    expect(title).toContain('font-size: 30px;');
-    expect(subtitle).toContain('font-size: 30px;');
+    expect(title).toContain('font-size: 26px;');
+    expect(subtitle).toContain('font-size: 24px;');
+    expect(appCss).toMatch(/\n\.conversation-starter-tags\s*\{[^}]*width: 100%;[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(150px, 100%\), 1fr\)\);[^}]*gap: 10px;[^}]*margin: 18px auto 0;/);
+    expect(cssBlock('.conversation-starter-tag')).toContain('width: 100%;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('min-height: 44px;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('justify-content: center;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('gap: 8px;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('padding: 0 16px;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('border-radius: 8px;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('font-size: 13px;');
+    expect(cssBlock('.conversation-starter-tag')).toContain('font-weight: 500;');
+    expect(cssBlock('.conversation-starter-tag svg')).toContain('width: 16px;');
     expect(emptyComposer).toContain('align-self: start;');
-    expect(appCss).toMatch(/\.conversation-page\.is-empty \.conversation-empty-greeting,\n\.conversation-page\.is-empty \.conversation-starter-tags\s*\{[^}]*width:\s*min\(740px, 100%\);/);
-    expect(cssBlock('.conversation-page.is-empty .composer-stack')).toContain('width: min(740px, 100%);');
+    expect(appCss).toMatch(/\.conversation-page\.is-empty \.conversation-empty-greeting,\n\.conversation-page\.is-empty \.conversation-starter-tags\s*\{[^}]*width:\s*min\(780px, 100%\);/);
+    expect(cssBlock('.conversation-page.is-empty .composer-stack')).toContain('width: min(780px, 100%);');
     expect(appCss).toMatch(/\.conversation-page\.is-empty \.clawee-composer textarea\s*\{[^}]*min-height:\s*72px;/);
     expect(appCss).toMatch(
       /\.conversation-page\.is-empty \.conversation-empty-state,\n\.conversation-page\.is-empty \.composer-wrap\s*\{[^}]*transform:\s*translateY\(clamp\(-150px, -14vh, -108px\)\);/
     );
-    expect(tokensCss).toContain('--border-hairline: rgba(245, 245, 246, 0.08);');
+    expect(tokensCss).toContain('--border-hairline: rgba(229, 229, 229, 0.08);');
     expect(tokensCss).toContain('--border-hairline: rgba(24, 24, 27, 0.07);');
     expect(cssBlock('.clawee-composer')).toContain('border: 1px solid var(--composer-border);');
     expect(cssBlock('.clawee-composer.without-project-selector')).toContain(
@@ -792,7 +824,7 @@ describe('app CSS visual contracts', () => {
     expect(lightComposer).toContain('--composer-project-background: #eeeeef;');
     expect(lightComposer).toContain('background: var(--composer-project-background);');
     expect(cssBlock(':root[data-theme="light"] .clawee-composer::after')).toContain('background: var(--surface-input);');
-    expect(lightComposer).toContain('backdrop-filter: none;');
+    expect(lightComposer).toContain('backdrop-filter: none !important;');
     expect(lightComposer).not.toContain('linear-gradient');
     expect(lightComposer).not.toContain('inset');
     expect(appCss).toMatch(/:root\[data-theme="light"\] \.clawee-composer \.composer-icon-button,[\s\S]*?\.composer-submit-menu-button\s*\{[^}]*box-shadow:\s*none;/);
@@ -824,6 +856,18 @@ describe('app CSS visual contracts', () => {
     expect(accentButton).toContain('width: 30px;');
     expect(selectedAccent).toContain('var(--settings-accent-swatch)');
     expect(swatch).toContain('background: var(--settings-accent-swatch);');
+  });
+
+  it('品牌选中态使用交互色，预览色块保留品牌原色', () => {
+    const selectedBrand = cssBlock('.settings-accent-options > .settings-brand-accent-choice[aria-checked="true"]');
+    const selectedNav = cssBlock('.settings-nav button[aria-current="page"]');
+
+    expect(selectedBrand).toContain('border-color: var(--accent);');
+    expect(selectedBrand).toContain('background: var(--accent-soft);');
+    expect(selectedBrand).toContain('color: var(--accent);');
+    expect(selectedNav).toContain('var(--accent) 18%, var(--surface-2)');
+    expect(appCss).not.toContain('.settings-nav button[aria-current="page"]::before');
+    expect(cssBlock('.settings-brand-accent-choice .settings-accent-swatch')).toContain('var(--border-strong)');
   });
 
   it('separates the custom accent label, preview swatch, and value input', () => {
@@ -894,7 +938,7 @@ describe('app CSS visual contracts', () => {
   it('uses a solid conversation background without dynamic background assets', () => {
     const conversationPage = cssBlock('.conversation-page');
 
-    expect(tokensCss).toContain('--surface-page: #0c0d0f;');
+    expect(tokensCss).toContain('--surface-page: #0a0a0a;');
     expect(tokensCss).toContain('--surface-page: #fafafa;');
     expect(tokensCss).toContain('--conversation-bg: var(--surface-page);');
     expect(conversationPage).toContain('background: var(--conversation-bg);');
@@ -934,8 +978,8 @@ describe('app CSS visual contracts', () => {
     expect(conversationFileLayout).toContain('var(--conversation-pane-width, calc(60% - 6px))');
     expect(conversationFileLayout).toContain('calc(100% - 286px)');
     expect(conversationFileLayout).toContain('minmax(280px, 1fr)');
-    expect(topBar).toContain('min-height: 72px;');
-    expect(topBar).toContain('padding: 12px 16px 12px 18px;');
+    expect(topBar).toContain('min-height: 64px;');
+    expect(topBar).toContain('padding: 8px 16px 8px 18px;');
     expect(topBar).toContain('grid-template-rows: auto auto;');
     expect(titleRow).toContain('justify-content: space-between;');
     expect(controlRow).toContain('justify-content: space-between;');
@@ -1041,10 +1085,11 @@ describe('app CSS visual contracts', () => {
       match => match.groups?.body ?? ''
     ).find(block => block.includes('min-height: 40px;')) ?? '';
 
-    expect(composer).toContain('--composer-input-background: #1a1b1e;');
-    expect(composer).toContain('--composer-project-background: #232427;');
-    expect(composer).toContain('--composer-border: rgba(245, 245, 246, 0.12);');
-    expect(composer).toContain('--composer-separator: rgba(245, 245, 246, 0.06);');
+    expect(composer).toContain('--composer-input-background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, rgba(24, 24, 32, 0.92)), color-mix(in srgb, var(--accent) 1%, rgba(27, 27, 24, 0.82)));');
+    expect(composer).toContain('--composer-project-background: rgba(32, 32, 32, 0.72);');
+    expect(composer).toContain('--composer-border: color-mix(in srgb, var(--accent) 8%, transparent);');
+    expect(composer).toContain('--composer-separator: rgba(229, 229, 229, 0.08);');
+    expect(composer).toContain('backdrop-filter: blur(20px) saturate(115%) !important;');
     expect(composer).toContain('border: 1px solid var(--composer-border);');
     expect(composerAfter).toContain('background: var(--composer-input-background);');
     expect(projectContext).toContain('background: var(--composer-project-background);');
@@ -1208,14 +1253,13 @@ describe('app CSS visual contracts', () => {
     expect(messageMeta).toContain('padding: 0 4px;');
     expect(messageMeta).toContain('opacity: 0;');
     expect(messageMeta).toContain('pointer-events: none;');
+    expect(messageMeta).toContain('position: absolute;');
     expect(assistantMessageMeta).toContain('justify-content: flex-start;');
     expect(assistantMessageMeta).toContain('padding-left: 0;');
     expect(appCss).toContain('.timeline-user_message:hover .timeline-message-meta');
     expect(appCss).toContain('.timeline-assistant_message:hover .timeline-message-meta');
     expect(appCss).toContain('.timeline-message-meta.is-latest-assistant');
-    expect(appCss).toMatch(
-      /\.timeline-message-meta\.is-latest-assistant time\s*\{[^}]*opacity:\s*0;/
-    );
+    expect(cssBlock('.timeline-message-meta.is-latest-assistant')).toContain('position: static;');
     expect(appCss).toContain('@media (hover: none)');
   });
 
@@ -1241,12 +1285,29 @@ describe('app CSS visual contracts', () => {
   });
 
   it('uses a very subtle divider between process groups', () => {
-    const processDetails = cssBlock('.timeline-process details');
+    const processDetails = cssBlock('.timeline-process > details');
 
     expect(processDetails).toContain(
       'border-bottom: 1px solid color-mix(in srgb, var(--text) 5%, transparent);'
     );
     expect(processDetails).not.toContain('border-bottom: 1px solid var(--border);');
+  });
+
+  it('aligns workflow execution controls by their bottom edges with flexible spacing', () => {
+    const css = readNormalizedText('src/features/workflow/workflow.css');
+
+    expect(css).toContain('.workflow-execution-settings { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; }');
+    expect(css).toContain('.workflow-execution-settings > label { display: flex; align-items: center; white-space: nowrap; }');
+  });
+
+  it('uses the selected accent for larger approval decision buttons', () => {
+    const css = readNormalizedText('src/features/enterprise-approvals/enterprise-approvals.css');
+
+    expect(css).toContain('gap: 12px;');
+    expect(css).toContain('min-height: 44px; padding: 0 20px; border-radius: 8px; font-size: 14px; font-weight: 500;');
+    expect(css).toContain('.approval-decision-buttons .approval-approve { background: var(--accent); border-color: var(--accent) !important; color: var(--on-accent); }');
+    expect(css).toContain('.approval-decision-buttons .approval-reject { border-color: var(--accent); color: var(--accent); background: transparent; }');
+    expect(css).toContain('.approval-decision-buttons .approval-reject:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }');
   });
 
   it('renders approvals as compact neutral floating confirmations', () => {

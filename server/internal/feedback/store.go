@@ -31,42 +31,47 @@ type Event struct {
 	RequestHash   string         `json:"request_hash"`
 }
 type Report struct {
-	Consent                 json.RawMessage   `json:"consent,omitempty"`
-	TombstoneExpires        *time.Time        `json:"tombstone_expires_at,omitempty"`
-	ID                      string            `json:"report_id"`
-	DisplayNumber           string            `json:"display_number"`
-	ClientID                string            `json:"client_feedback_id"`
-	Description             string            `json:"description"`
-	OccurredAt              string            `json:"occurred_at"`
-	ReproductionSteps       string            `json:"reproduction_steps"`
-	SourceClaim             map[string]string `json:"source_claim"`
-	TrustedSource           string            `json:"trusted_source,omitempty"`
-	Environment             map[string]string `json:"environment"`
-	Manifest                json.RawMessage   `json:"manifest"`
-	ManifestHash            string            `json:"manifest_sha256"`
-	RequestHash             string            `json:"request_hash"`
-	RecoveryHash            string            `json:"recovery_hash"`
-	StatusHash              string            `json:"status_hash"`
-	UploadHash              string            `json:"upload_hash"`
-	UploadExpires           time.Time         `json:"upload_expires_at"`
-	RecoveryExpires         time.Time         `json:"recovery_expires_at"`
-	CreatedAt               time.Time         `json:"created_at"`
-	ExpiresAt               time.Time         `json:"expires_at"`
-	SubmittedAt             *time.Time        `json:"submitted_at,omitempty"`
-	UploadState             string            `json:"upload_state"`
-	SecurityState           string            `json:"security_state"`
-	Completeness            string            `json:"completeness"`
-	ProcessingStatus        string            `json:"processing_status"`
-	Version                 int               `json:"version"`
-	AssignedTo              string            `json:"assigned_to,omitempty"`
-	ResolvedAt              *time.Time        `json:"resolved_at,omitempty"`
-	ResolvedBy              string            `json:"resolved_by,omitempty"`
-	PublicResolutionSummary string            `json:"public_resolution_summary,omitempty"`
-	Artifacts               []StoredArtifact  `json:"artifacts"`
-	Events                  []Event           `json:"events"`
-	ReservedBytes           int64             `json:"reserved_bytes"`
+	Kind                    string             `json:"kind,omitempty"`
+	Incident                *AutomaticIncident `json:"incident,omitempty"`
+	LastOccurredAt          *time.Time         `json:"last_occurred_at,omitempty"`
+	Consent                 json.RawMessage    `json:"consent,omitempty"`
+	TombstoneExpires        *time.Time         `json:"tombstone_expires_at,omitempty"`
+	ID                      string             `json:"report_id"`
+	DisplayNumber           string             `json:"display_number"`
+	ClientID                string             `json:"client_feedback_id"`
+	Description             string             `json:"description"`
+	OccurredAt              string             `json:"occurred_at"`
+	ReproductionSteps       string             `json:"reproduction_steps"`
+	SourceClaim             map[string]string  `json:"source_claim"`
+	TrustedSource           string             `json:"trusted_source,omitempty"`
+	Environment             map[string]string  `json:"environment"`
+	Manifest                json.RawMessage    `json:"manifest"`
+	ManifestHash            string             `json:"manifest_sha256"`
+	RequestHash             string             `json:"request_hash"`
+	RecoveryHash            string             `json:"recovery_hash"`
+	StatusHash              string             `json:"status_hash"`
+	UploadHash              string             `json:"upload_hash"`
+	UploadExpires           time.Time          `json:"upload_expires_at"`
+	RecoveryExpires         time.Time          `json:"recovery_expires_at"`
+	CreatedAt               time.Time          `json:"created_at"`
+	ExpiresAt               time.Time          `json:"expires_at"`
+	SubmittedAt             *time.Time         `json:"submitted_at,omitempty"`
+	UploadState             string             `json:"upload_state"`
+	SecurityState           string             `json:"security_state"`
+	Completeness            string             `json:"completeness"`
+	ProcessingStatus        string             `json:"processing_status"`
+	Version                 int                `json:"version"`
+	AssignedTo              string             `json:"assigned_to,omitempty"`
+	ResolvedAt              *time.Time         `json:"resolved_at,omitempty"`
+	ResolvedBy              string             `json:"resolved_by,omitempty"`
+	PublicResolutionSummary string             `json:"public_resolution_summary,omitempty"`
+	Artifacts               []StoredArtifact   `json:"artifacts"`
+	Events                  []Event            `json:"events"`
+	ReservedBytes           int64              `json:"reserved_bytes"`
 }
 type Filter struct {
+	Kind, Layer, ErrorCode                             string
+	Reporter                                           string
 	Status, Source, Version, Keyword, From, To, Cursor string
 	Limit                                              int
 	IncludeUnavailable                                 bool
@@ -98,6 +103,7 @@ type Transaction interface {
 	FindClient(string) (Report, error)
 	Save(Report) error
 	Rate(string, time.Time, int) (bool, error)
+	DailyRate(string, time.Time, int) (bool, error)
 	AddCleanup(CleanupTask) error
 	Cleanup(time.Time) ([]CleanupTask, error)
 	FinishCleanup(CleanupTask, bool) error
@@ -231,10 +237,10 @@ func (s *MemoryStore) List(f Filter) ([]Report, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+		if reportSortTime(out[i]).Equal(reportSortTime(out[j])) {
 			return out[i].ID > out[j].ID
 		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
+		return reportSortTime(out[i]).After(reportSortTime(out[j]))
 	})
 	if f.Limit > 0 && len(out) > f.Limit {
 		out = out[:f.Limit]
@@ -242,6 +248,19 @@ func (s *MemoryStore) List(f Filter) ([]Report, error) {
 	return out, nil
 }
 func matches(r Report, f Filter) bool {
+	kind := r.Kind
+	if kind == "" {
+		kind = "manual"
+	}
+	if f.Kind != "" && kind != f.Kind {
+		return false
+	}
+	if f.Layer != "" && (r.Incident == nil || r.Incident.Layer != f.Layer) {
+		return false
+	}
+	if f.ErrorCode != "" && (r.Incident == nil || r.Incident.ErrorCode != f.ErrorCode) {
+		return false
+	}
 	if !f.IncludeUnavailable && (r.UploadState != "ready" || r.SecurityState != "normal" || !time.Now().Before(r.ExpiresAt)) {
 		return false
 	}
@@ -259,14 +278,25 @@ func matches(r Report, f Filter) bool {
 	if f.Version != "" && f.Version != r.Environment["app_version"] {
 		return false
 	}
+	if f.Reporter != "" && (r.Incident == nil || r.Incident.Reporter == nil || (r.Incident.Reporter.SubjectID != f.Reporter && !strings.Contains(strings.ToLower(r.Incident.Reporter.DisplayName), strings.ToLower(f.Reporter)))) {
+		return false
+	}
 	if f.Keyword != "" && !strings.Contains(strings.ToLower(r.Description+" "+r.DisplayNumber), strings.ToLower(f.Keyword)) {
 		return false
 	}
 	if f.From != "" && r.CreatedAt.Format(time.RFC3339Nano) < f.From || f.To != "" && r.CreatedAt.Format(time.RFC3339Nano) > f.To {
 		return false
 	}
-	if f.Cursor != "" && r.CreatedAt.Format(time.RFC3339Nano)+"|"+r.ID >= f.Cursor {
-		return false
+	if f.Cursor != "" {
+		timestamp, id, ok := strings.Cut(f.Cursor, "|")
+		cursorAt, err := time.Parse(time.RFC3339Nano, timestamp)
+		if !ok || err != nil {
+			return false
+		}
+		occurredAt := reportSortTime(r)
+		if occurredAt.After(cursorAt) || occurredAt.Equal(cursorAt) && r.ID >= id {
+			return false
+		}
 	}
 	return true
 }
@@ -278,6 +308,15 @@ func (s *MemoryStore) Rate(key string, now time.Time, limit int) (bool, error) {
 	v.Count++
 	s.rates[key] = v
 	return v.Count <= limit, nil
+}
+func (s *MemoryStore) DailyRate(key string, now time.Time, limit int) (bool, error) {
+	value := s.rates[key]
+	if now.Sub(value.At) >= 24*time.Hour {
+		value = rate{At: now}
+	}
+	value.Count++
+	s.rates[key] = value
+	return value.Count <= limit, nil
 }
 func (s *MemoryStore) AddCleanup(t CleanupTask) error { s.tasks[t.Key] = t; return nil }
 func (s *MemoryStore) Cleanup(now time.Time) ([]CleanupTask, error) {

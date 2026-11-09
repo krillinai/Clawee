@@ -106,7 +106,11 @@ export function prepareReleaseLayout(input) {
   });
 
   const destinations = new Set();
-  assertCompleteRelease(mapped);
+  const desktopOnly = manifest.components?.length === 1 && manifest.components[0] === 'desktop';
+  if (desktopOnly && (manifest.serverImage || mapped.some(item => item.component === 'server'))) {
+    throw new Error('Desktop-only release cannot include server artifacts or an image');
+  }
+  assertCompleteRelease(mapped, desktopOnly);
   for (const item of mapped) {
     if (destinations.has(item.destination)) {
       throw new Error(`Duplicate COS release path: ${item.destination}`);
@@ -155,6 +159,7 @@ export function prepareReleaseLayout(input) {
     releaseNotesUrl: publicObjectUrl(config, `releases/${release.tag}/release-notes.md`),
     artifacts: publicArtifacts,
     desktop: manifest.desktop,
+    components: manifest.components,
     serverImage: manifest.serverImage
   };
   writeJson(join(versionRoot, 'release.json'), releaseDocument);
@@ -289,7 +294,7 @@ function rewriteUpdaterFiles({ mapped, release, config, versionRoot }) {
   });
 }
 
-function assertCompleteRelease(mapped) {
+function assertCompleteRelease(mapped, desktopOnly) {
   const destinations = new Set(mapped.map(item => item.destination));
   const required = [
     'updates/latest.yml',
@@ -300,8 +305,10 @@ function assertCompleteRelease(mapped) {
     ['macos', 'x64', ['dmg', 'zip', 'json']],
     ['macos', 'arm64', ['dmg', 'zip', 'json']],
     ['windows', 'x64', ['exe', 'json']],
-    ['linux', 'amd64', ['tar.gz', 'sha256']],
-    ['linux', 'arm64', ['tar.gz', 'sha256']]
+    ...(desktopOnly ? [] : [
+      ['linux', 'amd64', ['tar.gz', 'sha256']],
+      ['linux', 'arm64', ['tar.gz', 'sha256']]
+    ])
   ]) {
     for (const format of formats) {
       if (!mapped.some(item => item.platform === platform && item.arch === arch && item.format === format)) {

@@ -3,6 +3,26 @@ import type { RuntimeClient } from '../runtime/client.js';
 import { createRunService } from './run-service.js';
 
 describe('RunService', () => {
+  it('sends workbench data separately from the visible user prompt', async () => {
+    const post = vi.fn(async (_path: string, _body?: unknown) => ({ id: 'run_1', threadId: 'thread_1', status: 'running' }));
+    const client = {
+      post<T>(path: string, body?: unknown): Promise<T> {
+        return post(path, body) as Promise<T>;
+      },
+      get<T>(): Promise<T> {
+        throw new Error('Unexpected get');
+      }
+    } satisfies Pick<RuntimeClient, 'post' | 'get'>;
+
+    await createRunService(client).startThreadRun({
+      threadId: 'thread_1', prompt: '分析增长趋势', workbenchContext: '{"followerCount":128600}'
+    });
+
+    expect(post).toHaveBeenCalledWith('/runs', {
+      threadId: 'thread_1', prompt: '分析增长趋势', resumeMode: 'auto',
+      workbenchContext: '{"followerCount":128600}'
+    });
+  });
   it('omits global model config when the caller has not resolved it', async () => {
     const post = vi.fn(async (_path: string, _body?: unknown) => ({ id: 'run_1', threadId: 'thread_1', status: 'running' }));
     const client = {

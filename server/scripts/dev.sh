@@ -23,7 +23,21 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-docker compose -f "$ROOT_DIR/deploy/docker-compose.yaml" up -d postgres
+database_url="$(sed -nE 's/^[[:space:]]*url:[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' "$CLAWEE_OPS_DIR/configs/config.yaml" | head -n 1)"
+database_authority="${database_url#*://}"
+database_authority="${database_authority%%@*}"
+if [[ "$database_url" != postgres://* && "$database_url" != postgresql://* ]] || [[ "$database_authority" != *:* ]]; then
+  printf 'database.url must include a password for PostgreSQL container startup\n' >&2
+  exit 1
+fi
+database_password="${database_authority#*:}"
+if [[ -z "$database_password" ]]; then
+  printf 'database.url password must not be empty\n' >&2
+  exit 1
+fi
+
+CLAWEE_POSTGRES_PASSWORD="$database_password" \
+  docker compose -f "$ROOT_DIR/deploy/docker-compose.yaml" up -d postgres
 
 STATUS_DIR="$(mktemp -d)"
 BACKEND_STATUS_FILE="$STATUS_DIR/backend.status"

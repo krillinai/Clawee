@@ -47,8 +47,12 @@ func TestServiceUploadVersionStoresImmutablePackage(t *testing.T) {
 	_, err = uploadApprovedVersion(service, context.Background(), UploadVersionInput{
 		Version: "1.2.0", Package: bytes.NewReader(data), CreatedBy: "usr_admin",
 	})
-	if !errors.Is(err, ErrConflict) {
+	var versionConflict *SkillConflictError
+	if !errors.Is(err, ErrConflict) || !errors.As(err, &versionConflict) {
 		t.Fatalf("duplicate upload error = %v, want ErrConflict", err)
+	}
+	if versionConflict.Kind != SkillConflictVersion || versionConflict.SkillName != "code-review" || versionConflict.SpaceName != "默认技能空间" || versionConflict.Version != "1.2.0" {
+		t.Fatalf("duplicate upload conflict = %#v", versionConflict)
 	}
 	files, err := os.ReadDir(root)
 	if err != nil {
@@ -71,6 +75,33 @@ func TestServiceUploadVersionStoresImmutablePackage(t *testing.T) {
 	}
 	if _, err := service.GetAdmin(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetAdmin(missing) error = %v", err)
+	}
+}
+
+func TestServiceUploadVersionReportsExistingSkillSpace(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: t.TempDir()})
+	space, err := service.CreateSpace(ctx, "人力资源部", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uploadApprovedVersion(service, ctx, UploadVersionInput{
+		SpaceID: space.SpaceID, Version: "1.0.0", CreatedBy: "admin",
+		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("functional-competency-model")}})),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.UploadVersion(ctx, UploadVersionInput{
+		Version: "1.0.0", CreatedBy: "admin", UploadedByUserID: "test-admin", Origin: "admin_upload",
+		Package: bytes.NewReader(buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("functional-competency-model")}})),
+	})
+	var conflict *SkillConflictError
+	if !errors.Is(err, ErrConflict) || !errors.As(err, &conflict) {
+		t.Fatalf("cross-space upload error = %v, want detailed ErrConflict", err)
+	}
+	if conflict.Kind != SkillConflictExisting || conflict.SkillName != "functional-competency-model" || conflict.SpaceName != "人力资源部" {
+		t.Fatalf("cross-space conflict = %#v", conflict)
 	}
 }
 
@@ -601,6 +632,43 @@ func TestServiceRejectsInvalidVersionFileAccess(t *testing.T) {
 	}
 	if _, err := service.ReadVersionFile(context.Background(), large.Skill.SkillID, large.Version.VersionID, "large.txt"); !errors.Is(err, ErrFileNotPreviewable) {
 		t.Fatalf("large preview error = %v", err)
+	}
+}
+
+func TestServiceMissingStoredPackagePreservesFileError(t *testing.T) {
+	root := t.TempDir()
+	service := NewService(Config{Store: NewMemoryStore(), PackageRoot: root})
+	data := buildTestZIP(t, []testZIPEntry{{name: "SKILL.md", body: validSkillMD("valid")}})
+	created, err := uploadApprovedVersion(service, context.Background(), UploadVersionInput{Version: "1", Package: bytes.NewReader(data), CreatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, created.Version.PackagePath)); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		open func() error
+	}{
+		{name: "version package", open: func() error {
+			_, err := service.OpenVersionPackage(context.Background(), created.Skill.SkillID, created.Version.VersionID)
+			return err
+		}},
+		{name: "current package", open: func() error {
+			_, err := service.OpenCurrentPackage(context.Background(), created.Skill.SkillID)
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.open()
+			if !errors.Is(err, ErrStoredPackageMissing) || !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("error = %v, want ErrStoredPackageMissing and os.ErrNotExist", err)
+			}
+			var pathError *os.PathError
+			if !errors.As(err, &pathError) || pathError.Path != filepath.Join(root, created.Version.PackagePath) {
+				t.Fatalf("error = %v, want original file path", err)
+			}
+		})
 	}
 }
 

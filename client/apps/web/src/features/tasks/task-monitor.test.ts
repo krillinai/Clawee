@@ -26,10 +26,12 @@ function createTask(overrides: Partial<TaskItem> = {}): TaskItem {
 }
 
 describe('task monitor', () => {
+  const observedSince = Date.parse('2026-07-12T10:00:00.000Z');
+
   it('uses the first snapshot as a silent baseline', () => {
     const result = collectTaskTransitions(new Map(), [
       createTask({ status: 'succeeded', runStatus: 'succeeded' })
-    ], false);
+    ], false, observedSince);
 
     expect(result.transitions).toEqual([]);
     expect(result.statuses.get('run_1')).toBe('succeeded');
@@ -54,9 +56,74 @@ describe('task monitor', () => {
         status: 'waiting_approval',
         runStatus: 'running'
       })
-    ], true);
+    ], true, observedSince);
 
     expect(result.transitions.map(task => task.id)).toEqual(['run_1', 'run_3']);
+  });
+
+  it.each(['succeeded', 'failed', 'canceled'] as const)('does not treat a historical %s task loaded after an empty baseline as newly completed', status => {
+    const baseline = collectTaskTransitions(new Map(), [], false, observedSince);
+    const result = collectTaskTransitions(baseline.statuses, [createTask({
+      status,
+      runStatus: status,
+      createdAt: '2026-07-10T10:00:00.000Z',
+      endedAt: '2026-07-11T10:01:00.000Z',
+      updatedAt: '2026-07-12T10:01:00.000Z'
+    })], true, observedSince);
+
+    expect(result.transitions).toEqual([]);
+  });
+
+  it('remembers completed tasks when they leave and re-enter the polled page', () => {
+    const task = createTask({ status: 'succeeded', runStatus: 'succeeded' });
+    const baseline = collectTaskTransitions(new Map(), [task], false, observedSince);
+    const missing = collectTaskTransitions(baseline.statuses, [], true, observedSince);
+    const returned = collectTaskTransitions(missing.statuses, [task], true, observedSince);
+
+    expect(missing.statuses.get(task.id)).toBe('succeeded');
+    expect(returned.transitions).toEqual([]);
+  });
+
+  it('detects a known running task completing after it leaves the polled page', () => {
+    const task = createTask();
+    const baseline = collectTaskTransitions(new Map(), [task], false, observedSince);
+    const missing = collectTaskTransitions(baseline.statuses, [], true, observedSince);
+    const result = collectTaskTransitions(missing.statuses, [createTask({
+      status: 'succeeded', runStatus: 'succeeded'
+    })], true, observedSince);
+
+    expect(result.transitions.map(task => task.id)).toEqual(['run_1']);
+  });
+
+  it.each(['succeeded', 'failed'] as const)('detects an unseen task that reaches %s between polls', status => {
+    const task = createTask({
+      status, runStatus: status, createdAt: '2026-07-11T10:00:00.000Z',
+      endedAt: '2026-07-12T10:00:01.000Z'
+    });
+    const baseline = collectTaskTransitions(new Map(), [], false, observedSince);
+    const result = collectTaskTransitions(baseline.statuses, [task], true, observedSince);
+
+    expect(result.transitions).toEqual([task]);
+    expect(collectTaskTransitions(result.statuses, [task], true, observedSince).transitions).toEqual([]);
+  });
+
+  it('uses updatedAt for older task responses without an end time', () => {
+    const historical = createTask({
+      id: 'old_run', status: 'succeeded', runStatus: 'succeeded',
+      updatedAt: '2026-07-11T10:01:00.000Z'
+    });
+    const recent = createTask({ status: 'succeeded', runStatus: 'succeeded' });
+
+    expect(collectTaskTransitions(new Map(), [historical, recent], true, observedSince)
+      .transitions).toEqual([recent]);
+  });
+
+  it('keeps newly discovered pending approvals actionable regardless of their age', () => {
+    const task = createTask({
+      status: 'waiting_approval', updatedAt: '2026-07-11T10:00:00.000Z'
+    });
+
+    expect(collectTaskTransitions(new Map(), [task], true, observedSince).transitions).toEqual([task]);
   });
 
   it('auto-subscribes live tasks and newly transitioned terminal tasks', () => {

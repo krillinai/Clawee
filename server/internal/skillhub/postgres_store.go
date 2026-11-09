@@ -61,12 +61,12 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 			return Skill{}, Version{}, err
 		}
 		if skill.SpaceID != proposed.SpaceID {
-			return Skill{}, Version{}, ErrConflict
+			return Skill{}, Version{}, s.skillConflictError(ctx, tx, skill, SkillConflictExisting, "")
 		}
 	case VersionResolutionCreateOnly:
 		err = scanSkill(tx.QueryRow(ctx, `SELECT skill_id,space_id,name,current_version_id,created_by,created_at,updated_at FROM skills WHERE name=$1 FOR UPDATE`, proposed.Name), &skill)
 		if err == nil {
-			return Skill{}, Version{}, ErrConflict
+			return Skill{}, Version{}, s.skillConflictError(ctx, tx, skill, SkillConflictExisting, "")
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return Skill{}, Version{}, err
@@ -117,9 +117,9 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 		version.VersionID, version.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, version.CreatedAt,
 		sourceID, sourcePath, sourceCommitSHA, sourceContentSHA256, nullableText(version.UploadedByUserID), nullableText(version.UploadedByAgentID), version.UploadedByName, version.SkillName)
 	if err != nil {
-		return Skill{}, Version{}, mapStoreError(err)
+		return Skill{}, Version{}, s.mapSkillVersionError(ctx, tx, err, skill, version.Version)
 	}
-	if err = createLocalRequest(ctx, tx, version.VersionID, skill.SpaceID, version.PackageSHA256, version.CreatedAt); err != nil {
+	if err = createLocalRequest(ctx, tx, version.VersionID, skill.SpaceID, version.PackageSHA256, version.CreatedAt, &version.ApprovalRequestID); err != nil {
 		return Skill{}, Version{}, err
 	}
 	eventType, actorKind := "skill.version_uploaded", "user"
@@ -130,8 +130,8 @@ func (s *PostgresStore) CreateVersion(ctx context.Context, proposed Skill, versi
 	if options.Origin == "source_sync" {
 		actorKind, actorUserID = "system", nil
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO employee_ai_activity_facts (fact_id,event_type,actor_kind,actor_user_id,origin,target_id,target_name,source_system,source_event_key) VALUES ($1,$2,$3,$4,$5,$6,$7,'skillhub',$8)`,
-		newID("fact"), eventType, actorKind, actorUserID, options.Origin, skill.SkillID, skill.Name, version.VersionID)
+	_, err = tx.Exec(ctx, `INSERT INTO employee_ai_activity_facts (fact_id,event_type,actor_kind,actor_user_id,origin,target_id,target_name,source_system,source_event_key,version_label,actor_name) VALUES ($1,$2,$3,$4,$5,$6,$7,'skillhub',$8,$9,$10)`,
+		newID("fact"), eventType, actorKind, actorUserID, options.Origin, skill.SkillID, skill.Name, version.VersionID, version.Version, version.UploadedByName)
 	if err != nil {
 		return Skill{}, Version{}, err
 	}
@@ -176,12 +176,14 @@ func (s *PostgresStore) ListAdmin(ctx context.Context) ([]Skill, error) {
 
 func (s *PostgresStore) ListOwnPendingVersions(ctx context.Context, userID string) ([]OwnPendingVersion, error) {
 	rows, err := s.pool.Query(ctx, `SELECT s.skill_id,s.space_id,s.name,v.version_id,v.version,v.created_at,sp.approval_provider,
-ai.id,ai.status,COALESCE(ai.decision,''),COALESCE(ai.provider_instance_id,'')
+e.id,e.status,COALESCE(e.decision,''),COALESCE(e.provider_instance_id,''),r.id,CASE WHEN r.id IS NULL OR v.source_id IS NOT NULL THEN '' ELSE (`+reviewWorkflowStageSQL+`) END
 FROM skill_versions v JOIN skills s ON s.skill_id=v.skill_id
 JOIN skill_spaces sp ON sp.space_id=s.space_id
-JOIN data_resource_grants g ON g.resource_type='skill_space' AND g.resource_id=s.space_id AND g.user_id=$1 AND g.action='write'
-LEFT JOIN LATERAL (SELECT id,status,decision,provider_instance_id FROM skill_version_approval_instances WHERE version_id=v.version_id AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1) ai ON TRUE
-WHERE v.uploaded_by_user_id=$1 AND ((sp.approval_provider='dingtalk' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id) OR (sp.approval_provider='local' AND v.approval_status='pending' AND NOT EXISTS(SELECT 1 FROM approval_config_approvers ac WHERE ac.scope_type='skill_space' AND ac.scope_id=sp.space_id)))
+JOIN effective_data_resource_permissions g ON g.resource_type='skill_space' AND g.resource_id=s.space_id AND g.user_id=$1 AND g.action='read'
+LEFT JOIN LATERAL (SELECT id,status,decision,provider_instance_id FROM skill_version_approval_instances WHERE version_id=v.version_id AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1) e ON TRUE
+LEFT JOIN LATERAL(SELECT * FROM approval_requests WHERE business_type='skill_version' AND action='publish' AND scope_type='skill_space' AND business_id=v.version_id AND scope_id=s.space_id AND content_digest=v.package_sha256 AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1) r ON sp.approval_provider='local'
+LEFT JOIN LATERAL(SELECT * FROM skill_ai_review_attempts WHERE request_id=r.id ORDER BY created_at DESC,attempt_id DESC LIMIT 1) ai ON true
+WHERE v.uploaded_by_user_id=$1 AND ((sp.approval_provider='local' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id AND (EXISTS(SELECT 1 FROM approval_config_approvers c WHERE c.scope_type='skill_space' AND c.scope_id=s.space_id) OR EXISTS(SELECT 1 FROM approval_config_roles c WHERE c.scope_type='skill_space' AND c.scope_id=s.space_id))) OR (EXISTS(SELECT 1 FROM effective_data_resource_permissions w WHERE w.user_id=$1 AND w.resource_type='skill_space' AND w.resource_id=s.space_id AND w.action='write') AND ((sp.approval_provider='dingtalk' AND v.source_id IS NULL AND s.current_version_id IS DISTINCT FROM v.version_id) OR (sp.approval_provider='local' AND v.approval_status='pending' AND NOT EXISTS(SELECT 1 FROM approval_config_approvers ac WHERE ac.scope_type='skill_space' AND ac.scope_id=sp.space_id) AND NOT EXISTS(SELECT 1 FROM approval_config_roles ac WHERE ac.scope_type='skill_space' AND ac.scope_id=sp.space_id)))))
 ORDER BY v.created_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -190,9 +192,13 @@ ORDER BY v.created_at DESC`, userID)
 	items := []OwnPendingVersion{}
 	for rows.Next() {
 		var item OwnPendingVersion
-		var id, status, decision, providerID pgtype.Text
-		if err := rows.Scan(&item.SkillID, &item.SpaceID, &item.Name, &item.VersionID, &item.Version, &item.CreatedAt, &item.ApprovalProvider, &id, &status, &decision, &providerID); err != nil {
+		var id, status, decision, providerID, requestID pgtype.Text
+		var stage string
+		if err := rows.Scan(&item.SkillID, &item.SpaceID, &item.Name, &item.VersionID, &item.Version, &item.CreatedAt, &item.ApprovalProvider, &id, &status, &decision, &providerID, &requestID, &stage); err != nil {
 			return nil, err
+		}
+		if requestID.Valid && stage != "" {
+			item.LocalApproval = &LocalApproval{RequestID: requestID.String, WorkflowStage: stage}
 		}
 		if id.Valid {
 			item.ApprovalInstance = &ApprovalInstance{ID: id.String, Status: status.String, Decision: decision.String, ProviderInstanceID: providerID.String}
@@ -307,7 +313,7 @@ func (s *PostgresStore) ListPublished(ctx context.Context) ([]PublishedItem, err
 
 func (s *PostgresStore) ListPublishedForUser(ctx context.Context, userID, spaceID string) ([]PublishedItem, error) {
 	query := publishedSelect + ` AND EXISTS (
-		SELECT 1 FROM data_resource_grants g
+		SELECT 1 FROM effective_data_resource_permissions g
 		WHERE g.user_id=$1 AND g.resource_type=$2 AND g.resource_id=s.space_id AND g.action=$3
 	)`
 	args := []any{userID, ResourceTypeSpace, SpaceActionRead}
@@ -429,7 +435,7 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 		return Skill{}, Version{}, ErrConflict
 	}
 	var hasApprovers bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1) OR EXISTS(SELECT 1 FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
 		return Skill{}, Version{}, err
 	}
 	if provider == "dingtalk" && userID != "" {
@@ -482,7 +488,12 @@ func (s *PostgresStore) setCurrentVersion(ctx context.Context, skillID, versionI
 	}
 	if provider == "local" && hasApprovers {
 		var valid bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='approved')`, versionID, skill.SpaceID, version.PackageSHA256).Scan(&valid); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_requests r WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND scope_type='skill_space' AND scope_id=$2 AND content_digest=$3 AND status='approved'
+AND r.id=(SELECT id FROM approval_requests WHERE business_type='skill_version' AND business_id=$1 AND action='publish' AND status<>'invalidated' ORDER BY created_at DESC,id DESC LIMIT 1)
+AND (EXISTS(SELECT 1 FROM skill_versions v WHERE v.version_id=$1 AND v.source_id IS NOT NULL) OR ((`+aiHumanGateSQL+`)
+AND EXISTS(SELECT 1 FROM approval_request_approvers a WHERE a.request_id=r.id)
+AND NOT EXISTS(SELECT 1 FROM approval_request_approvers a WHERE a.request_id=r.id AND (a.scenario_value IS NULL OR a.result_effectiveness IS NULL OR a.ease_of_use IS NULL OR a.reuse_value IS NULL))))
+AND NOT EXISTS(SELECT 1 FROM approval_request_approvers a WHERE a.request_id=r.id AND a.status<>'approved'))`, versionID, skill.SpaceID, version.PackageSHA256).Scan(&valid); err != nil {
 			return Skill{}, Version{}, err
 		}
 		if !valid {
@@ -637,7 +648,7 @@ func (s *PostgresStore) ClearCurrentVersion(ctx context.Context, skillID string,
 		}
 		if provider == "local" {
 			var hasApprovers bool
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approval_config_approvers WHERE scope_type='skill_space' AND scope_id=$1) OR EXISTS(SELECT 1 FROM approval_config_roles WHERE scope_type='skill_space' AND scope_id=$1)`, spaceID).Scan(&hasApprovers); err != nil {
 				return nil, err
 			}
 			if hasApprovers {
@@ -775,6 +786,22 @@ func mapStoreError(err error) error {
 		return ErrConflict
 	}
 	return err
+}
+
+func (s *PostgresStore) skillConflictError(ctx context.Context, tx pgx.Tx, skill Skill, kind, version string) error {
+	var spaceName string
+	if err := tx.QueryRow(ctx, `SELECT name FROM skill_spaces WHERE space_id=$1`, skill.SpaceID).Scan(&spaceName); err != nil {
+		spaceName = skill.SpaceID
+	}
+	return &SkillConflictError{Kind: kind, SkillName: skill.Name, SpaceName: spaceName, Version: version}
+}
+
+func (s *PostgresStore) mapSkillVersionError(ctx context.Context, tx pgx.Tx, err error, skill Skill, version string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "skill_versions_skill_id_version_key" {
+		return s.skillConflictError(ctx, tx, skill, SkillConflictVersion, version)
+	}
+	return mapStoreError(err)
 }
 
 func mapSkillCreateError(err error) error {

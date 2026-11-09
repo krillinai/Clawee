@@ -157,17 +157,17 @@ test(previewOnly
     await expect.poll(
       () => readEnterpriseSession(app!.page)
     ).toMatchObject({ status: 'signed_in' });
+    await waitForWorkspace(app.page);
     await expect.poll(() => existsSync(credentialPath)).toBe(true);
-    expect(JSON.parse(readFileSync(credentialPath, 'utf8'))).toMatchObject({
+    const credentials = JSON.parse(readFileSync(credentialPath, 'utf8'));
+    expect(credentials).toMatchObject({
       schemaVersion: 1,
       enterprise: {
         accessToken: expect.any(String),
         expiresAt: '2099-07-30T12:00:00.000Z'
-      },
-      modelService: {
-        apiKey: expect.any(String)
       }
     });
+    expect(credentials.modelService).toBeUndefined();
     if (process.platform !== 'win32') {
       expect(statSync(credentialPath).mode & 0o777).toBe(0o600);
     }
@@ -226,7 +226,11 @@ test(previewOnly
     })).toBeVisible();
 
     await app.page.getByRole('button', {
-      name: 'Agent动态',
+      name: '工作台',
+      exact: true
+    }).click();
+    await app.page.getByRole('button', {
+      name: '打开Agent动态模块',
       exact: true
     }).click();
     await expect(app.page.getByRole('heading', {
@@ -282,6 +286,8 @@ test(previewOnly
     await expect(app.page.getByText('1.8 秒', { exact: true })).toBeVisible();
     await expect(app.page.getByText(/packaged private tool/i)).toHaveCount(0);
 
+    await app.page.getByRole('button', { name: '返回 Agent动态', exact: true }).click();
+    await app.page.getByRole('button', { name: '返回工作台', exact: true }).click();
     await app.page.getByRole('button', {
       name: '新建会话',
       exact: true
@@ -409,7 +415,7 @@ test(previewOnly
       .toBe('#/connections');
 
     await app.page.getByRole('button', {
-      name: '数据看板',
+      name: '工作台',
       exact: true
     }).click();
     await expect(app.page.getByText('已采集 24 个稿件', { exact: true }))
@@ -417,11 +423,13 @@ test(previewOnly
     await app.page.getByRole('button', {
       name: '打开哔哩哔哩运营详情看板'
     }).click();
-    await expect(app.page.getByRole('heading', { name: '哔哩哔哩运营' }))
+    await expect(app.page.getByRole('heading', { name: '哔哩哔哩数据洞察' }))
       .toBeVisible();
-    await expect(app.page.getByText('实际 App 新品内容复盘', { exact: true }))
+    await expect(app.page.getByRole('table', { name: '哔哩哔哩稿件表现明细' })
+      .getByText('实际 App 新品内容复盘', { exact: true }))
       .toBeVisible();
 
+    await app.page.getByRole('button', { name: '返回工作台', exact: true }).click();
     await app.page.getByRole('button', {
       name: '企业知识库',
       exact: true
@@ -512,6 +520,7 @@ test(previewOnly
     ));
     expect(tokenExchange).toMatchObject({
       bodyKeys: [
+        'account_scoped_agent',
         'agent_id',
         'client_id',
         'code',
@@ -538,6 +547,11 @@ test(previewOnly
       expect.objectContaining({
         method: 'GET',
         path: '/api/v1/auth/me',
+        authorizationPresent: true
+      }),
+      expect.objectContaining({
+        method: 'POST',
+        path: '/api/v1/auth/session/renew',
         authorizationPresent: true
       }),
       expect.objectContaining({
@@ -809,6 +823,15 @@ class FakeEnterpriseServer {
       );
     if (!publicAuthRoute && request.headers.authorization !== `Bearer ${this.token}`) {
       sendJson(response, 401, { error: { code: 'unauthorized' } });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/v1/auth/session/renew') {
+      sendJson(response, 200, { data: {
+        access_token: this.token,
+        token_type: 'Bearer',
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      } });
       return;
     }
 

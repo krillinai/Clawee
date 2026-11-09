@@ -1,4 +1,5 @@
 import type { AttachmentResponse, RunRequest, RunResponse } from '@clawee/protocol';
+import { WORKBENCH_CONTEXT_MAX_CHARS } from '@clawee/protocol';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AttachmentService } from '../attachments/service.js';
 import type { RuntimeCapabilityMatrix } from '../codex/capabilities.js';
@@ -17,6 +18,7 @@ export async function registerRunRoutes(
   server: FastifyInstance,
   manager: RunManager,
   options: {
+    canRunAgent?(): boolean;
     sseHeartbeatMs?: number;
     threadManager?: ThreadManager;
     profileValidator?: ProfileValidator;
@@ -35,6 +37,9 @@ export async function registerRunRoutes(
     }
   });
   server.post<{ Body: unknown }>('/runs', async (request, reply) => {
+    if (options.canRunAgent?.() === false) {
+      return reply.code(428).send(apiError('MODEL_SERVICE_CONFIGURATION_REQUIRED', '请先配置并验证 Codex 模型服务'));
+    }
     const parsedBody = parseRunRequest(request.body);
     if (!parsedBody.ok) {
       return reply.code(400).send(apiError('VALIDATION_FAILED', parsedBody.message));
@@ -94,7 +99,7 @@ export async function registerRunRoutes(
     const query = request.query as { limit?: string } | undefined;
     const limit = query?.limit === undefined ? undefined : Number(query.limit);
     return {
-      runs: manager.listRuns(Number.isFinite(limit) ? limit : undefined).map(run =>
+      runs: manager.listRuns(Number.isFinite(limit) ? limit : undefined, { publicOnly: true }).map(run =>
         withAttachments(run, options.attachmentService?.listByRun(run.id) ?? [])
       )
     };
@@ -104,7 +109,7 @@ export async function registerRunRoutes(
     const { id } = request.params as { id: string };
     const run = manager.getRun(id);
     if (run === undefined) return reply.code(404).send(apiError('RUN_NOT_FOUND', 'Run not found'));
-    return withAttachments(run, options.attachmentService?.listByRun(run.id) ?? []);
+    return { ...withAttachments(run, options.attachmentService?.listByRun(run.id) ?? []), lastEventSeq: manager.getLastEventSeq(id) };
   });
 
   server.post('/runs/:id/cancel', async (request, reply) => {
@@ -112,6 +117,9 @@ export async function registerRunRoutes(
     const run = manager.getRun(id);
     if (run === undefined) {
       return reply.code(404).send(apiError('RUN_NOT_FOUND', 'Run not found'));
+    }
+    if (run.threadId !== undefined && options.threadManager?.getPublicThread(run.threadId)?.purpose === 'skill_review') {
+      return reply.code(409).send(apiError('THREAD_READ_ONLY', 'AI 审核会话只读'));
     }
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'canceled') {
       return reply
@@ -123,10 +131,16 @@ export async function registerRunRoutes(
   });
 
   server.post('/runs/:id/steer', async (request, reply) => {
+    if (options.canRunAgent?.() === false) {
+      return reply.code(428).send(apiError('MODEL_SERVICE_CONFIGURATION_REQUIRED', '请先配置并验证 Codex 模型服务'));
+    }
     const { id } = request.params as { id: string };
     const run = manager.getRun(id);
     if (run === undefined) {
       return reply.code(404).send(apiError('RUN_NOT_FOUND', 'Run not found'));
+    }
+    if (run.threadId !== undefined && options.threadManager?.getPublicThread(run.threadId)?.purpose === 'skill_review') {
+      return reply.code(409).send(apiError('THREAD_READ_ONLY', 'AI 审核会话只读'));
     }
     if (run.status !== 'queued') {
       return reply
@@ -194,13 +208,16 @@ type ProfileValidationResult = { ok: true } | { ok: false; code: string; message
 
 const RESUME_MODES = ['auto', 'new_thread', 'resume_thread'] as const;
 const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
-const REASONING_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh'] as const;
+const REASONING_EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 function parseRunRequest(body: unknown): ParseResult<RunRequest> {
   if (body === undefined) return { ok: false, message: 'prompt is required' };
   if (!isPlainObject(body)) return { ok: false, message: 'body must be an object' };
 
   const input = body as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(input, 'executionPolicy') || Object.prototype.hasOwnProperty.call(input, 'skillReview')) {
+    return { ok: false, message: 'executionPolicy and skillReview are internal only' };
+  }
   const prompt = input.prompt;
   if (typeof prompt !== 'string' || prompt.length === 0) {
     return { ok: false, message: 'prompt is required' };
@@ -221,6 +238,15 @@ function parseRunRequest(body: unknown): ParseResult<RunRequest> {
       return { ok: false, message: 'model must be a non-empty string or null' };
     }
     value.model = typeof input.model === 'string' ? input.model.trim() : null;
+  }
+
+  if (input.workbenchContext !== undefined) {
+    if (typeof input.workbenchContext !== 'string' || input.workbenchContext.trim().length === 0
+      || input.workbenchContext.length > WORKBENCH_CONTEXT_MAX_CHARS) {
+      return { ok: false, message: 'workbenchContext must be a non-empty string within the context limit' };
+    }
+    if (value.threadId === undefined) return { ok: false, message: 'workbenchContext requires threadId' };
+    value.workbenchContext = input.workbenchContext;
   }
 
   if (input.resumeMode !== undefined) {

@@ -14,24 +14,98 @@ const getBrandingMock = vi.mocked(getPlatformBranding);
 const updateBrandingMock = vi.mocked(updatePlatformBranding);
 
 describe("PlatformBrandingPage", () => {
+  it("预览使用客户端当前的品牌行，不显示旧版产品名和版本号", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    expect(screen.getByAltText("展开态 Logo 预览")).toBeInTheDocument();
+    expect(screen.getByAltText("折叠态 Logo 预览")).toBeInTheDocument();
+    expect(screen.queryByText("Clawee", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^v\d+\.\d+\.\d+$/)).not.toBeInTheDocument();
+  });
+
+  it("清除深色版后沿用浅色版，保存并重新打开仍各自独立", async () => {
+    const saved = {
+      sidebarLogoConfigured: true, sidebarLogoUrl: "/light", sidebarCompactLogoConfigured: false, sidebarCompactLogoUrl: null,
+      sidebarLogoDarkConfigured: true, sidebarLogoDarkUrl: "/dark", sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null
+    };
+    getBrandingMock.mockResolvedValue(saved);
+    updateBrandingMock.mockResolvedValue({ ...saved, sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null });
+    const view = renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    fireEvent.click(screen.getByRole("radio", { name: "深色模式" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/dark?v=0");
+    fireEvent.click(screen.getByRole("button", { name: "清除展开态 Logo 配置" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/light?v=0");
+    expect(screen.getByText("未配置深色版，沿用浅色版")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("平台外观已保存。");
+    expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ sidebarLogoAction: "keep", sidebarLogoDarkAction: "reset" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/light?v=1");
+    view.unmount();
+    getBrandingMock.mockResolvedValue({ ...saved, sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null });
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/light?v=0");
+    fireEvent.click(screen.getByRole("radio", { name: "深色模式" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/light?v=0");
+  });
+
+  it("分别保留浅色和深色草稿，深色版未配置时预览浅色版", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "平台外观" });
+    const light = new File(["light"], "light.png", { type: "image/png" });
+    const dark = new File(["dark"], "dark.png", { type: "image/png" });
+    fireEvent.change(document.querySelector("#sidebar-logo-file")!, { target: { files: [light] } });
+    fireEvent.click(screen.getByRole("radio", { name: "深色模式" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "blob:light.png");
+    expect(screen.getAllByText("未配置深色版，沿用浅色版")).toHaveLength(1);
+    fireEvent.change(document.querySelector("#sidebar-logo-dark-file")!, { target: { files: [dark] } });
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "blob:dark.png");
+    fireEvent.click(screen.getByRole("radio", { name: "浅色模式" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "blob:light.png");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({
+      sidebarLogo: light, sidebarLogoAction: "replace",
+      sidebarLogoDark: dark, sidebarLogoDarkAction: "replace"
+    })));
+  });
+
   beforeEach(() => {
+    vi.clearAllMocks();
     getBrandingMock.mockResolvedValue({
       sidebarLogoConfigured: false,
       sidebarLogoUrl: null,
       sidebarCompactLogoConfigured: false,
-      sidebarCompactLogoUrl: null
+      sidebarCompactLogoUrl: null,
+      sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null,
+      sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null
     });
     updateBrandingMock.mockResolvedValue({
       sidebarLogoConfigured: true,
       sidebarLogoUrl: "/api/v1/admin/platform-branding/sidebar-logo",
       sidebarCompactLogoConfigured: false,
-      sidebarCompactLogoUrl: null
+      sidebarCompactLogoUrl: null,
+      sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null,
+      sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null
     });
     vi.spyOn(URL, "createObjectURL").mockImplementation((file) => `blob:${(file as File).name}`);
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
   });
 
-  it("previews both files locally, preserves them across backgrounds, and resets one position", async () => {
+  it("校验并保存可选的品牌重点色", async () => {
+    renderPage();
+    const input = await screen.findByLabelText("品牌重点色 HEX");
+    expect(screen.getByRole("heading", { name: "客户端品牌重点色" })).toBeInTheDocument();
+    expect(input).toHaveValue("");
+    fireEvent.change(input, { target: { value: "invalid" } });
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(screen.getByText("请输入 #RRGGBB 格式的 HEX 色值")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "#F2E9EA" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith(expect.objectContaining({ accentColor: "#F2E9EA" })));
+  });
+
+  it("previews both files locally, preserves them across themes, and resets one position", async () => {
     renderPage();
     await screen.findByRole("heading", { name: "平台外观" });
     expect(screen.getByText("建议尺寸：1050 × 240 px")).toBeInTheDocument();
@@ -46,17 +120,20 @@ describe("PlatformBrandingPage", () => {
     expect(screen.getByAltText("折叠态 Logo 预览")).toHaveAttribute("src", "blob:compact.jpg");
     expect(updateBrandingMock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("radio", { name: "深色背景" }));
+    fireEvent.click(screen.getByRole("radio", { name: "深色模式" }));
     expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "blob:expanded.png");
+    fireEvent.click(screen.getByRole("radio", { name: "浅色模式" }));
     fireEvent.click(screen.getByRole("button", { name: "清除折叠态小 Logo 配置" }));
-    expect(screen.getByAltText("折叠态 Logo 预览")).toHaveAttribute("src", "/krillinai-mark-white.png");
+    expect(screen.getByAltText("折叠态 Logo 预览")).toHaveAttribute("src", "/krillinai-mark-black.png");
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith({
       sidebarLogoAction: "replace",
       sidebarLogo: expanded,
       sidebarCompactLogoAction: "reset",
-      sidebarCompactLogo: undefined
+      sidebarCompactLogo: undefined,
+      sidebarLogoDarkAction: "keep", sidebarLogoDark: undefined,
+      sidebarCompactLogoDarkAction: "keep", sidebarCompactLogoDark: undefined
     }));
     expect(await screen.findByText("平台外观已保存。")).toBeInTheDocument();
   });
@@ -66,7 +143,9 @@ describe("PlatformBrandingPage", () => {
       sidebarLogoConfigured: true,
       sidebarLogoUrl: "/api/v1/admin/platform-branding/sidebar-logo",
       sidebarCompactLogoConfigured: true,
-      sidebarCompactLogoUrl: "/api/v1/admin/platform-branding/sidebar-compact-logo"
+      sidebarCompactLogoUrl: "/api/v1/admin/platform-branding/sidebar-compact-logo",
+      sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null,
+      sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null
     });
     renderPage();
     await screen.findByRole("heading", { name: "平台外观" });
@@ -83,7 +162,9 @@ describe("PlatformBrandingPage", () => {
       sidebarLogoAction: "reset",
       sidebarLogo: undefined,
       sidebarCompactLogoAction: "keep",
-      sidebarCompactLogo: undefined
+      sidebarCompactLogo: undefined,
+      sidebarLogoDarkAction: "keep", sidebarLogoDark: undefined,
+      sidebarCompactLogoDarkAction: "keep", sidebarCompactLogoDark: undefined
     }));
   });
 
@@ -92,7 +173,9 @@ describe("PlatformBrandingPage", () => {
       sidebarLogoConfigured: true,
       sidebarLogoUrl: "/api/v1/admin/platform-branding/sidebar-logo",
       sidebarCompactLogoConfigured: true,
-      sidebarCompactLogoUrl: "/api/v1/admin/platform-branding/sidebar-compact-logo"
+      sidebarCompactLogoUrl: "/api/v1/admin/platform-branding/sidebar-compact-logo",
+      sidebarLogoDarkConfigured: true, sidebarLogoDarkUrl: "/api/v1/admin/platform-branding/sidebar-logo-dark",
+      sidebarCompactLogoDarkConfigured: true, sidebarCompactLogoDarkUrl: "/api/v1/admin/platform-branding/sidebar-compact-logo-dark"
     });
     renderPage();
     await screen.findByRole("heading", { name: "平台外观" });
@@ -101,12 +184,18 @@ describe("PlatformBrandingPage", () => {
     expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/krillinai-wordmark-black.png");
     expect(screen.getByAltText("折叠态 Logo 预览")).toHaveAttribute("src", "/krillinai-mark-black.png");
 
+    fireEvent.click(screen.getByRole("radio", { name: "深色模式" }));
+    expect(screen.getByAltText("展开态 Logo 预览")).toHaveAttribute("src", "/krillinai-wordmark-white.png");
+    expect(screen.getByAltText("折叠态 Logo 预览")).toHaveAttribute("src", "/krillinai-mark-white.png");
+
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith({
       sidebarLogoAction: "reset",
       sidebarLogo: undefined,
       sidebarCompactLogoAction: "reset",
-      sidebarCompactLogo: undefined
+      sidebarCompactLogo: undefined,
+      sidebarLogoDarkAction: "reset", sidebarLogoDark: undefined,
+      sidebarCompactLogoDarkAction: "reset", sidebarCompactLogoDark: undefined
     }));
   });
 
@@ -141,6 +230,8 @@ describe("PlatformBrandingPage", () => {
     await waitFor(() => expect(updateBrandingMock).toHaveBeenCalledWith({
       sidebarLogoAction: "keep", sidebarLogo: undefined,
       sidebarCompactLogoAction: "keep", sidebarCompactLogo: undefined,
+      sidebarLogoDarkAction: "keep", sidebarLogoDark: undefined,
+      sidebarCompactLogoDarkAction: "keep", sidebarCompactLogoDark: undefined,
       sidebarMenuLabels: { skills: "一二三四五六七八九十" }
     }));
   });
@@ -149,6 +240,8 @@ describe("PlatformBrandingPage", () => {
     getBrandingMock.mockResolvedValue({
       sidebarLogoConfigured: false, sidebarLogoUrl: null,
       sidebarCompactLogoConfigured: false, sidebarCompactLogoUrl: null,
+      sidebarLogoDarkConfigured: false, sidebarLogoDarkUrl: null,
+      sidebarCompactLogoDarkConfigured: false, sidebarCompactLogoDarkUrl: null,
       sidebarMenuLabels: { skills: "技能", knowledge: "知识" }
     });
     renderPage();

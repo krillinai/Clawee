@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authMethods, currentAccount, hasAdminPermission, login, unbindDingTalk, type Account } from "./auth-api";
+import { authMethods, currentAccount, hasAdminPermission, login, type Account } from "./auth-api";
 
 const mockFetch = vi.fn();
 
@@ -22,6 +22,22 @@ describe("auth-api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     mockFetch.mockReset();
+  });
+
+  it("分别映射角色编码和显示名称，不改变授权依据", async () => {
+    vi.stubGlobal("fetch", mockFetch);
+    mockFetch.mockResolvedValueOnce(response({ data: {
+      account: { user_id: "usr_user", email: "user@example.com", status: "active" },
+      admin_roles: ["admin", "auditor"],
+      admin_role_names: ["系统管理员", "安全审计员"],
+      admin_permissions: [],
+      model_gateway_enabled: false
+    } }));
+    const result = await currentAccount();
+    expect(result.user.adminRoles).toEqual(["admin", "auditor"]);
+    expect(result.user.adminRoleNames).toEqual(["系统管理员", "安全审计员"]);
+    expect(result.user.modelGatewayEnabled).toBe(false);
+    expect(hasAdminPermission(result.user, "console:rbac:read")).toBe(false);
   });
 
   it("does not grant admin access when current permissions are absent", async () => {
@@ -76,18 +92,6 @@ describe("auth-api", () => {
       localPasswordConfigured: true,
       avatarUrl: "/api/v1/auth/avatar/usr_user"
     });
-  });
-
-  it("posts the current password when unbinding dingtalk", async () => {
-    vi.stubGlobal("fetch", mockFetch);
-    mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
-
-    await unbindDingTalk("passw0rd!");
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/api/v1/auth/dingtalk/unbind",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ password: "passw0rd!" }) })
-    );
   });
 });
 

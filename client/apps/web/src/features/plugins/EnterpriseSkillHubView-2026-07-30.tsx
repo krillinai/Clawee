@@ -22,6 +22,8 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import { SkillAuthorAvatar } from './SkillMarketCover.js';
 import { EnterpriseSkillParticipantAvatar } from './EnterpriseSkillParticipantAvatar.js';
 import { SkillUseProjectDialog, type SkillMarketProjectOption } from './SkillUseProjectDialog.js';
@@ -39,6 +41,7 @@ export type EnterpriseSkillHubViewProps = {
   connected: boolean;
   session: EnterpriseSessionResponse;
   skills?: EnterpriseSkillResponse[];
+  skillUsage?: Record<string, number>;
   loading: boolean;
   loadError?: string;
   search?: string;
@@ -78,15 +81,6 @@ const mockEnterpriseSkills: EnterpriseSkillResponse[] = mockEnterpriseSkillInput
   actions: status === 'not_installed' ? ['install'] : status === 'update_available' || status === 'installed' ? ['update', 'use'] : ['use']
 }));
 
-const mockEnterpriseSkillUsage: Record<string, number> = {
-  'brand-compliance': 1284,
-  'competitor-intelligence': 936,
-  'customer-insights': 742,
-  'social-operations': 1689,
-  'channel-campaigns': 418,
-  'business-weekly': 1106
-};
-
 type EnterpriseStatusFilter =
   | 'all'
   | EnterpriseSkillStatus
@@ -110,6 +104,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
   const [spaceFilter, setSpaceFilter] = useState('all');
   const [activeDetail, setActiveDetail] = useState<ActiveDetail>();
   const [pendingUseSkill, setPendingUseSkill] = useState<EnterpriseSkillResponse>();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const [internalAddMenuOpen, setInternalAddMenuOpen] = useState(false);
   const addMenuOpen = props.addMenuOpen ?? internalAddMenuOpen;
   function setAddMenuOpen(open: boolean) {
@@ -168,17 +163,6 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
   const availableCount = skills.filter(skill => skill.status === 'not_installed').length;
 
   useEffect(() => {
-    if (activeDetail === undefined) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      closeDetail();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [activeDetail]);
-
-  useEffect(() => {
     if (activeDetail !== undefined && props.skills !== undefined && !props.skills.some(skill => skill.skillId === activeDetail.skillId)) {
       closeDetail();
     }
@@ -221,6 +205,16 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
   function requestUse(skill: EnterpriseSkillResponse) {
     setActiveDetail(undefined);
     setPendingUseSkill(skill);
+  }
+
+  async function requestUpdate(skill: EnterpriseSkillResponse) {
+    if (!(await confirm({
+      title: '覆盖本地 Skill',
+      description: `更新「${skill.name}」将用企业版本覆盖本地同名 Skill，确定继续吗？`,
+      confirmLabel: '覆盖更新',
+      destructive: true
+    }))) return;
+    props.onUpdate(skill.skillId);
   }
 
   if (props.session.status === 'checking') {
@@ -316,10 +310,11 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
               mutationLocked={mutationLocked}
               operation={props.operation}
               skill={skill}
+              usage={props.skillUsage}
               onInstall={props.onInstall}
               onLoadParticipantAvatar={props.onLoadParticipantAvatar}
               onOpen={trigger => openDetail(skill, trigger)}
-              onUpdate={props.onUpdate}
+              onUpdate={() => void requestUpdate(skill)}
               onReplace={props.onReplaceSkill}
               onUse={() => requestUse(skill)}
             />
@@ -336,7 +331,10 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
           operation={props.operation}
           onClose={closeDetail}
           onInstall={props.onInstall}
-          onUpdate={props.onUpdate}
+          onUpdate={skillId => {
+            const skill = activeDetail.detail ?? skills.find(item => item.skillId === skillId);
+            if (skill !== undefined) void requestUpdate(skill);
+          }}
           onUse={requestUse}
         />
       ) : null}
@@ -354,6 +352,7 @@ export function EnterpriseSkillHubView(props: EnterpriseSkillHubViewProps) {
           skillTitle={pendingUseSkill.name}
         />
       ) : null}
+      {confirmDialog}
     </section>
   );
 }
@@ -380,6 +379,7 @@ function EnterpriseFilterButton(props: {
 function EnterpriseSkillRow(props: {
   connected: boolean;
   skill: EnterpriseSkillResponse;
+  usage?: Record<string, number>;
   mutationLocked: boolean;
   operation?: EnterpriseSkillOperation;
   onOpen(trigger: HTMLElement): void;
@@ -431,7 +431,7 @@ function EnterpriseSkillRow(props: {
             {props.skill.description ?? props.skill.skillId}
           </span>
           <span className="skill-market-card__tags">
-            <span>使用 {formatUsageCount(getEnterpriseSkillUsage(props.skill.skillId))} 次</span>
+            <span>使用 {formatUsageCount(props.usage?.[props.skill.skillId] ?? 0)} 次</span>
           </span>
         </span>
       </button>
@@ -530,11 +530,14 @@ function EnterpriseSkillDetailDialog(props: {
   onUse(skill: EnterpriseSkillResponse): void;
 }) {
   const skill = props.active.detail ?? props.fallback;
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalBehavior(dialogRef, { open: true, onClose: props.onClose });
   return (
     <div className="skill-market-modal-backdrop" onMouseDown={event => {
       if (event.target === event.currentTarget) props.onClose();
     }}>
       <section
+        ref={dialogRef}
         aria-label={`${skill?.name ?? props.active.skillId} 详情`}
         aria-modal="true"
         className="enterprise-skill-detail"
@@ -666,7 +669,7 @@ function getEnterpriseSkillVisual(
   if (integrity === 'local_changed') {
     return {
       label: '本地内容已修改',
-      reason: '本地内容与安装记录不一致，只能继续使用，不能静默更新。',
+      reason: '本地内容与安装记录不一致，更新前需确认覆盖本地修改。',
       tone: 'warning',
       icon: <FileWarning size={18} />
     };
@@ -682,7 +685,7 @@ function getEnterpriseSkillVisual(
     case 'invalid':
       return {
         label: '本地内容无效',
-        reason: '同名本地 Skill 无法通过结构校验。',
+        reason: '同名本地 Skill 无法通过结构校验，可确认覆盖。',
         tone: 'danger',
         icon: <AlertCircle size={18} />
       };
@@ -696,7 +699,7 @@ function getEnterpriseSkillVisual(
     case 'name_conflict':
       return {
         label: '名称冲突',
-        reason: '该名称已由其他来源占用，企业 Hub 不会覆盖。',
+        reason: '该名称已由其他来源占用，可确认覆盖。',
         tone: 'danger',
         icon: <AlertCircle size={18} />
       };
@@ -743,10 +746,6 @@ function formatVersionSummary(skill: EnterpriseSkillResponse): string {
   if (skill.installedVersion !== undefined) return `本地 ${skill.installedVersion}`;
   if (skill.version !== undefined) return `版本 ${skill.version}`;
   return '版本未知';
-}
-
-function getEnterpriseSkillUsage(skillId: string): number {
-  return mockEnterpriseSkillUsage[skillId] ?? 0;
 }
 
 function formatUsageCount(count: number): string {

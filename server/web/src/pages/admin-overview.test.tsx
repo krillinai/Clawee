@@ -673,6 +673,53 @@ describe("AdminOverviewPage", () => {
     expect(screen.queryByRole("link", { name: "查看失败调用" })).not.toBeInTheDocument();
   });
 
+  it.each([0, 1])("仅有技能权限且有 %i 项资源时使用紧凑列表", async (count) => {
+    listSkillsMock.mockResolvedValue(Array.from({ length: count }, (_, index) => ({
+      skillId: `skill_${index}`,
+      name: "日报生成",
+      description: "",
+      currentVersionId: "version_1",
+      createdBy: "admin",
+      createdAt: "2026-06-11T00:00:00Z",
+      updatedAt: "2026-06-11T00:00:00Z"
+    })));
+    renderAdminOverviewPage([permissions.skillRead]);
+
+    const resources = await screen.findByRole("region", { name: "企业资源状态" });
+    expect(await within(resources).findByText(`${count} 个已发布`)).toBeInTheDocument();
+    expect(within(resources).getByText("技能")).toBeInTheDocument();
+    expect(within(resources).getByRole("link", { name: "查看" })).toHaveAttribute("href", "/admin/skills");
+    expect(within(resources).queryByRole("img", { name: /纳管资源分布/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "总览分区导航" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "企业资源" })).toBeInTheDocument();
+    expect(screen.queryByText("知识库")).not.toBeInTheDocument();
+    expect(screen.queryByText("共享空间")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "刷新数据" }));
+    await waitFor(() => expect(listSkillsMock).toHaveBeenCalledTimes(2));
+    for (const request of [listMCPAgentsMock, listMCPAuditsMock, listMCPCapabilitiesMock, listMCPGatesMock, listMCPGrantsMock, listMCPUpstreamServersMock, getAgentActivityListMock, listKnowledgeBasesMock, listSharedSpacesMock]) {
+      expect(request).not.toHaveBeenCalled();
+    }
+  });
+
+  it("多类企业资源均为空时不渲染空白分布图", async () => {
+    renderAdminOverviewPage([permissions.knowledgeRead, permissions.skillRead, permissions.sharedFilesRead]);
+
+    const resources = await screen.findByRole("region", { name: "企业资源状态" });
+    expect(await within(resources).findByText("0 个已发布")).toBeInTheDocument();
+    expect(within(resources).getAllByRole("link", { name: "查看" })).toHaveLength(3);
+    expect(within(resources).queryByRole("img", { name: /纳管资源分布/ })).not.toBeInTheDocument();
+  });
+
+  it("企业资源请求失败时不将资源数量展示为零", async () => {
+    listSkillsMock.mockRejectedValue(new Error("服务暂不可用"));
+    renderAdminOverviewPage([permissions.skillRead]);
+
+    expect(await screen.findByText("企业资源状态加载失败。")).toBeInTheDocument();
+    const resources = screen.getByRole("region", { name: "企业资源状态" });
+    expect(within(resources).queryByText("0 个已发布")).not.toBeInTheDocument();
+    expect(within(resources).queryByRole("img", { name: /纳管资源分布/ })).not.toBeInTheDocument();
+  });
+
   it("仅有审计权限时显示分析区且不渲染空的接入资源区", async () => {
     renderAdminOverviewPage([permissions.mcpAuditRead]);
 

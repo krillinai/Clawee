@@ -9,8 +9,8 @@ usage() {
 
 示例：
   pnpm server:deploy:source -- \
-    --host ubuntu@1.13.175.31 \
-    --dir /home/ubuntu/clawee-agent
+    --host deploy@192.0.2.10 \
+    --dir /home/deploy/clawee-agent
 
 也可以通过环境变量设置默认值：
   CLAWEE_SERVER_SSH

@@ -6,7 +6,8 @@ import {
 const REQUIRED_TASK_TOOLS = [
   'clawee_submit_task',
   'clawee_get_task',
-  'clawee_get_task_result'
+  'clawee_get_task_result',
+  'clawee_get_agent_health'
 ] as const;
 
 export type ServerReadinessChecks = {

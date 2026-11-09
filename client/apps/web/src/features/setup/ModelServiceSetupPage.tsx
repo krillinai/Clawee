@@ -15,6 +15,7 @@ import {
 import {
   type CSSProperties,
   type FormEvent,
+  type ReactNode,
   useEffect,
   useRef,
   useState
@@ -29,6 +30,7 @@ export type ModelServiceSetupPageProps = {
     trafficLightInset: number;
   };
   onConfigure(input: ConfigureModelServiceRequest): Promise<void>;
+  secondaryActions?: ReactNode;
 };
 
 export function ModelServiceSetupPage(
@@ -100,7 +102,6 @@ export function ModelServiceSetupPage(
         <header className="model-service-setup__header">
           <span className="model-service-setup__brand">Clawee</span>
           <h1>配置 Codex 模型服务</h1>
-          <p>验证通过后才能进入工作台。</p>
         </header>
 
         <form
@@ -189,9 +190,10 @@ export function ModelServiceSetupPage(
                   />
                 )
               : <Play size={17} fill="currentColor" />}
-            {submitting ? '正在验证模型服务' : '验证并启动 Clawee'}
+            {submitting ? '正在保存配置' : '保存并启动 Clawee'}
           </button>
         </form>
+        {!submitting ? props.secondaryActions : null}
       </main>
     </div>
   );
@@ -202,6 +204,7 @@ export function ModelAccessStatusPage(props: {
   integratedTitleBar?: ModelServiceSetupPageProps['integratedTitleBar'];
   onRetry(): void;
   onLogout(): void;
+  secondaryActions?: ReactNode;
 }) {
   const shellStyle = props.integratedTitleBar === undefined
     ? undefined
@@ -246,6 +249,7 @@ export function ModelAccessStatusPage(props: {
             <LogOut size={17} aria-hidden="true" />退出账户
           </button>
         </div>
+        {props.secondaryActions}
       </main>
     </div>
   );
@@ -260,7 +264,7 @@ function formatConfigurationError(error: unknown): string {
       return '本地私有凭据文件不可用，无法保存 API Key。';
     }
     if (error.code === 'MODEL_SERVICE_CONFIGURATION_BUSY') {
-      return '模型服务正在验证，请稍候。';
+      return '模型服务尚未准备好，当前无法保存配置。请先点击“重新检测”，确认服务恢复后再试。';
     }
     if (error.code === 'MODEL_SERVICE_CONFIGURATION_INVALID') {
       return error.message.replace(

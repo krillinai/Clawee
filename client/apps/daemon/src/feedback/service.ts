@@ -4,11 +4,11 @@ import { createReadStream } from 'node:fs';
 import { chmod, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { canonicalFeedbackJSON, FEEDBACK_ORIGIN, type FeedbackDraft, type FeedbackManifest } from '@clawee/protocol';
+import { canonicalFeedbackJSON, resolveFeedbackOrigin, type FeedbackDraft, type FeedbackManifest, type FeedbackPolicy } from '@clawee/protocol';
 import { collectFeedback, feedbackEnvironment, type NativeFeedback } from './collector.js';
 import { redactFeedback } from './redactor.js';
 
-type StoredDraft = Omit<FeedbackDraft, 'external_feedback_allowed'> & { client_feedback_id: string; occurred_at: string; reproduction_steps: string; include_diagnostics?: boolean; consent_at?: string; accept_partial?: boolean; created_at: string; uploaded_artifact_ids: string[]; environment?: Record<string, string>; redacted_description?: string; redacted_steps?: string };
+type StoredDraft = Omit<FeedbackDraft, 'external_feedback_allowed'> & { routing_version?: number; client_feedback_id: string; occurred_at: string; reproduction_steps: string; include_diagnostics?: boolean; consent_at?: string; accept_partial?: boolean; created_at: string; uploaded_artifact_ids: string[]; environment?: Record<string, string>; redacted_description?: string; redacted_steps?: string };
 type Secrets = { recovery_token: string; status_token: string; upload_token?: string; upload_expires_at?: string; recovery_expires_at?: string };
 type Progress = { report_id: string; upload_token?: string; upload_expires_at?: string; recovery_expires_at: string; received_artifact_ids: string[]; upload_state: string; expires_at: string };
 class UploadError extends Error { constructor(readonly status: number, readonly retryAfter: number) { super(`FEEDBACK_HTTP_${status}`); } }
@@ -24,20 +24,51 @@ export class FeedbackService {
   private running = false;
   private timer?: NodeJS.Timeout;
   private closed = false;
-  constructor(private input: { db: Database.Database; dataDir: string; environment: () => Record<string, string>; policy: (refresh: boolean) => Promise<{ allowed?: boolean; expiresAt?: string }>; fetchImpl?: typeof fetch }) {}
+  private pending = new Set<Promise<void>>();
+  private activeOrigin?: string;
+  constructor(private input: { db: Database.Database; dataDir: string; origin: () => string | undefined; environment: () => Record<string, string>; policy?: (refresh: boolean) => Promise<{ allowed?: boolean; expiresAt?: string }>; fetchImpl?: typeof fetch }) {}
+  get origin() { return resolveFeedbackOrigin(this.input.origin()); }
+  private synchronizeTarget() {
+    const origin = this.origin;
+    if (origin !== this.activeOrigin) {
+      for (const controller of [...this.controllers.values(), ...this.statusControllers.values()]) controller.abort();
+      this.activeOrigin = origin;
+    }
+    return origin;
+  }
+  private requireTarget(draft: StoredDraft) {
+    if (!this.synchronizeTarget() || draft.origin !== this.activeOrigin || draft.routing_version !== 2) throw new Error('FEEDBACK_TARGET_CHANGED');
+  }
+  private track(task: Promise<void>): Promise<void> {
+    this.pending.add(task);
+    const remove = () => this.pending.delete(task);
+    void task.then(remove, remove);
+    return task;
+  }
   private directory(id: string) { if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error('FEEDBACK_NOT_FOUND'); return join(this.input.dataDir, 'feedback', id); }
   private load(id: string): StoredDraft { this.directory(id); const row = this.input.db.prepare('SELECT draft_json FROM feedback_queue WHERE local_feedback_id=?').get(id) as { draft_json: string } | undefined; if (!row) throw new Error('FEEDBACK_NOT_FOUND'); return JSON.parse(row.draft_json) as StoredDraft; }
   private save(draft: StoredDraft) { const stored = this.input.db.prepare('SELECT draft_json FROM feedback_queue WHERE local_feedback_id=?').get(draft.local_feedback_id) as { draft_json: string } | undefined; if (stored && (JSON.parse(stored.draft_json) as StoredDraft).state === 'cancelled' && draft.state !== 'cancelled') return; this.input.db.prepare('INSERT INTO feedback_queue VALUES(?,?,?) ON CONFLICT(local_feedback_id) DO UPDATE SET draft_json=excluded.draft_json,updated_at=excluded.updated_at').run(draft.local_feedback_id, JSON.stringify(draft), new Date().toISOString()); }
   async allowed(refresh = true): Promise<boolean> {
-    const path = join(this.input.dataDir, 'feedback', 'policy.json');
+    const origin = this.synchronizeTarget();
+    if (!origin) return false;
+    const path = join(this.input.dataDir, 'feedback', `policy-${createHash('sha256').update(origin).digest('hex')}.json`);
     await mkdir(join(this.input.dataDir, 'feedback'), { recursive: true, mode: 0o700 });
     let known: { allowed?: boolean; expiresAt?: string } = {};
-    try { known = JSON.parse(await readFile(path, 'utf8')) as typeof known; } catch { /* 尚未获取企业策略时默认允许主动反馈。 */ }
+    try { known = JSON.parse(await readFile(path, 'utf8')) as typeof known; } catch { }
     let current: typeof known = {};
-    try { current = await this.input.policy(refresh); } catch { /* 已知过期策略不得绕过。 */ }
-    // 本地禁用立即生效，但陈旧的本地允许不能覆盖中心已返回的禁用策略。
+    try {
+      if (this.input.policy) current = await this.input.policy(refresh);
+      else if (refresh || known.allowed === undefined || !known.expiresAt || Date.parse(known.expiresAt) <= Date.now()) {
+        const response = await (this.input.fetchImpl ?? fetch)(`${origin}/api/v1/feedback/policy`, { redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(5000) });
+        if (!response.ok) { await response.body?.cancel(); throw new Error('FEEDBACK_POLICY_UNAVAILABLE'); }
+        const { data } = await response.json() as { data?: FeedbackPolicy };
+        if (!data || typeof data.enabled !== 'boolean' || data.policy_version !== 1 || !Number.isFinite(Date.parse(data.expires_at))) throw new Error('FEEDBACK_POLICY_INVALID');
+        current = { allowed: data.enabled, expiresAt: new Date(Math.min(Date.parse(data.expires_at), Date.now() + 3_600_000)).toISOString() };
+      }
+    } catch { }
+    if (origin !== this.synchronizeTarget()) return false;
     if (current.allowed !== undefined && (refresh || current.allowed === false || known.allowed === undefined)) { known = current; await atomicJSON(path, known); }
-    return known.allowed !== false && !(known.expiresAt && Date.parse(known.expiresAt) <= Date.now()) && !(current.expiresAt && Date.parse(current.expiresAt) <= Date.now());
+    return known.allowed === true && !(known.expiresAt && Date.parse(known.expiresAt) <= Date.now()) && !(current.expiresAt && Date.parse(current.expiresAt) <= Date.now());
   }
   private async requireAllowed(refresh = true) { if (!await this.allowed(refresh)) throw new Error('FEEDBACK_POLICY_DISABLED'); }
   recordDiagnostic(threadId: string, record: Record<string, unknown>) {
@@ -53,18 +84,20 @@ export class FeedbackService {
     if (!this.input.db.prepare('SELECT id FROM threads WHERE id=?').get(input.thread_id)) throw new Error('FEEDBACK_THREAD_NOT_FOUND');
     const count = (this.input.db.prepare('SELECT COUNT(*) AS count FROM feedback_queue').get() as { count: number }).count;
     if (count >= 20) throw new Error('FEEDBACK_DRAFT_LIMIT');
-    const now = new Date().toISOString(); const draft: StoredDraft = { local_feedback_id: randomUUID(), client_feedback_id: randomUUID(), thread_id: input.thread_id, description: input.description, occurred_at: input.occurred_at, reproduction_steps: input.reproduction_steps ?? '', state: 'awaiting_consent', origin: FEEDBACK_ORIGIN, size_bytes: 0, screenshots: [], retry_count: 0, expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), created_at: now, uploaded_artifact_ids: [] };
+    const now = new Date().toISOString(); const draft: StoredDraft = { routing_version: 2, local_feedback_id: randomUUID(), client_feedback_id: randomUUID(), thread_id: input.thread_id, description: input.description, occurred_at: input.occurred_at, reproduction_steps: input.reproduction_steps ?? '', state: 'awaiting_consent', origin: this.origin!, size_bytes: 0, screenshots: [], retry_count: 0, expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), created_at: now, uploaded_artifact_ids: [] };
     const dir = this.directory(draft.local_feedback_id); await mkdir(dir, { recursive: true, mode: 0o700 }); await chmod(dir, 0o700);
     const secrets: Secrets = { recovery_token: randomBytes(32).toString('base64url'), status_token: randomBytes(32).toString('base64url') };
     await writeFile(join(dir, 'credentials.json'), JSON.stringify(secrets), { mode: 0o600, flag: 'wx' }); this.save(draft); return this.get(draft.local_feedback_id);
   }
   async get(id: string): Promise<FeedbackDraft> {
     const d = this.load(id);
-    const allowed = await this.allowed(false);
+    const matchesTarget = d.routing_version === 2 && d.origin === this.synchronizeTarget();
+    if (!matchesTarget && !['submitted', 'cancelled'].includes(d.state)) { d.state = 'failed'; d.error_code = 'FEEDBACK_TARGET_CHANGED'; this.save(d); }
+    const allowed = matchesTarget && await this.allowed(false);
     let preview: FeedbackDraft['preview'];
     const summary = d.manifest?.collection_scope ? d.manifest.artifacts.find(a => a.source === 'lightweight') : undefined;
     if (summary && d.state !== 'collecting') { const text = await readFile(join(this.directory(id), summary.artifact_id), 'utf8'); preview = { description: d.redacted_description ?? '', reproduction_steps: d.redacted_steps ?? '', diagnostics: text.trim().split('\n').map(line => JSON.parse(line) as unknown) }; }
-    if (!this.closed && d.report_id && d.state === 'submitted' && allowed && !this.statusControllers.has(id) && Date.now() - (this.statusCheckedAt.get(id) ?? 0) >= 30000) void this.refreshStatus(d);
+    if (!this.closed && d.report_id && d.state === 'submitted' && allowed && !this.statusControllers.has(id) && Date.now() - (this.statusCheckedAt.get(id) ?? 0) >= 30000) void this.track(this.refreshStatus(d));
     return { local_feedback_id: id, thread_id: d.thread_id, description: d.description, preview, state: d.state, origin: d.origin, manifest: d.manifest, manifest_sha256: d.manifest_sha256, size_bytes: d.size_bytes, screenshots: d.screenshots, report_id: d.report_id, error_code: d.error_code, consent_at: d.consent_at, retry_count: d.retry_count, next_retry_at: d.next_retry_at, expires_at: d.expires_at, materials_expires_at: d.materials_expires_at, external_feedback_allowed: allowed, centre_status: d.centre_status, public_resolution_summary: d.public_resolution_summary };
   }
   private async refreshStatus(d: StoredDraft) {
@@ -72,7 +105,7 @@ export class FeedbackService {
     this.statusControllers.set(id, controller); this.statusCheckedAt.set(id, Date.now());
     try {
       const secrets = await this.secrets(id);
-      const next = await this.request<{ processing_status?: string; public_resolution_summary?: string }>(`/reports/${d.report_id}/status`, 'GET', controller, undefined, secrets.status_token);
+      const next = await this.request<{ processing_status?: string; public_resolution_summary?: string }>(d, `/reports/${d.report_id}/status`, 'GET', controller, undefined, secrets.status_token);
       if (this.closed) return;
       const current = this.load(id); current.centre_status = next.processing_status; current.public_resolution_summary = next.public_resolution_summary; this.save(current);
     } catch { /* 远端查询失败不影响本地成功回执。 */ }
@@ -80,7 +113,7 @@ export class FeedbackService {
   }
   private editable(d: StoredDraft) { if (d.consent_at || d.report_id || d.state === 'collecting' || d.state === 'cancelled') throw new Error('FEEDBACK_SNAPSHOT_FROZEN'); }
   async screenshot(id: string, data: Buffer, mime: string) {
-    await this.requireAllowed(); const d = this.load(id); this.editable(d);
+    await this.requireAllowed(); const d = this.load(id); this.requireTarget(d); this.editable(d);
     if (d.screenshots.length >= 5 || data.length > 10 * 1024 * 1024) throw new Error('FEEDBACK_SCREENSHOT_LIMIT');
     const image = sharp(data, { limitInputPixels: 25000000 }); const metadata = await image.metadata();
     if (!['png', 'jpeg', 'webp'].includes(metadata.format ?? '') || `image/${metadata.format}` !== mime || (metadata.pages ?? 1) > 1) throw new Error('FEEDBACK_INVALID_IMAGE');
@@ -89,10 +122,10 @@ export class FeedbackService {
   }
   async removeScreenshot(id: string, screenshotId: string) { const d = this.load(id); this.editable(d); const found = d.screenshots.find(s => s.screenshot_id === screenshotId); if (!found) throw new Error('FEEDBACK_NOT_FOUND'); await rm(join(this.directory(id), found.screenshot_id)); d.screenshots = d.screenshots.filter(s => s !== found); d.manifest = undefined; d.manifest_sha256 = undefined; this.save(d); }
   async collect(id: string, native?: NativeFeedback, includeDiagnostics?: boolean) {
-    await this.requireAllowed(); const d = this.load(id); this.editable(d); d.state = 'collecting'; d.error_code = undefined; d.manifest = undefined; d.manifest_sha256 = undefined; d.size_bytes = 0; this.save(d);
+    await this.requireAllowed(); const d = this.load(id); this.requireTarget(d); this.editable(d); d.state = 'collecting'; d.error_code = undefined; d.manifest = undefined; d.manifest_sha256 = undefined; d.size_bytes = 0; this.save(d);
     d.include_diagnostics = includeDiagnostics ?? d.include_diagnostics ?? false;
     const controller = new AbortController(); this.controllers.set(id, controller);
-    void (async () => {
+    void this.track((async () => {
       try {
         for (const name of await readdir(this.directory(id))) if (/^[0-9a-f-]{36}$/.test(name) && !d.screenshots.some(s => s.screenshot_id === name)) await rm(join(this.directory(id), name), { force: true });
         d.environment = feedbackEnvironment({ ...this.input.environment(), ...native?.environment }); d.redacted_description = String(redactFeedback(d.description)); d.redacted_steps = String(redactFeedback(d.reproduction_steps));
@@ -103,57 +136,61 @@ export class FeedbackService {
         controller.signal.throwIfAborted(); d.manifest = m; d.manifest_sha256 = createHash('sha256').update(canonicalFeedbackJSON(m)).digest('hex'); d.size_bytes = m.artifacts.reduce((n, a) => n + a.size_bytes, 0); if (m.artifacts.length > 256 || d.size_bytes > 200 * 1024 * 1024) throw new Error('FEEDBACK_QUOTA_EXCEEDED'); d.state = 'awaiting_consent'; this.save(d);
       } catch (error) { if (!this.closed && this.load(id).state !== 'cancelled') { d.state = 'failed'; d.error_code = (error as Error).message === 'FEEDBACK_QUOTA_EXCEEDED' ? 'FEEDBACK_QUOTA_EXCEEDED' : 'FEEDBACK_COLLECTION_FAILED'; d.manifest_sha256 = undefined; if (d.manifest) { d.manifest.completeness = 'partial'; d.manifest.missing_items = d.manifest.missing_items.filter(item => item !== 'collection:in_progress'); d.manifest.missing_items.push(d.error_code === 'FEEDBACK_QUOTA_EXCEEDED' ? 'collection:quota_exceeded' : 'collection:interrupted'); } this.save(d); } }
       finally { this.controllers.delete(id); }
-    })();
+    })());
   }
   async send(id: string, input: { confirmed: boolean; manifest_sha256: string; accept_partial: boolean }) {
-    await this.requireAllowed(); const d = this.load(id);
+    await this.requireAllowed(); const d = this.load(id); this.requireTarget(d);
     if (!d.manifest?.collection_scope) throw new Error('FEEDBACK_RECOLLECTION_REQUIRED');
     if (!input.confirmed || !d.manifest || input.manifest_sha256 !== d.manifest_sha256 || d.state !== 'awaiting_consent' || (d.manifest.completeness === 'partial' && !input.accept_partial) || Date.parse(d.expires_at) <= Date.now()) throw new Error('FEEDBACK_CONSENT_REQUIRED');
     d.consent_at = new Date().toISOString(); d.accept_partial = input.accept_partial; d.state = 'queued'; this.save(d); this.start();
   }
-  async retry(id: string) { await this.requireAllowed(); const d = this.load(id); if (!d.consent_at || !d.manifest || d.state !== 'failed' || Date.parse(d.expires_at) <= Date.now()) throw new Error('FEEDBACK_RETRY_NOT_ALLOWED'); const secrets = await this.secrets(id); if (secrets.recovery_expires_at && Date.parse(secrets.recovery_expires_at) <= Date.now()) throw new Error('FEEDBACK_EXPIRED'); d.state = 'queued'; d.retry_count = 0; d.error_code = undefined; d.next_retry_at = undefined; this.save(d); this.start(); }
+  async retry(id: string) { await this.requireAllowed(); const d = this.load(id); this.requireTarget(d); if (!d.consent_at || !d.manifest || d.state !== 'failed' || Date.parse(d.expires_at) <= Date.now()) throw new Error('FEEDBACK_RETRY_NOT_ALLOWED'); const secrets = await this.secrets(id); if (secrets.recovery_expires_at && Date.parse(secrets.recovery_expires_at) <= Date.now()) throw new Error('FEEDBACK_EXPIRED'); d.state = 'queued'; d.retry_count = 0; d.error_code = undefined; d.next_retry_at = undefined; this.save(d); this.start(); }
   async cancel(id: string) { const d = this.load(id); if (d.state === 'submitted') throw new Error('FEEDBACK_ALREADY_SUBMITTED'); d.state = 'cancelled'; this.save(d); this.controllers.get(id)?.abort(); return { centre_materials_may_remain: Boolean(d.report_id) }; }
   private async secrets(id: string): Promise<Secrets> { return JSON.parse(await readFile(join(this.directory(id), 'credentials.json'), 'utf8')) as Secrets; }
   private async saveSecrets(id: string, secrets: Secrets) { await atomicJSON(join(this.directory(id), 'credentials.json'), secrets); }
-  private async request<T>(path: string, method: string, controller: AbortController, body?: unknown, token?: string, artifact?: FeedbackManifest['artifacts'][number], id?: string): Promise<T> {
-    await this.requireAllowed(false); controller.signal.throwIfAborted();
+  private async request<T>(draft: StoredDraft, path: string, method: string, controller: AbortController, body?: unknown, token?: string, artifact?: FeedbackManifest['artifacts'][number], id?: string): Promise<T> {
+    this.requireTarget(draft); await this.requireAllowed(false); this.requireTarget(draft); controller.signal.throwIfAborted();
     const headers: Record<string, string> = {}; if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (artifact) { headers['Content-Type'] = artifact.content_type; headers['Content-Length'] = String(artifact.size_bytes); headers['X-Content-SHA256'] = artifact.sha256; }
     const stream = artifact && id ? createReadStream(join(this.directory(id), artifact.artifact_id)) : undefined;
     try {
-      const response = await (this.input.fetchImpl ?? fetch)(`${FEEDBACK_ORIGIN}/api/v1/feedback${path}`, { method, headers, redirect: 'error', credentials: 'omit', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]), body: stream as unknown as BodyInit ?? (body === undefined ? undefined : JSON.stringify(body)), ...(stream ? { duplex: 'half' } : {}) } as RequestInit);
+      const response = await (this.input.fetchImpl ?? fetch)(`${draft.origin}/api/v1/feedback${path}`, { method, headers, redirect: 'error', credentials: 'omit', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]), body: stream as unknown as BodyInit ?? (body === undefined ? undefined : JSON.stringify(body)), ...(stream ? { duplex: 'half' } : {}) } as RequestInit);
+      if (draft.origin !== this.synchronizeTarget()) { await response.body?.cancel(); throw new Error('FEEDBACK_TARGET_CHANGED'); }
       if (!response.ok) { const value = response.headers.get('Retry-After'); const seconds = value === null ? 0 : /^\d+$/.test(value) ? Number(value) * 1000 : Math.max(0, Date.parse(value) - Date.now()); await response.body?.cancel(); throw new UploadError(response.status, seconds); }
       const reader = response.body?.getReader(); const chunks: Uint8Array[] = []; let size = 0;
       if (!reader) throw new Error('FEEDBACK_PROTOCOL_ERROR');
       try { for (;;) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > 2 * 1024 * 1024) throw new Error('FEEDBACK_PROTOCOL_ERROR'); chunks.push(part.value); } }
       finally { await reader.cancel(); }
       try { const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { data?: T }; if (!parsed?.data || typeof parsed.data !== 'object') throw new Error(); return parsed.data; } catch { throw new Error('FEEDBACK_PROTOCOL_ERROR'); }
-    } finally { stream?.destroy(); }
+    } finally {
+      if (stream && !stream.closed) await new Promise<void>(resolve => { stream.once('close', resolve); stream.destroy(); });
+    }
   }
   private async upload(d: StoredDraft, controller: AbortController) {
     const id = d.local_feedback_id; const secrets = await this.secrets(id); const m = d.manifest!;
     d.state = 'uploading'; this.save(d);
     const update = async (p: Progress) => { d.report_id = p.report_id; d.uploaded_artifact_ids = p.received_artifact_ids; secrets.upload_token = p.upload_token ?? secrets.upload_token; secrets.upload_expires_at = p.upload_expires_at ?? secrets.upload_expires_at; secrets.recovery_expires_at = p.recovery_expires_at; d.expires_at = p.expires_at; await this.saveSecrets(id, secrets); controller.signal.throwIfAborted(); this.save(d); return p; };
     let p: Progress;
-    if (!d.report_id) p = await update(await this.request<Progress>('/reports', 'POST', controller, { client_feedback_id: d.client_feedback_id, recovery_token: secrets.recovery_token, status_token: secrets.status_token, description: d.redacted_description, occurred_at: d.occurred_at, reproduction_steps: d.redacted_steps, environment: d.environment, source_claim: {}, consent: { policy_version: 1, confirmed_at: d.consent_at }, manifest: m }));
-    else p = await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token));
+    if (!d.report_id) p = await update(await this.request<Progress>(d, '/reports', 'POST', controller, { client_feedback_id: d.client_feedback_id, recovery_token: secrets.recovery_token, status_token: secrets.status_token, description: d.redacted_description, occurred_at: d.occurred_at, reproduction_steps: d.redacted_steps, environment: d.environment, source_claim: {}, consent: { policy_version: 1, confirmed_at: d.consent_at }, manifest: m }));
+    else p = await update(await this.request<Progress>(d, `/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token));
     if (p.upload_state === 'ready') { this.submitted(d); return; }
     for (const artifact of m.artifacts) {
       if (d.uploaded_artifact_ids.includes(artifact.artifact_id)) continue;
       // 顺序上传自然满足最多两个并发，恢复时无在途请求。
-      if (Date.parse(secrets.upload_expires_at ?? '') <= Date.now()) await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token));
-      try { await this.request(`/reports/${d.report_id}/artifacts/${artifact.artifact_id}`, 'PUT', controller, undefined, secrets.upload_token, artifact, id); }
-      catch (error) { if (!(error instanceof UploadError) || error.status !== 401 || Date.parse(secrets.recovery_expires_at ?? '') <= Date.now()) throw error; await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token)); await this.request(`/reports/${d.report_id}/artifacts/${artifact.artifact_id}`, 'PUT', controller, undefined, secrets.upload_token, artifact, id); }
+      if (Date.parse(secrets.upload_expires_at ?? '') <= Date.now()) await update(await this.request<Progress>(d, `/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token));
+      try { await this.request(d, `/reports/${d.report_id}/artifacts/${artifact.artifact_id}`, 'PUT', controller, undefined, secrets.upload_token, artifact, id); }
+      catch (error) { if (!(error instanceof UploadError) || error.status !== 401 || Date.parse(secrets.recovery_expires_at ?? '') <= Date.now()) throw error; await update(await this.request<Progress>(d, `/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token)); await this.request(d, `/reports/${d.report_id}/artifacts/${artifact.artifact_id}`, 'PUT', controller, undefined, secrets.upload_token, artifact, id); }
       controller.signal.throwIfAborted(); d.uploaded_artifact_ids.push(artifact.artifact_id); this.save(d);
     }
-    const submit = () => this.request(`/reports/${d.report_id}/submit`, 'POST', controller, { manifest_sha256: d.manifest_sha256, accept_partial: d.accept_partial }, secrets.upload_token);
-    try { await submit(); } catch (error) { if (!(error instanceof UploadError) || error.status !== 401 || Date.parse(secrets.recovery_expires_at ?? '') <= Date.now()) throw error; const recovered = await update(await this.request<Progress>(`/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token)); if (recovered.upload_state !== 'ready') await submit(); }
+    const submit = () => this.request(d, `/reports/${d.report_id}/submit`, 'POST', controller, { manifest_sha256: d.manifest_sha256, accept_partial: d.accept_partial }, secrets.upload_token);
+    try { await submit(); } catch (error) { if (!(error instanceof UploadError) || error.status !== 401 || Date.parse(secrets.recovery_expires_at ?? '') <= Date.now()) throw error; const recovered = await update(await this.request<Progress>(d, `/reports/${d.report_id}/upload-credentials`, 'POST', controller, undefined, secrets.recovery_token)); if (recovered.upload_state !== 'ready') await submit(); }
     controller.signal.throwIfAborted(); this.submitted(d);
   }
   private submitted(d: StoredDraft) { d.state = 'submitted'; d.error_code = undefined; d.expires_at = new Date(Date.now() + 7 * 86400000).toISOString(); d.materials_expires_at = new Date(Date.now() + 86400000).toISOString(); this.save(d); }
   start() { if (this.closed || this.running || this.timer) return; this.timer = setTimeout(() => { this.timer = undefined; void this.work(); }, 100); this.timer.unref(); }
-  private async work() {
+  private work() { return this.track(this.runWork()); }
+  private async runWork() {
     if (this.running || this.closed) return; this.running = true;
     try {
       const drafts = (this.input.db.prepare('SELECT draft_json FROM feedback_queue').all() as Array<{ draft_json: string }>).map(row => JSON.parse(row.draft_json) as StoredDraft);
@@ -166,6 +203,7 @@ export class FeedbackService {
         }
         if (d.state === 'collecting' && !this.controllers.has(d.local_feedback_id)) { d.state = 'failed'; d.error_code = 'FEEDBACK_COLLECTION_INTERRUPTED'; d.manifest_sha256 = undefined; if (d.manifest) { d.manifest.completeness = 'partial'; d.manifest.missing_items = d.manifest.missing_items.filter(item => item !== 'collection:in_progress'); d.manifest.missing_items.push('collection:interrupted'); } this.save(d); }
         if (!['queued', 'uploading'].includes(d.state)) continue;
+        if (d.routing_version !== 2 || d.origin !== this.synchronizeTarget()) { d.state = 'failed'; d.error_code = 'FEEDBACK_TARGET_CHANGED'; this.save(d); continue; }
         if (!d.manifest?.collection_scope) { d.state = 'failed'; d.error_code = 'FEEDBACK_RECOLLECTION_REQUIRED'; this.save(d); continue; }
         if (Date.parse(d.next_retry_at ?? '') > Date.now()) continue;
         uploadAllowed ??= await this.allowed();
@@ -177,6 +215,7 @@ export class FeedbackService {
         catch (error) {
           if (this.closed || this.load(d.local_feedback_id).state === 'cancelled') continue;
           if ((error as Error).message === 'FEEDBACK_POLICY_DISABLED') continue;
+          if ((error as Error).message === 'FEEDBACK_TARGET_CHANGED') { d.state = 'failed'; d.error_code = 'FEEDBACK_TARGET_CHANGED'; this.save(d); continue; }
           const retry = (error as Error).message !== 'FEEDBACK_PROTOCOL_ERROR' && (!(error instanceof UploadError) || [408, 429].includes(error.status) || error.status >= 500);
           d.retry_count++; d.error_code = error instanceof UploadError ? error.message : 'FEEDBACK_UPLOAD_FAILED';
           d.state = retry && d.retry_count < 10 ? 'queued' : 'failed';
@@ -187,5 +226,10 @@ export class FeedbackService {
   }
   async export(id: string) { const d = this.load(id); if (!d.manifest) throw new Error('FEEDBACK_NOT_READY'); return d.manifest; }
   async artifact(id: string, aid: string) { const d = this.load(id); if (!d.manifest?.artifacts.some(a => a.artifact_id === aid)) throw new Error('FEEDBACK_NOT_FOUND'); return createReadStream(join(this.directory(id), aid)); }
-  close() { this.closed = true; if (this.timer) clearTimeout(this.timer); for (const controller of [...this.controllers.values(), ...this.statusControllers.values()]) controller.abort(); }
+  async close() {
+    this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
+    for (const controller of [...this.controllers.values(), ...this.statusControllers.values()]) controller.abort();
+    await Promise.allSettled([...this.pending]);
+  }
 }

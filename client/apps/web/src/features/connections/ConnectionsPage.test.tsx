@@ -1,5 +1,6 @@
 import type {
   CodexMcpListResponse,
+  CodexMcpServerResponse,
   EnterpriseMcpCatalogResponse,
   EnterpriseSessionResponse
 } from '@clawee/protocol';
@@ -14,6 +15,58 @@ import {
 import type { McpSettingsService } from '../settings/McpSettingsView.js';
 
 describe('ConnectionsPage', () => {
+  it.each(['not_logged_in', 'oauth'] as const)('OAuth 服务 %s 显示可用的登录、退出文字按钮', async authStatus => {
+    const user = userEvent.setup();
+    const native = nativeData();
+    native.servers[0]!.authStatus = authStatus;
+    const mcpService = createMcpService({ listServers: vi.fn(async () => native) });
+    render(<ConnectionsPage connected session={signedOutSession()} service={null}
+      mcpService={mcpService} mcpCapabilities={allCapabilities()}
+      onOpenAccount={vi.fn()} onRefreshSession={vi.fn(async () => signedOutSession())} onSessionExpired={vi.fn()} />);
+
+    const login = await screen.findByRole('button', { name: '登录 github' });
+    expect(login).toHaveTextContent('登录');
+    expect(login.querySelector('svg')).toBeNull();
+    await user.click(login);
+    expect(mcpService.loginServer).toHaveBeenCalledWith('github', false);
+    const logout = await screen.findByRole('button', { name: '退出 github' });
+    await waitFor(() => expect(logout).toBeEnabled());
+    expect(logout).toHaveTextContent('退出');
+    expect(logout.querySelector('svg')).toBeNull();
+    await user.click(logout);
+    expect(mcpService.logoutServer).toHaveBeenCalledWith('github', false);
+  });
+
+  it.each<CodexMcpServerResponse['authStatus']>(['unsupported', 'bearer_token', 'unknown', undefined])(
+    '非 OAuth 或未确认认证方式的服务 %s 隐藏登录、退出按钮',
+    async authStatus => {
+      const native = nativeData();
+      native.servers[0]!.authStatus = authStatus;
+      render(<ConnectionsPage connected session={signedOutSession()} service={null}
+        mcpService={createMcpService({ listServers: vi.fn(async () => native) })} mcpCapabilities={allCapabilities()}
+        onOpenAccount={vi.fn()} onRefreshSession={vi.fn(async () => signedOutSession())} onSessionExpired={vi.fn()} />);
+
+      await screen.findByRole('heading', { name: 'github' });
+      expect(screen.queryByRole('button', { name: '登录 github' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '退出 github' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '删除 github' })).toBeEnabled();
+    }
+  );
+
+  it('企业服务端 Agent 卡片打开时检查健康，普通 MCP 不触发健康查询', async () => {
+    const catalog = enterpriseCatalog({ name: '演示助手' });
+    catalog.upstreams[0]!.tools[0]!.upstreamName = 'clawee_submit_task';
+    const service = createEnterpriseService({
+      refreshMcpConnections: vi.fn(async () => catalog),
+      checkMcpHealth: vi.fn(async () => ({ status: 'ready' as const, message: 'Runtime 和模型配置已准备', checkedAt: '2026-10-29T06:00:00Z' }))
+    });
+    render(<ConnectionsPage connected session={signedInSession()} service={service}
+      mcpService={createMcpService()} mcpCapabilities={allCapabilities()}
+      onOpenAccount={vi.fn()} onRefreshSession={vi.fn(async () => signedInSession())} onSessionExpired={vi.fn()} />);
+    expect(await screen.findByText('Runtime 和模型配置已准备')).toBeInTheDocument();
+    expect(service.checkMcpHealth).toHaveBeenCalledExactlyOnceWith('crm-main');
+  });
+
   it('shows and toggles native Codex MCP while signed out', async () => {
     const user = userEvent.setup();
     let native = nativeData();
@@ -92,6 +145,9 @@ describe('ConnectionsPage', () => {
       .not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '安装' }))
       .not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '登录 github' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '退出 github' })).not.toBeInTheDocument();
+    expect(enterpriseService.checkMcpHealth).not.toHaveBeenCalled();
   });
 
   it('refreshes a cached enterprise catalog when the page opens', async () => {
@@ -406,10 +462,11 @@ describe('ConnectionsPage', () => {
       />
     );
 
-    expect(await screen.findByRole('button', { name: '登录 github' }))
-      .toBeDisabled();
-    expect(screen.getByRole('button', { name: '退出 github' }))
-      .toBeDisabled();
+    await screen.findByRole('heading', { name: 'github' });
+    expect(screen.queryByRole('button', { name: '登录 github' }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '退出 github' }))
+      .not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '删除 github' }))
       .toBeDisabled();
     expect(screen.getByRole('switch', { name: 'github MCP' }))
@@ -441,6 +498,7 @@ function createEnterpriseService(
   return {
     listMcpConnections: vi.fn(async () => enterpriseCatalog()),
     refreshMcpConnections: vi.fn(async () => enterpriseCatalog()),
+    checkMcpHealth: vi.fn(async () => ({ status: 'unknown' as const, message: '尚未检查', checkedAt: '2026-10-29T06:00:00Z' })),
     updateMcpPreference: vi.fn(async () => enterpriseCatalog()),
     ...overrides
   };
@@ -458,6 +516,7 @@ function nativeData(
       enabled: true,
       transport: 'http',
       status: 'configured',
+      authStatus: 'oauth',
       url: 'https://enterprise.example/mcp/servers/crm-main',
       envKeys: ['GITHUB_TOKEN'],
       hasSecrets: true,

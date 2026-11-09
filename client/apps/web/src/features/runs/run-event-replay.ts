@@ -1,319 +1,169 @@
 import type { TimelineItem } from '../../components/timeline/timeline-model.js';
+import { groupTimelineItemsByRun } from './timeline-order.js';
 
-export type RunReplayDeduper = {
-  shouldAppend(item: TimelineItem): boolean;
-};
+export type RunReplayDeduper = { shouldAppend(item: TimelineItem): boolean };
+export type HistoryMergeMode = 'latest' | 'older' | 'search';
 
-export function createRunReplayDeduper(
-  timelineItems: TimelineItem[]
-): RunReplayDeduper {
-  const existingIds = new Set(timelineItems.map(item => item.id));
-  let lastUserIndex = -1;
-  for (let index = timelineItems.length - 1; index >= 0; index -= 1) {
-    if (
-      timelineItems[index]?.kind !== 'user_message'
-      && timelineItems[index]?.kind !== 'schedule_trigger'
-    ) {
-      continue;
-    }
-    lastUserIndex = index;
-    break;
-  }
-  const latestInput = timelineItems[lastUserIndex];
-  const latestTurnItems = timelineItems.slice(
-    lastUserIndex + (latestInput?.kind === 'schedule_trigger' ? 0 : 1)
-  );
-  const remainingHistoryKeys = new Map<string, number>();
-
-  for (const item of latestTurnItems) {
+export function createRunReplayDeduper(timelineItems: TimelineItem[], runId?: string): RunReplayDeduper {
+  const existingIds = new Set(timelineItems.map(identity));
+  const remaining = new Map<string, number>();
+  for (const item of timelineItems) {
+    if (runId === undefined || item.runId !== runId || item.rawEventId !== undefined) continue;
     const key = timelineReplayMergeKey(item);
-    if (key === undefined) continue;
-    remainingHistoryKeys.set(key, (remainingHistoryKeys.get(key) ?? 0) + 1);
+    if (key !== undefined) remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
-
-  function consumeHistoryKey(item: TimelineItem): boolean {
-    const key = timelineReplayMergeKey(item);
-    if (key === undefined) return false;
-    const count = remainingHistoryKeys.get(key) ?? 0;
-    if (count === 0) return false;
-    if (count === 1) remainingHistoryKeys.delete(key);
-    else remainingHistoryKeys.set(key, count - 1);
-    return true;
-  }
-
   return {
     shouldAppend(item) {
-      if (existingIds.has(item.id)) {
-        consumeHistoryKey(item);
-        return false;
-      }
-      if (consumeHistoryKey(item)) return false;
-      existingIds.add(item.id);
+      if (item.kind === 'done') return true;
+      const key = timelineReplayMergeKey(item);
+      const count = key === undefined ? 0 : remaining.get(key) ?? 0;
+      const known = existingIds.has(identity(item));
+      if (count > 0 && key !== undefined) remaining.set(key, count - 1);
+      if (known || count > 0) return false;
+      existingIds.add(identity(item));
       return true;
     }
   };
 }
 
+function identity(item: TimelineItem): string {
+  if (item.kind === 'approval') return `approval:${item.approval.id}`;
+  if ((item.kind === 'user_message' || item.kind === 'schedule_trigger' || item.kind === 'done') && item.runId !== undefined) {
+    return `${item.kind}:${item.runId}`;
+  }
+  return `${item.runId ?? item.turnId ?? ''}:${item.kind}:${item.rawEventId ?? item.id}${toolPhase(item)}`;
+}
+
 export function mergeTimelineHistoryWithCache(
-  historyItems: TimelineItem[],
-  cachedItems: TimelineItem[]
+  historyItems: TimelineItem[], cachedItems: TimelineItem[], mode: HistoryMergeMode = 'latest'
 ): TimelineItem[] {
-  const merged = [...historyItems];
-  mergeCachedUserMessageAttachments(merged, cachedItems);
-  const historyIds = new Set(historyItems.map(item => item.id));
-  const remainingHistoryKeys = countTimelineKeys(historyItems);
-  const representedTerminalRunIds = findRepresentedTerminalRunIds(
-    cachedItems,
-    remainingHistoryKeys
-  );
-
-  function consumeHistoryKey(item: TimelineItem): boolean {
-    if (item.kind === 'done' && item.status !== 'succeeded') return false;
+  const runsByTurn = new Map([...cachedItems, ...historyItems].flatMap(item =>
+    item.turnId !== undefined && item.runId !== undefined && !item.historyOnly ? [[item.turnId, item.runId] as const] : []));
+  const normalize = (item: TimelineItem, preserveId = false): TimelineItem => {
+    const runId = item.turnId === undefined ? undefined : runsByTurn.get(item.turnId);
+    if (runId === undefined || item.runId === runId) return item;
+    if (item.kind === 'done' && item.terminalSource === 'runtime_turn') {
+      return { ...item, kind: 'run_status', label: 'finalizing', runId, historyOnly: false };
+    }
+    return {
+      ...item, runId, historyOnly: false,
+      id: preserveId || item.rawEventId === undefined ? item.id : `${runId}:${item.rawEventId}${toolPhase(item)}`
+    };
+  };
+  const history = historyItems.map(item => normalize(item));
+  const merged = cachedItems.map(item => normalize(item, true));
+  const identities = new WeakMap<TimelineItem, string>();
+  const replayKeys = new WeakMap<TimelineItem, string | undefined>();
+  const identityOf = (item: TimelineItem): string => {
+    let key = identities.get(item);
+    if (key === undefined) {
+      key = identity(item);
+      identities.set(item, key);
+    }
+    return key;
+  };
+  const replayKeyOf = (item: TimelineItem): string | undefined => {
+    if (replayKeys.has(item)) return replayKeys.get(item);
     const key = timelineReplayMergeKey(item);
-    if (key === undefined) return false;
-    return consumeKey(remainingHistoryKeys, key);
+    replayKeys.set(item, key);
+    return key;
+  };
+  const matchingIndices = new Map<string, number>();
+  const refreshMatchingIndices = () => {
+    matchingIndices.clear();
+    merged.forEach((item, index) => {
+      const key = identityOf(item);
+      if (!matchingIndices.has(key)) matchingIndices.set(key, index);
+    });
+  };
+  refreshMatchingIndices();
+  let previousId: string | undefined;
+  const usedIds = new Set<string>();
+  for (let offset = 0; offset < history.length; offset += 1) {
+    const item = history[offset]!;
+    const itemIdentity = identityOf(item);
+    let index = matchingIndices.get(itemIdentity) ?? -1;
+    if (index < 0 && item.runId !== undefined && item.rawEventId === undefined) {
+      const key = replayKeyOf(item);
+      index = merged.findIndex(existing => !usedIds.has(existing.id) && existing.rawEventId === undefined
+        && key !== undefined && replayKeyOf(existing) === key);
+    }
+    if (index >= 0) {
+      const cached = merged[index]!;
+      const stale = cached.eventSeq !== undefined && (item.eventSeq === undefined
+        ? cached.kind === 'assistant_message' && cached.messageState === 'streaming'
+        : cached.eventSeq > item.eventSeq);
+      let updated: TimelineItem = { ...cached, ...item, id: cached.id,
+        historyIds: [...new Set([...(cached.historyIds ?? []), ...(item.historyIds ?? []), item.id])] };
+      if (stale) updated = { ...updated, ...cached, historyIds: updated.historyIds };
+      if (cached.kind === 'user_message' && updated.kind === 'user_message' && item.kind === 'user_message') {
+        updated = { ...updated, attachments: item.attachments ?? cached.attachments,
+          attachmentPreviewUrls: { ...cached.attachmentPreviewUrls, ...item.attachmentPreviewUrls },
+          runStatus: cached.runStatus ?? item.runStatus };
+      }
+      merged[index] = updated;
+      refreshMatchingIndices();
+    } else {
+      let nextAnchor: number | undefined;
+      for (let next = offset + 1; next < history.length; next += 1) {
+        nextAnchor = matchingIndices.get(identityOf(history[next]!));
+        if (nextAnchor !== undefined) break;
+      }
+      const previousIndex = previousId === undefined ? -1 : merged.findIndex(existing => existing.id === previousId);
+      const sameRunStart = item.runId === undefined ? -1 : merged.findIndex(existing => existing.runId === item.runId);
+      if ((item.kind === 'user_message' || item.kind === 'schedule_trigger') && sameRunStart >= 0) index = sameRunStart;
+      else if (nextAnchor !== undefined) index = nextAnchor;
+      else if (previousIndex >= 0) index = previousIndex + 1;
+      else {
+        const time = timestamp(item);
+        const scopes = new Set<string>();
+        index = Number.isFinite(time) ? merged.findIndex(existing => {
+          const scope = existing.runId ?? existing.turnId;
+          if (scope !== undefined && scopes.has(scope)) return false;
+          if (scope !== undefined) scopes.add(scope);
+          return timestamp(existing) > time;
+        }) : -1;
+        if (index < 0) index = mode === 'older' ? 0 : merged.length;
+      }
+      merged.splice(index, 0, item);
+      refreshMatchingIndices();
+    }
+    previousId = merged[index]!.id;
+    usedIds.add(previousId);
   }
-
-  for (const item of cachedItems) {
-    if (
-      item.runId !== undefined
-      && representedTerminalRunIds.has(item.runId)
-    ) {
-      continue;
-    }
-    if (historyIds.has(item.id)) {
-      consumeHistoryKey(item);
-      continue;
-    }
-    if (consumeHistoryKey(item)) continue;
-    if (
-      item.kind === 'user_message' || item.kind === 'schedule_trigger'
-    ) {
-      const historyHasSameInput = item.runId === undefined
-        ? historyItems.some(historyItem => (
-          historyItem.kind === item.kind
-          && timelineUserInputsMatch(historyItem, item)
-        ))
-        : historyItems.some(historyItem => (
-          historyItem.kind === item.kind
-          && historyItem.runId === item.runId
-        ));
-      if (historyHasSameInput) continue;
-    }
-    merged.push(item);
-    historyIds.add(item.id);
-  }
-
-  return merged;
+  return groupTimelineItemsByRun(merged);
 }
 
-function timelineUserInputsMatch(
-  historyItem: TimelineItem,
-  cachedItem: TimelineItem
-): boolean {
-  if (historyItem.kind === 'schedule_trigger' && cachedItem.kind === 'schedule_trigger') {
-    return (
-      historyItem.prompt === cachedItem.prompt
-      && historyItem.triggeredAt === cachedItem.triggeredAt
-    );
-  }
-  if (historyItem.kind !== 'user_message' || cachedItem.kind !== 'user_message') return false;
-  const historyAttachmentIds = historyItem.attachments?.map(item => item.id) ?? [];
-  const cachedAttachmentIds = cachedItem.attachments?.map(item => item.id) ?? [];
-  if (
-    historyAttachmentIds.length > 0
-    && historyAttachmentIds.some(id => cachedAttachmentIds.includes(id))
-  ) {
-    return true;
-  }
-  return historyItem.text.trim() === cachedItem.text.trim();
+function timestamp(item: TimelineItem): number {
+  return Date.parse('timestamp' in item ? item.timestamp ?? '' : item.kind === 'schedule_trigger' ? item.triggeredAt : '');
 }
 
-function mergeCachedUserMessageAttachments(
-  historyItems: TimelineItem[],
-  cachedItems: TimelineItem[]
-): void {
-  const matchedHistoryIndexes = new Set<number>();
-  for (const cachedItem of cachedItems) {
-    if (
-      cachedItem.kind !== 'user_message'
-      || (
-        cachedItem.attachments === undefined
-        && cachedItem.attachmentPreviewUrls === undefined
-      )
-    ) {
-      continue;
-    }
-
-    let historyIndex = historyItems.findIndex((historyItem, index) => (
-      !matchedHistoryIndexes.has(index)
-      && historyItem.kind === 'user_message'
-      && historyItem.id === cachedItem.id
-    ));
-    if (historyIndex === -1 && cachedItem.runId !== undefined) {
-      historyIndex = historyItems.findIndex((historyItem, index) => (
-        !matchedHistoryIndexes.has(index)
-        && historyItem.kind === 'user_message'
-        && historyItem.runId === cachedItem.runId
-      ));
-    }
-    if (historyIndex === -1) {
-      historyIndex = historyItems.findIndex((historyItem, index) => (
-        !matchedHistoryIndexes.has(index)
-        && historyItem.kind === 'user_message'
-        && historyItem.text === cachedItem.text
-      ));
-    }
-    if (historyIndex === -1) continue;
-
-    const historyItem = historyItems[historyIndex]!;
-    if (historyItem.kind !== 'user_message') continue;
-    const attachments = historyItem.attachments ?? cachedItem.attachments;
-    const attachmentPreviewUrls = {
-      ...cachedItem.attachmentPreviewUrls,
-      ...historyItem.attachmentPreviewUrls
-    };
-    historyItems[historyIndex] = {
-      ...historyItem,
-      ...(attachments === undefined ? {} : { attachments }),
-      ...(Object.keys(attachmentPreviewUrls).length === 0
-        ? {}
-        : { attachmentPreviewUrls })
-    };
-    matchedHistoryIndexes.add(historyIndex);
-  }
+function toolPhase(item: TimelineItem): string {
+  if (item.kind !== 'tool_step') return '';
+  try { return JSON.parse(item.content).type === 'tool_result' ? ':result' : ':use'; } catch { return ''; }
 }
 
 export function timelineReplayMergeKey(item: TimelineItem): string | undefined {
+  const scope = item.runId ?? item.turnId;
+  if (scope === undefined) return undefined;
+  let key: string;
   switch (item.kind) {
-    case 'user_message':
-      return `user:${item.text}`;
-    case 'schedule_trigger':
-      return `schedule:${item.prompt}:${item.triggeredAt}`;
-    case 'assistant_message':
-      return `assistant:${item.text}`;
-    case 'reasoning_summary':
-      return `reasoning:${item.text}`;
-    case 'tool_step':
-      return toolStepMergeKey(item);
-    case 'change_card':
-      return `change:${item.title}:${item.path}:${item.delta}`;
-    case 'done':
-      return `done:${item.status}`;
-    case 'approval':
-      return `approval:${item.approval.id}`;
-    case 'diagnostic':
-    case 'run_status':
-      return undefined;
-  }
-}
-
-function findRepresentedTerminalRunIds(
-  cachedItems: TimelineItem[],
-  remainingHistoryKeys: Map<string, number>
-): Set<string> {
-  const itemsByRunId = new Map<string, TimelineItem[]>();
-  for (const item of cachedItems) {
-    if (item.runId === undefined) continue;
-    const runItems = itemsByRunId.get(item.runId) ?? [];
-    runItems.push(item);
-    itemsByRunId.set(item.runId, runItems);
-  }
-
-  const represented = new Set<string>();
-  for (const [runId, runItems] of itemsByRunId) {
-    const done = runItems.find(item => item.kind === 'done');
-    if (done?.kind !== 'done' || done.status !== 'succeeded') continue;
-    const requiredKeys = countTimelineKeys(
-      runItems,
-      timelineRunRepresentationKey
-    );
-    if (
-      requiredKeys.size === 0
-      || !canConsumeKeys(remainingHistoryKeys, requiredKeys)
-    ) {
-      continue;
+    case 'user_message': key = `user:${item.text}`; break;
+    case 'schedule_trigger': key = `schedule:${item.prompt}:${item.triggeredAt}`; break;
+    case 'assistant_message': key = `assistant:${item.text}`; break;
+    case 'reasoning_summary': key = `reasoning:${item.text}`; break;
+    case 'tool_step': {
+      try {
+        const payload = JSON.parse(item.content);
+        key = payload.type === 'tool_use' ? `use:${payload.name ?? item.name}:${JSON.stringify(payload.input)}`
+          : `result:${JSON.stringify(payload.output)}:${payload.isError ?? false}`;
+      } catch { key = `tool:${item.name}:${item.content}`; }
+      break;
     }
-    consumeKeys(remainingHistoryKeys, requiredKeys);
-    represented.add(runId);
+    case 'change_card': key = `change:${item.title}:${item.path}:${item.delta}`; break;
+    case 'done': return undefined;
+    case 'approval': return `approval:${item.approval.id}`;
+    default: return undefined;
   }
-  return represented;
-}
-
-function timelineRunRepresentationKey(item: TimelineItem): string | undefined {
-  switch (item.kind) {
-    case 'user_message':
-    case 'schedule_trigger':
-    case 'assistant_message':
-    case 'done':
-      return timelineReplayMergeKey(item);
-    case 'reasoning_summary':
-    case 'tool_step':
-    case 'change_card':
-    case 'approval':
-    case 'diagnostic':
-    case 'run_status':
-      return undefined;
-  }
-}
-
-function countTimelineKeys(
-  items: TimelineItem[],
-  getKey: (item: TimelineItem) => string | undefined = timelineReplayMergeKey
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const item of items) {
-    const key = getKey(item);
-    if (key === undefined) continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return counts;
-}
-
-function canConsumeKeys(
-  available: Map<string, number>,
-  required: Map<string, number>
-): boolean {
-  for (const [key, count] of required) {
-    if ((available.get(key) ?? 0) < count) return false;
-  }
-  return true;
-}
-
-function consumeKeys(
-  available: Map<string, number>,
-  required: Map<string, number>
-): void {
-  for (const [key, count] of required) {
-    for (let index = 0; index < count; index += 1) {
-      consumeKey(available, key);
-    }
-  }
-}
-
-function consumeKey(counts: Map<string, number>, key: string): boolean {
-  const count = counts.get(key) ?? 0;
-  if (count === 0) return false;
-  if (count === 1) counts.delete(key);
-  else counts.set(key, count - 1);
-  return true;
-}
-
-function toolStepMergeKey(item: Extract<TimelineItem, { kind: 'tool_step' }>): string {
-  try {
-    const parsed = JSON.parse(item.content) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) {
-      return `tool:${item.name}:${item.content}`;
-    }
-    const payload = parsed as Record<string, unknown>;
-    if (payload.type === 'tool_use') {
-      return `tool-use:${String(payload.name ?? item.name)}:${JSON.stringify(payload.input)}`;
-    }
-    if (payload.type === 'tool_result') {
-      return `tool-result:${JSON.stringify(payload.output)}:${String(payload.isError ?? false)}`;
-    }
-  } catch {
-    return `tool:${item.name}:${item.content}`;
-  }
-  return `tool:${item.name}:${item.content}`;
+  return `${scope}:${key}`;
 }

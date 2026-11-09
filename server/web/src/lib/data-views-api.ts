@@ -2,6 +2,7 @@ import { appApi } from "@/lib/api";
 
 export const dataViewIds = {
   agentActivity: "agent_activity",
+  skillContributions: "skill_contributions",
   xiaohongshuOperation: "xiaohongshu_operation",
   douyinAds: "douyin_ads",
   bilibiliOperation: "bilibili_operation",

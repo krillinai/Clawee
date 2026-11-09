@@ -82,10 +82,11 @@ func TestDataServiceAuditProjectionKeepsCountsWithoutSensitiveContent(t *testing
 		t.Fatalf("summary audit = %#v", summaryAudit)
 	}
 	activityAudit := ProjectProxyAudit(ProxyAuditRecord{
-		UpstreamServerID: "agent-activity", UpstreamName: "agent_detail", RequestBody: JSONMap{"agent_id": "agent-1", "range": "7d"},
-		ResponseBody: JSONMap{"data_status": "available", "generated_at": "2026-09-01T00:00:00Z", "recent_activities": []any{map[string]any{"type": "coding", "summary": "secret"}}},
+		UpstreamServerID: "agent-activity", UpstreamName: "agent_detail", RequestBody: JSONMap{"agent_id": "agent-1", "range": "7d", "employee_id": "employee-a", "include_content": true, "offset": 20, "session_id": "session"},
+		ResponseBody: JSONMap{"data_status": "available", "generated_at": "2026-09-01T00:00:00Z", "recent_activities": []any{map[string]any{"type": "coding", "summary": "secret"}},
+			"content": map[string]any{"sessions": []any{map[string]any{"turns": []any{map[string]any{"user_prompt": "secret input", "last_assistant_message": "secret output"}}}}}},
 	})
-	if activityAudit.RequestBody["agent_id"] != "agent-1" || activityAudit.ResponseBody["recent_activities"] != nil || activityAudit.ResponseBody["data_status"] != "available" {
+	if activityAudit.RequestBody["agent_id"] != "agent-1" || activityAudit.RequestBody["employee_id"] != "employee-a" || activityAudit.RequestBody["include_content"] != true || activityAudit.RequestBody["offset"] != 20 || activityAudit.ResponseBody["content"] != nil || activityAudit.ResponseBody["recent_activities"] != nil || activityAudit.ResponseBody["data_status"] != "available" {
 		t.Fatalf("activity audit = %#v", activityAudit)
 	}
 	businessAudit := ProjectProxyAudit(ProxyAuditRecord{

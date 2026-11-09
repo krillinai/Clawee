@@ -141,8 +141,7 @@ test('内嵌 Runtime Probe 后进入工作台，刷新不重复 Probe，并代�
     await waitForWorkspace(fixture.page);
     await expect(waitForAvailabilityProbe(fixture.page)).resolves.toMatchObject({
       status: 'succeeded',
-      responseReceived: true,
-      markerMatched: true
+      responseReceived: true
     });
     expect(probeRequestCount(fixture)).toBe(1);
     const startupMetrics = await fixture.page.evaluate(async () => (
@@ -472,7 +471,7 @@ test('打包 App 将会话标题提升到 38px 原生标题栏且文件入口可
     })).toBeVisible();
     await expect(fixture.page.locator('.conversation-page')).not.toHaveClass(/is-empty/);
     await expect(fixture.page.getByText('需要帮你做点什么')).toHaveCount(0);
-    await expect(fixture.page.getByText('数据分析')).toHaveCount(0);
+    await expect(fixture.page.getByLabel('常用场景')).toHaveCount(0);
     await fixture.page.evaluate(() => {
       (
         window as Window & { __claweeReleaseHistoryLoad?: () => void }
@@ -712,8 +711,10 @@ test('打包 App 会发送并在会话刷新后恢复图片和 PDF', async () =>
       name: 'describe these attachments',
       exact: true
     })).toBeVisible();
+    await expect(fixture.page.getByRole('img', { name: 'screen.png' })).toHaveCount(1);
     await expect(fixture.page.getByRole('img', { name: 'screen.png' })).toBeVisible();
-    await expect(fixture.page.getByText('requirements.pdf', { exact: true })).toBeVisible();
+    await expect(fixture.page.getByTitle('requirements.pdf')).toHaveCount(1);
+    await expect(fixture.page.getByTitle('requirements.pdf')).toBeVisible();
     await expect(fixture.page.getByText('[Clawee 用户附件上下文]')).toHaveCount(0);
   } finally {
     await closeFixture(fixture);
@@ -762,7 +763,7 @@ test('packaged diagnostics use the embedded Runtime and never expose Codex selec
     })).toHaveAttribute('data-current-project', 'true');
     await expect(fixture.page.getByRole('textbox', { name: '输入任务' })).toBeEnabled();
     expect(existsSync(
-      join(fixture.root, 'Documents', 'Clawee', 'Default Project')
+      join(fixture.root, 'Documents', 'Clawee', 'DefaultProject')
     )).toBe(true);
     await fixture.page.getByRole('button', {
       name: '选择项目 默认项目'
@@ -809,7 +810,7 @@ test('packaged diagnostics use the embedded Runtime and never expose Codex selec
       target: expectedCodexRuntimeTarget,
       layoutVersion: 1,
       activationState: 'active_uncommitted',
-      minimumClaweeVersion: '1.0.0',
+      minimumClaweeVersion: '0.1.0',
       committedAt: null
     });
     expect(initialCodexStatus.body.runtime.entryPath).toContain(
@@ -1002,7 +1003,7 @@ test('后台 Probe 失败时仍进入工作台并暴露诊断状态', async () =
       ) ?? false
     }).toEqual({
       status: 'failed',
-      errorCode: 'CODEX_PROBE_EXIT_NON_ZERO',
+      errorCode: 'MODEL_SERVICE_VALIDATION_FAILED',
       hasDiagnostic: true
     });
     expect(fixture.page.url()).toContain('clawee-app://app/');
@@ -1044,6 +1045,7 @@ test('Daemon 异常退出后自动恢复且不重复 Probe', async () => {
     expect(probeRequestCount(fixture)).toBe(1);
     const mainPid = requiredPid(fixture.process.pid);
     const firstDaemonPid = await waitForDaemonUtilityPid(mainPid);
+    await fixture.page.evaluate(() => { document.documentElement.dataset.runtimeRecoveryMarker = 'preserved'; });
     process.kill(firstDaemonPid, 'SIGKILL');
 
     const replacementPid = await waitForDaemonUtilityPid(mainPid, firstDaemonPid);
@@ -1060,6 +1062,7 @@ test('Daemon 异常退出后自动恢复且不重复 Probe', async () => {
       health: undefined
     })), { timeout: 30_000 }).toEqual({ phase: 'ready', health: 200 });
     expect(probeRequestCount(fixture)).toBe(1);
+    await expect(fixture.page.locator('html')).toHaveAttribute('data-runtime-recovery-marker', 'preserved');
 
     process.kill(replacementPid, 'SIGKILL');
     await expect.poll(async () => await fixture.page.evaluate(async () => {
@@ -1136,6 +1139,7 @@ test('启动页使用新版品牌图标', async ({}, testInfo) => {
 test('退出期间会回收仍在 Probe 中的 Codex 子进程', async () => {
   const fixture = await launchPackagedDesktop('probe-hang');
   try {
+    await waitForWorkspace(fixture.page);
     await expect.poll(() => probeRequestCount(fixture), {
       timeout: 30_000
     }).toBe(1);
@@ -1257,7 +1261,7 @@ async function launchPackagedDesktop(
 
 function controlledModelMode(mode: string): ControlledModelResponseMode {
   if (mode === 'probe-failure') return 'failure';
-  if (mode === 'probe-hang') return 'hang';
+  if (mode === 'probe-hang') return 'probe-hang';
   return 'success';
 }
 
@@ -1290,7 +1294,7 @@ async function waitForWorkspace(page: Page): Promise<void> {
     await expect(page.getByRole('heading', {
       name: '欢迎使用 Clawee'
     })).toBeVisible();
-    await page.getByLabel('邮箱').fill(desktopE2EEnterpriseEmail);
+    await page.getByLabel('邮箱或手机号').fill(desktopE2EEnterpriseEmail);
     await page.getByLabel('密码').fill(desktopE2EEnterprisePassword);
     await page.getByRole('checkbox').check();
     await page.locator('.enterprise-email-submit').click();

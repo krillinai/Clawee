@@ -18,6 +18,7 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { ApiClientError } from '../../runtime/errors.js';
 
 export type ProfileSettingsService = {
@@ -49,6 +50,7 @@ export function ProfileSettingsView(props: {
   const [editor, setEditor] = useState<ProfileEditorState>();
   const [saving, setSaving] = useState(false);
   const [busyName, setBusyName] = useState<string>();
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   useEffect(() => {
     setData(props.data);
@@ -107,7 +109,7 @@ export function ProfileSettingsView(props: {
 
   async function deleteProfile(profile: CodexProfileResponse) {
     if (props.service === null) return;
-    if (!(props.confirmDelete?.(profile) ?? window.confirm(`删除 Profile ${profile.name}？`))) return;
+    if (!(props.confirmDelete?.(profile) ?? await confirm({ title: '删除 Profile', description: `删除 Profile ${profile.name}？`, confirmLabel: '删除', destructive: true }))) return;
     setBusyName(profile.name);
     setError(undefined);
     try {
@@ -235,6 +237,7 @@ export function ProfileSettingsView(props: {
           })}
         </ul>
       )}
+      {confirmDialog}
     </section>
   );
 }
@@ -326,6 +329,7 @@ function ProfileEditor(props: {
             <option value="medium">中</option>
             <option value="high">高</option>
             <option value="xhigh">超高</option>
+            <option value="max">最高</option>
           </select>
         </label>
         <label>

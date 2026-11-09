@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../runtime/types.js';
+import type { DesktopUpdateState } from '@clawee/protocol';
 import type {
   DesktopPlatform,
   HostBridge,
@@ -8,10 +9,22 @@ import type {
 } from './bridge.js';
 
 type DesktopApi = {
+  reportIncident?(observation: import('@clawee/protocol').IncidentObservation): Promise<void>;
+  readUpdateState?(): Promise<DesktopUpdateState>;
+  subscribeUpdateState?(listener: (state: DesktopUpdateState) => void): () => void;
+  checkForUpdates?(): Promise<HostBridgeResult>;
+  deferUpdate?(): Promise<HostBridgeResult>;
+  acknowledgeUpdateQuiescence?(updateId: string, busy?: boolean): Promise<void>;
+  downloadUpdate?(): Promise<HostBridgeResult>;
+  installUpdate?(): Promise<HostBridgeResult>;
+  testUpdate?(simulatedVersion: string): Promise<HostBridgeResult>;
+  cancelUpdateTest?(): Promise<HostBridgeResult>;
   collectFeedback?(threadId: string): Promise<import('@clawee/protocol').DesktopFeedbackSnapshot>;
   exportEmergencyFeedback?(description: string, screenshots?: import('@clawee/protocol').EmergencyFeedbackScreenshot[]): Promise<HostBridgeResult>;
+  exportDiagnostics?(): Promise<HostBridgeResult>;
   kind: 'desktop';
   platform: DesktopPlatform;
+  installationDirectory?: string | null;
   windowChrome?: {
     integratedTitleBar: boolean;
     titleBarHeight?: number;
@@ -35,8 +48,10 @@ type DesktopApi = {
   selectProjectDirectory(
     purpose?: ProjectDirectorySelectionPurpose
   ): Promise<string | null>;
+  selectContextDirectory?(): Promise<string | null>;
   resolveDroppedFilePath(file: File): string | null;
   openExternal(url: string): Promise<void>;
+  openFile?(path: string): Promise<HostBridgeResult>;
   revealPath(path: string): Promise<HostBridgeResult>;
   notify(message: HostNotification): Promise<void>;
   configureBackgroundNotifications(
@@ -78,20 +93,43 @@ export function readDesktopHostBridge(): DesktopHostBridge | undefined {
   return {
     kind: 'desktop',
     platform: api.platform,
+    ...(api.installationDirectory === undefined ? {} : { installationDirectory: api.installationDirectory }),
     ...(windowChrome === undefined ? {} : { windowChrome }),
     readConnectionConfig: () => api.readConnectionConfig(),
+    ...(api.deferUpdate ? { deferUpdate: () => api.deferUpdate!() } : {}),
+    ...(api.testUpdate && api.cancelUpdateTest ? {
+      testUpdate: (version: string) => api.testUpdate!(version),
+      cancelUpdateTest: () => api.cancelUpdateTest!()
+    } : {}),
+    ...(api.acknowledgeUpdateQuiescence ? { acknowledgeUpdateQuiescence: (id: string, busy?: boolean) => api.acknowledgeUpdateQuiescence!(id, busy) } : {}),
     subscribeConnectionConfig: listener => api.subscribeConnectionConfig(listener),
     restartRuntime: () => api.restartRuntime(),
+    ...(api.exportDiagnostics === undefined ? {} : {
+      exportDiagnostics: () => api.exportDiagnostics!()
+    }),
     readDesktopPreferences: () => api.readDesktopPreferences(),
     updateDesktopPreferences: preferences =>
       api.updateDesktopPreferences(preferences),
     selectProjectDirectory: purpose => api.selectProjectDirectory(purpose),
+    ...(api.selectContextDirectory === undefined ? {} : {
+      selectContextDirectory: () => api.selectContextDirectory!()
+    }),
     resolveDroppedFilePath: file => api.resolveDroppedFilePath(file),
     openExternal: url => api.openExternal(url),
+    ...(api.openFile === undefined ? {} : { openFile: (path: string) => api.openFile!(path) }),
     revealPath: path => api.revealPath(path),
     notify: message => api.notify(message),
     configureBackgroundNotifications: configuration =>
-      api.configureBackgroundNotifications(configuration)
+      api.configureBackgroundNotifications(configuration),
+    ...(api.readUpdateState && api.subscribeUpdateState && api.checkForUpdates && api.downloadUpdate && api.installUpdate
+      ? {
+          readUpdateState: () => api.readUpdateState!(),
+          subscribeUpdateState: (listener: (state: DesktopUpdateState) => void) => api.subscribeUpdateState!(listener),
+          checkForUpdates: () => api.checkForUpdates!(),
+          downloadUpdate: () => api.downloadUpdate!(),
+          installUpdate: () => api.installUpdate!()
+        }
+      : {})
   };
 }
 

@@ -218,6 +218,7 @@ function createSessionManager(): EnterpriseSessionManager {
       transportSecurity: 'secure_https' as const
     })),
     refresh: vi.fn(),
+    renew: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),

@@ -30,7 +30,7 @@ import (
 
 func TestLegacySkillHubRoutesAreRemoved(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{AccountService: accountService, SkillHubService: skillService})
 
 	for _, path := range []string{
@@ -80,7 +80,7 @@ func TestSkillSourceRoutesEnforcePermissionsAndSupportLifecycle(t *testing.T) {
 	}
 	skillStore := skillhub.NewMemoryStore()
 	sourceStore := skillhub.NewMemorySourceStore(skillStore)
-	skillService := skillhub.NewService(skillhub.Config{Store: skillStore, PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillStore, PackageRoot: t.TempDir()})
 	sourceService := skillhub.NewGitHubSourceService(skillhub.GitHubSourceServiceConfig{
 		Store: sourceStore, TokenCipher: sourceHTTPTestCipher{},
 	})
@@ -294,7 +294,7 @@ func sourceJSONRequest(t *testing.T, router http.Handler, method, path, body str
 
 func TestSkillHubUploadStoresCreatorNameSnapshot(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService,
 	})
@@ -308,7 +308,7 @@ func TestSkillHubUploadStoresCreatorNameSnapshot(t *testing.T) {
 }
 
 func TestLegacySkillHubDynamicRoutesNotFound(t *testing.T) {
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -331,7 +331,7 @@ func TestLegacySkillHubDynamicRoutesNotFound(t *testing.T) {
 
 func TestSkillHubCurrentVersionMutationsRejectQueryOnlySkillID(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestSkillHubCurrentVersionMutationsRejectQueryOnlySkillID(t *testing.T) {
 
 func TestSkillHubRoutesEnforceAuthenticationAndSupportPublishFlow(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 
 	recorder := httptest.NewRecorder()
@@ -489,7 +489,7 @@ func TestSkillHubRoutesEnforceAuthenticationAndSupportPublishFlow(t *testing.T) 
 
 func TestSkillHubAdminVersionFilesPreviewAndPackageRoutes(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 
@@ -566,9 +566,61 @@ func TestSkillHubAdminVersionFilesPreviewAndPackageRoutes(t *testing.T) {
 	}
 }
 
+func TestSkillHubAdminPackageRequiresDownloadPermission(t *testing.T) {
+	ctx := context.Background()
+	accountService := newTestAccountService(accounts.NewMemoryStore())
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountService})
+	if err := rbacService.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	router := newTestRouter(t, server.Options{
+		AccountService: accountService, RBACService: rbacService, SkillHubService: service,
+		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()),
+	})
+	adminCookies := register(t, router, `{"email":"download-admin@example.com","password":"passw0rd!"}`)
+	readerCookies := register(t, router, `{"email":"download-reader@example.com","password":"passw0rd!"}`)
+	readerID := nestedString(t, doJSON(t, router, http.MethodGet, "/api/v1/auth/me", "", readerCookies, http.StatusOK), "data", "account", "user_id")
+	role := doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/roles", `{"code":"skill_download_reader","name":"技能查看员","permission_codes":["console:skill:read"]}`, adminCookies, http.StatusCreated)
+	roleID := nestedString(t, role, "data", "role_id")
+	doJSON(t, router, http.MethodPost, "/api/v1/admin/rbac/account-roles", `{"user_id":"`+readerID+`","role_id":"`+roleID+`"}`, adminCookies, http.StatusCreated)
+	readerCookies = loginCookies(t, router, `{"email":"download-reader@example.com","password":"passw0rd!"}`)
+	space, err := service.CreateSpace(ctx, "下载权限验证", "", readerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.UploadVersion(ctx, skillhub.UploadVersionInput{
+		SpaceID: space.SpaceID, Version: "1.0.0", Package: bytes.NewReader(skillPackage(t)), CreatedBy: readerID, UploadedByUserID: readerID, Origin: "admin_upload",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "?skill_id=" + created.Skill.SkillID + "&version_id=" + created.Version.VersionID
+	doJSON(t, router, http.MethodGet, "/api/v1/admin/skills/detail"+query, "", readerCookies, http.StatusOK)
+	download := func(cookies []*http.Cookie) *httptest.ResponseRecorder {
+		return sourceJSONRequest(t, router, http.MethodGet, "/api/v1/admin/skills/version-package"+query, "", cookies)
+	}
+	assertSkillError(t, download(nil), http.StatusUnauthorized, "unauthorized")
+	assertSkillError(t, download(readerCookies), http.StatusForbidden, "forbidden")
+
+	for _, permissionCodes := range []string{
+		`["console:skill:read","console:skill:download"]`,
+		`["console:skill:manage"]`,
+	} {
+		doJSON(t, router, http.MethodPut, "/api/v1/admin/rbac/roles", `{"role_id":"`+roleID+`","name":"技能下载员","permission_codes":`+permissionCodes+`}`, adminCookies, http.StatusOK)
+		response := download(readerCookies)
+		packageSHA256 := sha256.Sum256(response.Body.Bytes())
+		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/zip" || created.Version.PackageSHA256 != hex.EncodeToString(packageSHA256[:]) {
+			t.Fatalf("download permissions=%s status=%d content-type=%q", permissionCodes, response.Code, response.Header().Get("Content-Type"))
+		}
+	}
+	doJSON(t, router, http.MethodPut, "/api/v1/admin/rbac/roles", `{"role_id":"`+roleID+`","name":"技能查看员","permission_codes":["console:skill:read"]}`, adminCookies, http.StatusOK)
+	assertSkillError(t, download(readerCookies), http.StatusForbidden, "forbidden")
+}
+
 func TestSkillHubAdminVersionRoutesRejectForeignVersion(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	firstData := skillPackageNamed(t, "first")
@@ -589,10 +641,58 @@ func TestSkillHubAdminVersionRoutesRejectForeignVersion(t *testing.T) {
 	assertSkillError(t, recorder, http.StatusNotFound, "not_found")
 }
 
+func TestSkillHubMissingStoredPackageReturnsNotFound(t *testing.T) {
+	accountService := newTestAccountService(accounts.NewMemoryStore())
+	packageRoot := t.TempDir()
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: packageRoot})
+	core, observed := observer.New(zap.WarnLevel)
+	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService, Logger: zap.New(core)})
+	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
+	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(packageRoot, created.Version.PackagePath)); err != nil {
+		t.Fatal(err)
+	}
+	query := "?skill_id=" + created.Skill.SkillID + "&version_id=" + created.Version.VersionID
+	for _, path := range []string{
+		"/api/v1/admin/skills/version-files" + query,
+		"/api/v1/admin/skills/version-file" + query + "&path=SKILL.md",
+		"/api/v1/admin/skills/version-package" + query,
+		"/api/v1/app/skills/version-files" + query,
+		"/api/v1/app/skills/version-file" + query + "&path=SKILL.md",
+		"/api/v1/app/skills/package" + query,
+	} {
+		t.Run(path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			for _, cookie := range adminCookies {
+				request.AddCookie(cookie)
+			}
+			router.ServeHTTP(recorder, request)
+			assertSkillError(t, recorder, http.StatusNotFound, "skill_package_missing")
+			if bytes.Contains(recorder.Body.Bytes(), []byte(packageRoot)) {
+				t.Fatalf("response exposes package root: %s", recorder.Body.String())
+			}
+		})
+	}
+	entries := observed.FilterMessage("api error response").All()
+	if len(entries) != 6 {
+		t.Fatalf("error log count = %d, want 6", len(entries))
+	}
+	for _, entry := range entries {
+		message, _ := entry.ContextMap()["errors"].(string)
+		if !strings.Contains(message, created.Version.PackagePath) || !strings.Contains(message, "no such file or directory") {
+			t.Fatalf("error log does not explain missing package: %q", message)
+		}
+	}
+}
+
 func TestSkillHubStoredPackageCorruptionReturnsInternalError(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	packageRoot := t.TempDir()
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: packageRoot})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: packageRoot})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	created, err := uploadApprovedVersionForTest(skillService, context.Background(), skillhub.UploadVersionInput{Version: "1", Package: bytes.NewReader(skillPackage(t)), CreatedBy: "admin"})
@@ -607,12 +707,12 @@ func TestSkillHubStoredPackageCorruptionReturnsInternalError(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/skills/version-files?skill_id="+created.Skill.SkillID+"&version_id="+created.Version.VersionID, nil)
 	request.AddCookie(adminCookie(t, adminCookies))
 	router.ServeHTTP(recorder, request)
-	assertSkillError(t, recorder, http.StatusInternalServerError, "internal_error")
+	assertSkillError(t, recorder, http.StatusInternalServerError, "skill_package_invalid")
 }
 
 func TestSkillHubLaterLowerVersionUploadBecomesPublishedDefault(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	userCookies := register(t, router, `{"email":"user@example.com","password":"passw0rd!"}`)
@@ -648,7 +748,7 @@ func TestSkillHubLaterLowerVersionUploadBecomesPublishedDefault(t *testing.T) {
 
 func TestSkillHubUploadRejectsUnexpectedMultipartFields(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	body, contentType := skillUploadBody(t, map[string]string{"version": "1.0", "unexpected": "value"}, true)
@@ -668,7 +768,7 @@ func TestSkillHubReplacementAndUnpublishedDeletion(t *testing.T) {
 	if err := rbacService.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
-	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, RBACService: rbacService, SkillHubService: service})
 	cookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	original := uploadApprovedSkillVersion(t, router, adminCookie(t, cookies), "1", skillPackageNamed(t, "original"))
@@ -717,7 +817,7 @@ func TestSkillHubReplacementAndUnpublishedDeletion(t *testing.T) {
 
 func TestSkillHubUploadAcceptsSingleWrapperDirectory(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 
@@ -752,7 +852,7 @@ func TestSkillHubUploadAcceptsSingleWrapperDirectory(t *testing.T) {
 
 func TestSkillHubUploadNormalizesMacOSMetadata(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 	admin := adminCookie(t, adminCookies)
@@ -810,7 +910,7 @@ func TestSkillHubUploadNormalizesMacOSMetadata(t *testing.T) {
 
 func TestSkillHubUploadReturnsDetailedPackageValidationError(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService})
 	adminCookies := register(t, router, `{"email":"admin@example.com","password":"passw0rd!"}`)
 
@@ -840,7 +940,7 @@ func TestSkillHubUploadReturnsDetailedPackageValidationError(t *testing.T) {
 func TestSkillHubOperationLogRecordsDownloadFailure(t *testing.T) {
 	core, observed := observer.New(zap.InfoLevel)
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService,
 		SkillHubService: skillService, Logger: zap.New(core),
@@ -866,7 +966,7 @@ func TestSkillHubOperationLogRecordsDownloadFailure(t *testing.T) {
 func TestSkillHubOperationLogRecordsSuccessfulUploadIdentifiers(t *testing.T) {
 	core, observed := observer.New(zap.InfoLevel)
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService,
 		SkillHubService: skillService, Logger: zap.New(core),
@@ -900,7 +1000,7 @@ func TestSkillHubOperationLogRecordsSuccessfulUploadIdentifiers(t *testing.T) {
 func TestSkillHubOperationLogRecordsClearedVersionIdentifiers(t *testing.T) {
 	core, observed := observer.New(zap.InfoLevel)
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService,
 		SkillHubService: skillService, Logger: zap.New(core),
@@ -952,7 +1052,7 @@ func TestSkillHubOperationLogRecordsClearedVersionIdentifiers(t *testing.T) {
 
 func TestSkillHubAuthenticationStoreFailureReturnsInternalError(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	skillService := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	skillService := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, SkillHubService: skillService,
 	})

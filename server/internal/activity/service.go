@@ -12,17 +12,24 @@ type Service struct {
 	client        SnapshotClient
 	store         ActivityStore
 	mcpUsageStore MCPUsageStore
+	accountNames  AccountNameLoader
 	timezone      string
 	location      *time.Location
 	clock         func() time.Time
 }
 
-func NewService(client SnapshotClient, store ActivityStore, mcpUsageStore MCPUsageStore, timezone string) (*Service, error) {
+type AccountNameLoader func(context.Context) ([]string, error)
+
+func NewService(client SnapshotClient, store ActivityStore, mcpUsageStore MCPUsageStore, timezone string, accountNames ...AccountNameLoader) (*Service, error) {
 	location, err := time.LoadLocation(strings.TrimSpace(timezone))
 	if err != nil {
 		return nil, err
 	}
-	return &Service{client: client, store: store, mcpUsageStore: mcpUsageStore, timezone: strings.TrimSpace(timezone), location: location, clock: time.Now}, nil
+	var accountNameLoader AccountNameLoader
+	if len(accountNames) > 0 {
+		accountNameLoader = accountNames[0]
+	}
+	return &Service{client: client, store: store, mcpUsageStore: mcpUsageStore, accountNames: accountNameLoader, timezone: strings.TrimSpace(timezone), location: location, clock: time.Now}, nil
 }
 
 func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statistics, error) {
@@ -52,12 +59,16 @@ func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statis
 	if activity.SkillUsage == nil {
 		activity.SkillUsage = []SkillUsage{}
 	}
+	if activity.EmployeeSkillUsage == nil {
+		activity.EmployeeSkillUsage = []EmployeeSkillUsage{}
+	}
 	empty := Statistics{
 		Range: r.Range, Timezone: r.Timezone, StartDate: request.StartDate, EndDate: request.EndDate,
 		GeneratedAt: r.GeneratedAt,
 		Organization: Organization{Usage: Usage{}, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents,
-			CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage,
-			SkillContributions: activity.SkillContributions, SkillUsageTotals: activity.SkillUsageTotals},
+			PlatformActivity: activity.PlatformActivity,
+			CompletedTurns:   activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage,
+			EmployeeSkillUsage: activity.EmployeeSkillUsage, SkillContributions: activity.SkillContributions, SkillUsageTotals: activity.SkillUsageTotals},
 		Trend: Trend{Granularity: r.Granularity, Points: []TrendPoint{}}, ModelDistribution: []ModelUsage{}, TokenUsageRanking: []TokenUsageRank{},
 		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": "not_configured", "activity": "available"},
 	}
@@ -88,13 +99,39 @@ func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statis
 	if snapshot.TokenUsageRanking == nil {
 		snapshot.TokenUsageRanking = []TokenUsageRank{}
 	}
+	if s.accountNames != nil {
+		accountNames, err := s.accountNames(ctx)
+		if err != nil {
+			empty.DataStatus["model_usage"] = "unavailable"
+			return empty, nil
+		}
+		snapshot.TokenUsageRanking = filterTokenUsageRanking(snapshot.TokenUsageRanking, accountNames)
+	}
 	return Statistics{
 		Range: r.Range, Timezone: r.Timezone, StartDate: request.StartDate, EndDate: request.EndDate,
 		GeneratedAt:  snapshot.GeneratedAt,
-		Organization: Organization{Usage: usage, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents, CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage, SkillContributions: activity.SkillContributions, SkillUsageTotals: activity.SkillUsageTotals},
+		Organization: Organization{Usage: usage, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents, PlatformActivity: activity.PlatformActivity, CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage, EmployeeSkillUsage: activity.EmployeeSkillUsage, SkillContributions: activity.SkillContributions, SkillUsageTotals: activity.SkillUsageTotals},
 		Trend:        Trend{Granularity: r.Granularity, Points: points}, ModelDistribution: snapshot.Models, TokenUsageRanking: snapshot.TokenUsageRanking,
 		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": "available", "activity": "available"},
 	}, nil
+}
+
+func filterTokenUsageRanking(ranking []TokenUsageRank, accountNames []string) []TokenUsageRank {
+	allowed := make(map[string]struct{}, len(accountNames))
+	for _, name := range accountNames {
+		if name = strings.TrimSpace(name); name != "" {
+			allowed[name] = struct{}{}
+		}
+	}
+	filtered := make([]TokenUsageRank, 0, len(ranking))
+	for _, item := range ranking {
+		if _, ok := allowed[strings.TrimSpace(item.Name)]; !ok {
+			continue
+		}
+		item.Rank = len(filtered) + 1
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func (s *Service) DateRange(requestedRange string) (DateRange, error) {
@@ -125,18 +162,23 @@ func (s *Service) Agents(ctx context.Context, input AgentListRequest) (AgentList
 	if input.Limit == 0 {
 		input.Limit = 10
 	}
-	if input.Limit < 1 || input.Limit > 20 || (input.SortBy != SortByTurnCount && input.SortBy != SortBySessionCount && input.SortBy != SortByLastActivityAt) {
+	if input.Limit < 1 || input.Limit > 20 || input.Offset < 0 || (input.SortBy != SortByTurnCount && input.SortBy != SortBySessionCount && input.SortBy != SortByLastActivityAt) {
 		return AgentListResult{}, ErrInvalidAgentList
 	}
 	statistics, err := s.Statistics(ctx, input.Range)
 	if err != nil {
 		return AgentListResult{}, err
 	}
-	byID := make(map[string]AgentListItem, len(statistics.Agents))
+	type agentKey struct{ employeeID, agentID string }
+	byID := make(map[agentKey]AgentListItem, len(statistics.Agents))
 	for _, agent := range statistics.Agents {
-		item := byID[agent.AgentID]
+		if input.EmployeeID != "" && agent.EmployeeID != input.EmployeeID {
+			continue
+		}
+		key := agentKey{agent.EmployeeID, agent.AgentID}
+		item := byID[key]
 		if item.AgentID == "" {
-			item = AgentListItem{AgentID: agent.AgentID, Name: agent.Name, Status: agent.Status}
+			item = AgentListItem{AgentID: agent.AgentID, Name: agent.Name, Status: agent.Status, EmployeeID: agent.EmployeeID, EmployeeName: agent.EmployeeName}
 		}
 		item.SessionCount += agent.SessionCount
 		item.TurnCount += agent.TurnCount
@@ -146,7 +188,7 @@ func (s *Service) Agents(ctx context.Context, input AgentListRequest) (AgentList
 			item.Name = agent.Name
 			item.Status = agent.Status
 		}
-		byID[agent.AgentID] = item
+		byID[key] = item
 	}
 	agents := make([]AgentListItem, 0, len(byID))
 	for _, item := range byID {
@@ -176,17 +218,27 @@ func (s *Service) Agents(ctx context.Context, input AgentListRequest) (AgentList
 				return left.TurnCount > right.TurnCount
 			}
 		}
-		return left.AgentID < right.AgentID
+		if left.AgentID != right.AgentID {
+			return left.AgentID < right.AgentID
+		}
+		return left.EmployeeID < right.EmployeeID
 	})
-	if len(agents) > input.Limit {
-		agents = agents[:input.Limit]
-	}
 	for index := range agents {
 		agents[index].Rank = index + 1
+	}
+	total := len(agents)
+	start := min(input.Offset, total)
+	agents = agents[start : start+min(input.Limit, total-start)]
+	hasMore := input.Offset < total && len(agents) < total-input.Offset
+	var nextOffset *int
+	if hasMore {
+		next := input.Offset + len(agents)
+		nextOffset = &next
 	}
 	return AgentListResult{
 		Range: statistics.Range, Timezone: statistics.Timezone, StartDate: statistics.StartDate, EndDate: statistics.EndDate,
 		GeneratedAt: statistics.GeneratedAt, SortBy: input.SortBy, Agents: agents, DataStatus: statistics.DataStatus,
+		Total: total, Limit: input.Limit, Offset: input.Offset, HasMore: hasMore, NextOffset: nextOffset,
 	}, nil
 }
 

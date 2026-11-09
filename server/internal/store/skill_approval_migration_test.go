@@ -42,10 +42,11 @@ INSERT INTO skill_versions(version_id,skill_id,version,description,package_path,
 VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),now(),'legacy','approved','skillspace_default','writer',now());`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.UpTo(ctx, 64); err != nil {
+	execSkillRoleSQL(t, pool, `UPDATE skills SET current_version_id='legacy-v1' WHERE skill_id='legacy'`)
+	if _, err = provider.UpTo(ctx, 77); err != nil {
 		t.Fatal(err)
 	}
-	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: t.TempDir()})
+	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewPostgresStore(pool), PackageRoot: materializeSkillPackages(t, pool)})
 	for _, id := range []string{"reviewer", "second"} {
 		if _, err = service.SetSpaceMember(ctx, skillhub.DefaultSpaceID, id, []string{skillhub.SpaceActionRead}, "writer", false); err != nil {
 			t.Fatal(err)
@@ -62,8 +63,8 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("无效旧批准发布: %v", err)
 	}
-	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v1"); err != nil {
-		t.Fatalf("有效旧批准发布: %v", err)
+	if _, err = service.GetPublished(ctx, "legacy"); err != nil {
+		t.Fatalf("保留旧已发布版本: %v", err)
 	}
 	count, err := service.SetSpaceApprovers(ctx, skillhub.DefaultSpaceID, "local", "", []string{"reviewer", "second"}, false, "writer")
 	if err != nil || count != 1 {
@@ -72,13 +73,13 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceApprovers(ctx, skillhub.DefaultSpaceID, "local", "", []string{"reviewer", "second"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, pool, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("部分批准发布: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, pool, "legacy", "legacy-v2", "second", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {
@@ -100,7 +101,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("迁移后旧批准发布: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "second", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, pool, "legacy", "legacy-v2", "second", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {
@@ -125,7 +126,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); !errors.Is(err, skillhub.ErrApprovalRequired) {
 		t.Fatalf("撤销后复用旧批准: %v", err)
 	}
-	if _, err = service.ReviewVersion(ctx, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
+	if _, err = reviewVersionForTest(service, ctx, pool, "legacy", "legacy-v2", "reviewer", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetCurrentVersion(ctx, "legacy", "legacy-v2"); err != nil {
@@ -151,7 +152,7 @@ VALUES ('legacy-v2','legacy','2','不可信旧结论','v2.zip',repeat('b',64),no
 	if _, err = service.SetSpaceApprovers(ctx, target.SpaceID, "local", "", []string{"reviewer"}, true, "writer"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = provider.Down(ctx); err != nil {
+	if _, err = provider.DownTo(ctx, 63); err != nil {
 		t.Fatal(err)
 	}
 	var restored string

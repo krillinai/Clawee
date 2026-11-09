@@ -23,7 +23,9 @@ type postgresRunner interface {
 }
 
 type PostgresStore struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	IdentityDeleted  func(context.Context, pgx.Tx, string, string, string) error
+	IdentityInserted func(context.Context, pgx.Tx, AccountIdentity) error
 }
 
 type postgresTxStore struct {
@@ -158,11 +160,38 @@ func (s *PostgresStore) SaveAccountAvatarIfMissing(ctx context.Context, userID s
 }
 
 func (s *PostgresStore) GetAccount(ctx context.Context, userID string) (Account, error) {
-	return getAccount(ctx, s.runner(ctx), `WHERE user_id = $1`, userID)
+	where := `WHERE user_id = $1`
+	if _, transactional := ctx.Value(postgresTxKey{}).(*postgresTxStore); transactional {
+		where += ` FOR UPDATE`
+	}
+	return getAccount(ctx, s.runner(ctx), where, userID)
 }
 
 func (s *PostgresStore) GetAccountByEmail(ctx context.Context, email string) (Account, error) {
 	return getAccount(ctx, s.runner(ctx), `WHERE email = $1`, email)
+}
+
+func (s *PostgresStore) GetAccountByPhone(ctx context.Context, phone string) (Account, error) {
+	return getAccount(ctx, s.runner(ctx), `WHERE phone = $1`, phone)
+}
+
+func (s *PostgresStore) UpdateExternalAccountProfile(ctx context.Context, userID, phone, name string, updatedAt time.Time) (Account, error) {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return Account{}, ErrPostgresStoreUnavailable
+	}
+	account, err := scanAccount(runner.QueryRow(ctx, `
+		UPDATE accounts SET phone = $2, name = CASE WHEN $3 = '' THEN name ELSE $3 END, updated_at = $4
+		WHERE user_id = $1 AND status = 'active'
+		RETURNING user_id, email, name, password_hash, status, created_at, updated_at, phone
+	`, userID, phone, name, updatedAt))
+	if isUniqueViolation(err, "accounts_phone_key") {
+		return Account{}, ErrPhoneExists
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Account{}, ErrAccountNotActive
+	}
+	return account, err
 }
 
 func (s *PostgresStore) ListAccounts(ctx context.Context) ([]Account, error) {
@@ -171,7 +200,7 @@ func (s *PostgresStore) ListAccounts(ctx context.Context) ([]Account, error) {
 		return nil, ErrPostgresStoreUnavailable
 	}
 	rows, err := runner.Query(ctx, `
-		SELECT user_id, email, name, password_hash, status, created_at, updated_at
+		SELECT user_id, email, name, password_hash, status, created_at, updated_at, phone
 		FROM accounts
 		ORDER BY created_at
 	`)
@@ -253,6 +282,40 @@ func (s *PostgresStore) GetSessionByHash(ctx context.Context, tokenHash string) 
 	return session, nil
 }
 
+func (s *PostgresStore) GetSessionByID(ctx context.Context, sessionID string) (Session, error) {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return Session{}, ErrPostgresStoreUnavailable
+	}
+	var session Session
+	err := runner.QueryRow(ctx, `
+		SELECT session_id, user_id, COALESCE(agent_id, ''), token_hash, expires_at, created_at, last_seen_at
+		FROM account_sessions WHERE session_id = $1
+	`, sessionID).Scan(&session.SessionID, &session.UserID, &session.AgentID, &session.TokenHash, &session.ExpiresAt, &session.CreatedAt, &session.LastSeenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrSessionNotFound
+	}
+	return session, err
+}
+
+func (s *PostgresStore) ExtendSession(ctx context.Context, sessionID string, now, expiresAt time.Time) (Session, error) {
+	runner := s.runner(ctx)
+	if runner == nil {
+		return Session{}, ErrPostgresStoreUnavailable
+	}
+	var session Session
+	err := runner.QueryRow(ctx, `
+		UPDATE account_sessions
+		SET expires_at = GREATEST(expires_at, $3), last_seen_at = GREATEST(last_seen_at, $2)
+		WHERE session_id = $1 AND expires_at > $2
+		RETURNING session_id, user_id, COALESCE(agent_id, ''), token_hash, expires_at, created_at, last_seen_at
+	`, sessionID, now, expiresAt).Scan(&session.SessionID, &session.UserID, &session.AgentID, &session.TokenHash, &session.ExpiresAt, &session.CreatedAt, &session.LastSeenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrSessionNotFound
+	}
+	return session, err
+}
+
 func (s *PostgresStore) DeleteSession(ctx context.Context, sessionID string) error {
 	runner := s.runner(ctx)
 	if runner == nil {
@@ -320,7 +383,7 @@ func (s *PostgresStore) GetAccountForAgent(ctx context.Context, agentID string) 
 		return Account{}, ErrPostgresStoreUnavailable
 	}
 	row := runner.QueryRow(ctx, `
-		SELECT a.user_id, a.email, a.name, a.password_hash, a.status, a.created_at, a.updated_at
+		SELECT a.user_id, a.email, a.name, a.password_hash, a.status, a.created_at, a.updated_at, a.phone
 		FROM account_agents aa
 		JOIN accounts a ON a.user_id = aa.user_id
 		WHERE aa.agent_id = $1
@@ -338,7 +401,7 @@ func (s *PostgresStore) GetAccountIdentity(ctx context.Context, providerType, pr
 		return AccountIdentity{}, ErrPostgresStoreUnavailable
 	}
 	return scanAccountIdentity(runner.QueryRow(ctx, `
-		SELECT provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at
+		SELECT provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at, enterprise_user_id
 		FROM account_identities
 		WHERE provider_type = $1 AND provider_key = $2 AND provider_subject = $3
 	`, providerType, providerKey, providerSubject))
@@ -350,28 +413,35 @@ func (s *PostgresStore) GetAccountIdentityForUser(ctx context.Context, userID, p
 		return AccountIdentity{}, ErrPostgresStoreUnavailable
 	}
 	return scanAccountIdentity(runner.QueryRow(ctx, `
-		SELECT provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at
+		SELECT provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at, enterprise_user_id
 		FROM account_identities
 		WHERE user_id = $1 AND provider_type = $2 AND provider_key = $3
 	`, userID, providerType, providerKey))
 }
 
 func (s *PostgresStore) InsertAccountIdentity(ctx context.Context, identity AccountIdentity) error {
+	txStore, transactional := ctx.Value(postgresTxKey{}).(*postgresTxStore)
+	if s.IdentityInserted != nil && !transactional {
+		return errors.New("identity insertion requires a transaction")
+	}
 	runner := s.runner(ctx)
 	if runner == nil {
 		return ErrPostgresStoreUnavailable
 	}
 	_, err := runner.Exec(ctx, `
 		INSERT INTO account_identities (
-			provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			provider_type, provider_key, provider_subject, user_id, external_user_id, verified_at, created_at, updated_at, enterprise_user_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject, identity.UserID, identity.ExternalUserID,
-		identity.VerifiedAt, identity.CreatedAt, identity.UpdatedAt)
+		identity.VerifiedAt, identity.CreatedAt, identity.UpdatedAt, identity.EnterpriseUserID)
 	if isUniqueViolation(err, "account_identities_pkey") {
 		return ErrAccountIdentityExists
 	}
 	if isUniqueViolation(err, "account_identities_user_id_provider_type_provider_key_key") {
 		return ErrAccountIdentityUserConflict
+	}
+	if err == nil && s.IdentityInserted != nil {
+		return s.IdentityInserted(ctx, txStore.tx, identity)
 	}
 	return err
 }
@@ -383,9 +453,9 @@ func (s *PostgresStore) UpdateAccountIdentityVerification(ctx context.Context, i
 	}
 	tag, err := runner.Exec(ctx, `
 		UPDATE account_identities
-		SET external_user_id = $4, verified_at = $5, updated_at = $6
+		SET external_user_id = $4, verified_at = $5, updated_at = $6, enterprise_user_id = CASE WHEN $7 = '' THEN enterprise_user_id ELSE $7 END
 		WHERE provider_type = $1 AND provider_key = $2 AND provider_subject = $3
-	`, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject, identity.ExternalUserID, identity.VerifiedAt, identity.UpdatedAt)
+	`, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject, identity.ExternalUserID, identity.VerifiedAt, identity.UpdatedAt, identity.EnterpriseUserID)
 	if err != nil {
 		return err
 	}
@@ -396,6 +466,10 @@ func (s *PostgresStore) UpdateAccountIdentityVerification(ctx context.Context, i
 }
 
 func (s *PostgresStore) DeleteAccountIdentity(ctx context.Context, userID, providerType, providerKey string) error {
+	txStore, transactional := ctx.Value(postgresTxKey{}).(*postgresTxStore)
+	if s.IdentityDeleted != nil && !transactional {
+		return errors.New("identity deletion requires a transaction")
+	}
 	runner := s.runner(ctx)
 	if runner == nil {
 		return ErrPostgresStoreUnavailable
@@ -409,6 +483,9 @@ func (s *PostgresStore) DeleteAccountIdentity(ctx context.Context, userID, provi
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrAccountIdentityNotFound
+	}
+	if s.IdentityDeleted != nil {
+		return s.IdentityDeleted(ctx, txStore.tx, userID, providerType, providerKey)
 	}
 	return nil
 }
@@ -515,17 +592,21 @@ func saveAccount(ctx context.Context, runner postgresRunner, account Account) er
 		return ErrPostgresStoreUnavailable
 	}
 	_, err := runner.Exec(ctx, `
-		INSERT INTO accounts (user_id, email, name, password_hash, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO accounts (user_id, email, name, password_hash, status, created_at, updated_at, phone)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (user_id) DO UPDATE SET
 			email = EXCLUDED.email,
+			phone = EXCLUDED.phone,
 			name = EXCLUDED.name,
 			password_hash = EXCLUDED.password_hash,
 			status = EXCLUDED.status,
 			updated_at = EXCLUDED.updated_at
-	`, account.UserID, account.Email, account.Name, account.PasswordHash, account.Status, account.CreatedAt, account.UpdatedAt)
+	`, account.UserID, account.Email, account.Name, account.PasswordHash, account.Status, account.CreatedAt, account.UpdatedAt, account.Phone)
 	if isUniqueViolation(err, "accounts_email_key") {
 		return ErrEmailExists
+	}
+	if isUniqueViolation(err, "accounts_phone_key") {
+		return ErrPhoneExists
 	}
 	return err
 }
@@ -535,7 +616,7 @@ func getAccount(ctx context.Context, runner postgresRunner, where string, arg st
 		return Account{}, ErrPostgresStoreUnavailable
 	}
 	row := runner.QueryRow(ctx, `
-		SELECT user_id, email, name, password_hash, status, created_at, updated_at
+		SELECT user_id, email, name, password_hash, status, created_at, updated_at, phone
 		FROM accounts
 		`+where, arg)
 	account, err := scanAccount(row)
@@ -558,6 +639,7 @@ func scanAccount(row pgx.Row) (Account, error) {
 		&account.Status,
 		&account.CreatedAt,
 		&account.UpdatedAt,
+		&account.Phone,
 	)
 	return account, err
 }
@@ -565,7 +647,7 @@ func scanAccount(row pgx.Row) (Account, error) {
 func scanAccountIdentity(row pgx.Row) (AccountIdentity, error) {
 	var identity AccountIdentity
 	err := row.Scan(&identity.ProviderType, &identity.ProviderKey, &identity.ProviderSubject, &identity.UserID,
-		&identity.ExternalUserID, &identity.VerifiedAt, &identity.CreatedAt, &identity.UpdatedAt)
+		&identity.ExternalUserID, &identity.VerifiedAt, &identity.CreatedAt, &identity.UpdatedAt, &identity.EnterpriseUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AccountIdentity{}, ErrAccountIdentityNotFound
 	}

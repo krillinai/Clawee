@@ -105,30 +105,31 @@ export function buildCodexResumeArgs(input: BuildCodexResumeArgsInput): string[]
   return args;
 }
 
+export const CODEX_TOOL_ISOLATION_FEATURES = [
+  'hooks',
+  'plugins',
+  'apps',
+  'multi_agent',
+  'browser_use',
+  'computer_use',
+  'in_app_browser',
+  'image_generation',
+  'tool_suggest',
+  'shell_tool',
+  'unified_exec',
+  'shell_snapshot'
+] as const;
+
 export function codexToolIsolationArgs(policy: BuiltInToolPolicy): string[] {
   if (Object.values(policy).some(enabled => enabled)) {
     throw new Error('Built-in tool policy must disable every tool');
   }
-  const disabled = [
-    'hooks',
-    'plugins',
-    'apps',
-    'multi_agent',
-    'browser_use',
-    'computer_use',
-    'in_app_browser',
-    'image_generation',
-    'tool_suggest',
-    'shell_tool',
-    'unified_exec',
-    'shell_snapshot'
-  ];
   return [
     '-c', 'mcp_servers={}',
     '-c', 'plugins={}',
     '-c', 'web_search="disabled"',
     '-c', 'notify=[]',
-    ...disabled.flatMap(feature => ['--disable', feature])
+    ...CODEX_TOOL_ISOLATION_FEATURES.flatMap(feature => ['--disable', feature])
   ];
 }
 

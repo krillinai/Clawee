@@ -23,7 +23,7 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MCPAccountTokenInfo, MCPAccountTokenResponse, MCPAgent, MCPGrant, MCPCapability, MCPUpstreamServer } from "@/lib/mcp-admin-api";
 import { agentCreationSourceLabel } from "@/lib/agent-source";
-import { formatDateTime, mcpStatusLabel, mcpStatusVariant } from "@/lib/mcp-admin-ui";
+import { formatDateTime, isDataAuthorizedTool, mcpStatusLabel, mcpStatusVariant } from "@/lib/mcp-admin-ui";
 import { trimInput } from "@/lib/text";
 
 export type AgentTableMode = "admin" | "user";
@@ -243,7 +243,7 @@ export function MCPAgentTokenDrawer({
   const mcpConfig = tokenResult && agent ? accountMCPConfig(tokenResult.token, agent.agentId) : undefined;
 
   return (
-    <DetailDrawer contextLabel="账户级 Token" onClose={onClose} open={open} subtitle={agent?.agentId ?? "当前账户"} title="账户级 Token 与 MCP 配置">
+    <DetailDrawer contextLabel="账户级 Token" onClose={onClose} open={open} subtitle={agent?.agentId ?? "当前账户"} title="账户级 Token 与接入配置">
       <KeyValueList
         items={[
           ...(agent ? [
@@ -284,6 +284,11 @@ export function MCPAgentTokenDrawer({
       </div> : null}
       {tokenError ? <ErrorAlert>{tokenError}</ErrorAlert> : null}
       {allowTokenSecrets ? <ResourceList>
+        <TokenSecretPane
+          disabled={!isActive || tokenPending}
+          title="模型 Base URL"
+          value={`${window.location.origin}/v1`}
+        />
         <TokenSecretPane
           disabled={isCopyDisabled}
           title="Token"
@@ -488,7 +493,7 @@ export function MCPAgentGrantsDrawer({
           return (
             <GrantListCard
               action={
-                mode === "admin" && onDeleteGrant ? (
+                mode === "admin" && onDeleteGrant && !isDataAuthorizedTool(capability, server) ? (
                   <Button className="h-7 px-2 text-xs" onClick={() => onDeleteGrant(grant)} size="sm" variant="destructive">
                     删除授权
                   </Button>
@@ -537,6 +542,7 @@ function GrantListCard({
             <strong className="min-w-0 truncate text-sm font-semibold">{title}</strong>
             <Badge variant="secondary">{serverLabel}</Badge>
             <Badge variant="muted">{domainLabel}</Badge>
+            {isDataAuthorizedTool(capability, server) && <Badge variant="secondary">随数据权限生效</Badge>}
             {capability?.confirmRequired ? <Badge variant="warning">需确认</Badge> : null}
             {capability?.approvalRequired ? <Badge variant="danger">需审批</Badge> : null}
             <Badge variant={mcpStatusVariant(capability?.status || "missing")}>{mcpStatusLabel(capability?.status || "missing")}</Badge>

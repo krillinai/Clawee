@@ -1,31 +1,33 @@
-import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalBehavior } from './use-modal-behavior.js';
 
-export function ConfirmDialog(props: {
-  open: boolean;
+export type ConfirmOptions = {
   title: string;
   description: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
+  destructive?: boolean;
+};
+
+export function ConfirmDialog(props: ConfirmOptions & {
+  open: boolean;
   className?: string;
   busy?: boolean;
-  destructive?: boolean;
   onConfirm(): void;
   onCancel(): void;
 }) {
   const titleId = useId();
   const descriptionId = useId();
+  const dialogRef = useRef<HTMLElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    if (!props.open) return;
-    window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !props.busy) props.onCancel();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [props.busy, props.onCancel, props.open]);
+  useModalBehavior(dialogRef, {
+    open: props.open,
+    onClose: props.onCancel,
+    closeDisabled: props.busy,
+    initialFocusRef: cancelButtonRef
+  });
 
   if (!props.open) return null;
 
@@ -37,6 +39,7 @@ export function ConfirmDialog(props: {
       }}
     >
       <section
+        ref={dialogRef}
         className={[
           'confirm-dialog',
           props.className
@@ -45,6 +48,7 @@ export function ConfirmDialog(props: {
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
+        tabIndex={-1}
       >
         <header>
           <h2 id={titleId}>{props.title}</h2>
@@ -73,4 +77,51 @@ export function ConfirmDialog(props: {
     </div>,
     document.body
   );
+}
+
+/**
+ * Promise-based replacement for window.confirm that renders the in-app
+ * ConfirmDialog. Render the returned element once in the component.
+ */
+export function useConfirmDialog() {
+  const [pending, setPending] = useState<ConfirmOptions>();
+  const resolverRef = useRef<(confirmed: boolean) => void>();
+
+  useEffect(() => () => {
+    resolverRef.current?.(false);
+    resolverRef.current = undefined;
+  }, []);
+
+  const confirm = useCallback((options: ConfirmOptions) => {
+    resolverRef.current?.(false);
+    return new Promise<boolean>(resolve => {
+      resolverRef.current = resolve;
+      setPending(options);
+    });
+  }, []);
+
+  const settle = useCallback((confirmed: boolean) => {
+    const resolve = resolverRef.current;
+    resolverRef.current = undefined;
+    setPending(undefined);
+    resolve?.(confirmed);
+  }, []);
+
+  const onCancel = useCallback(() => settle(false), [settle]);
+  const onConfirm = useCallback(() => settle(true), [settle]);
+
+  const element = (
+    <ConfirmDialog
+      open={pending !== undefined}
+      title={pending?.title ?? ''}
+      description={pending?.description ?? ''}
+      confirmLabel={pending?.confirmLabel ?? '确定'}
+      {...(pending?.cancelLabel === undefined ? {} : { cancelLabel: pending.cancelLabel })}
+      destructive={pending?.destructive === true}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+
+  return { confirm, confirmDialog: element };
 }

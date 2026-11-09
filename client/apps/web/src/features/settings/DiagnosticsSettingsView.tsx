@@ -3,6 +3,7 @@ import type {
   CodexStatusResponse
 } from '@clawee/protocol';
 import { AlertTriangle, CheckCircle2, HardDrive, SquareTerminal } from 'lucide-react';
+import { ExportDiagnosticsButton } from '../connection/ExportDiagnosticsButton.js';
 
 export type DiagnosticsSettingsViewProps = {
   connected: boolean;
@@ -22,6 +23,7 @@ export function DiagnosticsSettingsView(props: DiagnosticsSettingsViewProps) {
           <h1 id="settings-diagnostics-title">诊断</h1>
           <p>查看本地 Runtime、Codex 路径、能力矩阵和当前告警。</p>
         </div>
+        <ExportDiagnosticsButton />
       </header>
 
       {!props.connected ? (

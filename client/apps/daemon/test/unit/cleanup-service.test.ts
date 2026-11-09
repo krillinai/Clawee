@@ -347,6 +347,8 @@ function makeRunRow(overrides: Partial<RunRow> & { id: string }): RunRow {
     internal_status: 'succeeded',
     created_by: 'api',
     source_id: null,
+    initiator_user_id: null,
+    initiator_agent_id: null,
     public_prompt: null,
     triggered_at: null,
     profile: 'default',

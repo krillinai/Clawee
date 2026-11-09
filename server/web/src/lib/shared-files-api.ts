@@ -2,6 +2,9 @@ import { adminApi, APIError } from "./api";
 import { trimInput } from "./text";
 
 export type SharedSpace = {
+  personalOwnerUserId?: string;
+  personalOwnerName?: string;
+  personalOwnerEmail?: string;
   spaceId: string;
   name: string;
   description: string;
@@ -56,6 +59,9 @@ type PageMeta = { next_cursor: string; has_next: boolean };
 type ListEnvelope<T> = { data: T[]; meta: PageMeta };
 
 type SharedSpaceResponse = {
+  personal_owner_user_id?: string;
+  personal_owner_name?: string;
+  personal_owner_email?: string;
   space_id: string;
   name: string;
   description: string;
@@ -107,10 +113,11 @@ type UploadResponse = {
   updated_at: string;
 };
 
-export async function listSharedSpaces(input: { query?: string; cursor?: string }) {
+export async function listSharedSpaces(input: { query?: string; cursor?: string; personalOwnerUserId?: string }) {
   const params = new URLSearchParams({ limit: "50" });
   if (input.query && trimInput(input.query)) params.set("query", trimInput(input.query));
   if (input.cursor) params.set("cursor", input.cursor);
+  if (input.personalOwnerUserId) params.set("personal_owner_user_id", input.personalOwnerUserId);
   const response = await adminApi.get<ListEnvelope<SharedSpaceResponse>>(`/shared-spaces?${params}`);
   return { items: response.data.map(mapSpace), meta: response.meta };
 }
@@ -226,6 +233,7 @@ export async function getSharedFilePreview(fileId: string, signal?: AbortSignal)
 
 function mapSpace(item: SharedSpaceResponse): SharedSpace {
   return {
+    ...(item.personal_owner_user_id ? { personalOwnerUserId: item.personal_owner_user_id, personalOwnerName: item.personal_owner_name, personalOwnerEmail: item.personal_owner_email } : {}),
     spaceId: item.space_id,
     name: item.name,
     description: item.description,

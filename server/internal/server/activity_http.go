@@ -19,6 +19,39 @@ func mountActivityRoutes(app *gin.RouterGroup, opts Options) {
 	}
 	app.GET("/data-views", handleDataViews(opts))
 	app.GET("/activity/statistics", handleActivityStatistics(opts))
+	app.GET("/activity/agent-usage", handleAgentUsage(opts))
+}
+
+func handleAgentUsage(opts Options) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireAgentActivityRead(c, opts) {
+			return
+		}
+		collectorID, agentID := strings.TrimSpace(c.Query("collector_id")), strings.TrimSpace(c.Query("agent_id"))
+		if collectorID == "" || agentID == "" || len(collectorID) > 512 || len(agentID) > 512 {
+			activityError(c, http.StatusBadRequest, "invalid_request", "Agent 标识无效")
+			return
+		}
+		if opts.ActivityService == nil {
+			activityError(c, http.StatusServiceUnavailable, "activity_unavailable", "Agent 使用情况暂不可用")
+			return
+		}
+		account, ok := currentAccount(c)
+		if !ok {
+			activityError(c, http.StatusUnauthorized, "unauthorized", "未登录")
+			return
+		}
+		result, err := opts.ActivityService.AgentUsage(c.Request.Context(), account.UserID, collectorID, agentID, c.Query("range"))
+		if errors.Is(err, activity.ErrAgentNotFound) {
+			activityError(c, http.StatusNotFound, "agent_not_found", "未找到该 Agent")
+			return
+		}
+		if err != nil {
+			activityServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": result})
+	}
 }
 
 func handleDataViews(opts Options) gin.HandlerFunc {
@@ -38,7 +71,7 @@ func handleDataViews(opts Options) gin.HandlerFunc {
 			actions[grant.ResourceID] = append(actions[grant.ResourceID], grant.Action)
 		}
 		items := []gin.H{}
-		for _, viewID := range []string{dataaccess.ViewAgentActivity, dataaccess.ViewXiaohongshuOperation, dataaccess.ViewDouyinAds, dataaccess.ViewBilibiliOperation} {
+		for _, viewID := range []string{dataaccess.ViewAgentActivity, dataaccess.ViewSkillContributions, dataaccess.ViewXiaohongshuOperation, dataaccess.ViewDouyinAds, dataaccess.ViewBilibiliOperation} {
 			if granted := actions[viewID]; len(granted) > 0 {
 				items = append(items, gin.H{"view_id": viewID, "actions": granted})
 			}

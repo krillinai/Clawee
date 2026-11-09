@@ -1,4 +1,6 @@
 import { constants as fsConstants, type Stats } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import {
   accessSync,
   closeSync,
@@ -13,7 +15,7 @@ import {
   unlinkSync,
   writeSync
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import type {
   WorkspaceDirectoryListRequest,
@@ -23,18 +25,21 @@ import type {
   WorkspaceFileContentResponse,
   WorkspaceFileMeta,
   WorkspaceFileMetaRequest,
+  WorkspaceFilePathRequest,
   WorkspaceFileRevealRequest,
   WorkspaceFileRevealResponse,
   WorkspaceFileSaveRequest,
-  WorkspaceFileSaveResponse
+  WorkspaceFileSaveResponse,
+  WorkspaceOfficePreviewResponse
 } from '@clawee/protocol';
+import { OfficeAttachmentError, processOfficeAttachment } from '../attachments/office.js';
 import type { RuntimeThread } from '../threads/types.js';
 import { WorkspaceFileError } from './errors.js';
 import { isEditable, isPreviewable, isSensitivePath, isTextualKind, kindFor, mimeFor, reasonForUnavailable } from './mime.js';
-import { assertInsideRoot, assertRegularFile, isIgnoredDir, resolveSafeExisting, resolveSafeParent, validateRelativePath } from './paths.js';
+import { assertInsideRoot, assertRegularFile, isIgnoredDir, resolveSafeExisting, resolveSafeParent, validateFilePath, validateRelativePath } from './paths.js';
 import { defaultRevealExecutor, type RevealExecutor } from './reveal.js';
 import { buildDirectoryResponse } from './tree.js';
-import { MAX_IMAGE_BYTES, MAX_JSON_FORMAT_BYTES, MAX_PDF_BYTES, MAX_TEXT_BYTES } from './types.js';
+import { MAX_DOWNLOAD_BYTES, MAX_IMAGE_BYTES, MAX_JSON_FORMAT_BYTES, MAX_OFFICE_BYTES, MAX_PDF_BYTES, MAX_TEXT_BYTES } from './types.js';
 
 export type WorkspaceFileService = {
   listDirectory(request: WorkspaceDirectoryListRequest): Promise<WorkspaceDirectoryResponse>;
@@ -42,6 +47,8 @@ export type WorkspaceFileService = {
   readContent(request: WorkspaceFileContentRequest): Promise<WorkspaceFileContentResponse>;
   saveContent(request: WorkspaceFileSaveRequest): Promise<WorkspaceFileSaveResponse>;
   readBlob(request: WorkspaceFileBlobRequest): Promise<{ meta: WorkspaceFileMeta; buffer: Buffer }>;
+  readOfficePreview(request: WorkspaceFilePathRequest): Promise<WorkspaceOfficePreviewResponse>;
+  download(request: WorkspaceFilePathRequest): Promise<{ name: string; size: number; stream: Readable }>;
   reveal(request: WorkspaceFileRevealRequest): Promise<WorkspaceFileRevealResponse>;
 };
 
@@ -100,17 +107,11 @@ export function createWorkspaceFileService(input: {
 
     async getMeta(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       return buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
     },
 
     async readContent(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       const meta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
       if (!isTextualKind(meta.kind)) {
         throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only text-like files can be read as content.');
@@ -132,10 +133,10 @@ export function createWorkspaceFileService(input: {
       if (resolved.thread.sandbox === 'read-only') {
         throw new WorkspaceFileError('PERMISSION_DENIED', 'Thread sandbox is read-only.');
       }
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files cannot be modified.');
-      }
       const currentMeta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
+      if (currentMeta.readonly) {
+        throw new WorkspaceFileError('PERMISSION_DENIED', 'File is read-only.');
+      }
       if (!currentMeta.editable) {
         throw new WorkspaceFileError('FILE_NOT_EDITABLE', 'File is not editable.');
       }
@@ -151,11 +152,29 @@ export function createWorkspaceFileService(input: {
       };
     },
 
+    async readOfficePreview(request) {
+      const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
+      const meta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
+      if (meta.kind !== 'office') {
+        throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', '只读内容预览支持 .doc、.docx、.xls、.xlsx、.ppt 和 .pptx');
+      }
+      if (meta.size > MAX_OFFICE_BYTES) {
+        throw new WorkspaceFileError('FILE_TOO_LARGE', '文件超过 20 MB 预览限制，请下载后查看。');
+      }
+      try {
+        const result = await processOfficeAttachment(readFileSync(resolved.absolutePath), meta.mime, 'preview');
+        if (!result.preview) throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', '文件内容无法预览，请下载后查看。');
+        return { meta, preview: result.preview };
+      } catch (error) {
+        if (error instanceof OfficeAttachmentError) {
+          throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', error.message);
+        }
+        throw error;
+      }
+    },
+
     async readBlob(request) {
       const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
-      if (isSensitivePath(resolved.relativePath)) {
-        throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
-      }
       const meta = buildMeta(resolved.thread, resolved.relativePath, resolved.absolutePath);
       if ((meta.kind !== 'image' && meta.kind !== 'pdf') || !meta.previewable) {
         throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only previewable images and PDFs can be read as blobs.');
@@ -166,14 +185,60 @@ export function createWorkspaceFileService(input: {
       };
     },
 
+    async download(request) {
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        const resolved = resolveFileRequest(input.getThread, request.threadId, request.path);
+        handle = await open(resolved.absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+        const stats = await handle.stat();
+        if (!stats.isFile()) {
+          throw new WorkspaceFileError('UNSUPPORTED_FILE_TYPE', 'Only regular files are supported.');
+        }
+        const currentPath = isAbsolute(resolved.relativePath)
+          ? realpathSync(resolved.relativePath)
+          : resolveSafeExisting(resolved.rootReal, resolved.relativePath);
+        const currentStats = lstatSync(currentPath);
+        if (currentPath !== resolved.absolutePath || currentStats.dev !== stats.dev || currentStats.ino !== stats.ino) {
+          throw new WorkspaceFileError('PATH_ESCAPE', 'Target changed during download.');
+        }
+        if (stats.size > MAX_DOWNLOAD_BYTES) {
+          throw new WorkspaceFileError('FILE_TOO_LARGE', 'File exceeds supported size limit.', {
+            details: { size: stats.size, limit: MAX_DOWNLOAD_BYTES }
+          });
+        }
+        if (stats.size === 0) await handle.close();
+        return {
+          name: basename(resolved.relativePath),
+          size: stats.size,
+          stream: stats.size === 0
+            ? Readable.from([])
+            : handle.createReadStream({ start: 0, end: stats.size - 1, autoClose: true })
+        };
+      } catch (error) {
+        await handle?.close();
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === 'ENAMETOOLONG') throw new WorkspaceFileError('PATH_INVALID', 'File path is too long.');
+        if (code === 'ENOENT' || code === 'ENOTDIR') throw new WorkspaceFileError('FILE_NOT_FOUND', 'File not found.');
+        if (code === 'EACCES' || code === 'EPERM') {
+          throw new WorkspaceFileError('PERMISSION_DENIED', 'File is not readable.');
+        }
+        if (code === 'ELOOP') throw new WorkspaceFileError('PATH_ESCAPE', 'Target changed during download.');
+        throw error;
+      }
+    },
+
     async reveal(request) {
+      if (request.mode === 'file') {
+        const { absolutePath } = resolveFileRequest(input.getThread, request.threadId, request.path ?? '');
+        await revealExecutor({ absolutePath, mode: 'file' });
+        return { ok: true };
+      }
       const { rootReal } = getWorkspaceRoot(input.getThread, request.threadId);
       const relativePath = validateRelativePath(request.path ?? '', request.mode === 'directory');
       const absolutePath = request.mode === 'directory' && relativePath.length === 0
         ? rootReal
         : resolveSafeExisting(rootReal, relativePath);
 
-      if (request.mode === 'file') assertRegularFile(absolutePath);
       if (request.mode === 'directory' && isIgnoredDir(basename(absolutePath))) {
         throw new WorkspaceFileError('PATH_IGNORED', 'Ignored paths are not available.');
       }
@@ -202,13 +267,24 @@ function resolveFileRequest(
   rawPath: string
 ): { thread: RuntimeThread; rootReal: string; relativePath: string; absolutePath: string } {
   const { thread, rootReal } = getWorkspaceRoot(getThread, threadId);
-  const relativePath = validateRelativePath(rawPath, false);
+  let relativePath = validateFilePath(rawPath);
+  if (isSensitivePath(relativePath)) {
+    throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
+  }
   let absolutePath: string;
   try {
-    absolutePath = resolveSafeExisting(rootReal, relativePath);
+    absolutePath = isAbsolute(relativePath) ? realpathSync(relativePath) : resolveSafeExisting(rootReal, relativePath);
+    validateFilePath(absolutePath);
+    if (isSensitivePath(absolutePath)) {
+      throw new WorkspaceFileError('PERMISSION_DENIED', 'Sensitive files are not readable.');
+    }
+    const workspacePath = relative(rootReal, absolutePath);
+    if (isAbsolute(relativePath) && workspacePath !== '..' && !workspacePath.startsWith(`..${sep}`) && !isAbsolute(workspacePath)) {
+      relativePath = validateRelativePath(workspacePath, false);
+    }
     assertRegularFile(absolutePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '')) {
       throw new WorkspaceFileError('FILE_NOT_FOUND', 'File not found.');
     }
     throw error;
@@ -223,6 +299,7 @@ function buildMeta(thread: RuntimeThread, relativePath: string, absolutePath: st
 
   return {
     path: relativePath,
+    absolutePath,
     name: basename(relativePath),
     type: 'file',
     kind,
@@ -232,7 +309,7 @@ function buildMeta(thread: RuntimeThread, relativePath: string, absolutePath: st
     versionToken: versionTokenFor(absolutePath, stats.mtimeMs, stats.size),
     previewable: isPreviewable(kind, relativePath, stats.size),
     editable: isEditable(kind, relativePath, stats.size),
-    readonly: thread.sandbox === 'read-only' || thread.status === 'archived',
+    readonly: thread.sandbox === 'read-only' || thread.status === 'archived' || isAbsolute(relativePath),
     ...(reason ? { reason } : {})
   };
 }

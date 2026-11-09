@@ -1,4 +1,5 @@
 import type {
+  CodexAvailabilityProbe,
   ConfigureModelServiceRequest,
   ConfigureModelServiceResponse,
   ModelAccessState
@@ -11,6 +12,15 @@ export function createModelServiceConfigurationService(
   client: ClientLike
 ) {
   return {
+    readApiKey(): Promise<{ apiKey: string | null }> {
+      return client.get('/runtime/model-service/api-key');
+    },
+    check(input?: ConfigureModelServiceRequest): Promise<CodexAvailabilityProbe> {
+      return client.post('/runtime/model-service/check', input);
+    },
+    checkRuntime(): Promise<CodexAvailabilityProbe> {
+      return client.post('/runtime/model-service/check-runtime');
+    },
     read(): Promise<ModelAccessState> {
       return client.get('/runtime/model-service');
     },

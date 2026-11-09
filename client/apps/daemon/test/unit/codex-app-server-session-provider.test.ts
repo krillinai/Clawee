@@ -145,6 +145,8 @@ describe('Codex app-server session provider', () => {
         {
           id: 'assistant-1',
           type: 'assistant_message',
+          rawEventId: 'assistant-1',
+          messageState: 'complete',
           text: '第一个回答',
           createdAt: '2026-07-15T00:01:00.000Z',
           turnId: 'turn-1'
@@ -152,6 +154,7 @@ describe('Codex app-server session provider', () => {
         {
           id: 'history_done_turn-1',
           type: 'done',
+          terminalSource: 'runtime_turn',
           status: 'succeeded',
           createdAt: '2026-07-15T00:01:00.000Z',
           turnId: 'turn-1'
@@ -166,6 +169,8 @@ describe('Codex app-server session provider', () => {
         {
           id: 'assistant-2',
           type: 'assistant_message',
+          rawEventId: 'assistant-2',
+          messageState: 'complete',
           text: '第二个回答',
           createdAt: '2026-07-15T02:01:00.000Z',
           turnId: 'turn-2'
@@ -173,6 +178,7 @@ describe('Codex app-server session provider', () => {
         {
           id: 'history_done_turn-2',
           type: 'done',
+          terminalSource: 'runtime_turn',
           status: 'failed',
           createdAt: '2026-07-15T02:01:00.000Z',
           turnId: 'turn-2'
@@ -312,6 +318,8 @@ describe('Codex app-server session provider', () => {
         {
           id: 'assistant-tools',
           type: 'assistant_message',
+          rawEventId: 'assistant-tools',
+          messageState: 'complete',
           text: '工具流程完成',
           createdAt: '2026-07-15T00:01:00.000Z',
           turnId: 'turn-tools'
@@ -319,6 +327,7 @@ describe('Codex app-server session provider', () => {
         {
           id: 'history_done_turn-tools',
           type: 'done',
+          terminalSource: 'runtime_turn',
           status: 'succeeded',
           createdAt: '2026-07-15T00:01:00.000Z',
           turnId: 'turn-tools'
@@ -397,6 +406,7 @@ describe('Codex app-server session provider', () => {
       {
         id: 'history_done_turn-schedule',
         type: 'done',
+        terminalSource: 'runtime_turn',
         status: 'succeeded',
         createdAt: '2026-07-15T00:01:00.000Z',
         turnId: 'turn-schedule'
@@ -457,6 +467,7 @@ describe('Codex app-server session provider', () => {
       {
         id: 'history_done_turn-managed-context',
         type: 'done',
+        terminalSource: 'runtime_turn',
         status: 'succeeded',
         createdAt: '2026-07-15T00:01:00.000Z',
         turnId: 'turn-managed-context'

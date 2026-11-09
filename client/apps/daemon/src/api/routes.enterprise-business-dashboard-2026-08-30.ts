@@ -40,7 +40,8 @@ function sendDashboardError(reply: FastifyReply, error: unknown) {
   if (error instanceof EnterpriseBusinessDashboardManagerError) {
     return reply.code(error.statusCode).send(apiError(
       error.code,
-      dashboardErrorMessage(error.code)
+      dashboardErrorMessage(error.code),
+      error.details
     ));
   }
   throw error;

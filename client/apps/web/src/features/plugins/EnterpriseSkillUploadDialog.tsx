@@ -1,12 +1,13 @@
-import { ENTERPRISE_SKILL_PACKAGE_MAX_BYTES, type EnterpriseSkillResponse, type EnterpriseSkillSpaceListResponse } from '@clawee/protocol';
+import { ENTERPRISE_SKILL_PACKAGE_MAX_BYTES, type EnterpriseSkillUploadResponse, type EnterpriseSkillResponse, type EnterpriseSkillSpaceListResponse } from '@clawee/protocol';
 import { FileArchive, LoaderCircle, RefreshCw, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 
 export function EnterpriseSkillUploadDialog(props: {
   target?: EnterpriseSkillResponse;
   onLoadSpaces(): Promise<EnterpriseSkillSpaceListResponse>;
-  onUpload(input: { skillId?: string; spaceId: string; version: string; changelog: string; file: File }): Promise<void>;
+  onUpload(input: { skillId?: string; spaceId: string; version: string; changelog: string; file: File }): Promise<EnterpriseSkillUploadResponse | void>;
   onClose(): void;
 }) {
   const [spaces, setSpaces] = useState<EnterpriseSkillSpaceListResponse['spaces']>([]);
@@ -17,45 +18,22 @@ export function EnterpriseSkillUploadDialog(props: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [result, setResult] = useState<EnterpriseSkillUploadResponse>();
   const [reloadKey, setReloadKey] = useState(0);
   const dialogRef = useRef<HTMLElement>(null);
   const mountedRef = useRef(false);
   const busyRef = useRef(false);
   const propsRef = useRef(props);
   propsRef.current = props;
+  useModalBehavior(dialogRef, { open: true, onClose: props.onClose, closeDisabled: busy, initialFocusRef: dialogRef });
 
   useEffect(() => {
     mountedRef.current = true;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialogRef.current?.focus();
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !busyRef.current) {
-        event.preventDefault();
-        propsRef.current.onClose();
-      }
-      if (event.key !== 'Tab') return;
-      const elements = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)');
-      const first = elements?.[0];
-      const last = elements?.[elements.length - 1];
-      if (!first || !last) return;
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown);
     return () => {
       mountedRef.current = false;
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      previousFocus?.focus();
     };
   }, []);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -100,8 +78,11 @@ export function EnterpriseSkillUploadDialog(props: {
     setBusy(true);
     setError(undefined);
     try {
-      await propsRef.current.onUpload({ ...(propsRef.current.target ? { skillId: propsRef.current.target.skillId } : {}), spaceId, version: version.trim(), changelog, file });
-      if (mountedRef.current) propsRef.current.onClose();
+      const response = await propsRef.current.onUpload({ ...(propsRef.current.target ? { skillId: propsRef.current.target.skillId } : {}), spaceId, version: version.trim(), changelog, file });
+      if (mountedRef.current) {
+        if (response?.approvalURL) setResult(response);
+        else propsRef.current.onClose();
+      }
     } catch (reason) {
       if (mountedRef.current) setError(reason instanceof Error ? reason.message : '企业 Skill 上传失败');
     } finally {
@@ -119,7 +100,7 @@ export function EnterpriseSkillUploadDialog(props: {
           <h2 id="enterprise-skill-upload-title">{props.target ? '替换上传 Skill' : '上传企业 Skill'}</h2>
           <button type="button" className="skill-market-icon-button" title="关闭" aria-label="关闭企业 Skill 上传" disabled={busy} onClick={props.onClose}><X size={17} /></button>
         </header>
-        <form className="enterprise-skill-upload-form" noValidate onSubmit={event => { event.preventDefault(); void submit(); }}>
+        {result ? <div className="enterprise-skill-upload-fields"><p role="status">上传成功，等待 AI 评估。登录企业 Gateway 后查看审核进度与报告。</p><a href={result.approvalURL} target="_blank" rel="noreferrer">查看 AI 报告与审批进度</a><button type="button" className="skill-market-use-dialog__cancel" onClick={props.onClose}>关闭</button></div> : <form className="enterprise-skill-upload-form" noValidate onSubmit={event => { event.preventDefault(); void submit(); }}>
           <div className="enterprise-skill-upload-fields">
           {props.target ? <div className="enterprise-skill-upload-target"><span>当前 Skill</span><strong title={props.target.name}>{props.target.name}</strong></div> : null}
           <div className="enterprise-skill-upload-space">
@@ -144,7 +125,7 @@ export function EnterpriseSkillUploadDialog(props: {
             <button type="button" className="skill-market-use-dialog__cancel" disabled={busy} onClick={props.onClose}>取消</button>
             <button type="submit" className="skill-market-action-button" disabled={loading || busy || !spaceId || !file || !version.trim()}>{busy ? <LoaderCircle size={15} className="enterprise-skill-spinner" /> : <Upload size={15} />}{busy ? '上传中' : props.target ? '替换上传' : '上传'}</button>
           </footer>
-        </form>
+        </form>}
       </section>
     </div>, document.body
   );

@@ -3,6 +3,7 @@ import {
   useEffect
 } from 'react';
 import { createRoot } from 'react-dom/client';
+import { installWindowIncidentReporting } from './services/incident-observer.js';
 import { App } from './app/App.js';
 import {
   readDesktopHostBridge,
@@ -31,6 +32,7 @@ applyAccentColor(
 );
 installAutoHidingScrollbars();
 installWindowResizeStability();
+installWindowIncidentReporting();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

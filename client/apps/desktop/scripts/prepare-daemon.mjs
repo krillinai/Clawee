@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  materializeLazystreamDependency,
   removeWorkspaceSelfReference,
   pruneDaemonBuildArtifacts
 } from './daemon-deployment-contract.mjs';
@@ -66,6 +67,7 @@ await runStage('部署 Daemon 生产依赖', 'pnpm', [
   timeoutMs: 10 * 60_000
 });
 pruneDeploymentRoot();
+materializeLazystreamDependency(targetDir);
 const sourceSqliteRoot = realpathSync(
   resolve(rootDir, 'apps/daemon/node_modules/better-sqlite3')
 );
@@ -124,7 +126,7 @@ function applyProductVersion() {
 }
 
 function pruneDeploymentRoot() {
-  const allowed = new Set(['dist', 'node_modules', 'package.json']);
+  const allowed = new Set(['dist', 'resources', 'node_modules', 'package.json']);
   for (const entry of readdirSync(targetDir)) {
     if (allowed.has(entry)) continue;
     rmSync(resolve(targetDir, entry), { recursive: true, force: true });

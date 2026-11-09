@@ -85,7 +85,7 @@ describe('Server readiness', () => {
     await expectPortBindable(address);
   });
 
-  it('requires exactly the three task MCP tools', () => {
+  it('requires exactly the task and health MCP tools', () => {
     expect(() => assertRequiredTaskTools([
       'clawee_submit_task',
       'clawee_get_task'
@@ -94,6 +94,7 @@ describe('Server readiness', () => {
       'clawee_submit_task',
       'clawee_get_task',
       'clawee_get_task_result',
+      'clawee_get_agent_health',
       'unexpected_tool'
     ])).toThrow('SERVER_MCP_TOOLS_CHECK_FAILED');
   });

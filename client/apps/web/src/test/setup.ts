@@ -1,6 +1,23 @@
 import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
 
+// jsdom 尚未实现当前 Electron/浏览器提供的组合取消信号。
+if (typeof AbortSignal.any !== 'function') {
+  Object.defineProperty(AbortSignal, 'any', {
+    configurable: true,
+    value(signals: AbortSignal[]) {
+      const controller = new AbortController();
+      const abort = () => {
+        controller.abort(signals.find(signal => signal.aborted)?.reason);
+        signals.forEach(signal => signal.removeEventListener('abort', abort));
+      };
+      signals.forEach(signal => signal.addEventListener('abort', abort, { once: true }));
+      if (signals.some(signal => signal.aborted)) abort();
+      return controller.signal;
+    }
+  });
+}
+
 Object.defineProperty(window, 'confirm', {
   configurable: true,
   writable: true,

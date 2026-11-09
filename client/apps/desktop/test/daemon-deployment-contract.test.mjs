@@ -10,8 +10,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  materializeLazystreamDependency,
   removeWorkspaceSelfReference,
   pruneDaemonBuildArtifacts
 } from '../scripts/daemon-deployment-contract.mjs';
@@ -25,6 +27,30 @@ afterEach(() => {
 });
 
 describe('Daemon deployment contract', () => {
+  it('keeps lazystream on its own readable-stream version when copying junctions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'clawee-daemon-stream-'));
+    tempRoots.push(root);
+    const modules = join(root, 'node_modules');
+    const lazyStore = join(modules, '.pnpm', 'lazystream', 'node_modules');
+    const streamStore = join(modules, '.pnpm', 'readable-stream-2', 'node_modules');
+    const lazyPackage = join(lazyStore, 'lazystream');
+    const streamPackage = join(streamStore, 'readable-stream');
+    mkdirSync(lazyPackage, { recursive: true });
+    mkdirSync(streamPackage, { recursive: true });
+    mkdirSync(join(modules, 'readable-stream'), { recursive: true });
+    writeFileSync(join(lazyPackage, 'package.json'), JSON.stringify({ name: 'lazystream', main: 'index.js' }));
+    writeFileSync(join(lazyPackage, 'index.js'), `module.exports = require('readable-stream/passthrough')`);
+    writeFileSync(join(streamPackage, 'passthrough.js'), 'module.exports = 2');
+    symlinkSync(lazyPackage, join(modules, 'lazystream'), process.platform === 'win32' ? 'junction' : 'dir');
+    symlinkSync(streamPackage, join(lazyStore, 'readable-stream'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const requireFromRoot = createRequire(join(root, 'package.json'));
+    expect(requireFromRoot('lazystream')).toBe(2);
+    materializeLazystreamDependency(root);
+    expect(requireFromRoot('lazystream')).toBe(2);
+    expect(statSync(join(modules, 'lazystream', 'node_modules', 'readable-stream', 'passthrough.js')).isFile()).toBe(true);
+  });
+
   it('prunes build-only files while preserving SQLite and OfficeParser Node entrypoints', () => {
     const root = mkdtempSync(join(tmpdir(), 'clawee-daemon-prune-'));
     tempRoots.push(root);

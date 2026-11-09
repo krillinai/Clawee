@@ -4,8 +4,9 @@ import type {
   UpdateProjectRequest
 } from '@clawee/protocol';
 import { FolderCog, FolderMinus, FolderPlus, RefreshCw, Save, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ConfirmDialog, useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import type { ClaweeProject } from './project-model.js';
 
 const reasoningOptions: Array<{ value: '' | ReasoningEffort; label: string }> = [
@@ -13,7 +14,8 @@ const reasoningOptions: Array<{ value: '' | ReasoningEffort; label: string }> = 
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
   { value: 'high', label: '高' },
-  { value: 'xhigh', label: '超高' }
+  { value: 'xhigh', label: '超高' },
+  { value: 'max', label: '最高' }
 ];
 
 export function ProjectManagementDialog(props: {
@@ -37,6 +39,8 @@ export function ProjectManagementDialog(props: {
   const [projectPendingRemoval, setProjectPendingRemoval] = useState<ClaweeProject>();
   const [removingProjectId, setRemovingProjectId] = useState<string>();
   const [assignmentByThreadId, setAssignmentByThreadId] = useState<Record<string, string>>({});
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalBehavior(dialogRef, { open: props.open, onClose: props.onClose });
 
   useEffect(() => {
     if (!props.open) return;
@@ -67,6 +71,7 @@ export function ProjectManagementDialog(props: {
       if (event.target === event.currentTarget) props.onClose();
     }}>
       <section
+        ref={dialogRef}
         className="project-management-dialog"
         role="dialog"
         aria-modal="true"
@@ -282,6 +287,7 @@ function ProjectEditForm(props: {
     props.project.reasoning ?? ''
   );
   const [sandbox, setSandbox] = useState(props.project.sandbox);
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   return (
     <form className="project-edit-form" onSubmit={event => {
@@ -319,14 +325,15 @@ function ProjectEditForm(props: {
         <span>权限</span>
         <select
           value={normalizeProjectSandbox(sandbox)}
-          onChange={event => {
+          onChange={async event => {
             const value = event.currentTarget.value as ClaweeProject['sandbox'];
             if (
               value === 'danger-full-access'
               && sandbox !== 'danger-full-access'
-              && !window.confirm(
-                '完全访问权限允许 Clawee 访问本机文件并执行本地操作。确定要为此项目开启吗？'
-              )
+              && !(await confirm({
+                title: '开启完全访问权限', confirmLabel: '开启', destructive: true,
+                description: '完全访问权限允许 Clawee 访问本机文件并执行本地操作。确定要为此项目开启吗？'
+              }))
             ) {
               return;
             }
@@ -345,6 +352,7 @@ function ProjectEditForm(props: {
           <span>保存</span>
         </button>
       </div>
+      {confirmDialog}
     </form>
   );
 }

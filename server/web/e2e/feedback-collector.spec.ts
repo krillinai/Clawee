@@ -1,20 +1,28 @@
 import { expect, test } from '@playwright/test';
 
 test.use({ headless: true });
-for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-  test(`管理后台反馈截图遮盖与明确授权 ${viewport.width}`, async ({ page }, testInfo) => {
+for (const { viewport, dingtalkEnabled } of [{ width: 1440, height: 900 }, { width: 390, height: 844 }].flatMap(viewport => [false, true].map(dingtalkEnabled => ({ viewport, dingtalkEnabled })))) {
+  test(`管理后台反馈截图遮盖与明确授权 ${viewport.width} 钉钉启用 ${dingtalkEnabled}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     let submissions = 0; let submittedBody = '';
     await page.route('**/api/v1/**', async route => {
       const path = new URL(route.request().url()).pathname;
       let data: unknown = {};
-      if (path === '/api/v1/auth/me') data = { account: { user_id: 'usr_test', email: 'test@example.com', name: '测试管理员', status: 'active' }, admin_permissions: ['console:feedback:read'], applications: { admin: true, frontend: true } };
+      if (path === '/api/v1/auth/me') data = { account: { user_id: 'usr_test', email: 'test@example.com', name: '测试管理员', status: 'active' }, dingtalk_enabled: dingtalkEnabled, admin_permissions: ['console:feedback:read'], applications: { admin: true, frontend: true } };
       else if (path === '/api/v1/admin/feedback/reports') data = [];
-      else if (path === '/api/v1/admin/feedback/collection-policy') data = { external_feedback_allowed: true };
+      else if (path === '/api/v1/admin/feedback/collection-policy') data = { enabled: true };
       else if (path === '/api/v1/admin/feedback/collect') { submissions++; submittedBody = route.request().postData() ?? ''; data = { report_id: 'fb_test0001', display_number: 'FB-E2E', upload_state: 'ready', security_state: 'normal' }; }
       await route.fulfill({ json: { data, meta: { has_next: false } } });
     });
     await page.goto('/admin/feedback');
+    const feedbackButton = page.getByRole('button', { name: '提交异常反馈' });
+    const email = page.getByRole('group', { name: '账户信息' }).getByText('test@example.com', { exact: true });
+    await expect(email).toBeVisible();
+    await expect(feedbackButton).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '绑定钉钉' })).toHaveCount(0);
+    await page.getByRole('button', { name: '账户操作' }).click();
+    await expect(feedbackButton).toBeVisible();
+    await expect(page.getByRole('button', { name: '绑定钉钉' })).toHaveCount(dingtalkEnabled ? 1 : 0);
     await page.getByRole('button', { name: '提交异常反馈' }).click();
     await page.getByLabel('问题描述（必填）').fill('列表加载异常 password=private123');
     const bitmap = await page.evaluate(() => {
@@ -56,7 +64,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByText(/本地材料约 .* KiB/)).toBeVisible();
     await expect(page.getByRole('button', { name: '发送反馈' })).toBeDisabled();
     expect(submissions).toBe(0);
-    await page.getByLabel('确认可以发送上述资料和截图给软件维护方').check();
+    await page.getByLabel('确认可以提交上述资料和截图到当前后台反馈中心').check();
     await page.getByLabel('确认按部分资料发送，不包含桌面、会话及服务器日志').check();
     const dialog = page.getByRole('dialog');
     expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);

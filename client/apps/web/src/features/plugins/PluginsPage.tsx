@@ -4,6 +4,7 @@ import {
   EnterpriseSkillHubView,
   type EnterpriseSkillHubViewProps
 } from './EnterpriseSkillHubView-2026-07-30.js';
+import { CloudSkillHubView, type CloudSkillHubViewProps } from './CloudSkillHubView.js';
 import {
   ChevronDown,
   Plus,
@@ -11,24 +12,33 @@ import {
   Upload,
   WandSparkles
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './skill-market.css';
 
-export type PluginSource = 'public' | 'enterprise';
+export type PluginSource = 'public' | 'enterprise' | 'cloud';
 
 export type PluginsPageProps = SkillMarketViewProps & {
   source?: PluginSource;
   onSourceChange(source: PluginSource): void;
   enterprise: EnterpriseSkillHubViewProps;
+  cloud?: CloudSkillHubViewProps;
 };
 
 export default function PluginsPage(props: PluginsPageProps) {
-  const source = props.source ?? 'enterprise';
+  const requestedSource = props.source ?? 'enterprise';
+  const cloudAvailable = props.cloud?.data !== undefined;
+  const source = requestedSource === 'cloud' && !cloudAvailable ? 'enterprise' : requestedSource;
   const [marketQuery, setMarketQuery] = useState('');
   const [enterpriseQuery, setEnterpriseQuery] = useState('');
+  const [cloudQuery, setCloudQuery] = useState('');
   const [enterpriseAddMenuOpen, setEnterpriseAddMenuOpen] = useState(false);
+  useEffect(() => {
+    if (requestedSource === 'cloud' && !cloudAvailable && props.cloud?.loadError !== undefined) {
+      props.onSourceChange('enterprise');
+    }
+  }, [cloudAvailable, props.cloud?.loadError, props.onSourceChange, requestedSource]);
   return (
-    <section className="plugins-page" aria-label="插件">
+    <section className="plugins-page" data-source={source} aria-label="插件">
       <header className="plugins-source-header">
         <div className="plugins-source-tabs" role="tablist" aria-label="Skill 来源">
           <button
@@ -42,6 +52,19 @@ export default function PluginsPage(props: PluginsPageProps) {
           >
             企业Skills
           </button>
+          {cloudAvailable ? (
+            <button
+              aria-controls="plugins-source-cloud"
+              aria-selected={source === 'cloud'}
+              id="plugins-source-cloud-tab"
+              onClick={() => props.onSourceChange('cloud')}
+              role="tab"
+              tabIndex={source === 'cloud' ? 0 : -1}
+              type="button"
+            >
+              云 Skills
+            </button>
+          ) : null}
           <button
             aria-controls="plugins-source-public"
             aria-selected={source === 'public'}
@@ -55,15 +78,15 @@ export default function PluginsPage(props: PluginsPageProps) {
           </button>
         </div>
         <div className="plugins-source-actions">
-          {source === 'public' ? (
+          {source === 'public' || source === 'cloud' ? (
             <label className="skill-market-search">
               <Search size={17} aria-hidden="true" />
               <input
-                aria-label="搜索 Skill"
-                onChange={(event) => setMarketQuery(event.target.value)}
+                aria-label={source === 'cloud' ? '搜索云 Skill' : '搜索 Skill'}
+                onChange={(event) => source === 'cloud' ? setCloudQuery(event.target.value) : setMarketQuery(event.target.value)}
                 placeholder="搜索技能"
                 type="search"
-                value={marketQuery}
+                value={source === 'cloud' ? cloudQuery : marketQuery}
               />
             </label>
           ) : (
@@ -150,6 +173,12 @@ export default function PluginsPage(props: PluginsPageProps) {
             onInstall={props.onInstall}
             onUpdate={props.onUpdate}
             onUse={props.onUse}
+          />
+        ) : source === 'cloud' && props.cloud ? (
+          <CloudSkillHubView
+            {...props.cloud}
+            onSearchChange={setCloudQuery}
+            search={cloudQuery}
           />
         ) : (
           <EnterpriseSkillHubView

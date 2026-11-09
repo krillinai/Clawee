@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import { ActivityDetailHero } from "./activity-detail-hero";
 import { ActivityDetailSummary } from "./activity-detail-summary";
+import { ActivityDetailSkillUsage } from "./activity-detail-skill-usage";
 
 export function ActivityDetailView({
   collectorId,
@@ -49,6 +50,7 @@ export function ActivityDetailView({
       {navigation}
       <ActivityDetailHero detail={detail} listPath={listPath} />
       <ActivityDetailSummary detail={detail} />
+      <ActivityDetailSkillUsage agentId={agentId} collectorId={collectorId} scope={scope} />
       <Card className="shadow-none">
         <CardContent className="p-6">
           <TurnGroupList

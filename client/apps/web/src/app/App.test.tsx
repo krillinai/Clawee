@@ -12,6 +12,7 @@ import type {
   CodexSkillResponse,
   CodexStatusResponse,
   CreateScheduleRequest,
+  DesktopUpdateState,
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
   EnterpriseActivityStatisticsResponse,
@@ -41,8 +42,9 @@ import {
   pollEnterpriseSessionUntilSettled
 } from './AppController.js';
 import { PROJECTS_STORAGE_KEY } from '../features/projects/project-model.js';
+import { readModelReasoningPreferences, writeModelReasoningPreferences } from '../services/model-reasoning-preferences.js';
 import type { ClaweeProject } from '../features/projects/project-model.js';
-import type { HostBridge } from '../host/bridge.js';
+import type { HostBridge, HostBridgeResult } from '../host/bridge.js';
 import type { SubscribeRunEventsInput } from '../runtime/sse.js';
 import type { FileTreeNode, WorkspaceFile } from '../services/file-service.js';
 import {
@@ -61,6 +63,426 @@ function App(props: AppProps = {}) {
 }
 
 describe('App', () => {
+  it('在最近会话展示只读 AI 审核，复用历史并打开审批详情', async () => {
+    const user = userEvent.setup();
+    const review = createThreadResponse({ id: 'thread_review', title: 'AI 审核 · 只读 · p9-test · v1.0.0',
+      purpose: 'skill_review', projectId: null, workspaceMode: 'managed', codexThreadId: null,
+      skillReview: { requestId: 'request-1', attemptId: 'attempt-1', skillName: 'p9-test', versionId: 'version-1', version: '1.0.0',
+        reviewSkillVersion: '2.0.0', reviewSkillSHA256: 'a'.repeat(64), approvalURL: 'https://gateway.example/app/approvals/skill/request-1' } });
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.openExternal = vi.fn(async () => undefined);
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/threads?status=active')) return jsonResponse({ threads: url.includes('purpose=skill_review') ? [review] : [] });
+      if (url.endsWith('/threads/thread_review')) return jsonResponse({ thread: review });
+      if (url.includes('/threads/thread_review/history')) return jsonResponse({ threadId: review.id, items: [{
+        id: 'review-summary', type: 'user_message', text: '审核 Skill：p9-test', createdAt: review.createdAt
+      }, {
+        id: 'review-answer', type: 'assistant_message', text: '静态审核完成，建议通过。', createdAt: review.createdAt
+      }] });
+      if (url.includes('/threads/thread_review/runs')) return jsonResponse({ runs: [createRunResponse({ id: 'run_review', threadId: review.id, status: 'succeeded' })] });
+      if (url.includes('/tasks?')) return jsonResponse({ tasks: [], hasMore: false });
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      return fallback(input, init);
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()} subscribeRunEvents={async () => undefined} />);
+    const row = await screen.findByRole('group', { name: review.title! });
+    await user.click(within(row).getByRole('button', { name: new RegExp('p9-test') }));
+    expect(await screen.findByLabelText('AI 审核执行记录')).toBeInTheDocument();
+    expect(await screen.findByText('静态审核完成，建议通过。')).toBeInTheDocument();
+    expect(screen.getByText('审核 Skill：p9-test')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑消息' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '任务描述' })).not.toBeInTheDocument();
+    expect(document.querySelector('.composer-wrap')).toBeNull();
+    expect(within(row).queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看审批详情' }));
+    expect(hostBridge.openExternal).toHaveBeenCalledWith(review.skillReview!.approvalURL);
+    expect(runtimeFetch.mock.calls.some(([input, init]) => String(input).endsWith('/runs') && init?.method === 'POST')).toBe(false);
+  });
+
+  describe('会话完成未读', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    function createUnreadFixture(status: TaskItem['status'] = 'running') {
+      let focused = true;
+      let visible = true;
+      vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+      vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visible ? 'visible' : 'hidden');
+      let pollTasks: (() => void) | undefined;
+      const originalSetInterval = window.setInterval.bind(window);
+      vi.spyOn(window, 'setInterval').mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        if (timeout === 5_000 && String(handler).includes('refreshTasks')) pollTasks = handler as () => void;
+        return originalSetInterval(handler, timeout, ...args);
+      }) as typeof window.setInterval);
+      const thread = createThreadResponse({ id: 'thread_unread', title: '未读验证会话' });
+      let task: TaskItem = {
+        id: 'run_unread', runId: 'run_unread', threadId: thread.id, title: thread.title!,
+        status, runStatus: status === 'waiting_approval' ? 'running' : status,
+        cwd: thread.cwd, profile: 'default', createdBy: 'api', submissionMode: 'enqueue',
+        createdAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:01:00.000Z'
+      };
+      let listed = true;
+      let subscription: SubscribeRunEventsInput | undefined;
+      const historyItems = (): ThreadHistoryItem[] => [
+        { id: 'prompt_unread', type: 'user_message', text: '未读验证任务', runId: task.runId, createdAt: task.createdAt },
+        ...(task.status === 'running' ? [] : [{
+          id: 'done_unread', type: 'done' as const, status: task.runStatus as 'succeeded' | 'failed' | 'canceled',
+          runId: task.runId, createdAt: task.updatedAt
+        }])
+      ];
+      let loadHistory = async () => jsonResponse({ threadId: thread.id, items: historyItems() });
+      const fallback = createKnowledgeRuntimeFetch(() => undefined);
+      const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [thread] });
+        if (url.includes('/tasks?')) return jsonResponse({ tasks: listed ? [task] : [], hasMore: false });
+        if (url.includes(`/threads/${thread.id}/history`)) return loadHistory();
+        if (url.includes(`/threads/${thread.id}/runs`)) return jsonResponse({ runs: [createRunResponse({
+          id: task.runId, threadId: thread.id, status: task.runStatus
+        })] });
+        if (url.endsWith(`/runs/${task.runId}`)) return jsonResponse(createRunResponse({
+          id: task.runId, threadId: thread.id, status: task.runStatus
+        }));
+        return fallback(input, init);
+      };
+      const hostBridge = createHostBridge();
+      hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+      const props: AppProps = {
+        hostBridge, runtimeFetch, fileService: createFileService(),
+        subscribeRunEvents: async input => { subscription = input; }
+      };
+      return {
+        props,
+        setListed: (next: boolean) => { listed = next; },
+        poll: async () => { expect(pollTasks).toBeDefined(); await act(async () => pollTasks!()); },
+        setStatus: (next: 'succeeded' | 'failed' | 'canceled') => {
+          task = { ...task, status: next, runStatus: next, endedAt: new Date().toISOString() };
+        },
+        finish: async (next: 'succeeded' | 'failed' | 'canceled') => {
+          task = { ...task, status: next, runStatus: next };
+          expect(subscription).toBeDefined();
+          await act(async () => subscription!.onEvent(createRuntimeEvent('done', {
+            type: 'done', status: next,
+            terminationReason: next === 'succeeded' ? 'completed' : next === 'failed' ? 'stream_error' : 'user_canceled'
+          }, 1, task.runId)));
+        },
+        foreground: (focus: boolean, visibility = true) => {
+          focused = focus; visible = visibility;
+          fireEvent(window, new Event(focus ? 'focus' : 'blur'));
+          fireEvent(document, new Event('visibilitychange'));
+        },
+        deferHistory: () => {
+          let resolve!: (response: Response) => void;
+          const request = vi.fn(() => new Promise<Response>(settle => { resolve = settle; }));
+          loadHistory = request;
+          return { request, resolve: () => resolve(jsonResponse({ threadId: thread.id, items: historyItems() })) };
+        },
+        failHistory: () => { loadHistory = async () => { throw new Error('历史加载失败'); }; }
+      };
+    }
+
+    it.each(['running', 'queued', 'waiting_approval'] as const)('未打开的会话通过轮询发现 %s 时显示运行转圈', async status => {
+      const fixture = createUnreadFixture(status);
+      fixture.setListed(false);
+      const runtimeFetch = vi.fn(fixture.props.runtimeFetch!);
+      const subscribeRunEvents = vi.fn(async () => undefined);
+      render(<App {...fixture.props} runtimeFetch={runtimeFetch} subscribeRunEvents={subscribeRunEvents} />);
+      const row = await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      expect(within(row).queryByLabelText('正在运行')).not.toBeInTheDocument();
+
+      fixture.setListed(true);
+      await fixture.poll();
+      expect(within(row).getByLabelText('正在运行')).toHaveClass('conversation-run-spinner');
+      expect(runtimeFetch.mock.calls.some(([input]) => /\/threads\/thread_unread\/(runs|history)/.test(String(input)))).toBe(false);
+      expect(subscribeRunEvents).not.toHaveBeenCalled();
+
+      fixture.setStatus('succeeded');
+      await fixture.poll();
+      expect(within(row).queryByLabelText('正在运行')).not.toBeInTheDocument();
+    });
+
+    it.each(['succeeded', 'failed', 'canceled'] as const)('已确认 %s 的运行不会被旧轮询状态重新显示转圈', async status => {
+      const fixture = createUnreadFixture();
+      window.location.hash = '#/thread/thread_unread';
+      render(<App {...fixture.props} />);
+      await screen.findByText('未读验证任务');
+      await fixture.poll();
+      expect(screen.getByLabelText('正在运行')).toBeInTheDocument();
+
+      await fixture.finish(status);
+      expect(screen.queryByLabelText('正在运行')).not.toBeInTheDocument();
+      await fixture.poll();
+      expect(screen.queryByLabelText('正在运行')).not.toBeInTheDocument();
+    });
+
+    it.each(['succeeded', 'failed'] as const)('%s 后后台会话显示蓝点，刷新保留，加载成功后清除', async status => {
+      const fixture = createUnreadFixture();
+      const first = render(<App {...fixture.props} />);
+      fireEvent.click(await screen.findByRole('button', { name: /未读验证会话/ }));
+      await screen.findByText('未读验证任务');
+      fireEvent.click(screen.getByRole('button', { name: '设置' }));
+      await fixture.finish(status);
+      await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+      await fixture.poll();
+      expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual(['run_unread']);
+
+      first.unmount();
+      window.location.hash = '#/';
+      const pendingHistory = fixture.deferHistory();
+      render(<App {...fixture.props} />);
+      await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+      fireEvent.click(screen.getByRole('button', { name: /未读验证会话/ }));
+      await waitFor(() => expect(pendingHistory.request).toHaveBeenCalled());
+      expect(screen.getAllByLabelText('未读结果')).toHaveLength(2);
+      await act(async () => pendingHistory.resolve());
+      await waitFor(() => expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument());
+      expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual([]);
+    });
+
+    it.each(['前台', '失焦', '隐藏'] as const)('%s 时完成按窗口可见性处理，后续轮询不会重新标成未读', async mode => {
+      const fixture = createUnreadFixture();
+      window.location.hash = '#/thread/thread_unread';
+      render(<App {...fixture.props} />);
+      await screen.findByText('未读验证任务');
+      if (mode !== '前台') fixture.foreground(false, mode !== '隐藏');
+      await fixture.finish('succeeded');
+      if (mode !== '前台') {
+        await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+        fixture.foreground(true);
+      }
+      await waitFor(() => expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual([]));
+      fireEvent.click(screen.getByRole('button', { name: '设置' }));
+      await fixture.poll();
+      expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument();
+    });
+
+    it('加载失败保留已保存的未读，成功重试后清除', async () => {
+      const fixture = createUnreadFixture('failed');
+      window.localStorage.setItem('clawee.tasks.unread.v2', JSON.stringify(['run_unread']));
+      fixture.failHistory();
+      render(<App {...fixture.props} />);
+      fireEvent.click(await screen.findByRole('button', { name: /未读验证会话/ }));
+      await screen.findByText('无法加载聊天历史');
+      expect(screen.getAllByLabelText('未读结果')).toHaveLength(2);
+      const pendingHistory = fixture.deferHistory();
+      fireEvent.click(screen.getByRole('button', { name: /未读验证会话/ }));
+      await waitFor(() => expect(pendingHistory.request).toHaveBeenCalled());
+      await act(async () => pendingHistory.resolve());
+      await waitFor(() => expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument());
+    });
+
+    it('首次历史快照和主动取消不新增未读', async () => {
+      const fixture = createUnreadFixture('succeeded');
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument();
+      fixture.setStatus('canceled');
+      await fixture.poll();
+      expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual([]);
+    });
+
+    it('升级后不把旧版任务未读显示为历史会话蓝点', async () => {
+      const fixture = createUnreadFixture('succeeded');
+      window.localStorage.setItem('clawee.tasks.unread.v1', JSON.stringify(['run_unread']));
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+
+      expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument();
+    });
+
+    it('升级时运行中的任务完成后仍新增未读', async () => {
+      const fixture = createUnreadFixture();
+      window.localStorage.setItem('clawee.tasks.unread.v1', JSON.stringify(['run_unread']));
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      fixture.setStatus('succeeded');
+      await fixture.poll();
+
+      await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+      expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual(['run_unread']);
+    });
+
+    it('空列表后补载历史完成任务不新增未读', async () => {
+      const fixture = createUnreadFixture('succeeded');
+      fixture.setListed(false);
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      fixture.setListed(true);
+      await fixture.poll();
+
+      expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument();
+    });
+
+    it('历史完成任务移出列表再返回不新增未读', async () => {
+      const fixture = createUnreadFixture('succeeded');
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      fixture.setListed(false);
+      await fixture.poll();
+      fixture.setListed(true);
+      await fixture.poll();
+
+      expect(screen.queryByLabelText('未读结果')).not.toBeInTheDocument();
+    });
+
+    it('两个轮询之间快速完成的任务仍显示未读', async () => {
+      const fixture = createUnreadFixture();
+      fixture.setListed(false);
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      fixture.setStatus('succeeded');
+      fixture.setListed(true);
+      await fixture.poll();
+
+      await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+    });
+
+    it.each(['succeeded', 'failed'] as const)('未打开的会话通过轮询发现 %s 也会显示蓝点', async status => {
+      const fixture = createUnreadFixture();
+      render(<App {...fixture.props} />);
+      await screen.findByRole('button', { name: /未读验证会话/ });
+      await fixture.poll();
+      fixture.setStatus(status);
+      await fixture.poll();
+      await waitFor(() => expect(screen.getAllByLabelText('未读结果')).toHaveLength(2));
+      await fixture.poll();
+      expect(JSON.parse(window.localStorage.getItem('clawee.tasks.unread.v2')!)).toEqual(['run_unread']);
+    });
+  });
+
+  it.each(['browser', 'desktop'] as const)('%s host loads themed logos, switches immediately and clears them on sign-out', async hostKind => {
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    class BrandingURL extends URL {
+      static createObjectURL = vi.fn((blob: Blob | MediaSource) => `blob:branding-${(blob as Blob).size}`);
+      static revokeObjectURL = vi.fn();
+    }
+    vi.stubGlobal('URL', BrandingURL);
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/logout')) return jsonResponse(createEnterpriseSessionResponse({ status: 'signed_out', account: undefined }));
+      if (url.endsWith('/enterprise/platform-branding')) return jsonResponse({
+        sidebarLogoConfigured: true, sidebarCompactLogoConfigured: true,
+        sidebarLogoDarkConfigured: true, sidebarCompactLogoDarkConfigured: true
+      });
+      const sizes: Record<string, number> = {
+        'sidebar-logo': 1, 'sidebar-compact-logo': 2, 'sidebar-logo-dark': 3, 'sidebar-compact-logo-dark': 4
+      };
+      const kind = url.split('/enterprise/platform-branding/')[1];
+      return kind && sizes[kind] ? new Response(new Uint8Array(sizes[kind]), { headers: { 'content-type': 'image/png' } }) : undefined;
+    });
+    let view: ReturnType<typeof render> | undefined;
+    try {
+      view = render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+      await waitFor(() => expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', 'blob:branding-3'));
+      fireEvent.click(screen.getByRole('button', { name: '收起侧栏' }));
+      expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', 'blob:branding-4');
+      fireEvent.click(screen.getByRole('button', { name: '展开侧栏' }));
+      fireEvent.click(screen.getByRole('button', { name: '设置' }));
+      fireEvent.click(await screen.findByRole('button', { name: '浅色' }));
+      expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', 'blob:branding-1');
+      fireEvent.click(screen.getByRole('button', { name: '收起侧栏' }));
+      expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', 'blob:branding-2');
+      fireEvent.click(screen.getByRole('button', { name: '展开侧栏' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Member' }));
+      fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
+      await waitFor(() => expect(screen.getByRole('img', { name: 'KrillinAI' })).toHaveAttribute('src', '/krillinai-wordmark-black.png'));
+      for (const size of [1, 2, 3, 4]) expect(BrandingURL.revokeObjectURL).toHaveBeenCalledWith(`blob:branding-${size}`);
+    } finally {
+      view?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('断线保留项目和会话，重新显示窗口后恢复列表且不重复提交任务', async () => {
+    let available = true;
+    let publish!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const config = { baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' };
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => available ? config : null;
+    hostBridge.subscribeConnectionConfig = listener => { publish = listener; return () => {}; };
+    let latestTitle = '保留的历史会话';
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!available) throw new TypeError('offline');
+      if (String(input).endsWith('/threads?status=active&limit=50')) {
+        return jsonResponse({ threads: [createThreadResponse({ title: latestTitle })] });
+      }
+      return fallback(input, init);
+    });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await screen.findByRole('button', { name: /保留的历史会话/ });
+    available = false;
+    await act(async () => publish(null));
+    expect(screen.getByRole('button', { name: /保留的历史会话/ })).toBeInTheDocument();
+    expect(screen.queryByText('暂无最近会话')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('本地服务连接状态')).toHaveTextContent('正在恢复');
+    available = true;
+    latestTitle = '恢复后的历史会话';
+    fireEvent(window, new Event('focus'));
+    await screen.findByRole('button', { name: /恢复后的历史会话/ });
+    expect(screen.queryByLabelText('本地服务连接状态')).not.toBeInTheDocument();
+    expect(runtimeFetch.mock.calls.some(([input, init]) => String(input).endsWith('/runs') && init?.method === 'POST')).toBe(false);
+  });
+
+  it('刷新后本地服务未就绪时先恢复连接，读取会话前不展示登录表单', async () => {
+    let ready = false;
+    const config = { baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' };
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ready ? config : null;
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fallback} />);
+    expect(await screen.findByRole('heading', { name: '正在恢复本地服务' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('密码')).not.toBeInTheDocument();
+    ready = true;
+    fireEvent(window, new Event('online'));
+    await screen.findByRole('button', { name: '新建会话' });
+    expect(screen.queryByRole('heading', { name: '欢迎使用 Clawee' })).not.toBeInTheDocument();
+  });
+
+  it('更新安装前已保存的输入不再触发 60 秒等待', async () => {
+    const update: DesktopUpdateState = {
+      supported: true, status: 'waiting', automatic: true, currentVersion: '0.1.8', version: '0.1.9'
+    };
+    let publish!: Parameters<NonNullable<HostBridge['subscribeUpdateState']>>[0];
+    const acknowledgeUpdateQuiescence = vi.fn(async () => undefined);
+    const hostBridge: HostBridge = {
+      ...createHostBridge(), kind: 'desktop',
+      readUpdateState: async () => update,
+      subscribeUpdateState: listener => { publish = listener; return () => {}; },
+      acknowledgeUpdateQuiescence
+    };
+    render(<App hostBridge={hostBridge} fileService={createFileService()} />);
+    fireEvent.change(await screen.findByRole('textbox', { name: '输入任务' }), { target: { value: '重启后继续编辑的草稿' } });
+    await waitFor(() => expect(window.localStorage.getItem('clawee.composer-drafts.v1')).toContain('重启后继续编辑的草稿'));
+    act(() => publish({ ...update, status: 'installing', attemptId: 'install-attempt' }));
+    expect(acknowledgeUpdateQuiescence).toHaveBeenCalledExactlyOnceWith('install-attempt', false);
+  });
+
+  it('客户更新在登录前也会提示，不自动下载或安装', async () => {
+    const update: DesktopUpdateState = {
+      supported: true, status: 'available', currentVersion: '0.1.8', version: '0.1.9', notes: '客户管理员已批准'
+    };
+    const downloadUpdate = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    const installUpdate = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    render(<ProductionApp hostBridge={{ ...createHostBridge(), kind: 'desktop',
+      readUpdateState: async () => update, subscribeUpdateState: () => () => undefined,
+      checkForUpdates: async () => ({ ok: true }), downloadUpdate, installUpdate }} />);
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('客户管理员已批准');
+    expect(downloadUpdate).not.toHaveBeenCalled();
+    expect(installUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '下载更新' }));
+    await waitFor(() => expect(downloadUpdate).toHaveBeenCalledTimes(1));
+    expect(installUpdate).not.toHaveBeenCalled();
+  });
   it.each(['browser', 'desktop'] as const)('%s host uploads an enterprise skill to its space and refreshes the enterprise directory', async hostKind => {
     window.location.hash = '#/plugins?source=enterprise';
     const user = userEvent.setup();
@@ -108,6 +530,42 @@ describe('App', () => {
     expect(hostBridge.selectProjectDirectory).not.toHaveBeenCalled();
     expect(fetchCalls.some(call => call.url.endsWith('/codex/skills/install'))).toBe(false);
   });
+  it.each(['browser', 'desktop'] as const)('%s 上传 Skill 显示具体校验原因，缺少原因时保留默认提示', async hostKind => {
+    window.location.hash = '#/plugins?source=enterprise';
+    const user = userEvent.setup();
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const message = 'Skill 包格式不合法：ZIP 根目录或单一顶层包装目录下缺少 SKILL.md';
+    let attempts = 0;
+    const runtimeFetch = createKnowledgeRuntimeFetch((url, init) => {
+      if (url.endsWith('/enterprise/skills')) return jsonResponse(createEnterpriseSkillListResponse([]));
+      if (url.endsWith('/codex/skills')) return jsonResponse(createSkillListResponse([]));
+      if (url.endsWith('/enterprise/skill-spaces')) return jsonResponse({ spaces: [
+        { spaceId: 'team', name: '团队技能', description: '', actions: ['read', 'write'] }
+      ] });
+      if (new URL(url).pathname === '/enterprise/skills/versions' && init?.method === 'POST') {
+        attempts += 1;
+        return jsonResponse({ error: { code: 'ENTERPRISE_SKILL_PACKAGE_INVALID', message: 'Enterprise request failed',
+          details: attempts === 1 ? { packageValidationMessage: message } : {}
+        } }, { status: 400 });
+      }
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await screen.findByRole('tab', { name: '企业Skills', selected: true });
+    await user.click(screen.getByRole('button', { name: '添加技能' }));
+    await user.click(await screen.findByRole('menuitem', { name: /上传技能/ }));
+    const dialog = await screen.findByRole('dialog', { name: '上传企业 Skill' });
+    await within(dialog).findByRole('option', { name: '团队技能' });
+    await user.upload(within(dialog).getByLabelText('ZIP 技能包'), new File(['ZIP'], 'review.zip', { type: 'application/zip' }));
+    await user.click(within(dialog).getByRole('button', { name: '上传' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
+    await user.click(within(dialog).getByRole('button', { name: '上传' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('企业 Skill 包校验失败'));
+    expect(attempts).toBe(2);
+    expect(dialog).toBeInTheDocument();
+  });
+
   it.each(['browser', 'desktop'] as const)('%s host loads menu names and clears them on sign-out', async hostKind => {
     const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -132,10 +590,223 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: '企业知识库' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Member' }));
     fireEvent.click(await screen.findByRole('button', { name: '退出登录' }));
-    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '工作台']) {
       expect(await screen.findByRole('button', { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: '技能' })).not.toBeInTheDocument();
+  });
+
+  it('applies the backend brand color by default while preserving employee choices', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/platform-branding')) return jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#F2E9EA'
+      });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--brand-accent-value')).toBe('#f2e9ea'));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'brand');
+    expect(document.documentElement.style.getPropertyValue('--brand-light-soft')).toBe('#f2e9ea');
+    expect(document.documentElement.style.getPropertyValue('--brand-light-accent')).not.toBe('#f2e9ea');
+    fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+    expect(await screen.findByRole('radio', { name: '跟随品牌' })).toHaveAttribute('aria-checked', 'true');
+    for (let clickCount = 0; clickCount < 10; clickCount += 1) {
+      fireEvent.click(screen.getByRole('radio', { name: '跟随品牌' }));
+      expect(document.documentElement).toHaveAttribute('data-accent', 'brand');
+    }
+    fireEvent.click(screen.getByRole('radio', { name: '紫色' }));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'purple');
+    fireEvent.click(screen.getByRole('radio', { name: '跟随品牌' }));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'brand');
+    expect(document.documentElement.style.getPropertyValue('--brand-accent-value')).toBe('#f2e9ea');
+    expect(document.documentElement.style.getPropertyValue('--brand-light-soft')).toBe('#f2e9ea');
+  });
+
+  it.each(['success', 'failure', 'reset'] as const)('品牌色在同账号刷新期间保持稳定，刷新结果为 %s', async result => {
+    const hostBridge = createHostBridge();
+    const config = { baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' };
+    hostBridge.readConnectionConfig = async () => config;
+    let emitConnection!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    hostBridge.subscribeConnectionConfig = listener => {
+      emitConnection = listener;
+      return () => undefined;
+    };
+    let resolveBranding!: (response: Response) => void;
+    const pendingBranding = new Promise<Response>(resolve => { resolveBranding = resolve; });
+    const loadBranding = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#F2E9EA'
+      }))
+      .mockReturnValue(pendingBranding);
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/enterprise/platform-branding')) return loadBranding();
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-accent', 'brand'));
+    await act(async () => emitConnection({ ...config }));
+    await waitFor(() => expect(loadBranding).toHaveBeenCalledTimes(2));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'brand');
+    await act(async () => resolveBranding(result === 'failure'
+      ? jsonResponse({ error: { code: 'ENTERPRISE_SERVICE_UNAVAILABLE' } }, { status: 503 })
+      : jsonResponse({
+          sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false,
+          ...(result === 'success' ? { accentColor: '#0099ff' } : {})
+        })));
+    expect(document.documentElement).toHaveAttribute('data-accent', result === 'reset' ? 'neutral' : 'brand');
+    if (result === 'success') {
+      expect(document.documentElement.style.getPropertyValue('--brand-accent-value')).toBe('#0099ff');
+    }
+  });
+
+  it.each(['signed_out', 'different-account'] as const)('身份变更为 %s 时清除旧品牌色并拒绝迟到响应', async identity => {
+    const hostBridge = createHostBridge();
+    const config = { baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' };
+    hostBridge.readConnectionConfig = async () => config;
+    let emitConnection!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    hostBridge.subscribeConnectionConfig = listener => {
+      emitConnection = listener;
+      return () => undefined;
+    };
+    let session = createEnterpriseSessionResponse();
+    let resolveBranding!: (response: Response) => void;
+    const pendingBranding = new Promise<Response>(resolve => { resolveBranding = resolve; });
+    let resolveNewBranding!: (response: Response) => void;
+    const pendingNewBranding = new Promise<Response>(resolve => { resolveNewBranding = resolve; });
+    const loadBranding = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#F2E9EA'
+      }))
+      .mockReturnValueOnce(pendingBranding)
+      .mockReturnValueOnce(new Promise<Response>(() => undefined))
+      .mockReturnValue(pendingNewBranding);
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/enterprise/platform-branding')) return loadBranding();
+      if (url.endsWith('/enterprise/session')) return jsonResponse(session);
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-accent', 'brand'));
+    await act(async () => emitConnection({ ...config }));
+    await waitFor(() => expect(loadBranding).toHaveBeenCalledTimes(2));
+    session = identity === 'signed_out'
+      ? createEnterpriseSessionResponse({ status: 'signed_out', account: undefined })
+      : createEnterpriseSessionResponse({ account: { subjectId: 'other-account', email: 'other@example.com', name: 'Other' } });
+    await act(async () => emitConnection({ ...config }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-accent', 'neutral'));
+    await act(async () => resolveBranding(jsonResponse({
+      sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#0099ff'
+    })));
+    expect(document.documentElement).toHaveAttribute('data-accent', 'neutral');
+    if (identity === 'signed_out') {
+      expect(document.documentElement).toHaveAttribute('data-accent', 'neutral');
+    } else {
+      expect(await screen.findByRole('button', { name: 'Other' })).toBeInTheDocument();
+      await act(async () => resolveNewBranding(jsonResponse({
+        sidebarLogoConfigured: false, sidebarCompactLogoConfigured: false, accentColor: '#ff8800'
+      })));
+      expect(document.documentElement).toHaveAttribute('data-accent', 'brand');
+      expect(document.documentElement.style.getPropertyValue('--brand-accent-value')).toBe('#ff8800');
+    }
+  });
+
+  it('keeps the workbench accessible when the model check fails and opens model settings', async () => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    let checked = false;
+    let runtimeChecked = false;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/runtime/model-service/check')) {
+        checked = true;
+        return jsonResponse({ status: 'succeeded', checkedAt: '2026-10-09T10:00:00Z' });
+      }
+      if (url.endsWith('/runtime/model-service/check-runtime')) {
+        runtimeChecked = true;
+        return jsonResponse({ status: 'succeeded', checkedAt: '2026-10-09T10:00:00Z' });
+      }
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse({
+        availabilityProbe: runtimeChecked ? { status: 'succeeded' } : { status: 'failed', message: '模型检测超时，请检查网络后重试' }
+      }));
+      if (url.endsWith('/runtime/model-service')) return jsonResponse({ status: 'ready', mode: 'platform_managed', configuration: { baseUrl: 'https://model.example.test/v1', model: 'model-1' } });
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).toBeInTheDocument();
+    fireEvent(window, new Event('online'));
+    await waitFor(() => expect(runtimeChecked).toBe(true));
+    await waitFor(() => expect(screen.queryByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'AI模型配置' }));
+    expect(await screen.findByRole('heading', { name: 'AI模型配置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '检测模型' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '检测模型' }));
+    expect(await screen.findByText(/接口检测通过/)).toBeInTheDocument();
+    expect(checked).toBe(true);
+    expect(runtimeChecked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '返回应用' }));
+    await waitFor(() => expect(screen.queryByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).not.toBeInTheDocument());
+  });
+
+  it.each([false, true])('真实模型响应后刷新并清除超时横幅，历史回放和运行状态不触发刷新（立即完成：%s）', async complete => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const thread = createThreadResponse({ id: 'thread_recovery', title: '模型恢复会话' });
+    const run = createRunResponse({ id: 'run_recovery', threadId: thread.id, status: 'running', lastEventSeq: 3 });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    let recovered = false;
+    let statusReads = 0;
+    let subscription: SubscribeRunEventsInput | undefined;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/codex/status')) {
+        statusReads += 1;
+        return jsonResponse(createCodexStatusResponse({ availabilityProbe: recovered
+          ? { status: 'succeeded', responseReceived: true }
+          : { status: 'failed', message: '模型检测超时，请检查网络后重试' }
+        }));
+      }
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [thread] });
+      if (url.includes(`/threads/${thread.id}/history`)) return jsonResponse({ threadId: thread.id, items: [] });
+      if (url.includes(`/threads/${thread.id}/runs`)) return jsonResponse({ runs: [run] });
+      if (url.endsWith(`/runs/${run.id}`)) return jsonResponse(run);
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async input => { subscription = input; }} />);
+    expect(await screen.findByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /模型恢复会话/ }));
+    await waitFor(() => expect(subscription).toBeDefined());
+    const readsBeforeResponse = statusReads;
+    await act(async () => {
+      subscription!.onEvent(createRuntimeEvent('assistant_message', {
+        type: 'assistant_message', text: '历史输出', format: 'plain_text', delivery: 'message'
+      }, 3, run.id));
+      subscription!.onEvent(createRuntimeEvent('status', { type: 'status', label: 'running' }, 4, run.id));
+    });
+    expect(statusReads).toBe(readsBeforeResponse);
+    expect(screen.getByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).toBeInTheDocument();
+    recovered = true;
+    await act(async () => {
+      for (let seq = 5; seq < 15; seq += 1) subscription!.onEvent(createRuntimeEvent('assistant_message', {
+        type: 'assistant_message', text: '新输出', format: 'plain_text', delivery: 'delta'
+      }, seq, run.id));
+      if (complete) {
+        run.status = 'succeeded';
+        run.lastEventSeq = 15;
+        subscription!.onEvent(createRuntimeEvent('done', {
+          type: 'done', status: 'succeeded', terminationReason: 'completed'
+        }, 15, run.id));
+      }
+    });
+    await waitFor(() => expect(screen.queryByText('Runtime 链路检测失败：模型检测超时，请检查网络后重试')).not.toBeInTheDocument());
+    expect(statusReads).toBe(readsBeforeResponse + 1);
   });
 
   it('shows the configured admin link only for an admin session and clears it on sign-out', async () => {
@@ -169,8 +840,8 @@ describe('App', () => {
     });
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
     await screen.findByRole('button', { name: 'Member' });
-    for (const name of ['企业Skill', '企业知识库', '共享网盘', '数据看板']) {
-      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    for (const name of ['企业Skill', '企业知识库', '共享网盘', '工作台']) {
+      expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name })).toBeInTheDocument();
     }
   });
 
@@ -199,7 +870,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '旧名称' })).not.toBeInTheDocument();
   });
 
-  it('shows the enterprise model configuration gate when login is not required', async () => {
+  it('keeps the workbench available and model submissions disabled before model configuration', async () => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({
       baseUrl: 'http://127.0.0.1:60764',
@@ -231,11 +902,10 @@ describe('App', () => {
       />
     );
 
-    expect(await screen.findByRole('heading', {
-      name: '配置 Codex 模型服务'
-    })).toBeInTheDocument();
+    expect(await screen.findByText('模型服务暂时不可用，暂时只能使用无需模型的功能')).toBeInTheDocument();
+    expect(screen.getByLabelText('发送')).toBeDisabled();
     expect(screen.queryByText('欢迎使用 Clawee')).not.toBeInTheDocument();
-    expect(document.querySelector('.clawee-shell')).not.toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).toBeInTheDocument();
     expect(requests.some(url => url.endsWith('/codex/status'))).toBe(false);
   });
 
@@ -319,18 +989,14 @@ describe('App', () => {
       <ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />
     );
 
-    expect(await screen.findByRole('heading', {
-      name: '模型服务暂不可用'
-    })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(await screen.findByText('模型服务暂时不可用，暂时只能使用无需模型的功能')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
     expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+    await userEvent.click(screen.getByRole('button', { name: '重新检测' }));
 
-    expect(await screen.findByRole('heading', {
-      name: '正在准备模型服务'
-    })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    expect(await screen.findByText('正在准备模型服务，模型相关功能暂不可用')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新检测' })).not.toBeInTheDocument();
     expect(retryRequests).toBe(1);
   });
 
@@ -364,9 +1030,7 @@ describe('App', () => {
       <ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />
     );
 
-    expect(await screen.findByRole('heading', {
-      name: '正在准备模型服务'
-    })).toBeInTheDocument();
+    expect(await screen.findByText('正在准备模型服务，模型相关功能暂不可用')).toBeInTheDocument();
     expect(await screen.findByRole('heading', {
       name: '欢迎使用 Clawee'
     }, { timeout: 2_000 })).toBeInTheDocument();
@@ -675,11 +1339,14 @@ describe('App', () => {
     render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
 
     expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).toHaveClass('sidebar-hidden');
     expect(await screen.findByText('¥100.00')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '充值记录' }));
     expect(await screen.findByRole('heading', { name: '充值记录' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
     expect(screen.getByText('已支付，到账异常')).toBeInTheDocument();
     expect(window.location.hash).toBe('#/activity/recharge-records?range=7d');
     await user.click(screen.getByRole('button', { name: '返回 Agent动态' }));
@@ -693,15 +1360,27 @@ describe('App', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/activity?range=today'));
     expect(screen.getByTestId('total-tokens')).toHaveTextContent('184,200');
 
-    window.history.replaceState(null, '', '#/dashboard');
-    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/dashboard');
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '打开Agent动态模块' }));
+    expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/activity?range=7d');
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
 
     window.history.replaceState(null, '', '#/activity/agent/collector-beijing/agent-customer?range=30d');
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
     expect(await screen.findByRole('heading', { name: '客户洞察' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent动态' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Agent动态' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '近 30 天' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '返回 Agent动态' }));
+    expect(await screen.findByRole('heading', { name: 'Agent动态' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
     }
   );
 
@@ -754,220 +1433,84 @@ describe('App', () => {
     window.location.hash = '#/dashboard';
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '数据看板' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('opens the dashboard from the homepage data analysis shortcut', async () => {
+  it('recovers an unavailable workbench project through the existing default project API without starting a run', async () => {
+    const user = userEvent.setup();
+    window.location.hash = '#/dashboard';
+    testRuntimeProjects = [createTestProject('/Users/test/missing-project', { directoryState: 'missing' })];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()} />);
+    await screen.findByRole('heading', { name: '工作台' });
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    const recoveryButton = await screen.findByRole('button', { name: '使用默认项目' });
+    expect(within(screen.getByLabelText('模块对话')).getByRole('alert')).toHaveTextContent('/Users/test/missing-project');
+    await user.click(recoveryButton);
+    await waitFor(() => expect(screen.queryByRole('button', { name: '使用默认项目' })).not.toBeInTheDocument());
+    expect(findPostCalls(fetchCalls, '/projects/default')).toHaveLength(1);
+    expect(findPostCalls(fetchCalls, '/runs')).toHaveLength(0);
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+  });
+
+  it('hides navigation inside a workbench module and restores it on return or external navigation', async () => {
+    const user = userEvent.setup();
+    window.location.hash = '#/dashboard';
+    render(<App />);
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(await screen.findByRole('heading', { name: '哔哩哔哩数据洞察' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开导航' })).not.toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).toHaveClass('sidebar-hidden');
+
+    await user.click(screen.getByRole('button', { name: '返回工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+    expect(document.querySelector('.clawee-shell')).not.toHaveClass('sidebar-hidden');
+
+    await user.click(screen.getByRole('button', { name: '打开哔哩哔哩运营详情看板' }));
+    expect(screen.queryByLabelText('Clawee 导航')).not.toBeInTheDocument();
+    act(() => { window.location.hash = '#/'; });
+    await waitFor(() => expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument());
+    await user.click(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作台' }));
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Clawee 导航')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['工作台', '#/dashboard', 'heading'],
+    ['工作流', '#/workflow', 'heading'],
+    ['企业Skills', '#/plugins', 'tab'],
+    ['企业知识库', '#/knowledge', 'heading']
+  ] as const)('opens the existing %s module from the homepage shortcut', async (name, route, role) => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: '数据分析' }));
+    const shortcuts = await screen.findByLabelText('常用场景');
+    await user.click(within(shortcuts).getByRole('button', { name }));
 
-    expect(await screen.findByRole('heading', { name: '数据看板' })).toBeInTheDocument();
-    expect(window.location.hash).toBe('#/dashboard');
-  });
-
-  it.each(['browser', 'desktop'] as const)(
-    '%s host loads an installed homepage Skill into the current composer',
-    async (hostKind) => {
-      const user = userEvent.setup();
-      const hostBridge = createHostBridge();
-      hostBridge.kind = hostKind;
-      hostBridge.readConnectionConfig = async () => ({
-        baseUrl: 'http://127.0.0.1:60764',
-        token: 'runtime-token'
-      });
-      const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        const projectApiResponse = handleDefaultProjectApiRequest(url, init);
-        if (projectApiResponse !== undefined) return projectApiResponse;
-        if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
-        if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
-        if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [] });
-        if (url.endsWith('/enterprise/session')) {
-          return jsonResponse(createEnterpriseSessionResponse());
-        }
-        if (url.endsWith('/codex/skills')) {
-          return jsonResponse(createSkillListResponse([
-            createSkillResponse({ id: 'content-strategy', name: 'content-strategy' })
-          ]));
-        }
-        if (url.endsWith('/codex/mcp')) return jsonResponse(createMcpListResponse());
-        throw new Error(`Unexpected request ${url}`);
-      };
-
-      render(
-        <App
-          fileService={createFileService()}
-          hostBridge={hostBridge}
-          runtimeFetch={runtimeFetch}
-          subscribeRunEvents={async () => undefined}
-        />
-      );
-
-      await screen.findByRole('button', { name: '选择项目 content-design' });
-      await user.type(screen.getByRole('textbox', { name: '输入任务' }), '保留这段需求');
-      await user.click(screen.getByRole('button', { name: '脚本选题生成' }));
-
-      expect(await screen.findByLabelText('已选择 Skill content-strategy'))
-        .toBeInTheDocument();
-      expect(screen.getByRole('textbox', { name: '输入任务' }))
-        .toHaveValue('保留这段需求');
-    }
-  );
-
-  it('installs a missing enterprise Skill before loading it into the composer', async () => {
-    const user = userEvent.setup();
-    const hostBridge = createHostBridge();
-    hostBridge.readConnectionConfig = async () => ({
-      baseUrl: 'http://127.0.0.1:60764',
-      token: 'runtime-token'
-    });
-    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-    let localSkillRequests = 0;
-    let enterpriseSkillRequests = 0;
-    const enterpriseSkill = createEnterpriseSkillResponse({
-      skillId: 'ad-creative',
-      name: 'ad-creative',
-      status: 'not_installed',
-      integrity: 'not_applicable',
-      actions: ['install']
-    });
-    const installedEnterpriseSkill = createEnterpriseSkillResponse({
-      skillId: 'ad-creative',
-      name: 'ad-creative',
-      status: 'installed',
-      integrity: 'verified',
-      installedVersion: '1.0.0',
-      actions: ['use']
-    });
-    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
-      if (projectApiResponse !== undefined) return projectApiResponse;
-      fetchCalls.push({ url, init });
-      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
-      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
-      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [] });
-      if (url.endsWith('/enterprise/session')) {
-        return jsonResponse(createEnterpriseSessionResponse());
-      }
-      if (url.endsWith('/enterprise/skills')) {
-        enterpriseSkillRequests += 1;
-        return jsonResponse(createEnterpriseSkillListResponse([
-          enterpriseSkillRequests === 1 ? enterpriseSkill : installedEnterpriseSkill
-        ]));
-      }
-      if (
-        url.endsWith('/enterprise/skills/ad-creative/install')
-        && init?.method === 'POST'
-      ) {
-        return jsonResponse({
-          skill: installedEnterpriseSkill,
-          localSkill: createSkillResponse({ id: 'ad-creative', name: 'ad-creative' }),
-          operation: {}
-        });
-      }
-      if (url.endsWith('/codex/skills')) {
-        localSkillRequests += 1;
-        return jsonResponse(createSkillListResponse(
-          localSkillRequests === 1
-            ? []
-            : [createSkillResponse({ id: 'ad-creative', name: 'ad-creative' })]
-        ));
-      }
-      if (url.endsWith('/codex/mcp')) return jsonResponse(createMcpListResponse());
-      throw new Error(`Unexpected request ${url}`);
-    };
-
-    render(
-      <App
-        fileService={createFileService()}
-        hostBridge={hostBridge}
-        runtimeFetch={runtimeFetch}
-        subscribeRunEvents={async () => undefined}
-      />
-    );
-
-    expect(await screen.findByRole('heading', {
-      name: /^(上午|下午|晚上)好，Member$/
-    })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '广告素材审核' }));
-
-    expect(await screen.findByLabelText('已选择 Skill ad-creative')).toBeInTheDocument();
-    expect(findPostCalls(fetchCalls, '/enterprise/skills/ad-creative/install')).toHaveLength(1);
-    expect(enterpriseSkillRequests).toBe(2);
-    expect(localSkillRequests).toBe(2);
-  });
-
-  it('shows an error and does not fake Skill selection when installation fails', async () => {
-    const user = userEvent.setup();
-    const hostBridge = createHostBridge();
-    hostBridge.readConnectionConfig = async () => ({
-      baseUrl: 'http://127.0.0.1:60764',
-      token: 'runtime-token'
-    });
-    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
-      if (projectApiResponse !== undefined) return projectApiResponse;
-      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
-      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
-      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [] });
-      if (url.endsWith('/enterprise/session')) {
-        return jsonResponse(createEnterpriseSessionResponse());
-      }
-      if (url.endsWith('/enterprise/skills')) {
-        return jsonResponse(createEnterpriseSkillListResponse([
-          createEnterpriseSkillResponse({
-            skillId: 'marketing-video',
-            name: 'marketing-video',
-            status: 'not_installed',
-            integrity: 'not_applicable',
-            actions: ['install']
-          })
-        ]));
-      }
-      if (
-        url.endsWith('/enterprise/skills/marketing-video/install')
-        && init?.method === 'POST'
-      ) {
-        return jsonResponse({
-          error: {
-            code: 'ENTERPRISE_SERVICE_UNAVAILABLE',
-            message: '安装服务暂不可用'
-          }
-        }, { status: 503 });
-      }
-      if (url.endsWith('/codex/skills')) return jsonResponse(createSkillListResponse());
-      if (url.endsWith('/codex/mcp')) return jsonResponse(createMcpListResponse());
-      throw new Error(`Unexpected request ${url}`);
-    };
-
-    render(
-      <App
-        fileService={createFileService()}
-        hostBridge={hostBridge}
-        runtimeFetch={runtimeFetch}
-        subscribeRunEvents={async () => undefined}
-      />
-    );
-
-    expect(await screen.findByRole('heading', {
-      name: /^(上午|下午|晚上)好，Member$/
-    })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '视频发布' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('企业Skills暂时不可用');
-    expect(screen.queryByLabelText('已选择 Skill marketing-video')).not.toBeInTheDocument();
+    expect(await screen.findByRole(role, { name })).toBeInTheDocument();
+    expect(window.location.hash).toBe(route);
+    expect(screen.queryByLabelText('常用场景')).not.toBeInTheDocument();
+    expect(screen.queryByText('企业 Skill 目录中未找到该能力')).not.toBeInTheDocument();
   });
 
   it('restores the enterprise knowledge base from direct and history routes', async () => {
     window.location.hash = '#/knowledge';
     render(<App />);
     expect(await screen.findByRole('heading', { name: '企业知识库' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '企业知识库' })).toHaveAttribute('aria-current', 'page');
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '企业知识库' })).toHaveAttribute('aria-current', 'page');
     window.history.replaceState(null, '', '#/plugins');
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
     expect(await screen.findByRole('tab', { name: '企业Skills', selected: true })).toBeInTheDocument();
@@ -1429,7 +1972,7 @@ describe('App', () => {
         });
       }
       if (url.includes('/tasks?')) return jsonResponse({ tasks: [task], hasMore: false });
-      if (url.endsWith('/threads/thread_task/history?limit=50')) {
+      if (url.endsWith('/threads/thread_task/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_task', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_task/runs?limit=50')) {
@@ -1528,7 +2071,7 @@ describe('App', () => {
         });
       }
       if (url.includes('/tasks?')) return jsonResponse({ tasks: [task], hasMore: false });
-      if (url.endsWith('/threads/thread_approval_task/history?limit=50')) {
+      if (url.endsWith('/threads/thread_approval_task/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_approval_task',
           codexThreadId: null,
@@ -1661,6 +2204,7 @@ describe('App', () => {
     vi.unstubAllGlobals();
     testRuntimeProjects = undefined;
     window.localStorage.clear();
+    window.sessionStorage.clear();
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   });
 
@@ -1686,6 +2230,16 @@ describe('App', () => {
     expect(screen.queryByText('Codex Runtime Workbench')).not.toBeInTheDocument();
     expect(screen.queryByText('Runtime 地址')).not.toBeInTheDocument();
     expect(screen.queryByText(/Token|API Key|连接 Runtime/)).not.toBeInTheDocument();
+  });
+
+  it('重新打开工作台后保留未发送的输入草稿', async () => {
+    const first = render(<App fileService={createFileService()} />);
+    const input = await screen.findByRole('textbox', { name: '输入任务' });
+    fireEvent.change(input, { target: { value: '升级后继续编辑的草稿' } });
+    await waitFor(() => expect(window.localStorage.getItem('clawee.composer-drafts.v1')).toContain('升级后继续编辑的草稿'));
+    first.unmount();
+    render(<App fileService={createFileService()} />);
+    expect(await screen.findByRole('textbox', { name: '输入任务' })).toHaveValue('升级后继续编辑的草稿');
   });
 
   it('adds a title bar safe area only when the host exposes the capability', async () => {
@@ -1733,7 +2287,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith(`/threads/${thread.id}/history?limit=50`)) {
+      if (url.endsWith(`/threads/${thread.id}/history?limit=10`)) {
         return jsonResponse({ threadId: thread.id, codexThreadId: null, items: [] });
       }
       if (url.endsWith(`/threads/${thread.id}/runs?limit=50`)) {
@@ -1801,7 +2355,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith(`/threads/${thread.id}/history?limit=50`)) {
+      if (url.endsWith(`/threads/${thread.id}/history?limit=10`)) {
         return history.promise;
       }
       if (url.endsWith(`/threads/${thread.id}/runs?limit=50`)) {
@@ -1823,7 +2377,7 @@ describe('App', () => {
       .toBeInTheDocument();
     expect(document.querySelector('.conversation-page')).not.toHaveClass('is-empty');
     expect(screen.queryByText('需要帮你做点什么')).not.toBeInTheDocument();
-    expect(screen.queryByText('数据分析')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('常用场景')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /选择项目/ })).not.toBeInTheDocument();
 
     history.resolve(jsonResponse({
@@ -1838,8 +2392,54 @@ describe('App', () => {
     });
     expect(document.querySelector('.conversation-page')).toHaveClass('is-empty');
     expect(screen.getByText('需要帮你做点什么')).toBeInTheDocument();
-    expect(screen.getByText('数据分析')).toBeInTheDocument();
+    expect(screen.getByLabelText('常用场景')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /选择项目/ })).toBeInTheDocument();
+  });
+
+  it('does not reload an already selected empty conversation while loading or after success', async () => {
+    const user = userEvent.setup();
+    const [project] = persistProjects('/Users/test/develop/clean');
+    window.localStorage.setItem('clawee.navigation.v3', JSON.stringify({
+      currentProjectId: project.id,
+      selectedThreadId: 'thread-empty-selected'
+    }));
+    const thread = createThreadResponse({
+      id: 'thread-empty-selected', title: '空会话', projectId: project.id,
+      cwd: project.cwd, canonicalCwd: project.cwd
+    });
+    const history = createDeferred<Response>();
+    let historyRequests = 0;
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({
+      baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token'
+    });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [thread] });
+      if (url.endsWith(`/threads/${thread.id}/history?limit=10`)) {
+        historyRequests += 1;
+        return history.promise;
+      }
+      if (url.endsWith(`/threads/${thread.id}/runs?limit=50`)) return jsonResponse({ runs: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+
+    render(<App fileService={createFileService()} hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    const selected = await screen.findByRole('button', { name: /空会话/ });
+    await waitFor(() => expect(historyRequests).toBe(1));
+    await user.click(selected);
+    await user.click(selected);
+    expect(historyRequests).toBe(1);
+
+    history.resolve(jsonResponse({ threadId: thread.id, codexThreadId: null, items: [] }));
+    await waitFor(() => expect(screen.getByText('需要帮你做点什么')).toBeInTheDocument());
+    await user.click(selected);
+    await user.click(selected);
+    expect(historyRequests).toBe(1);
   });
 
   it('shows cached history immediately while refreshing a revisited conversation', async () => {
@@ -1868,7 +2468,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [threadA, threadB] });
       }
-      if (url.endsWith('/threads/thread-cache-a/history?limit=50')) {
+      if (url.endsWith('/threads/thread-cache-a/history?limit=10')) {
         historyARequests += 1;
         if (historyARequests > 1) return refreshedHistoryA.promise;
         return jsonResponse({
@@ -1882,7 +2482,7 @@ describe('App', () => {
           }]
         });
       }
-      if (url.endsWith('/threads/thread-cache-b/history?limit=50')) {
+      if (url.endsWith('/threads/thread-cache-b/history?limit=10')) {
         return jsonResponse({
           threadId: threadB.id,
           codexThreadId: null,
@@ -1981,7 +2581,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [imageThread, otherThread] });
       }
-      if (url.endsWith(`/threads/${imageThread.id}/history?limit=50`)) {
+      if (url.endsWith(`/threads/${imageThread.id}/history?limit=10`)) {
         return jsonResponse({
           threadId: imageThread.id,
           codexThreadId: 'codex-image-history',
@@ -1996,7 +2596,7 @@ describe('App', () => {
           }]
         });
       }
-      if (url.endsWith(`/threads/${otherThread.id}/history?limit=50`)) {
+      if (url.endsWith(`/threads/${otherThread.id}/history?limit=10`)) {
         return jsonResponse({
           threadId: otherThread.id,
           codexThreadId: null,
@@ -2087,7 +2687,7 @@ describe('App', () => {
           upstreams: []
         });
       }
-      if (url.includes('/history?limit=50')) {
+      if (url.includes('/history?limit=10')) {
         const threadId = url.includes(threadA.id) ? threadA.id : threadB.id;
         return jsonResponse({ threadId, codexThreadId: null, items: [] });
       }
@@ -2138,7 +2738,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith(`/threads/${thread.id}/history?limit=50`)) {
+      if (url.endsWith(`/threads/${thread.id}/history?limit=10`)) {
         return jsonResponse({ threadId: thread.id, codexThreadId: null, items: [] });
       }
       if (url.endsWith(`/threads/${thread.id}/runs?limit=50`)) {
@@ -2168,7 +2768,11 @@ describe('App', () => {
     expect(document.querySelector('.clawee-main-titlebar')).not.toBeInTheDocument();
   });
 
-  it('uses the signed-in enterprise account name in the homepage greeting', async () => {
+  it.each([
+    { name: '林晓', displayName: '林晓' },
+    { name: '13800000000', displayName: '企业用户' },
+    { name: '+86 138-0000-0000', displayName: '企业用户' }
+  ])('uses a safe enterprise account name in the homepage greeting: $name', async ({ name, displayName }) => {
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({
       baseUrl: 'http://127.0.0.1:60764',
@@ -2187,8 +2791,9 @@ describe('App', () => {
         return jsonResponse(createEnterpriseSessionResponse({
           account: {
             subjectId: 'acct-lin',
-            email: 'lin@example.com',
-            name: '林晓'
+            email: '',
+            phone: '13800000000',
+            name
           }
         }));
       }
@@ -2205,8 +2810,10 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('heading', {
-      name: /^(上午|下午|晚上)好，林晓$/
+      name: new RegExp(`^(上午|下午|晚上)好，${displayName}$`)
     })).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain('13800000000');
+    expect(document.body.innerHTML).not.toContain('+86 138-0000-0000');
   });
 
   it('does not allow chat submission before the local runtime is connected', async () => {
@@ -2225,6 +2832,485 @@ describe('App', () => {
     expect(screen.queryByText(prompt)).not.toBeInTheDocument();
     expect(screen.queryByText(/收到。我会先围绕/)).not.toBeInTheDocument();
     expect(screen.queryByText(/mock 文件变更/)).not.toBeInTheDocument();
+  });
+
+  it('keeps workflow plans out of the ordinary Agent sidebar without showing a broken task', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/gateway')) return jsonResponse({ gateway: 'https://gateway.example', configurable: true });
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [
+        createScheduleResponse(), createScheduleResponse({ id: 'workflow-plan', name: '前账号流程计划', action: 'workflow_start', threadId: null })
+      ] });
+      if (url.endsWith('/tasks?status=all&limit=50')) return jsonResponse({ tasks: [], hasMore: false });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await screen.findByRole('button', { name: '定时任务' }));
+    expect(await screen.findByText('每日总结')).toBeInTheDocument();
+    expect(screen.queryByText('前账号流程计划')).not.toBeInTheDocument();
+    expect(screen.queryByText('任务会话需要修复')).not.toBeInTheDocument();
+  });
+
+  it.each(['configuration_required', 'resolving', 'unavailable'] as const)('R2 延迟 Gateway %s 身份稳定前无变更，稳定后未知发起保留原 key', async modelStatus => {
+    window.location.hash = '#/workflow';
+    let resolveGateway!: (response: Response) => void;
+    const gateway = new Promise<Response>(resolve => { resolveGateway = resolve; });
+    const fixture = createModelGatedWorkflowFetch(modelStatus);
+    const starts: unknown[] = [];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/enterprise/gateway') return (await gateway).clone();
+      if (path.endsWith('/instances') && init?.method === 'POST') {
+        starts.push(JSON.parse(init.body as string));
+        if (starts.length === 1) throw new Error('发起响应丢失');
+      }
+      return fixture.runtimeFetch(input, init);
+    });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText(/正在确认工作流身份/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '流程模板' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '创建定时计划' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.method !== 'GET' && !['/projects/migrations/local-storage-v1', '/projects/default'].includes(request.path))).toBe(false);
+    await act(async () => resolveGateway(jsonResponse({ gateway: 'https://stable.example', configurable: true })));
+    await userEvent.click(await screen.findByRole('button', { name: '流程模板' }));
+    await userEvent.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    fireEvent.change(screen.getByRole('textbox', { name: '任务要求' }), { target: { value: '原要求' } });
+    await userEvent.click(screen.getByRole('button', { name: '发起任务' }));
+    const retry = await screen.findByRole('button', { name: '重试发起' });
+    expect(screen.getByRole('textbox', { name: '任务要求' })).toBeDisabled();
+    await userEvent.click(retry);
+    await waitFor(() => expect(starts).toHaveLength(2));
+    expect(starts[1]).toEqual(starts[0]);
+    expect(starts[0]).toMatchObject({ initialInput: { text: '原要求' }, idempotencyKey: expect.any(String) });
+    expect(await screen.findByRole('heading', { name: '无需模型发起模板' })).toBeInTheDocument();
+    expect(fixture.requests.some(request => request.path.endsWith('/prepare') || request.path.endsWith('/execute'))).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: '定时任务' }));
+    expect(await screen.findByRole('heading', { name: '定时任务' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作流' })).toBeInTheDocument();
+  });
+
+  it('R2 Gateway 解析失败时明确不可用，不挂载可变更界面', async () => {
+    window.location.hash = '#/workflow';
+    const fixture = createModelGatedWorkflowFetch('configuration_required');
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === '/enterprise/gateway') throw new Error('私密内部路径');
+      return fixture.runtimeFetch(input, init);
+    };
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    expect(await screen.findByText(/工作流身份不可用/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '流程模板' })).not.toBeInTheDocument();
+    expect(screen.queryByText('私密内部路径')).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.method !== 'GET' && !['/projects/migrations/local-storage-v1', '/projects/default'].includes(request.path))).toBe(false);
+  });
+
+  it.each(['logout', 'account', 'origin', 'failed-new-session'] as const)('R2 %s 不接纳前会话迟到 Origin 或暂存身份', async change => {
+    window.location.hash = '#/workflow';
+    let session = createEnterpriseSessionResponse();
+    let resolveOldGateway!: (response: Response) => void;
+    let resolveNewGateway!: (response: Response) => void;
+    const oldGateway = new Promise<Response>(resolve => { resolveOldGateway = resolve; });
+    const newGateway = new Promise<Response>(resolve => { resolveNewGateway = resolve; });
+    const fixture = createModelGatedWorkflowFetch('unavailable');
+    let connectionChanged!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.subscribeConnectionConfig = listener => { connectionChanged = listener; return () => undefined; };
+    let newGatewayCalls = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/enterprise/session') return jsonResponse(session);
+      if (path === '/enterprise/gateway') {
+        const newSession = new Headers(init?.headers).get('Authorization') === 'Bearer new-runtime-token';
+        if (newSession) {
+          newGatewayCalls += 1;
+          if (change === 'failed-new-session') throw new Error('新会话身份读取失败');
+        }
+        return (await (newSession ? newGateway : oldGateway)).clone();
+      }
+      return fixture.runtimeFetch(input, init);
+    };
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={runtimeFetch} />);
+    await screen.findByText(/正在确认工作流身份/);
+    if (change === 'failed-new-session') {
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      await screen.findByRole('button', { name: '流程模板' });
+    }
+    if (change === 'logout') session = createEnterpriseSessionResponse({ status: 'signed_out', account: undefined });
+    if (change === 'account') session = createEnterpriseSessionResponse({ account: { subjectId: 'other-account', email: 'other@example.com', name: '其他账户' } });
+    await act(async () => connectionChanged({ baseUrl: 'http://127.0.0.1:60764', token: 'new-runtime-token' }));
+    if (change === 'logout') {
+      await screen.findByRole('heading', { name: '欢迎使用 Clawee' });
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      expect(screen.queryByRole('button', { name: '流程模板' })).not.toBeInTheDocument();
+    } else if (change === 'failed-new-session') {
+      expect(await screen.findByText(/工作流身份不可用/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '流程模板' })).not.toBeInTheDocument();
+    } else {
+      await waitFor(() => expect(newGatewayCalls).toBeGreaterThan(0));
+      await act(async () => resolveOldGateway(jsonResponse({ gateway: 'https://old.example', configurable: true })));
+      expect(screen.getByText(/正在确认工作流身份/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '流程模板' })).not.toBeInTheDocument();
+      await act(async () => resolveNewGateway(jsonResponse({ gateway: 'https://new.example', configurable: true })));
+      expect(await screen.findByRole('button', { name: '流程模板' })).toBeInTheDocument();
+    }
+    expect(fixture.requests.some(request => request.method !== 'GET' && !['/projects/migrations/local-storage-v1', '/projects/default'].includes(request.path))).toBe(false);
+  });
+
+  it.each([
+    ['configuration_required', 'browser'], ['unavailable', 'browser'],
+    ['configuration_required', 'desktop'], ['unavailable', 'desktop']
+  ] as const)('贡献工作台：%s / %s 无模型完成筛选、详情、导出与返回', async (modelStatus, hostKind) => {
+    window.location.hash = '#/settings';
+    const fixture = createContributionWorkbenchFetch(modelStatus);
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:contributions');
+      static revokeObjectURL = vi.fn();
+    });
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+      await userEvent.click(await within(await screen.findByLabelText('Clawee 导航')).findByRole('button', { name: '工作台' }));
+      expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+      expect(fixture.requests.some(({ path }) => /skill-contributions\/(summary|records|detail)|conversations/.test(path))).toBe(false);
+      await userEvent.click(screen.getByRole('button', { name: /^数据洞察/ }));
+      await userEvent.click(screen.getByRole('button', { name: '打开Skill 贡献模块' }));
+      await screen.findByRole('button', { name: '贡献测试技能' });
+      expect(window.location.hash).toBe('#/skill-contributions');
+      expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.queryByRole('button', { name: 'Skill 贡献' })).not.toBeInTheDocument();
+      expect(screen.getByLabelText('发送')).toBeDisabled();
+      expect(screen.getByText('模型暂不可用')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('最低总分'), { target: { value: '16' } });
+      await waitFor(() => expect(fixture.requests.some(({ path }) => path.includes('/records?') && path.includes('min_total_score=16'))).toBe(true));
+      await userEvent.click(await screen.findByRole('button', { name: '贡献测试技能' }));
+      expect(await screen.findByRole('dialog', { name: '审核详情' })).toBeInTheDocument();
+      expect(fixture.requests.some(({ path }) => path.endsWith('/detail?version_id=version-1'))).toBe(true);
+      await userEvent.keyboard('{Escape}');
+      await userEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
+      await screen.findByText('已导出 1 条记录');
+      expect(fixture.requests.find(({ path }) => path.endsWith('/export'))?.body).toMatchObject({ min_total_score: 16, report: 'uploads' });
+      expect(download).toHaveBeenCalledOnce();
+      await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:contributions'), { timeout: 2000 });
+      await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+      expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument();
+      expect(window.location.hash).toBe('#/dashboard');
+      expect(fixture.requests.filter(({ method, path }) => method !== 'GET' && !path.endsWith('/export') && !path.startsWith('/desktop-update/') && !['/projects/migrations/local-storage-v1', '/projects/default'].includes(path))).toEqual([]);
+    } finally { download.mockRestore(); }
+  });
+
+  it.each(['browser', 'desktop'] as const)('贡献工作台：%s 模型准备中可直达目录和旧链接并恢复历史导航', async hostKind => {
+    window.location.hash = '#/dashboard';
+    const fixture = createContributionWorkbenchFetch('resolving');
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await userEvent.click(await screen.findByRole('button', { name: '打开Skill 贡献模块' }));
+    await screen.findByRole('button', { name: '贡献测试技能' });
+    expect(screen.getByLabelText('发送')).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+    await screen.findByRole('heading', { name: '工作台' });
+    window.history.replaceState(null, '', '#/skill-contributions');
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    await screen.findByRole('button', { name: '贡献测试技能' });
+    window.history.replaceState(null, '', '#/dashboard');
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    await screen.findByRole('heading', { name: '工作台' });
+    act(() => { window.location.hash = '#/skill-contributions'; });
+    await screen.findByRole('button', { name: '贡献测试技能' });
+    expect(fixture.requests.filter(({ path }) => path.endsWith('/latest')).length).toBeGreaterThanOrEqual(3);
+    expect(fixture.requests.some(({ method, path }) => method !== 'GET' && !path.startsWith('/desktop-update/') && !['/projects/migrations/local-storage-v1', '/projects/default'].includes(path))).toBe(false);
+  });
+
+  it('贡献工作台：模型就绪且无项目时沿专用接口执行，离开只停止订阅', async () => {
+    window.location.hash = '#/dashboard';
+    const fixture = createContributionWorkbenchFetch('unavailable');
+    fixture.state.connected = true;
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const subscribe = vi.fn((input: Parameters<NonNullable<AppProps['subscribeRunEvents']>>[0]) => new Promise<void>(resolve => {
+      input.signal?.addEventListener('abort', () => resolve(), { once: true });
+    }));
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} subscribeRunEvents={subscribe} />);
+    await screen.findByRole('button', { name: '打开Skill 贡献模块' });
+    await waitFor(() => expect(fixture.requests.some(({ path }) => path.startsWith('/threads?'))).toBe(true));
+    const navigationStart = fixture.requests.length;
+    await userEvent.click(screen.getByRole('button', { name: '打开Skill 贡献模块' }));
+    const question = await screen.findByLabelText('贡献查询问题');
+    await waitFor(() => expect(question).toBeEnabled());
+    await userEvent.type(question, '查询本月上传');
+    await userEvent.click(screen.getByLabelText('发送'));
+    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+    expect(fixture.requests.find(({ path, method }) => path === '/enterprise/skill-contribution-conversations' && method === 'POST')?.body).toEqual({});
+    expect(fixture.requests.find(({ path, method }) => path.endsWith('/contribution-thread/runs') && method === 'POST')?.body).toMatchObject({ prompt: '查询本月上传', query: { report: 'uploads' } });
+    expect(fixture.requests.slice(navigationStart).some(({ path, method }) => method === 'POST' && (path.startsWith('/projects') || path === '/threads' || path === '/runs'))).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(subscribe.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+    expect(fixture.requests.some(({ path }) => /cancel|interrupt/.test(path))).toBe(false);
+  });
+
+  it('贡献工作台：切换账号重新鉴权，断开连接不保留业务页面', async () => {
+    window.location.hash = '#/skill-contributions';
+    const fixture = createContributionWorkbenchFetch('unavailable');
+    let connectionChanged!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.subscribeConnectionConfig = listener => { connectionChanged = listener; return () => undefined; };
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await userEvent.click(await screen.findByRole('button', { name: '贡献测试技能' }));
+    await screen.findByRole('dialog', { name: '审核详情' });
+    fixture.state.subjectId = 'another-account';
+    fixture.state.access = 'denied';
+    await act(async () => connectionChanged({ baseUrl: 'http://127.0.0.1:60765', token: 'another-token' }));
+    await screen.findByText('无权查看 Skill 贡献');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('贡献测试技能')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('贡献查询问题')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(screen.queryByRole('button', { name: '打开Skill 贡献模块' })).not.toBeInTheDocument();
+    await act(async () => connectionChanged(null));
+    expect(screen.queryByRole('button', { name: '打开Skill 贡献模块' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入工作台（无需模型）' })).not.toBeInTheDocument();
+    act(() => { window.location.hash = '#/skill-contributions'; });
+    await screen.findByRole('button', { name: '返回工作台' });
+    expect(screen.queryByLabelText('贡献查询问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('贡献测试技能')).not.toBeInTheDocument();
+  });
+
+  it.each(['checking', 'denied', 'error'] as const)('贡献工作台：直达 %s 授权提示可返回目录', async access => {
+    window.location.hash = '#/skill-contributions';
+    const fixture = createContributionWorkbenchFetch('unavailable');
+    fixture.state.access = access;
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    const message = access === 'checking' ? '正在验证 Skill 贡献授权' : access === 'denied' ? '无权查看 Skill 贡献' : 'Skill 贡献授权暂不可用';
+    await screen.findByText(message);
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page');
+    await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(window.location.hash).toBe('#/dashboard');
+    expect(screen.queryByRole('button', { name: '打开Skill 贡献模块' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(({ path }) => path.includes('/records?') || path.endsWith('/latest'))).toBe(false);
+  });
+
+  it('贡献工作台：撤权清理详情与页面，目录同步隐藏卡片', async () => {
+    window.location.hash = '#/skill-contributions';
+    const fixture = createContributionWorkbenchFetch('unavailable');
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await userEvent.click(await screen.findByRole('button', { name: '贡献测试技能' }));
+    await screen.findByRole('dialog', { name: '审核详情' });
+    fixture.state.access = 'denied';
+    fireEvent(window, new Event('focus'));
+    await screen.findByText('无权查看 Skill 贡献');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('贡献测试技能')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('贡献查询问题')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '返回工作台' }));
+    await screen.findByRole('heading', { name: '工作台' });
+    expect(screen.queryByRole('button', { name: '打开Skill 贡献模块' })).not.toBeInTheDocument();
+  });
+
+  it.each(['dashboard', 'skill-contributions'] as const)('贡献工作台：未登录直达 %s 保持登录门禁', async route => {
+    window.location.hash = `#/${route}`;
+    const fixture = createContributionWorkbenchFetch('configuration_required', false);
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await screen.findByRole('heading', { name: '欢迎使用 Clawee' });
+    expect(screen.queryByRole('button', { name: '进入工作台（无需模型）' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(({ path }) => path.includes('/records?') || path.endsWith('/latest'))).toBe(false);
+  });
+
+  it.each([
+    ['configuration_required', 'browser'], ['unavailable', 'browser'],
+    ['configuration_required', 'desktop'], ['unavailable', 'desktop']
+  ] as const)('model-independent workflow: %s / %s keeps Agent gated', async (modelStatus, hostKind) => {
+    window.location.hash = '#/settings';
+    persistProjects('/workspace/model-gated-project');
+    const user = userEvent.setup();
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch(modelStatus);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    expect(await screen.findByText('模型服务暂时不可用，暂时只能使用无需模型的功能')).toBeInTheDocument();
+    await user.click(await within(await screen.findByLabelText('Clawee 导航')).findByRole('button', { name: '工作流' }));
+    expect(await screen.findByRole('heading', { name: '工作流' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '流程模板' }));
+    await user.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    await user.click(await screen.findByRole('button', { name: '创建定时计划' }));
+    await user.click(await screen.findByRole('button', { name: '保存计划' }));
+    await waitFor(() => expect(fixture.requests.some(request => request.path === '/schedules' && request.method === 'POST')).toBe(true));
+    const create = fixture.requests.find(request => request.path === '/schedules' && request.method === 'POST')!;
+    expect(create.body).toMatchObject({ action: 'workflow_start', workflow: { templateId: 'model-gated-template', initialInput: {} } });
+    expect(create.body).not.toHaveProperty('prompt');
+    expect(create.body).not.toHaveProperty('model');
+    await user.click(screen.getByRole('button', { name: '流程模板' }));
+    await user.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    const start = await screen.findByRole('button', { name: '发起任务' });
+    expect(start).toBeEnabled();
+    await user.click(start);
+    expect(await screen.findByRole('heading', { name: '无需模型发起模板' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开执行会话' })).toBeDisabled();
+    expect(await screen.findByText(/模型尚未就绪/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '待我处理' }));
+    await user.click(await screen.findByRole('button', { name: /审批 · 无需模型审批/ }));
+    await user.click(await screen.findByRole('button', { name: '批准' }));
+    await waitFor(() => expect(fixture.requests.some(request => request.path.endsWith('/decision'))).toBe(true));
+    expect(fixture.requests.some(request => request.path.endsWith('/prepare') || request.path.endsWith('/execute') || request.path === '/runs')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '定时任务' }));
+    expect(await screen.findByRole('heading', { name: '定时任务' })).toBeInTheDocument();
+    await user.click(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作流' }));
+    await user.click(await screen.findByRole('button', { name: '返回模型设置' }));
+    expect(await screen.findByRole('heading', { name: 'AI模型配置' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Base URL')).toBeEnabled();
+    expect(window.location.hash).toBe('#/settings');
+  });
+
+  it.each(['browser', 'desktop'] as const)('model-independent workflow: %s keeps navigation available while checking models', async hostKind => {
+    window.location.hash = '#/settings';
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch('resolving');
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    expect(await screen.findByText('正在准备模型服务，模型相关功能暂不可用')).toBeInTheDocument();
+    await waitFor(() => expect(fixture.requests.some(request => request.path === '/enterprise/skill-contributions/capability')).toBe(true));
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作流' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skill 贡献' })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('Clawee 导航')).getByRole('button', { name: '工作台' })).toBeInTheDocument();
+  });
+
+  it.each(['configuration_required', 'resolving', 'unavailable'] as const)('model-independent workflow: direct route remains usable when models are %s', async modelStatus => {
+    window.location.hash = '#/workflow';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch(modelStatus);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    expect(await screen.findByRole('button', { name: '定时计划' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '配置 Codex 模型服务' })).not.toBeInTheDocument();
+  });
+
+  it('model-independent workflow: sign-in is still required for direct workflow routes', async () => {
+    window.location.hash = '#/workflow';
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const fixture = createModelGatedWorkflowFetch('configuration_required', false);
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    expect(await screen.findByRole('heading', { name: '欢迎使用 Clawee' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入工作流（无需模型）' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '定时计划' })).not.toBeInTheDocument();
+    expect(fixture.requests.some(request => request.path.startsWith('/enterprise/workflow-'))).toBe(false);
+  });
+
+  it('model-independent workflow: losing daemon connectivity disables plan creation', async () => {
+    let connectionChanged!: Parameters<NonNullable<HostBridge['subscribeConnectionConfig']>>[0];
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    hostBridge.subscribeConnectionConfig = listener => { connectionChanged = listener; return () => undefined; };
+    const fixture = createModelGatedWorkflowFetch('unavailable');
+    render(<ProductionApp hostBridge={hostBridge} runtimeFetch={fixture.runtimeFetch} />);
+    await userEvent.click(await within(await screen.findByLabelText('Clawee 导航')).findByRole('button', { name: '工作流' }));
+    await userEvent.click(await screen.findByRole('button', { name: '流程模板' }));
+    await userEvent.click(await screen.findByRole('button', { name: /无需模型发起模板/ }));
+    expect(await screen.findByRole('button', { name: '创建定时计划' })).toBeInTheDocument();
+    await act(async () => connectionChanged(null));
+    expect(screen.queryByRole('button', { name: '创建定时计划' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存计划' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入工作流（无需模型）' })).not.toBeInTheDocument();
+  });
+
+  it.each(['browser', 'desktop'] as const)('%s 工作流选择项目后打开会话，返回原流程任务与待办筛选', async hostKind => {
+    const user = userEvent.setup();
+    const hostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const node = { node_id: 'write', order: 0, type: 'agent', title: '撰写内容', instruction: '撰写内容', assignee_user_id: 'acct-member' };
+    const task = { task_id: 'task-return', instance_id: 'instance-return', node_id: node.node_id, type: 'agent', status: 'pending', instruction: node.instruction, input: { text: '用户主题' }, assignee_user_id: 'acct-member' };
+    const instance = { id: task.instance_id, template_id: 'template-return', status: 'running', current_node_id: node.node_id, nodes: [node], tasks: [task], started_at: '2026-10-16T00:00:00Z' };
+    const meta = { next_cursor: '', has_next: false };
+    const thread = createThreadResponse({ id: 'thread-return', title: '工作流 · 撰写内容', sandbox: 'danger-full-access' });
+    const prepare = vi.fn();
+    const execute = vi.fn();
+    const runtimeFetch = createKnowledgeRuntimeFetch((url, init) => {
+      const path = new URL(url).pathname;
+      if (path === '/enterprise/gateway') return jsonResponse({ gateway: 'https://gateway.example', configurable: true });
+      if (path === '/enterprise/workflow-templates') return jsonResponse({ data: [{ id: instance.template_id, name: '内容发布流程', status: 'enabled', revision: 1, nodes: [node] }], meta });
+      if (path === '/enterprise/workflow-instances') return jsonResponse({ data: [instance], meta });
+      if (path === '/enterprise/workflow-tasks') return jsonResponse({ data: [task], meta });
+      if (path === `/enterprise/workflow-instances/${instance.id}`) return jsonResponse({ data: instance });
+      if (path === '/enterprise/workflow-capability') return jsonResponse({ canExecute: true });
+      if (path.endsWith('/execution')) return jsonResponse({ status: 'idle', threadId: thread.id });
+      if (path.endsWith('/prepare')) { prepare(JSON.parse(String(init?.body))); return jsonResponse({ threadId: thread.id, instruction: node.instruction, input: '用户主题', firstNode: true }); }
+      if (path.endsWith('/execute')) { execute(); return jsonResponse({}); }
+      if (path === `/threads/${thread.id}`) return jsonResponse({ thread });
+      if (path === `/threads/${thread.id}/history`) return jsonResponse({ thread, items: [], hasMore: false });
+      if (path === `/threads/${thread.id}/runs`) return jsonResponse({ runs: [] });
+      if (path === '/schedules') return jsonResponse({ schedules: [] });
+      if (path === '/tasks') return jsonResponse({ tasks: [], hasMore: false });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await within(await screen.findByLabelText('Clawee 导航')).findByRole('button', { name: /^工作流$/ }));
+    await user.click(await screen.findByRole('button', { name: /Agent · 撰写内容/ }));
+    await user.click(screen.getByRole('button', { name: /^待执行$/ }));
+    const selector = screen.getByRole('combobox', { name: '执行项目' });
+    const projectId = readTestRuntimeProjects().find(project => project.status === 'active')!.id;
+    await user.selectOptions(selector, projectId);
+    expect(screen.getByRole('heading', { name: /^工作流$/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^打开执行会话$/ }));
+    const context = await screen.findByRole('region', { name: '所属流程任务' });
+    expect(context).toHaveClass('workflow-conversation-context--compact');
+    expect(context.parentElement).toHaveClass('conversation-page');
+    expect(context).not.toHaveTextContent('内容发布流程');
+    expect(context).not.toHaveTextContent('第 1 步 · 撰写内容');
+    expect(prepare).toHaveBeenCalledWith({ projectId });
+    expect(execute).not.toHaveBeenCalled();
+    const requirement = screen.getByRole('textbox', { name: '任务要求' });
+    await user.type(requirement, '，只选三条');
+    expect(requirement).toHaveValue('用户主题，只选三条');
+    await user.click(within(context).getByRole('button', { name: '返回流程任务' }));
+    expect(await screen.findByRole('heading', { name: '内容发布流程', level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^待执行$/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('combobox', { name: '执行项目' })).toHaveValue(projectId);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('loads Gateway identity and exposes workflow plan creation through the shared page', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const template = { id: 'workflow-template', name: '客户端定时审核', description: '', revision: 1, status: 'enabled',
+      nodes: [{ node_id: 'review', order: 0, type: 'approval', title: '审核', instruction: '审核', assignee_user_id: 'acct-member' }] };
+    const meta = { next_cursor: '', has_next: false };
+    const runtimeFetch = createKnowledgeRuntimeFetch(url => {
+      if (url.endsWith('/enterprise/gateway')) return jsonResponse({ gateway: 'https://gateway.example/path', configurable: true });
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      if (url.includes('/enterprise/workflow-templates?')) return jsonResponse({ data: [template], meta });
+      if (url.endsWith('/enterprise/workflow-templates/workflow-template')) return jsonResponse({ data: template });
+      if (url.includes('/enterprise/workflow-instances?') || url.includes('/enterprise/workflow-tasks?')) return jsonResponse({ data: [], meta });
+      if (url.endsWith('/enterprise/workflow-capability')) return jsonResponse({ canExecute: false });
+      if (url.endsWith('/tasks?status=all&limit=50')) return jsonResponse({ tasks: [], hasMore: false });
+      return undefined;
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await within(await screen.findByLabelText('Clawee 导航')).findByRole('button', { name: '工作流' }));
+    await user.click(await screen.findByRole('button', { name: '流程模板' }));
+    await user.click(await screen.findByRole('button', { name: /客户端定时审核/ }));
+    await user.click(await screen.findByRole('button', { name: '创建定时计划' }));
+    expect(await screen.findByRole('form', { name: '创建工作流定时计划' })).toBeInTheDocument();
+    expect(screen.getByText(/由当前客户端发起/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存计划' })).toBeEnabled();
   });
 
   it('opens a previous schedule run in its task thread without opening diagnostics', async () => {
@@ -2258,7 +3344,7 @@ describe('App', () => {
       if (url.endsWith('/tasks?status=all&limit=50')) {
         return jsonResponse({ tasks: [], hasMore: false });
       }
-      if (url.endsWith('/threads/thread-schedule-1/history?limit=50')) {
+      if (url.endsWith('/threads/thread-schedule-1/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread-schedule-1',
           codexThreadId: null,
@@ -2344,7 +3430,7 @@ describe('App', () => {
       if (url.endsWith('/tasks?status=all&limit=50')) {
         return jsonResponse({ tasks: [], hasMore: false });
       }
-      if (url.endsWith('/threads/thread-schedule-1/history?limit=50')) {
+      if (url.endsWith('/threads/thread-schedule-1/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread-schedule-1',
           codexThreadId: null,
@@ -2451,7 +3537,7 @@ describe('App', () => {
       if (url.endsWith('/schedules/schedule-1/run-now') && init?.method === 'POST') {
         return runNow.promise;
       }
-      if (url.endsWith('/threads/thread-schedule-1/history?limit=50')) {
+      if (url.endsWith('/threads/thread-schedule-1/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread-schedule-1',
           codexThreadId: null,
@@ -2872,10 +3958,10 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_a/history?limit=50')) {
+      if (url.endsWith('/threads/thread_a/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_a', codexThreadId: null, items: [] });
       }
-      if (url.endsWith('/threads/thread_b/history?limit=50')) {
+      if (url.endsWith('/threads/thread_b/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_b', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_a/runs?limit=50')) {
@@ -2948,7 +4034,7 @@ describe('App', () => {
           threads: [createThreadResponse({ id: 'thread_queue', title: '队列会话' })]
         });
       }
-      if (url.endsWith('/threads/thread_queue/history?limit=50')) {
+      if (url.endsWith('/threads/thread_queue/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_queue', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_queue/runs?limit=50')) {
@@ -3047,10 +4133,10 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_a/history?limit=50')) {
+      if (url.endsWith('/threads/thread_a/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_a', codexThreadId: null, items: [] });
       }
-      if (url.endsWith('/threads/thread_b/history?limit=50')) {
+      if (url.endsWith('/threads/thread_b/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_b', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_a/runs?limit=50')) return jsonResponse({ runs: [] });
@@ -3185,10 +4271,10 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_a/history?limit=50')) {
+      if (url.endsWith('/threads/thread_a/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_a', codexThreadId: null, items: [] });
       }
-      if (url.endsWith('/threads/thread_b/history?limit=50')) {
+      if (url.endsWith('/threads/thread_b/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_b', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_a/runs?limit=50')) {
@@ -3257,7 +4343,7 @@ describe('App', () => {
           threads: [createThreadResponse({ id: 'thread_a', title: '会话 A' })]
         });
       }
-      if (url.endsWith('/threads/thread_a/history?limit=50')) {
+      if (url.endsWith('/threads/thread_a/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_a', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_a/runs?limit=50')) {
@@ -3327,7 +4413,7 @@ describe('App', () => {
     expect(screen.queryByText(/Run is already terminal|停止任务失败/)).not.toBeInTheDocument();
   });
 
-  it('restores a running conversation after an unexpected SSE disconnect', async () => {
+  it.each(['assistant_message', 'reasoning_summary'] as const)('restores a running conversation with %s after an unexpected SSE disconnect', async messageType => {
     const user = userEvent.setup();
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({
@@ -3346,20 +4432,24 @@ describe('App', () => {
           threads: [createThreadResponse({ id: 'thread_restore', title: '断线恢复会话' })]
         });
       }
-      if (url.endsWith('/threads/thread_restore/history?limit=50')) {
+      if (url.endsWith('/threads/thread_restore/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_restore',
           codexThreadId: null,
           items: [
             {
               id: 'history_user_restore',
+              runId: 'run_restore',
               type: 'user_message',
               text: '继续生成长内容',
               createdAt: new Date(0).toISOString()
             },
             {
               id: 'history_assistant_restore',
-              type: 'assistant_message',
+              runId: 'run_restore',
+              rawEventId: 'event_1',
+              eventSeq: 1,
+              type: messageType,
               text: '第一段内容',
               createdAt: new Date(0).toISOString()
             }
@@ -3376,7 +4466,7 @@ describe('App', () => {
                   threadId: 'thread_restore',
                   status: 'running'
                 }),
-                lastEventSeq: 1
+                lastEventSeq: messageType === 'reasoning_summary' ? 2 : 1
               }]
         });
       }
@@ -3392,18 +4482,20 @@ describe('App', () => {
     const subscribeRunEvents = async (input: SubscribeRunEventsInput) => {
       subscriptions.push(input);
       input.onEvent(
-        createRuntimeEvent(
-          'assistant_message',
-          {
-            type: 'assistant_message',
-            text: '第一段内容',
-            format: 'plain_text',
-            delivery: 'message'
-          },
+        { ...createRuntimeEvent(
+          messageType,
+          messageType === 'reasoning_summary'
+            ? { type: messageType, text: '第一段内容', format: 'plain_text', delivery: 'delta' }
+            : { type: messageType, text: '第一段内容', format: 'plain_text', delivery: 'message' },
           1,
           'run_restore'
-        )
+        ), rawEventId: 'event_1' }
       );
+      if (messageType === 'reasoning_summary') {
+        input.onEvent({ ...createRuntimeEvent('reasoning_summary', {
+          type: 'reasoning_summary', text: '，补充思考', format: 'plain_text', delivery: 'delta'
+        }, 2, 'run_restore'), rawEventId: 'event_1' });
+      }
       if (subscriptions.length === 1) return;
 
       input.onEvent(
@@ -3415,7 +4507,7 @@ describe('App', () => {
             format: 'plain_text',
             delivery: 'summary'
           },
-          2,
+          3,
           'run_restore'
         )
       );
@@ -3428,7 +4520,7 @@ describe('App', () => {
             format: 'plain_text',
             delivery: 'message'
           },
-          3,
+          4,
           'run_restore'
         )
       );
@@ -3436,7 +4528,7 @@ describe('App', () => {
         createRuntimeEvent(
           'done',
           { type: 'done', status: 'succeeded', terminationReason: 'completed' },
-          4,
+          5,
           'run_restore'
         )
       );
@@ -3457,14 +4549,127 @@ describe('App', () => {
 
     await waitFor(() => expect(subscriptions).toHaveLength(2), { timeout: 2_000 });
     expect(subscriptions[0]?.fromSeq).toBe(0);
-    expect(subscriptions[1]?.fromSeq).toBe(1);
+    expect(subscriptions[1]?.fromSeq).toBe(messageType === 'reasoning_summary' ? 2 : 1);
     expect(await screen.findByText('第二段内容')).toBeInTheDocument();
     await user.click(await screen.findByText(/^(?:已完成|已处理 .+)$/));
-    expect(await screen.findAllByText('第一段内容')).toHaveLength(1);
+    expect(await screen.findAllByText(messageType === 'reasoning_summary' ? '第一段内容，补充思考' : '第一段内容')).toHaveLength(1);
     expect(screen.queryByText('SSE connection closed unexpectedly')).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument();
     });
+  });
+
+  it('waits after reconnect exhaustion and coalesces manual, online and focus recovery', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    let resolveSnapshot!: (response: Response) => void;
+    let snapshotRequests = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const defaults = handleDefaultProjectApiRequest(url, init);
+      if (defaults !== undefined) return defaults;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [createThreadResponse({ id: 'thread_recover', title: '耗尽恢复' })] });
+      if (url.includes('/threads/thread_recover/history')) return jsonResponse({ threadId: 'thread_recover', items: [
+        { id: 'recover-user', type: 'user_message', runId: 'run_recover', text: '继续输出', createdAt: new Date(0).toISOString() }
+      ] });
+      if (url.includes('/threads/thread_recover/runs?')) return jsonResponse({ runs: [{ ...createRunResponse({ id: 'run_recover', threadId: 'thread_recover', status: 'running' }), lastEventSeq: 1 }] });
+      if (url.endsWith('/runs/run_recover')) {
+        snapshotRequests += 1;
+        return new Promise<Response>(resolve => { resolveSnapshot = resolve; });
+      }
+      if (url.endsWith('/runs/run_recover/diagnostics')) return jsonResponse(createRunDiagnosticsResponse(createCodexStatusResponse()));
+      throw new Error(`Unexpected request ${url}`);
+    };
+    let fail!: (error: Error) => void;
+    const subscriptions: SubscribeRunEventsInput[] = [];
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()} subscribeRunEvents={input => {
+      subscriptions.push(input);
+      if (subscriptions.length === 1) input.onEvent({ ...createRuntimeEvent('assistant_message', {
+        type: 'assistant_message', delivery: 'delta', format: 'plain_text', text: '已收到'
+      }, 1, 'run_recover'), rawEventId: 'recover-body' });
+      return new Promise<void>((resolve, reject) => {
+        fail = reject;
+        input.signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+    }} />);
+    await screen.findByRole('status', { name: '本地运行内核正常' });
+    await user.click(await screen.findByRole('button', { name: /耗尽恢复/ }));
+    await screen.findByText('已收到');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      for (const delay of [0, 500, 1000, 2000, 4000, 8000]) {
+        await act(async () => { if (delay > 0) await vi.advanceTimersByTimeAsync(delay); fail(new Error('断流')); await Promise.resolve(); });
+      }
+      expect(subscriptions).toHaveLength(6);
+      const retry = screen.getByRole('button', { name: '重试连接' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(subscriptions).toHaveLength(6);
+      fireEvent.click(retry);
+      fireEvent(window, new Event('online'));
+      fireEvent(window, new Event('focus'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(snapshotRequests).toBe(1);
+      await act(async () => {
+        resolveSnapshot(jsonResponse({ ...createRunResponse({ id: 'run_recover', threadId: 'thread_recover', status: 'running' }), lastEventSeq: 1 }));
+        await Promise.resolve();
+      });
+      expect(subscriptions).toHaveLength(7);
+      expect(subscriptions[6]?.fromSeq).toBe(1);
+      await act(async () => {
+        subscriptions[6]!.onEvent({ ...createRuntimeEvent('assistant_message', {
+          type: 'assistant_message', delivery: 'message', format: 'plain_text', text: '已收到，继续完成'
+        }, 2, 'run_recover'), rawEventId: 'recover-body' });
+        subscriptions[6]!.onEvent(createRuntimeEvent('done', { type: 'done', status: 'succeeded', terminationReason: 'completed' }, 3, 'run_recover'));
+      });
+      expect(screen.getByText('已收到，继续完成')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '重试连接' })).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: '输入任务' })).toBeEnabled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('syncs final output before accepting a terminal snapshot and normal EOF without done', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const run = { ...createRunResponse({ id: 'run_eof', threadId: 'thread_eof', status: 'succeeded' }), lastEventSeq: 2 };
+    let completed = false;
+    let snapshotRequests = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const defaults = handleDefaultProjectApiRequest(url, init);
+      if (defaults !== undefined) return defaults;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [createThreadResponse({ id: 'thread_eof', title: '终态输出同步' })] });
+      if (url.includes('/threads/thread_eof/history')) return jsonResponse({ threadId: 'thread_eof', items: [
+        { id: 'eof-user', runId: run.id, type: 'user_message', text: '生成最终内容', createdAt: new Date(0).toISOString() },
+        ...(completed ? [{ id: 'eof-history', rawEventId: 'eof-body', eventSeq: 2, runId: run.id, type: 'assistant_message', messageState: 'complete', text: '最终内容完整', createdAt: new Date(0).toISOString() }] : [])
+      ] });
+      if (url.includes('/threads/thread_eof/runs?')) return jsonResponse({ runs: [run] });
+      if (url.endsWith('/runs/run_eof')) { snapshotRequests += 1; return jsonResponse(run); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    let finish!: () => void;
+    const subscribe = vi.fn(async (input: SubscribeRunEventsInput) => {
+      input.onEvent({ ...createRuntimeEvent('assistant_message', { type: 'assistant_message', text: '最终', delivery: 'delta', format: 'plain_text' }, 1, run.id), rawEventId: 'eof-body' });
+      await new Promise<void>(resolve => { finish = resolve; });
+      completed = true;
+      input.onEvent({ ...createRuntimeEvent('assistant_message', { type: 'assistant_message', text: '最终内容完整', delivery: 'message', format: 'plain_text' }, 2, run.id), rawEventId: 'eof-body' });
+    });
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()} subscribeRunEvents={subscribe} />);
+    await screen.findByRole('status', { name: '本地运行内核正常' });
+    await user.click(await screen.findByRole('button', { name: /终态输出同步/ }));
+    await screen.findByText('输出同步中');
+    await screen.findByText('最终');
+    await act(async () => { finish(); });
+    await screen.findByText('最终内容完整');
+    await waitFor(() => expect(snapshotRequests).toBe(1));
+    expect(screen.queryByText('输出同步中')).not.toBeInTheDocument();
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '重试连接' })).not.toBeInTheDocument();
   });
 
   it('keeps pending run starts isolated when switching threads', async () => {
@@ -3489,10 +4694,10 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_a/history?limit=50')) {
+      if (url.endsWith('/threads/thread_a/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_a', codexThreadId: null, items: [] });
       }
-      if (url.endsWith('/threads/thread_b/history?limit=50')) {
+      if (url.endsWith('/threads/thread_b/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_b', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/threads/thread_a/runs?limit=50')) return jsonResponse({ runs: [] });
@@ -3869,11 +5074,9 @@ describe('App', () => {
         />
       );
 
-      expect(await screen.findByRole('heading', {
-        name: '欢迎使用 Clawee'
-      })).toBeInTheDocument();
-      expect(screen.getByText('连接恢复后即可继续登录。'))
-        .toBeInTheDocument();
+      expect(await screen.findByLabelText('本地服务连接状态')).toHaveTextContent('正在恢复本地服务连接');
+      expect(screen.queryByLabelText('密码')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重试连接' })).toBeEnabled();
       expect(document.querySelector('.clawee-shell')).toBeNull();
     }
   );
@@ -3912,6 +5115,7 @@ describe('App', () => {
       const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
       let skillRequests = 0;
       let localSkillRequests = 0;
+      let marketRecordRequests = 0;
       const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const projectApiResponse = handleDefaultProjectApiRequest(url, init);
@@ -3951,6 +5155,10 @@ describe('App', () => {
               name: 'enterprise-name'
             })
           ]));
+        }
+        if (url.endsWith('/codex/skill-market/install-records')) {
+          marketRecordRequests += 1;
+          return jsonResponse({ records: [] });
         }
         if (
           url.endsWith(`/enterprise/skills/enterprise-skill/${kind}`)
@@ -3995,9 +5203,14 @@ describe('App', () => {
       } else {
         await user.click(within(skill).getByRole('button', { name: actionLabel }));
       }
+      if (kind === 'update') {
+        await user.click(within(await screen.findByRole('alertdialog', { name: '覆盖本地 Skill' }))
+          .getByRole('button', { name: '覆盖更新' }));
+      }
 
       await waitFor(() => expect(skillRequests).toBe(2));
       await waitFor(() => expect(localSkillRequests).toBe(1));
+      await waitFor(() => expect(marketRecordRequests).toBe(1));
       const mutationCalls = fetchCalls.filter(call => (
         call.url.endsWith(`/enterprise/skills/enterprise-skill/${kind}`)
         && call.init?.method === 'POST'
@@ -4163,7 +5376,7 @@ describe('App', () => {
           })
         }, { status: 201 });
       }
-      if (url.endsWith('/threads/thread_enterprise_skill/history?limit=50')) {
+      if (url.endsWith('/threads/thread_enterprise_skill/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_enterprise_skill',
           codexThreadId: null,
@@ -5010,7 +6223,7 @@ describe('App', () => {
       prompt,
       resumeMode: 'auto'
     });
-    expect(sseFetchImpl).toBe(runtimeFetch);
+    expect(sseFetchImpl).toBeTypeOf('function');
 
     expect(screen.queryByRole('button', { name: /查看运行详情/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/当前动态/)).not.toBeInTheDocument();
@@ -5375,7 +6588,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '停止任务' })).not.toBeInTheDocument();
   });
 
-  it('renders Codex process agent messages as folded process text and only the final agent message as Clawee reply', async () => {
+  it('keeps all Codex agent messages visible outside the folded process', async () => {
     const user = userEvent.setup();
     const prompt = '检查当前目录并总结';
     const hostBridge = createHostBridge();
@@ -5467,11 +6680,11 @@ describe('App', () => {
 
     expect(screen.getByText('我会先确认当前目录，再读取必要文件。')).toBeInTheDocument();
     expect(screen.queryByText('正在查看项目内容')).not.toBeInTheDocument();
-    expect(screen.queryByText('pwd')).not.toBeInTheDocument();
-    expect(screen.getByText('已读取文件')).toBeInTheDocument();
+    expect(screen.getByText('pwd')).toHaveClass('process-step-detail');
+    expect(container.querySelector('.process-tool-group > summary')).toHaveTextContent('已查看当前目录');
     expect(screen.queryByText('工具完成 call_1')).not.toBeInTheDocument();
     expect(screen.getByText('当前目录是 /repo，检查已完成。')).toBeInTheDocument();
-    expect(container.querySelectorAll('.timeline-assistant_message')).toHaveLength(1);
+    expect(container.querySelectorAll('.timeline-assistant_message')).toHaveLength(2);
     expect(container.querySelector('.timeline-process details')).toHaveAttribute('open');
   });
 
@@ -5697,7 +6910,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_playground/history?limit=50')) {
+      if (url.endsWith('/threads/thread_playground/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_playground', codexThreadId: null, items: [] });
       }
       throw new Error(`Unexpected request ${url}`);
@@ -5820,7 +7033,7 @@ describe('App', () => {
         if (url.endsWith('/threads?status=active&limit=50')) {
           return jsonResponse({ threads: [thread] });
         }
-        if (url.endsWith(`/threads/${thread.id}/history?limit=50`)) {
+        if (url.endsWith(`/threads/${thread.id}/history?limit=10`)) {
           return jsonResponse({ threadId: thread.id, codexThreadId: null, items: [] });
         }
         if (url.endsWith(`/threads/${thread.id}/runs?limit=50`)) {
@@ -6332,7 +7545,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_playground/history?limit=50')) {
+      if (url.endsWith('/threads/thread_playground/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_playground', codexThreadId: null, items: [] });
       }
       throw new Error(`Unexpected request ${url}`);
@@ -6618,7 +7831,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_bili_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_bili_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_bili_history',
           codexThreadId: 'codex-bili-history',
@@ -6697,7 +7910,7 @@ describe('App', () => {
           })
         });
       }
-      if (url.endsWith('/threads/thread_older_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_older_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_older_history',
           codexThreadId: 'codex-older-history',
@@ -6900,7 +8113,7 @@ describe('App', () => {
       if (url.endsWith('/tasks?status=all&limit=50')) {
         return jsonResponse({ tasks: [], hasMore: false });
       }
-      if (url.endsWith('/threads/thread-conversation/history?limit=50')) {
+      if (url.endsWith('/threads/thread-conversation/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread-conversation',
           codexThreadId: null,
@@ -6917,7 +8130,7 @@ describe('App', () => {
       if (url.endsWith('/threads/thread-conversation/runs?limit=50')) {
         return jsonResponse({ runs: [] });
       }
-      if (url.endsWith('/threads/thread-task/history?limit=50')) {
+      if (url.endsWith('/threads/thread-task/history?limit=10')) {
         return taskHistory.promise;
       }
       if (url.endsWith('/threads/thread-task/runs?limit=50')) {
@@ -7006,7 +8219,7 @@ describe('App', () => {
           })
         });
       }
-      if (url.endsWith('/threads/thread-late-task/history?limit=50')) {
+      if (url.endsWith('/threads/thread-late-task/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread-late-task',
           codexThreadId: null,
@@ -7065,7 +8278,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_codex_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_codex_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_codex_history',
           codexThreadId: 'codex-history-1',
@@ -7108,9 +8321,7 @@ describe('App', () => {
 
     expect(await findTimelineUserMessage('分析这个 skill 是干什么的')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /选择项目 / })).not.toBeInTheDocument();
-    expect(await screen.findByText(/^(?:已完成|已处理 .+)$/)).toBeInTheDocument();
-
-    await user.click(screen.getByText(/^(?:已完成|已处理 .+)$/));
+    expect(await screen.findByText('状态待确认')).toBeInTheDocument();
 
     expect(screen.getByText('先读取 skill 说明。')).toBeInTheDocument();
     expect(screen.getByText('这个 skill 用于分析选品资料。')).toBeInTheDocument();
@@ -7122,6 +8333,48 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('textbox', { name: '输入任务' })).toHaveFocus();
     });
+  });
+
+  it('将历史回复引用到现有草稿并随问题一起发送', async () => {
+    const user = userEvent.setup();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const thread = createThreadResponse({ id: 'thread_quote', title: '引用测试会话' });
+    const fallback = createKnowledgeRuntimeFetch(() => undefined);
+    let submittedPrompt: string | undefined;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/threads?status=active')) return jsonResponse({ threads: [thread] });
+      if (url.endsWith('/threads/thread_quote')) return jsonResponse({ thread });
+      if (url.includes('/threads/thread_quote/history')) return jsonResponse({ threadId: thread.id, items: [{
+        id: 'quoted-answer', type: 'assistant_message', text: '优先复用现有组件。', createdAt: thread.createdAt
+      }] });
+      if (url.includes('/threads/thread_quote/runs')) return jsonResponse({ runs: [] });
+      if (url.endsWith('/runs') && init?.method === 'POST') {
+        submittedPrompt = JSON.parse(String(init.body)).prompt;
+        return jsonResponse(createRunResponse({ id: 'run_quote', threadId: thread.id, status: 'running' }), { status: 202 });
+      }
+      return fallback(input, init);
+    };
+    render(<App hostBridge={hostBridge} runtimeFetch={runtimeFetch} fileService={createFileService()}
+      subscribeRunEvents={async () => undefined} />);
+    await user.click(await screen.findByRole('button', { name: /^引用测试会话 / }));
+    const reply = await screen.findByText('优先复用现有组件。');
+    const textbox = screen.getByRole('textbox', { name: '输入任务' });
+    await waitFor(() => expect(textbox).toBeEnabled());
+    await user.type(textbox, '已有问题');
+    const range = document.createRange();
+    range.selectNodeContents(reply);
+    act(() => { window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+      document.dispatchEvent(new Event('selectionchange')); });
+    await user.click(screen.getByRole('button', { name: '引用' }));
+    const quoted = '已有问题\n\n引用回复：\n> 优先复用现有组件。\n\n';
+    await waitFor(() => { expect(textbox).toHaveValue(quoted); expect(textbox).toHaveFocus(); });
+    await waitFor(() => expect(window.localStorage.getItem('clawee.composer-drafts.v1')).toContain('引用回复'));
+    await user.type(textbox, '具体复用哪些？');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(submittedPrompt).toBe(`${quoted}具体复用哪些？`));
+    await waitFor(() => expect(textbox).toHaveValue(''));
   });
 
   it('loads the latest history page first and prepends an older cursor page without duplicates', async () => {
@@ -7149,7 +8402,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_paged_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_paged_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_paged_history',
           codexThreadId: 'codex-paged-history',
@@ -7171,7 +8424,7 @@ describe('App', () => {
           nextCursor: 'cursor_older'
         });
       }
-      if (url.endsWith('/threads/thread_paged_history/history?limit=50&before=cursor_older')) {
+      if (url.endsWith('/threads/thread_paged_history/history?limit=10&before=cursor_older')) {
         return jsonResponse({
           threadId: 'thread_paged_history',
           codexThreadId: 'codex-paged-history',
@@ -7211,7 +8464,7 @@ describe('App', () => {
     expect(requestedUrls.filter(url => (
       url.includes('/threads/thread_paged_history/history')
     ))).toEqual([
-      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=50'
+      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=10'
     ]);
 
     await user.click(screen.getByRole('button', { name: '加载更早记录' }));
@@ -7222,8 +8475,8 @@ describe('App', () => {
     expect(requestedUrls.filter(url => (
       url.includes('/threads/thread_paged_history/history')
     ))).toEqual([
-      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=50',
-      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=50&before=cursor_older'
+      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=10',
+      'http://127.0.0.1:60764/threads/thread_paged_history/history?limit=10&before=cursor_older'
     ]);
   });
 
@@ -7250,7 +8503,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_synthetic_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_synthetic_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_synthetic_history',
           codexThreadId: 'codex-synthetic-history',
@@ -7276,6 +8529,7 @@ describe('App', () => {
             {
               id: 'current_done',
               type: 'done',
+              terminalSource: 'runtime_turn',
               status: 'succeeded',
               createdAt: new Date(7).toISOString()
             }
@@ -7284,7 +8538,7 @@ describe('App', () => {
           nextCursor: 'cursor_synthetic_older'
         });
       }
-      if (url.endsWith('/threads/thread_synthetic_history/history?limit=50&before=cursor_synthetic_older')) {
+      if (url.endsWith('/threads/thread_synthetic_history/history?limit=10&before=cursor_synthetic_older')) {
         return jsonResponse({
           threadId: 'thread_synthetic_history',
           codexThreadId: 'codex-synthetic-history',
@@ -7310,6 +8564,7 @@ describe('App', () => {
             {
               id: 'older_done',
               type: 'done',
+              terminalSource: 'runtime_turn',
               status: 'succeeded',
               createdAt: new Date(3).toISOString()
             },
@@ -7371,7 +8626,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_stale_codex_id/history?limit=50')) {
+      if (url.endsWith('/threads/thread_stale_codex_id/history?limit=10')) {
         historyRequests += 1;
         return jsonResponse({
           threadId: 'thread_stale_codex_id',
@@ -7458,7 +8713,7 @@ describe('App', () => {
           })
         });
       }
-      if (url.endsWith('/threads/thread_search_target/history?limit=50')) {
+      if (url.endsWith('/threads/thread_search_target/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_search_target',
           codexThreadId: 'codex-search-target',
@@ -7511,11 +8766,11 @@ describe('App', () => {
     expect(document.querySelector('[data-search-target="true"]')).toBeNull();
     expect(requestedUrls).toEqual(expect.arrayContaining([
       expect.stringContaining(
-        '/threads/thread_search_target/history?limit=50'
+        '/threads/thread_search_target/history?limit=10'
       )
     ]));
     expect(requestedUrls.some(url => (
-      url.includes('/threads/thread_search_target/history?limit=50&before=')
+      url.includes('/threads/thread_search_target/history?limit=10&before=')
     ))).toBe(false);
   });
 
@@ -7542,7 +8797,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_current_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_current_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_current_history',
           codexThreadId: 'codex-current-history',
@@ -7630,7 +8885,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_content_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_content_history/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_content_history',
           codexThreadId: 'codex-content-history',
@@ -7644,7 +8899,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_bili_history/history?limit=50')) {
+      if (url.endsWith('/threads/thread_bili_history/history?limit=10')) {
         return new Promise<Response>((resolve) => {
           resolveNextHistory = resolve;
         });
@@ -7690,6 +8945,115 @@ describe('App', () => {
     expect(await findTimelineUserMessage('新的会话加载完成')).toBeInTheDocument();
   });
 
+  it.each([404, 403, 500])('文件校验返回 %s 时不显示卡片，校验通过后才显示真实文件', async status => {
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const workspaceRoot = '/Users/test/Documents/Clawee/Default Project';
+    let finishMissing!: (response: Response) => void;
+    let finishValid!: (response: Response) => void;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({
+        threads: [createThreadResponse({ id: 'thread_files', title: '文件校验会话', cwd: workspaceRoot, canonicalCwd: workspaceRoot })]
+      });
+      if (url.endsWith('/threads/thread_files/history?limit=10')) return jsonResponse({
+        threadId: 'thread_files', codexThreadId: null,
+        items: [{
+          id: 'assistant-files', type: 'assistant_message', createdAt: new Date(0).toISOString(),
+          text: `如需要，我可以把整理内容保存为：\`${workspaceRoot}/awesome-LLM-resources-summary.md\`。已有文件：\`valid.md\`。`
+        }]
+      });
+      if (url.includes('/workspace/files/meta?')) {
+        const path = new URL(url).searchParams.get('path');
+        if (path === 'awesome-LLM-resources-summary.md') return new Promise<Response>(resolve => { finishMissing = resolve; });
+        if (path === 'valid.md') return new Promise<Response>(resolve => { finishValid = resolve; });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+
+    render(<App fileService={createFileService()} hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: /文件校验会话/ }));
+    await waitFor(() => expect(finishValid).toBeTypeOf('function'));
+    expect(finishMissing).toBeTypeOf('function');
+    expect(screen.queryByLabelText('任务成果')).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishMissing(jsonResponse({ error: { code: status === 403 ? 'PERMISSION_DENIED' : 'FILE_NOT_FOUND', message: '文件不可用' } }, { status }));
+      finishValid(jsonResponse({
+        path: 'valid.md', name: 'valid.md', type: 'file', kind: 'markdown', mime: 'text/markdown',
+        size: 0, mtimeMs: 1, versionToken: 'v1', previewable: true, editable: false, readonly: true
+      }));
+    });
+
+    expect(await screen.findByRole('button', { name: '打开成果 valid.md' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开成果 awesome-LLM-resources-summary.md' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^打开成果 / })).toHaveLength(1);
+    expect(screen.getByRole('link', { name: `${workspaceRoot}/awesome-LLM-resources-summary.md` })).toBeInTheDocument();
+  });
+
+  it.each(['darwin', 'win32', 'browser'] as const)('%s 会话文档原生操作使用 daemon 校验后的原文件路径', async platform => {
+    const user = userEvent.setup();
+    const openFile = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    const revealPath = vi.fn(async (): Promise<HostBridgeResult> => ({ ok: true }));
+    const hostBridge: HostBridge = {
+      ...createHostBridge(),
+      kind: platform === 'browser' ? 'browser' : 'desktop',
+      ...(platform === 'browser' ? {} : { platform }),
+      openFile, revealPath,
+      readConnectionConfig: async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' })
+    };
+    const fileName = "培训方案 O'Brien.pptx";
+    const path = `outputs/${fileName}`;
+    const absolutePath = platform === 'win32' ? `C:\\资料\\outputs\\${fileName}` : `/Users/test/资料/outputs/${fileName}`;
+    let deleted = false;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({
+        threads: [createThreadResponse({ id: 'thread_native_files', title: '原生文档操作会话' })]
+      });
+      if (url.endsWith('/threads/thread_native_files/history?limit=10')) return jsonResponse({
+        threadId: 'thread_native_files', codexThreadId: null,
+        items: [{ id: 'native-document', type: 'assistant_message', createdAt: new Date(0).toISOString(), text: `已生成：\`${path}\`` }]
+      });
+      if (url.includes('/workspace/files/meta?')) {
+        expect(new URL(url).searchParams.get('path')).toBe(path);
+        return deleted
+          ? jsonResponse({ error: { code: 'FILE_NOT_FOUND', message: 'File not found.' } }, { status: 404 })
+          : jsonResponse({ path, absolutePath, name: fileName, type: 'file', kind: 'office', mime: 'application/octet-stream',
+            size: 100, mtimeMs: 1, versionToken: 'v1', previewable: true, editable: false, readonly: false });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    render(<App fileService={createFileService()} hostBridge={hostBridge} runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+    await user.click(await screen.findByRole('button', { name: /原生文档操作会话/ }));
+    expect(await screen.findByRole('button', { name: `打开成果 ${fileName}` })).toBeInTheDocument();
+    if (platform === 'browser') {
+      expect(screen.queryByRole('button', { name: `文档操作 ${fileName}` })).not.toBeInTheDocument();
+      return;
+    }
+    const trigger = screen.getByRole('button', { name: `文档操作 ${fileName}` });
+    await user.click(trigger);
+    await user.click(screen.getByRole('menuitem', { name: '使用默认应用打开' }));
+    await waitFor(() => expect(openFile).toHaveBeenCalledExactlyOnceWith(absolutePath));
+    await user.click(trigger);
+    await user.click(screen.getByRole('menuitem', { name: platform === 'darwin' ? '在 Finder 中显示' : '在文件资源管理器中显示' }));
+    await waitFor(() => expect(revealPath).toHaveBeenCalledExactlyOnceWith(absolutePath));
+    expect(screen.queryByLabelText('会话和文件工作区')).not.toBeInTheDocument();
+    deleted = true;
+    await user.click(trigger);
+    await user.click(screen.getByRole('menuitem', { name: '使用默认应用打开' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('文件不存在或无法访问');
+    expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
   it('从会话头部点击文件会在会话旁打开真实文件工作区', async () => {
     const user = userEvent.setup();
     const hostBridge = createHostBridge();
@@ -7712,7 +9076,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_files/history?limit=50')) {
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_files',
           codexThreadId: null,
@@ -7810,14 +9174,160 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('点击聊天回复中的成果卡片会直接打开对应文件', async () => {
+  it.each((['browser', 'desktop'] as const).flatMap(hostKind => [
+    { hostKind, external: false, registeredDelivery: false },
+    { hostKind, external: true, registeredDelivery: false },
+    { hostKind, external: false, registeredDelivery: true }
+  ]))('$hostKind host 的空格和单引号路径成果可预览和打开（工作区外：$external，网盘交付：$registeredDelivery）', async ({ hostKind, external, registeredDelivery }) => {
     const user = userEvent.setup();
-    const hostBridge = createHostBridge();
-    const absoluteChangedPath = '/Users/test/develop/clawee/Default%20Project/xiaodoujia-apple-aso-audit.html';
-    const absoluteImagePath = '/Users/test/develop/clawee/Default%20Project/outputs/bridge.png';
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
+    const workspaceRoot = '/Users/example/Documents/Clawee/Default Project';
+    const relativePath = 'outputs/image-generator/demo-ai-wordmark-test-02.png';
+    const absolutePath = external
+      ? `/Users/example/Documents/AI项目/Example's AI projects/${relativePath}`
+      : `${workspaceRoot}/${relativePath}`;
+    const requestedPath = external ? absolutePath : relativePath;
+    const fileName = 'demo-ai-wordmark-test-02.png';
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:generated-wordmark')
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const fileRequests: Array<{ endpoint: string; path: string | null }> = [];
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/threads?status=active&limit=50')) {
+        return jsonResponse({
+          threads: [createThreadResponse({
+            id: 'thread_files',
+            title: '空格路径成果会话',
+            codexThreadId: 'codex-thread-files',
+            cwd: workspaceRoot,
+            canonicalCwd: workspaceRoot
+          })]
+        });
+      }
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
+        return jsonResponse({
+          threadId: 'thread_files',
+          codexThreadId: 'codex-thread-files',
+          items: [{
+            id: 'history_assistant_1',
+            runId: 'run_image',
+            type: 'assistant_message',
+            text: `已生成：\`${absolutePath}\``,
+            format: 'plain_text',
+            delivery: 'message',
+            createdAt: new Date(0).toISOString()
+          }]
+        });
+      }
+      if (url.endsWith('/threads/thread_files/runs?limit=50')) {
+        return jsonResponse({ runs: registeredDelivery ? [createRunResponse({
+          id: 'run_image', threadId: 'thread_files', status: 'succeeded',
+          sharedDriveState: { uploads: [], downloads: [{
+            status: 'downloaded', relativePath,
+            artifact: { space_id: 'space_image', file_id: 'file_image', logical_path: relativePath,
+              file_name: fileName, content_type: 'image/png', revision: 1, size_bytes: 4, sha256: 'a'.repeat(64) }
+          }] }
+        })] : [] });
+      }
+      if (url.includes('/workspace/files/directory?')) {
+        return jsonResponse({
+          threadId: 'thread_files',
+          rootName: 'Default Project',
+          rootPathLabel: workspaceRoot,
+          path: '',
+          suggestedOpenPath: relativePath,
+          truncated: false,
+          warnings: [],
+          nodes: []
+        });
+      }
+      if (url.includes('/workspace/files/')) {
+        const parsedUrl = new URL(url);
+        const path = parsedUrl.searchParams.get('path');
+        fileRequests.push({ endpoint: parsedUrl.pathname, path });
+        if (path !== requestedPath) {
+          return jsonResponse({ error: { code: 'NOT_FOUND', message: 'File not found.' } }, { status: 404 });
+        }
+        if (parsedUrl.pathname.endsWith('/blob')) {
+          return new Response(new Uint8Array([137, 80, 78, 71]), {
+            headers: { 'content-type': 'image/png' }
+          });
+        }
+        if (parsedUrl.pathname.endsWith('/meta')) {
+          return jsonResponse({
+            path: requestedPath,
+            name: fileName,
+            type: 'file',
+            kind: 'image',
+            mime: 'image/png',
+            size: 4,
+            mtimeMs: 1,
+            versionToken: 'v1',
+            previewable: true,
+            editable: false,
+            readonly: true
+          });
+        }
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+
+    render(<App
+      fileService={createFileService()}
+      hostBridge={hostBridge}
+      runtimeFetch={runtimeFetch}
+      subscribeRunEvents={async () => undefined}
+    />);
+
+    await user.click(await screen.findByRole('button', { name: /空格路径成果会话/ }));
+    expect(await screen.findByRole('img', { name: fileName })).toHaveAttribute('src', 'blob:generated-wordmark');
+    expect(fileRequests.filter(request => request.endpoint.endsWith('/blob')))
+      .toEqual([expect.objectContaining({ path: requestedPath })]);
+    const card = screen.getByRole('button', { name: `打开成果 ${fileName}` });
+    expect(screen.getAllByRole('button', { name: /^打开成果 / })).toHaveLength(1);
+    await user.click(card);
+
+    expect(await screen.findByLabelText('会话和文件工作区')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fileRequests.some(request => request.endpoint.endsWith('/meta'))).toBe(true);
+      expect(fileRequests.filter(request => request.endpoint.endsWith('/blob')).length).toBeGreaterThan(1);
+    });
+    expect(fileRequests.every(request => request.path === requestedPath)).toBe(true);
+    expect(screen.queryByText('File not found.')).not.toBeInTheDocument();
+    expect(screen.queryByText('图片预览不可用')).not.toBeInTheDocument();
+  });
+
+  it.each((['browser', 'desktop'] as const).flatMap(hostKind =>
+    (['posix', 'windows', 'windows-url', 'windows-url-case'] as const).map(pathKind => ({ hostKind, pathKind }))
+  ))('$hostKind host 的 $pathKind 中文空格绝对路径成果可预览和下载，接口错误不回退', async ({ hostKind, pathKind }) => {
+    const user = userEvent.setup();
+    const hostBridge: HostBridge = { ...createHostBridge(), kind: hostKind };
+    const workspaceRoot = pathKind === 'posix' ? '/srv/任务 工作区' : String.raw`C:\Users\example\Documents\Clawee\Default Project`;
+    const relativeChangedPath = '中文 报告 100%.html';
+    const imageFileName = '中文 图片 %20.png';
+    const relativeImagePath = `outputs/${imageFileName}`;
+    const linkRoot = `${pathKind.startsWith('windows-url') ? '/' : ''}${workspaceRoot.replace(/\\/g, '/')}`;
+    const casedLinkRoot = pathKind === 'windows-url-case' ? linkRoot.toLowerCase() : linkRoot;
+    const absoluteChangedPath = encodeURI(`${casedLinkRoot}/${relativeChangedPath}`);
+    const absoluteImagePath = encodeURI(`${casedLinkRoot}/${relativeImagePath}`);
+    const outsidePath = '/srv/任务 工作区外/中文 报告.html';
+    const windowsOutsidePath = String.raw`D:\outside\summary.md`;
     const createObjectURL = vi.fn(() => 'blob:generated-bridge');
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.href).toBe('blob:generated-bridge');
+      expect(this.download).toBe(relativeChangedPath);
+    });
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -7834,21 +9344,22 @@ describe('App', () => {
               id: 'thread_files',
               title: '真实文件会话',
               codexThreadId: 'codex-thread-files',
-              cwd: '/Users/test/develop/clawee/Default Project',
-              canonicalCwd: '/Users/test/develop/clawee/Default Project'
+              cwd: workspaceRoot,
+              canonicalCwd: workspaceRoot
             })
           ]
         });
       }
-      if (url.endsWith('/threads/thread_files/history?limit=50')) {
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_files',
           codexThreadId: 'codex-thread-files',
           items: [
+            createFileChangeHistoryItem('history-outside-change', windowsOutsidePath),
             {
               id: 'history_assistant_1',
               type: 'assistant_message',
-              text: `已生成文件：\n\n\`\`\`text\n${absoluteChangedPath} (311 字节)\n\`\`\`\n\n![大桥](${absoluteImagePath})`,
+              text: `[中文报告](${absoluteChangedPath})\n\n![大桥](${absoluteImagePath})\n\n[工作区外报告](${outsidePath})\n\n文件：\`${windowsOutsidePath}\``,
               format: 'plain_text',
               delivery: 'message',
               createdAt: new Date(0).toISOString()
@@ -7860,7 +9371,7 @@ describe('App', () => {
         return jsonResponse({
           threadId: 'thread_files',
           rootName: 'Default Project',
-          rootPathLabel: '/Users/test/develop/clawee/Default Project',
+          rootPathLabel: workspaceRoot,
           path: '',
           suggestedOpenPath: 'README.md',
           truncated: false,
@@ -7882,8 +9393,8 @@ describe('App', () => {
               }
             },
             {
-              path: 'xiaodoujia-apple-aso-audit.html',
-              name: 'xiaodoujia-apple-aso-audit.html',
+              path: relativeChangedPath,
+              name: relativeChangedPath,
               depth: 0,
               type: 'file',
               meta: {
@@ -7901,7 +9412,7 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/blob?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'outputs/bridge.png') throw new Error(`Expected image blob request, got ${path}`);
+        if (path !== relativeImagePath) throw new Error(`Expected image blob request, got ${path}`);
         return new Response(new Uint8Array([137, 80, 78, 71]), {
           status: 200,
           headers: { 'content-type': 'image/png' }
@@ -7909,10 +9420,15 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/meta?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'xiaodoujia-apple-aso-audit.html') throw new Error(`Expected HTML meta request, got ${path}`);
+        if (path === outsidePath) return jsonResponse({ error: { code: 'PERMISSION_DENIED', message: '路径越界' } }, { status: 403 });
+        if (path === relativeImagePath) return jsonResponse({
+          path, name: imageFileName, type: 'file', kind: 'image', mime: 'image/png',
+          size: 4, mtimeMs: 1, versionToken: 'v1', previewable: true, editable: false, readonly: true
+        });
+        if (path !== relativeChangedPath) return jsonResponse({ error: { code: 'FILE_NOT_FOUND', message: 'File not found.' } }, { status: 404 });
         return jsonResponse({
-          path: 'xiaodoujia-apple-aso-audit.html',
-          name: 'xiaodoujia-apple-aso-audit.html',
+          path: relativeChangedPath,
+          name: relativeChangedPath,
           type: 'file',
           kind: 'html',
           mime: 'text/html',
@@ -7926,11 +9442,11 @@ describe('App', () => {
       }
       if (url.includes('/workspace/files/content?')) {
         const path = new URL(url).searchParams.get('path');
-        if (path !== 'xiaodoujia-apple-aso-audit.html') throw new Error(`Expected HTML content request, got ${path}`);
+        if (path !== relativeChangedPath) throw new Error(`Expected HTML content request, got ${path}`);
         return jsonResponse({
           meta: {
-            path: 'xiaodoujia-apple-aso-audit.html',
-            name: 'xiaodoujia-apple-aso-audit.html',
+            path: relativeChangedPath,
+            name: relativeChangedPath,
             type: 'file',
             kind: 'html',
             mime: 'text/html',
@@ -7945,10 +9461,14 @@ describe('App', () => {
           encoding: 'utf8'
         });
       }
+      if (url.includes('/workspace/files/download?')) {
+        expect(new URL(url).searchParams.get('path')).toBe(relativeChangedPath);
+        return new Response('<h1>Generated</h1>');
+      }
       throw new Error(`Unexpected request ${url}`);
     };
 
-    render(
+    const view = render(
       <App
         fileService={createFileService()}
         hostBridge={hostBridge}
@@ -7958,20 +9478,50 @@ describe('App', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: /真实文件会话/ }));
-    expect(await screen.findByRole('img', { name: 'bridge.png' }))
+    expect(await screen.findByRole('img', { name: imageFileName }))
       .toHaveAttribute('src', 'blob:generated-bridge');
-    await user.click(await screen.findByRole('button', { name: `打开成果 ${absoluteChangedPath}` }));
+    const imageCard = screen.getByRole('button', { name: `打开成果 ${imageFileName}` });
+    expect(imageCard).toHaveAttribute('title', imageFileName);
+    expect(imageCard.querySelector('strong')).toHaveTextContent(imageFileName);
+    const reportCard = screen.getByRole('button', { name: `打开成果 ${relativeChangedPath}` });
+    expect(reportCard).toHaveAttribute('title', relativeChangedPath);
+    expect(reportCard.querySelector('strong')).toHaveTextContent(relativeChangedPath);
+    expect(screen.queryByRole('button', { name: '打开成果 summary.md' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `打开文件 ${windowsOutsidePath}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开成果 中文 报告.html' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '中文报告' }));
 
     expect(await screen.findByLabelText('会话和文件工作区')).toBeInTheDocument();
-    expect(await screen.findByTitle('xiaodoujia-apple-aso-audit.html HTML 预览')).toBeInTheDocument();
+    expect(await screen.findByTitle(`${relativeChangedPath} HTML 预览`)).toBeInTheDocument();
+    if (hostKind === 'desktop') {
+      expect(screen.getByRole('button', { name: '打开文件' })).toBeEnabled();
+    } else {
+      expect(screen.queryByRole('button', { name: '打开文件' })).not.toBeInTheDocument();
+    }
     expect(screen.queryByText('选择一个文件')).not.toBeInTheDocument();
     expect(screen.queryByText('已编辑 docs/atoms.md')).not.toBeInTheDocument();
     expect(
       fetchCalls.some(call => (
         call.url.includes('/workspace/files/meta?')
-        && call.url.includes('path=xiaodoujia-apple-aso-audit.html')
+        && new URL(call.url).searchParams.get('path') === relativeChangedPath
       ))
     ).toBe(true);
+    vi.useFakeTimers();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '下载文件' })));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('a[download]')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(document.querySelector('a[download]')).not.toBeInTheDocument();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:generated-bridge');
+    vi.useRealTimers();
+    const downloadCall = fetchCalls.find(call => call.url.includes('/workspace/files/download?'));
+    expect(downloadCall?.init?.headers).toEqual({ Authorization: 'Bearer runtime-token' });
+    expect(downloadCall?.url).not.toContain('runtime-token');
+    await user.click(screen.getByRole('link', { name: '工作区外报告' }));
+    expect(await screen.findByText('路径越界')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载文件' })).toBeDisabled();
+    expect(fetchCalls.some(call => call.url.includes('/workspace/files/meta?') && new URL(call.url).searchParams.get('path') === outsidePath)).toBe(true);
+    view.unmount();
   });
 
   it('会话和文件工作区之间的分隔条可以拖动调整宽度', async () => {
@@ -8006,7 +9556,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_files/history?limit=50')) {
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_files',
           codexThreadId: null,
@@ -8165,7 +9715,7 @@ describe('App', () => {
           ]
         });
       }
-      if (/\/threads\/thread_files_(?:a|b|empty)\/history\?limit=50$/.test(url)) {
+      if (/\/threads\/thread_files_(?:a|b|empty)\/history\?limit=10$/.test(url)) {
         const threadId = url.match(/thread_files_(?:a|b|empty)/)?.[0] ?? '';
         const fileName = threadId === 'thread_files_a'
           ? 'A.md'
@@ -8329,7 +9879,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_files/history?limit=50')) {
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_files',
           codexThreadId: null,
@@ -8467,7 +10017,7 @@ describe('App', () => {
           ]
         });
       }
-      if (url.endsWith('/threads/thread_files/history?limit=50')) {
+      if (url.endsWith('/threads/thread_files/history?limit=10')) {
         return jsonResponse({
           threadId: 'thread_files',
           codexThreadId: null,
@@ -8675,6 +10225,52 @@ describe('App', () => {
     expect(readCachedModelCatalog()?.models[0]?.displayName).toBe('Live GPT');
   });
 
+  it('refreshes the fallback catalog when the daemon announces an update', async () => {
+    const fallback = createCodexModelListResponse();
+    fallback.models = [{
+      ...fallback.models[0]!, id: 'deepseek-v4-flash', model: 'deepseek-v4-flash',
+      displayName: 'deepseek-v4-flash', isDefault: true
+    }];
+    const complete = createCodexModelListResponse();
+    const hostBridge = createHostBridge();
+    hostBridge.readConnectionConfig = async () => ({
+      baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token'
+    });
+    let requests = 0;
+    const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const projectApiResponse = handleDefaultProjectApiRequest(url, init);
+      if (projectApiResponse !== undefined) return projectApiResponse;
+      if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
+      if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
+      if (url.endsWith('/codex/models')) {
+        requests += 1;
+        return jsonResponse({ ...(requests === 1 ? fallback : complete), updatesAvailable: true });
+      }
+      if (url.endsWith('/codex/models/events')) {
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('event: changed\ndata: {}\n\n'));
+            init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+          }
+        }), { status: 200 });
+      }
+      if (url.endsWith('/threads?status=active&limit=50')) {
+        return jsonResponse({ threads: [] });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+
+    render(<App fileService={createFileService()} hostBridge={hostBridge}
+      runtimeFetch={runtimeFetch} subscribeRunEvents={async () => undefined} />);
+
+    expect(await screen.findByRole('button', {
+      name: new RegExp(complete.models[0]!.displayName)
+    })).toBeInTheDocument();
+    expect(requests).toBeGreaterThanOrEqual(2);
+    expect(readCachedModelCatalog()?.models).toEqual(complete.models);
+  });
+
   it('shows the Gateway configured model without built-in GPT options', async () => {
     const user = userEvent.setup();
     const hostBridge = createHostBridge();
@@ -8852,8 +10448,12 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '选择模型 GPT-5.5' }))
       .toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.5' }));
-    expect(screen.getByRole('menuitemradio', { name: /^超高 / }))
-      .toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByText('推理强度')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '设置' }));
+    await user.click(screen.getByRole('button', { name: 'AI模型配置' }));
+    expect(screen.getByText('推理强度设置').closest('details')).not.toHaveAttribute('open');
+    await user.click(screen.getByText('推理强度设置'));
+    expect(screen.getByRole('combobox', { name: 'GPT-5.5 推理强度' })).toHaveValue('medium');
   });
 
   it('migrates the latest conversation model while a new conversation is open', async () => {
@@ -8882,7 +10482,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith('/threads/thread_selected_model/history?limit=50')) {
+      if (url.endsWith('/threads/thread_selected_model/history?limit=10')) {
         return jsonResponse({
           threadId: thread.id,
           codexThreadId: null,
@@ -8965,8 +10565,8 @@ describe('App', () => {
         .toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: '选择模型 GPT-5.5' }));
-    expect(screen.getByRole('menuitemradio', { name: /^超高 / }))
-      .toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: /GPT-5.5/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByText('推理强度')).not.toBeInTheDocument();
   });
 
   it('creates a runtime thread before starting the first run in a new conversation', async () => {
@@ -9105,7 +10705,7 @@ describe('App', () => {
     expect(screen.getByRole('textbox', { name: '输入任务' })).toHaveValue('');
   });
 
-  it('applies selected composer runtime config when creating a new thread', async () => {
+  it('在折叠设置入口中保存模型强度，并应用到新会话', async () => {
     const user = userEvent.setup();
     const prompt = '用高强度推理生成方案';
     window.localStorage.setItem(
@@ -9179,11 +10779,23 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '选择访问权限 请求批准' }));
     await user.click(screen.getByRole('menuitemradio', { name: /完全访问/ }));
     await user.click(screen.getByRole('button', { name: '开启' }));
+    await user.click(screen.getByRole('button', { name: '设置' }));
+    await user.click(screen.getByRole('button', { name: 'AI模型配置' }));
+    expect(screen.getByText('推理强度设置').closest('details')).not.toHaveAttribute('open');
+    await user.click(screen.getByText('推理强度设置'));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'GPT-5.5 推理强度' }), 'xhigh');
+    expect(readModelReasoningPreferences()).toEqual({ 'gpt-5.5': 'xhigh' });
+    await user.click(screen.getByRole('button', { name: '常规' }));
+    await user.click(screen.getByRole('button', { name: 'AI模型配置' }));
+    expect(screen.getByText('推理强度设置').closest('details')).not.toHaveAttribute('open');
+    await user.click(screen.getByText('推理强度设置'));
+    expect(screen.getByRole('combobox', { name: 'GPT-5.5 推理强度' })).toHaveValue('xhigh');
+    expect(screen.getByRole('combobox', { name: 'GPT-5.6 Sol 推理强度' })).toHaveValue('medium');
+    await user.click(screen.getByRole('button', { name: '返回应用' }));
     await user.click(await screen.findByRole('button', {
       name: '选择模型 GPT-5.6 Sol'
     }));
     await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.5/ }));
-    await user.click(screen.getByRole('menuitemradio', { name: /^超高 / }));
     expect(readRecentModelConfig()).toEqual({
       model: 'gpt-5.5',
       reasoning: 'xhigh'
@@ -9211,8 +10823,11 @@ describe('App', () => {
     });
   });
 
-  it('uses the global model selection when sending in an existing conversation', async () => {
+  it.each(['medium', 'low'] as const)('已有会话使用模型偏好或自动中档 %s，忽略历史强度', async effort => {
     const user = userEvent.setup();
+    if (effort === 'low') writeModelReasoningPreferences({ 'gpt-5.5': effort });
+    writeRecentModelConfig({ model: 'gpt-5.5', reasoning: 'xhigh' });
+    window.localStorage.setItem('clawee.models.global-selection-migrated.v1', '1');
     const prompt = '继续处理这个会话';
     const hostBridge = createHostBridge();
     hostBridge.readConnectionConfig = async () => ({ baseUrl: 'http://127.0.0.1:60764', token: 'runtime-token' });
@@ -9222,7 +10837,7 @@ describe('App', () => {
       title: '已有会话',
       sandbox: 'read-only',
       model: 'gpt-5.6-sol',
-      reasoning: null
+      reasoning: 'xhigh'
     });
     const runtimeFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -9235,7 +10850,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [existingThread] });
       }
-      if (url.endsWith('/threads/thread_existing/history?limit=50')) {
+      if (url.endsWith('/threads/thread_existing/history?limit=10')) {
         return jsonResponse({ threadId: 'thread_existing', codexThreadId: null, items: [] });
       }
       if (url.endsWith('/runs')) return jsonResponse({ id: 'run_1', threadId: 'thread_existing', status: 'running' }, { status: 202 });
@@ -9253,15 +10868,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('status', { name: '本地运行内核正常' })).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /已有会话/ }));
-    await user.click(await screen.findByRole('button', {
-      name: '选择模型 GPT-5.6 Sol'
-    }));
-    await user.click(screen.getByRole('menuitemradio', { name: /GPT-5.5/ }));
-    await user.click(screen.getByRole('menuitemradio', { name: /^超高 / }));
-    expect(readRecentModelConfig()).toEqual({
-      model: 'gpt-5.5',
-      reasoning: 'xhigh'
-    });
+    expect(await screen.findByRole('button', { name: '选择模型 GPT-5.5' })).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: '输入任务' }), prompt);
     await user.click(screen.getByRole('button', { name: '发送' }));
 
@@ -9272,7 +10879,7 @@ describe('App', () => {
       prompt,
       resumeMode: 'auto',
       model: 'gpt-5.5',
-      reasoning: 'xhigh'
+      reasoning: effort
     });
   });
 
@@ -9305,7 +10912,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads });
       }
-      if (/\/threads\/thread_(first|second)\/history\?limit=50$/.test(url)) {
+      if (/\/threads\/thread_(first|second)\/history\?limit=10$/.test(url)) {
         const threadId = url.includes('thread_first') ? 'thread_first' : 'thread_second';
         return jsonResponse({ threadId, codexThreadId: null, items: [] });
       }
@@ -9337,7 +10944,7 @@ describe('App', () => {
       .toBeInTheDocument();
     expect(readRecentModelConfig()).toEqual({
       model: 'gpt-5.5',
-      reasoning: null
+      reasoning: 'medium'
     });
 
     await user.click(screen.getByRole('button', { name: '新建会话' }));
@@ -9493,9 +11100,10 @@ describe('App', () => {
       await screen.findByRole('combobox', { name: '默认权限' }),
       'danger-full-access'
     );
+    await user.click(within(await screen.findByRole('alertdialog', { name: '开启完全访问权限' })).getByRole('button', { name: '开启' }));
 
-    expect(window.localStorage.getItem('clawee.preferences.defaultPermission'))
-      .toBe('danger-full-access');
+    await waitFor(() => expect(window.localStorage.getItem('clawee.preferences.defaultPermission'))
+      .toBe('danger-full-access'));
 
     await user.click(screen.getByRole('button', { name: '返回应用' }));
     expect(await screen.findByRole('button', { name: '选择项目 secondary' })).toBeInTheDocument();
@@ -9591,6 +11199,7 @@ describe('App', () => {
       screen.getByRole('combobox', { name: '默认权限' }),
       'danger-full-access'
     );
+    await user.click(within(await screen.findByRole('alertdialog', { name: '开启完全访问权限' })).getByRole('button', { name: '开启' }));
 
     await waitFor(() => {
       expect(findPatchCall(fetchCalls, '/threads/thread-ordinary')).toBeDefined();
@@ -9626,7 +11235,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith('/threads/thread_running_permission/history?limit=50')) {
+      if (url.endsWith('/threads/thread_running_permission/history?limit=10')) {
         return jsonResponse({
           threadId: thread.id,
           codexThreadId: null,
@@ -9688,7 +11297,7 @@ describe('App', () => {
       if (url.endsWith('/threads?status=active&limit=50')) {
         return jsonResponse({ threads: [thread] });
       }
-      if (url.endsWith('/threads/thread_permission_race/history?limit=50')) {
+      if (url.endsWith('/threads/thread_permission_race/history?limit=10')) {
         return jsonResponse({
           threadId: thread.id,
           codexThreadId: null,
@@ -9750,7 +11359,7 @@ describe('App', () => {
       if (url.endsWith('/healthz')) return jsonResponse({ ok: true });
       if (url.endsWith('/codex/status')) return jsonResponse(createCodexStatusResponse());
       if (url.endsWith('/threads?status=active&limit=50')) return jsonResponse({ threads: [thread] });
-      if (url.endsWith('/threads/thread_memory/history?limit=50')) {
+      if (url.endsWith('/threads/thread_memory/history?limit=10')) {
         return jsonResponse({
           threadId: thread.id,
           codexThreadId: null,
@@ -9974,6 +11583,9 @@ function handleDefaultProjectApiRequest(
   url: string,
   init?: RequestInit
 ): Response | undefined {
+  if (url.endsWith('/threads?status=active&purpose=skill_review&limit=50')) {
+    return jsonResponse({ threads: [] });
+  }
   if (url.endsWith('/projects/migrations/local-storage-v1')) {
     const projects = readTestRuntimeProjects();
     return jsonResponse({
@@ -10007,11 +11619,11 @@ function handleDefaultProjectApiRequest(
   }
   if (url.endsWith('/projects/default') && init?.method === 'POST') {
     const existing = readTestRuntimeProjects().find(
-      project => project.cwd === '/Users/test/Documents/Clawee/Default Project'
+      project => project.cwd === '/Users/test/Documents/Clawee/DefaultProject'
     );
     if (existing !== undefined) return jsonResponse({ project: existing });
     const project = createTestProject(
-      '/Users/test/Documents/Clawee/Default Project',
+      '/Users/test/Documents/Clawee/DefaultProject',
       { name: '默认项目' }
     );
     testRuntimeProjects = [project, ...readTestRuntimeProjects()];
@@ -10457,6 +12069,86 @@ function createActivityDetailResponse(input: {
       activeWorkMs: 0,
       toolTypeVariety: 0,
       toolCallCount: 0
+    }
+  };
+}
+
+function createContributionWorkbenchFetch(modelStatus: 'configuration_required' | 'resolving' | 'unavailable', signedIn = true) {
+  const fallback = createModelGatedWorkflowFetch(modelStatus, signedIn);
+  const state: { access: 'allowed' | 'checking' | 'denied' | 'error'; connected: boolean; subjectId: string } = { access: 'allowed', connected: false, subjectId: 'acct-member' };
+  const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+  const record = { id: 'fact-1', employee_id: 'employee-1', employee_name: '员工', skill_id: 'skill-1', skill_name: '贡献测试技能', version_id: 'version-1', version: '1', space_id: 'space-1', source: 'app_upload', approval_id: 'approval-1', occurred_at: '2026-10-12T08:00:00Z', status: 'approved', scoring_standard_version: null, scores: null, approvers: [], entity_available: true, history_status: 'covered' };
+  const response = { query: {}, timezone: 'Asia/Shanghai', generated_at: '2026-10-13T08:00:00Z', coverage: { first_approvals_from: '2026-10-01T00:00:00Z', uploads_from: null, notice: '历史覆盖有限' }, items: [record], total: 1 };
+  return {
+    state, requests,
+    async runtimeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      const url = new URL(String(input));
+      requests.push({ path: url.pathname + url.search, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined });
+      if (url.pathname === '/healthz' && state.connected) return jsonResponse({ ok: true });
+      if (url.pathname === '/codex/status') return jsonResponse(createCodexStatusResponse());
+      if (url.pathname === '/projects/migrations/local-storage-v1') return jsonResponse({ projectIdMap: {}, migrated: true });
+      if (url.pathname === '/projects') return jsonResponse({ projects: [] });
+      if (url.pathname === '/projects/default') return jsonResponse({ error: { code: 'PROJECT_DIRECTORY_UNAVAILABLE', message: '测试环境无可用项目目录' } }, { status: 409 });
+      if (url.pathname === '/threads') return jsonResponse({ threads: [] });
+      if (url.pathname === '/enterprise/session') return jsonResponse(createEnterpriseSessionResponse(signedIn ? { account: { subjectId: state.subjectId, name: 'Member', email: 'member@example.com' } } : { status: 'signed_out', account: undefined }));
+      if (url.pathname === '/enterprise/skill-contribution-conversations' && init?.method === 'POST') return jsonResponse({ thread: { id: 'contribution-thread' } });
+      if (url.pathname === '/enterprise/skill-contribution-conversations/contribution-thread/runs' && init?.method === 'POST') return jsonResponse({ id: 'contribution-run', status: 'running', lastEventSeq: 0 });
+      if (url.pathname === '/enterprise/skill-contributions/capability') {
+        if (state.access === 'checking') return new Promise(() => undefined);
+        if (state.access === 'error') return jsonResponse({ error: { code: 'UNAVAILABLE', message: '不可用' } }, { status: 503 });
+        return jsonResponse({ allowed: state.access === 'allowed' });
+      }
+      if (url.pathname === '/enterprise/skill-contributions/summary') return jsonResponse({ ...response, summary: { uploads: 1, first_approvals: 1, contributors: 1, scored_count: 0, average_score: null } });
+      if (url.pathname === '/enterprise/skill-contributions/records' || url.pathname === '/enterprise/skill-contributions/detail') return jsonResponse(response);
+      if (url.pathname === '/enterprise/skill-contributions/export') return jsonResponse({ filename: 'contributions.csv', content: '员工,技能\n员工,贡献测试技能', rowCount: 1 });
+      if (url.pathname === '/enterprise/skill-contribution-conversations/latest') return new Response(null, { status: 204 });
+      return fallback.runtimeFetch(input, init);
+    }
+  };
+}
+
+function createModelGatedWorkflowFetch(modelStatus: 'configuration_required' | 'resolving' | 'unavailable', signedIn = true) {
+  const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+  const meta = { next_cursor: '', has_next: false };
+  const node = { node_id: 'agent', order: 0, type: 'agent', title: '等待模型执行', instruction: '等待模型执行', assignee_user_id: 'acct-member' };
+  const template = { id: 'model-gated-template', name: '无需模型发起模板', description: '', status: 'enabled', revision: 1, nodes: [node] };
+  const agentTask = { task_id: 'model-gated-task', instance_id: 'model-gated-instance', node_id: node.node_id, type: 'agent', status: 'pending', instruction: node.instruction, input: {}, assignee_user_id: 'acct-member' };
+  const approvalTask = { ...agentTask, task_id: 'model-gated-approval', instance_id: 'model-gated-approval-instance', node_id: 'approval', type: 'approval', instruction: '无需模型审批' };
+  const instance = { id: agentTask.instance_id, template_id: template.id, status: 'running', current_node_id: node.node_id, nodes: [node], tasks: [agentTask], started_at: '2026-10-09T00:00:00Z' };
+  const approvalInstance = { ...instance, id: approvalTask.instance_id, current_node_id: 'approval', nodes: [{ ...node, node_id: 'approval', type: 'approval' }], tasks: [approvalTask] };
+  let plan: ScheduleResponse | undefined;
+  return {
+    requests,
+    async runtimeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      const url = new URL(String(input));
+      const path = url.pathname;
+      const method = init?.method ?? 'GET';
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+      requests.push({ path, method, body });
+      if (path === '/healthz') return jsonResponse({ ok: true, runtimeState: 'configuration_required' });
+      if (path === '/runtime/model-service') return jsonResponse({ status: modelStatus, mode: 'enterprise_managed' });
+      if (path === '/enterprise/session') return jsonResponse(createEnterpriseSessionResponse(signedIn ? {} : { status: 'signed_out', account: undefined }));
+      if (path === '/enterprise/gateway') return jsonResponse({ gateway: 'https://gateway.example', configurable: true });
+      if (path === '/enterprise/workflow-templates') return jsonResponse({ data: [template], meta });
+      if (path === `/enterprise/workflow-templates/${template.id}`) return jsonResponse({ data: template });
+      if (path === `/enterprise/workflow-templates/${template.id}/instances`) return jsonResponse({ data: { instance_id: instance.id, task_id: agentTask.task_id, status: 'running' } });
+      if (path === '/enterprise/workflow-instances') return jsonResponse({ data: [instance, approvalInstance], meta });
+      if (path === `/enterprise/workflow-instances/${instance.id}`) return jsonResponse({ data: instance });
+      if (path === `/enterprise/workflow-instances/${approvalInstance.id}`) return jsonResponse({ data: approvalInstance });
+      if (path === '/enterprise/workflow-tasks') return jsonResponse({ data: [agentTask, approvalTask], meta });
+      if (path === '/enterprise/workflow-capability') return jsonResponse({ canExecute: true });
+      if (path === '/enterprise/skill-contributions/capability') return jsonResponse({ allowed: true });
+      if (path.endsWith('/execution')) return jsonResponse({ status: 'idle' });
+      if (path.endsWith('/prepare')) return jsonResponse({ threadId: 'should-not-prepare', instruction: '', input: '', firstNode: true });
+      if (path.endsWith('/decision')) return jsonResponse({ data: { instance_id: approvalInstance.id, status: 'succeeded' } });
+      if (path === '/schedules' && method === 'GET') return jsonResponse({ schedules: plan ? [plan] : [] });
+      if (path === '/schedules' && method === 'POST') {
+        plan = createScheduleResponse({ id: 'model-gated-plan', action: 'workflow_start', threadId: null,
+          workflow: { templateId: template.id, initialInput: {} }, name: '无需模型计划' });
+        return jsonResponse(plan);
+      }
+      if (path === '/schedules/model-gated-plan/operations') return jsonResponse({ operations: [] });
+      return jsonResponse({ error: { code: 'TEST_UNEXPECTED_ENDPOINT', message: 'Unexpected test endpoint' } }, { status: 404 });
     }
   };
 }

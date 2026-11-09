@@ -16,6 +16,10 @@ const AdminFeatureGate = lazy(() =>
 const AgentAccessPage = lazy(() =>
   import("./pages/agent-access").then((module) => ({ default: module.AgentAccessPage }))
 );
+const ModelUsagePage = lazy(() =>
+  import("./pages/model-usage").then((module) => ({ default: module.ModelUsagePage }))
+);
+const AgentPromptPolicyPage = lazy(() => import("./pages/agent-prompt-policy").then(module => ({ default: module.AgentPromptPolicyPage })));
 const FeedbackPageView = lazy(() => import('./pages/feedback').then(module => ({ default: module.FeedbackPageView })));
 const FeedbackDetailPage = lazy(() => import('./pages/feedback').then(module => ({ default: module.FeedbackDetailPage })));
 const AppMCPCapabilitiesPage = lazy(() =>
@@ -50,6 +54,12 @@ const MCPGatesPage = lazy(() =>
 );
 const MCPProxyAuditPage = lazy(() =>
   import("./pages/mcp-proxy-audit").then((module) => ({ default: module.MCPProxyAuditPage }))
+);
+const ModelProxyAuditPage = lazy(() =>
+  import("./pages/model-proxy-audit").then((module) => ({ default: module.ModelProxyAuditPage }))
+);
+const ModelUpstreamsPage = lazy(() =>
+  import("./pages/model-upstreams").then((module) => ({ default: module.ModelUpstreamsPage }))
 );
 const MCPUpstreamServersPage = lazy(() =>
   import("./pages/mcp-upstream-servers").then((module) => ({
@@ -104,6 +114,10 @@ const WorkflowTemplatesPage = lazy(() => import("./pages/workflow").then((module
 const WorkflowTemplateEditorPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowTemplateEditorPage })));
 const WorkflowInstancesPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstancesPage })));
 const WorkflowInstanceDetailPage = lazy(() => import("./pages/workflow").then((module) => ({ default: module.WorkflowInstanceDetailPage })));
+const AppApprovalsPage = lazy(() => import("./pages/app-approvals").then((module) => ({ default: module.AppApprovalsPage })));
+const AppApprovalDetailPage = lazy(() => import("./pages/app-approvals").then((module) => ({ default: module.AppApprovalDetailPage })));
+const AdminApprovalsPage = lazy(() => import("./pages/admin-approvals").then((module) => ({ default: module.AdminApprovalsPage })));
+const AdminApprovalDetailPage = lazy(() => import("./pages/admin-approvals").then((module) => ({ default: module.AdminApprovalDetailPage })));
 
 function adminPage(permission: string, element: React.ReactNode) {
   return <AuthGate requiredPermission={permission}><AdminFeatureGate>{element}</AdminFeatureGate></AuthGate>;
@@ -148,6 +162,9 @@ export function App() {
               }
             >
               <Route path="/app/agents" element={<AgentAccessPage />} />
+              <Route path="/app/model-usage" element={<ModelUsagePage />} />
+              <Route path="/app/approvals" element={<AppApprovalsPage />} />
+              <Route path="/app/approvals/:kind/:id" element={<AppApprovalDetailPage />} />
               <Route path="/app/agents/detail" element={<AgentAccessPage />} />
               <Route path="/app/mcp-capabilities" element={<AppMCPCapabilitiesPage />} />
               <Route path="/app/activity" element={<AppActivityPage />} />
@@ -177,6 +194,8 @@ export function App() {
               }
             >
               <Route path="/admin" element={<AdminOverviewPage />} />
+              <Route path="/admin/approvals" element={adminPageAny([permissions.skillRead, permissions.workflowInstanceRead], <AdminApprovalsPage />)} />
+              <Route path="/admin/approvals/:kind/:id" element={adminPageAny([permissions.skillRead, permissions.workflowInstanceRead], <AdminApprovalDetailPage />)} />
               <Route path="/admin/workflow-templates" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplatesPage />)} />
               <Route path="/admin/workflow-templates/new" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplateEditorPage />)} />
               <Route path="/admin/workflow-templates/:id" element={adminPage(permissions.workflowTemplateManage, <WorkflowTemplateEditorPage />)} />
@@ -193,9 +212,15 @@ export function App() {
               <Route path="/admin/mcp/capabilities" element={adminPage(permissions.mcpCapabilityRead, <MCPCapabilitiesPage />)} />
               <Route path="/admin/mcp/agents" element={adminPageAny([permissions.agentRead, permissions.mcpGrantRead], <MCPAgentsGrantsPage />)} />
               <Route path="/admin/mcp/agents/detail" element={adminPageAny([permissions.agentRead, permissions.mcpGrantRead], <MCPAgentsGrantsPage />)} />
+              <Route path="/admin/agent-prompt-policy" element={adminPage(permissions.agentManage, <AgentPromptPolicyPage />)} />
               <Route path="/admin/mcp/gates" element={adminPage(permissions.mcpGateRead, <MCPGatesPage />)} />
               <Route path="/admin/mcp/gates/detail" element={adminPage(permissions.mcpGateRead, <MCPGatesPage />)} />
               <Route path="/admin/mcp/audits" element={adminPage(permissions.mcpAuditRead, <MCPProxyAuditPage />)} />
+              <Route path="/admin/model-gateway/accounts" element={adminPage(permissions.mcpUpstreamRead, <ModelUpstreamsPage section="accounts" />)} />
+              <Route path="/admin/model-gateway/groups" element={adminPage(permissions.mcpUpstreamRead, <ModelUpstreamsPage section="groups" />)} />
+              <Route path="/admin/model-gateway/logs" element={adminPage(permissions.mcpAuditRead, <ModelProxyAuditPage />)} />
+              <Route path="/admin/model-proxy/upstreams" element={<Navigate replace to="/admin/model-gateway/accounts" />} />
+              <Route path="/admin/model-proxy/audits" element={<Navigate replace to="/admin/model-gateway/logs" />} />
               <Route path="/admin/knowledge-bases" element={adminPage(permissions.knowledgeRead, <KnowledgeBasesPage />)} />
               <Route path="/admin/skills" element={adminPage(permissions.skillRead, <SkillsPage />)} />
               <Route path="/admin/skills/detail" element={adminPage(permissions.skillRead, <SkillDetailPage />)} />

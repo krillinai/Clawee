@@ -119,10 +119,19 @@ func TestEnsureOwnedAgentReusesOwnedAgentWithoutMutationOrTokenRotation(t *testi
 	if err := svc.proxyGateway.EnsureAccountToken(context.Background(), "usr_1"); err != nil {
 		t.Fatalf("ensure account token after revoke: %v", err)
 	}
-	latest, err := store.GetLatestAccountToken(context.Background(), "usr_1")
-	if err != nil || latest.Status != mcpgateway.StatusRevoked {
-		t.Fatalf("ensure account token resurrected revoked token: token=%#v err=%v", latest, err)
+	latest, err := store.GetActiveAccountToken(context.Background(), "usr_1")
+	if err != nil || latest.Status != mcpgateway.StatusActive || !containsScope(latest.Scopes, mcpgateway.AccountTokenScopeModelCall) {
+		t.Fatalf("ensure account token did not create unified token: token=%#v err=%v", latest, err)
 	}
+}
+
+func containsScope(scopes []string, want string) bool {
+	for _, scope := range scopes {
+		if scope == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEnsureOwnedAgentClaweeLoginBackfillsMissingAccountToken(t *testing.T) {

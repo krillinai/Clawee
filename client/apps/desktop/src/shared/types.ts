@@ -76,6 +76,7 @@ export type ProjectDirectorySelectionPurpose = 'add' | 'create' | 'replace';
 
 export const DESKTOP_TITLE_BAR_HEIGHT = 38;
 export const DESKTOP_TRAFFIC_LIGHT_INSET = 76;
+export const DESKTOP_PACKAGED_ARGUMENT = '--clawee-packaged';
 
 export type DesktopWindowChrome =
   | {
@@ -100,8 +101,10 @@ export type DesktopHostNotification = {
 };
 
 export type DesktopApi = {
+  reportIncident(observation: import('@clawee/protocol').IncidentObservation): Promise<void>;
   kind: 'desktop';
   platform: DesktopPlatform;
+  installationDirectory?: string | null;
   windowChrome?: DesktopWindowChrome;
   readConnectionConfig(): Promise<DesktopConnectionConfig | null>;
   subscribeConnectionConfig(
@@ -109,10 +112,20 @@ export type DesktopApi = {
   ): () => void;
   readBootstrapState(): Promise<DesktopBootstrapState>;
   subscribeBootstrapState(listener: (state: DesktopBootstrapState) => void): () => void;
+  readUpdateState(): Promise<import('@clawee/protocol').DesktopUpdateState>;
+  subscribeUpdateState(listener: (state: import('@clawee/protocol').DesktopUpdateState) => void): () => void;
+  checkForUpdates(): Promise<DesktopHostResult>;
+  downloadUpdate(): Promise<DesktopHostResult>;
+  installUpdate(): Promise<DesktopHostResult>;
+  testUpdate(simulatedVersion: string): Promise<DesktopHostResult>;
+  cancelUpdateTest(): Promise<DesktopHostResult>;
+  deferUpdate(): Promise<DesktopHostResult>;
+  acknowledgeUpdateQuiescence(updateId: string, busy?: boolean): Promise<void>;
   retryBootstrap(): Promise<DesktopHostResult>;
   selectProjectDirectory(
     purpose?: ProjectDirectorySelectionPurpose
   ): Promise<string | null>;
+  selectContextDirectory(): Promise<string | null>;
   resolveDroppedFilePath(file: File): string | null;
   restartRuntime(): Promise<DesktopHostResult>;
   reloadWorkspace(): Promise<DesktopHostResult>;
@@ -122,6 +135,7 @@ export type DesktopApi = {
     preferences: Partial<DesktopPreferences>
   ): Promise<DesktopPreferences>;
   openExternal(url: string): Promise<void>;
+  openFile(path: string): Promise<DesktopHostResult>;
   revealPath(path: string): Promise<DesktopHostResult>;
   notify(message: DesktopHostNotification): Promise<void>;
   configureBackgroundNotifications(configuration: { enabled: boolean }): Promise<DesktopHostResult>;

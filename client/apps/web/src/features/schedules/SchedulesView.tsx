@@ -28,6 +28,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import { ApiClientError } from '../../runtime/errors.js';
 import type { ClaweeProject } from '../projects/project-model.js';
 import {
@@ -101,8 +103,10 @@ export function SchedulesView(props: SchedulesViewProps) {
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ScheduleFilter>('all');
+  const { confirm, confirmDialog } = useConfirmDialog();
   const requestGenerationRef = useRef(0);
   const openedExternalEditIdRef = useRef<string>();
+  const editorDialogRef = useRef<HTMLDivElement | null>(null);
 
   const currentProject = useMemo(
     () => props.projects.find(project => project.id === props.currentProjectId) ?? props.projects[0],
@@ -117,7 +121,7 @@ export function SchedulesView(props: SchedulesViewProps) {
     try {
       const response = await props.service.listSchedules();
       if (generation !== requestGenerationRef.current) return;
-      setSchedules(response.schedules);
+      setSchedules(response.schedules.filter(schedule => schedule.action !== 'workflow_start'));
     } catch {
       if (generation !== requestGenerationRef.current) return;
       setLoadError('无法加载定时任务');
@@ -158,17 +162,13 @@ export function SchedulesView(props: SchedulesViewProps) {
     void openEditEditor(schedule);
   }, [props.editScheduleId, schedules]);
 
-  useEffect(() => {
-    if (editor === undefined) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setEditor(undefined);
-        setEditorErrors({});
-      }
+  useModalBehavior(editorDialogRef, {
+    open: editor !== undefined,
+    onClose: () => {
+      setEditor(undefined);
+      setEditorErrors({});
     }
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [editor]);
+  });
 
   const filteredSchedules = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -301,7 +301,12 @@ export function SchedulesView(props: SchedulesViewProps) {
   async function deleteSchedule(schedule: ScheduleResponse) {
     if (props.service === null || busyIds.has(schedule.id)) return;
     const confirmed = props.confirmDelete?.(schedule)
-      ?? window.confirm(`确认删除任务“${schedule.name}”？`);
+      ?? await confirm({
+        title: '删除任务',
+        description: `确认删除任务“${schedule.name}”？`,
+        confirmLabel: '删除',
+        destructive: true
+      });
     if (!confirmed) return;
     setBusy(schedule.id, true);
     clearActionError(schedule.id);
@@ -434,7 +439,7 @@ export function SchedulesView(props: SchedulesViewProps) {
                               className="schedule-row__title-button"
                               type="button"
                               aria-label={`打开任务会话 ${schedule.name}`}
-                              onClick={() => props.onOpenTask(schedule.threadId)}
+                              onClick={() => { if (schedule.threadId) props.onOpenTask(schedule.threadId); }}
                             >
                               {schedule.name}
                             </button>
@@ -457,7 +462,7 @@ export function SchedulesView(props: SchedulesViewProps) {
                           <button
                             className="schedule-row__run-link"
                             type="button"
-                            onClick={() => props.onOpenTask(
+                            onClick={() => schedule.threadId && props.onOpenTask(
                               schedule.threadId,
                               schedule.lastRunId!
                             )}
@@ -565,6 +570,7 @@ export function SchedulesView(props: SchedulesViewProps) {
               }}
             >
               <div
+                ref={editorDialogRef}
                 aria-label={editor.mode === 'create' ? '创建定时任务' : '编辑定时任务'}
                 aria-modal="true"
                 className="schedule-editor-dialog"
@@ -585,6 +591,7 @@ export function SchedulesView(props: SchedulesViewProps) {
           ) : null}
         </>
       </div>
+      {confirmDialog}
     </section>
   );
 }

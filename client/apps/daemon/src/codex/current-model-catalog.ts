@@ -18,6 +18,9 @@ const MODEL_CATALOG_RELATIVE_PATH = join(
 const MODEL_CATALOG_COMMAND_TIMEOUT_MS = 10_000;
 const MODEL_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 export const GENERATED_MODEL_CONTEXT_WINDOW = 64_000;
+export const SOL_REASONING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'].map(
+  effort => ({ effort, description: effort })
+);
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -114,13 +117,16 @@ export function createGeneratedModel(
   const templateWithoutModelMessages = Object.fromEntries(
     Object.entries(template).filter(([key]) => key !== 'model_messages')
   );
+  const solReasoning = model === 'gpt-6.1-sol';
   return {
     ...templateWithoutModelMessages,
     slug: model,
     display_name: displayName,
     description: null,
-    default_reasoning_level: null,
-    supported_reasoning_levels: [],
+    default_reasoning_level: solReasoning ? 'medium' : null,
+    supported_reasoning_levels: solReasoning
+      ? SOL_REASONING_LEVELS
+      : [],
     shell_type: 'unified_exec',
     visibility: 'list',
     supported_in_api: true,

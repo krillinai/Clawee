@@ -113,7 +113,7 @@ func projectDataServiceAudit(record ProxyAuditRecord) ProxyAuditRecord {
 		return record
 	}
 	request := JSONMap{}
-	requestKeys := []string{"range", "sort_by", "limit", "agent_id"}
+	requestKeys := []string{"range", "sort_by", "limit", "offset", "agent_id", "employee_id", "session_id", "include_content"}
 	if isBusinessData {
 		requestKeys = []string{"view_id", "range", "metric_ids", "top_n"}
 	}

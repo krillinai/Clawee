@@ -23,6 +23,8 @@ export type InsertRunInput = {
   internalStatus: string;
   createdBy: string;
   sourceId?: string;
+  initiatorUserId?: string;
+  initiatorAgentId?: string;
   publicPrompt?: string | null;
   triggeredAt?: string | null;
   timeoutMs?: number | null;
@@ -42,6 +44,7 @@ export type InsertRunInput = {
 };
 
 export type RunRow = {
+  shared_drive_state_json?: string | null;
   id: string;
   thread_id: string | null;
   codex_thread_id: string | null;
@@ -52,6 +55,8 @@ export type RunRow = {
   internal_status: string;
   created_by: string;
   source_id: string | null;
+  initiator_user_id: string | null;
+  initiator_agent_id: string | null;
   public_prompt: string | null;
   triggered_at: string | null;
   profile: string;
@@ -83,10 +88,15 @@ export type RunRow = {
   error_message: string | null;
 };
 
+export type RunHistoryEvents = {
+  events: readonly AgentEventEnvelope[];
+  identities: readonly Pick<AgentEventEnvelope, 'runId' | 'turnId' | 'rawEventId'>[];
+};
+
 export type RunRepository = {
   insertRun(input: InsertRunInput): void;
   getRun(id: string): RunRow | undefined;
-  listRuns(limit?: number): RunRow[];
+  listRuns(limit?: number, options?: { publicOnly?: boolean }): RunRow[];
   listRunsByThread(threadId: string, limit?: number): RunRow[];
   isLegacyScheduleCodexThread(codexThreadId: string): boolean;
   listNonTerminalRuns(): RunRow[];
@@ -97,6 +107,7 @@ export type RunRepository = {
   insertRunEvent(event: AgentEventEnvelope): void;
   getLastRunEventSeq(runId: string): number;
   listRunEvents(runId: string, afterSeq?: number): AgentEventEnvelope[];
+  listRunHistoryEvents(runId: string): RunHistoryEvents;
 };
 
 export type ProjectRow = {
@@ -186,6 +197,8 @@ export type InsertThreadInput = {
   reasoning?: string | null;
   status: 'active' | 'archived';
   purpose?: ThreadPurpose;
+  skillReviewJSON?: string;
+  agentPromptPolicyJSON?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -207,6 +220,8 @@ export type ThreadRow = {
   reasoning: string | null;
   status: 'active' | 'archived';
   purpose: ThreadPurpose;
+  skill_review_json?: string | null;
+  agent_prompt_policy_json?: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -228,6 +243,7 @@ export type ThreadRepository = {
   listKnowledgeThreads(input: {
     enterpriseSubjectId: string;
     status?: 'active' | 'archived' | 'all';
+    assignment?: 'assigned' | 'unassigned';
     limit?: number;
   }): ThreadRow[];
   listPublicThreads(input?: {
@@ -254,6 +270,7 @@ export type ThreadRepository = {
   updateScheduleThread(input: UpdateScheduleThreadRowInput): void;
   setThreadPurpose(input: { id: string; purpose: ThreadPurpose }): void;
   setCodexThreadId(threadId: string, codexThreadId: string): void;
+  setAgentPromptPolicySnapshot(threadId: string, snapshotJSON: string): void;
   listCodexBindingRepairCandidates(): Array<{
     threadId: string;
     codexThreadId: string;
@@ -432,21 +449,23 @@ export function createRunRepository(db: Database.Database): RunRepository {
   const insert = db.prepare(`
     INSERT INTO runs (
       id, thread_id, codex_thread_id, resume_mode, queue_state, submission_mode, public_status, internal_status, created_by, source_id,
-      public_prompt, triggered_at,
+      public_prompt, triggered_at, initiator_user_id, initiator_agent_id,
       profile, cwd, canonical_cwd, workspace_mode, prompt_hash, prompt_preview_redacted,
       model, reasoning, sandbox, codex_version, codex_bin, codex_home, normalizer_version, timeout_ms
     ) VALUES (
       @id, @threadId, @codexThreadId, @resumeMode, @queueState, @submissionMode, @publicStatus, @internalStatus, @createdBy, @sourceId,
-      @publicPrompt, @triggeredAt,
+      @publicPrompt, @triggeredAt, @initiatorUserId, @initiatorAgentId,
       @profile, @cwd, @canonicalCwd, @workspaceMode, @promptHash, @promptPreviewRedacted,
       @model, @reasoning, @sandbox, @codexVersion, @codexBin, @codexHome, @normalizerVersion, @timeoutMs
     )
   `);
 
   const get = db.prepare<string>('SELECT * FROM runs WHERE id = ?');
-  const list = db.prepare<{ limit: number }>(`
-    SELECT * FROM runs
-    ORDER BY created_at DESC, id DESC
+  const list = db.prepare<{ limit: number; publicOnly: number }>(`
+    SELECT runs.* FROM runs
+    LEFT JOIN threads ON threads.id = runs.thread_id
+    WHERE (@publicOnly = 0 OR threads.enterprise_subject_id IS NULL)
+    ORDER BY runs.created_at DESC, runs.id DESC
     LIMIT @limit
   `);
   const listByThread = db.prepare<{ threadId: string; limit: number }>(`
@@ -504,9 +523,9 @@ export function createRunRepository(db: Database.Database): RunRepository {
   `);
   const insertEvent = db.prepare(`
     INSERT OR REPLACE INTO run_events (
-      id, run_id, seq, type, payload_json, raw_event_id
+      id, run_id, seq, type, payload_json, raw_event_id, turn_id, normalizer_version, created_at
     ) VALUES (
-      @id, @runId, @seq, @type, @payloadJson, @rawEventId
+      @id, @runId, @seq, @type, @payloadJson, @rawEventId, @turnId, @normalizerVersion, @ts
     )
   `);
   const listEvents = db.prepare<{ runId: string; afterSeq: number }>(`
@@ -514,6 +533,19 @@ export function createRunRepository(db: Database.Database): RunRepository {
     FROM run_events
     WHERE run_id = @runId AND seq > @afterSeq
     ORDER BY seq ASC
+  `);
+  const listHistoryEvents = db.prepare<{ runId: string }>(`
+    SELECT *
+    FROM run_events
+    WHERE run_id = @runId
+      AND type IN ('schedule_trigger', 'assistant_message', 'reasoning_summary',
+        'tool_use', 'tool_result', 'file_change', 'error', 'diagnostic', 'done')
+    ORDER BY seq ASC
+  `);
+  const listEventIdentities = db.prepare<{ runId: string }>(`
+    SELECT DISTINCT turn_id, raw_event_id
+    FROM run_events
+    WHERE run_id = @runId AND (turn_id IS NOT NULL OR raw_event_id IS NOT NULL)
   `);
   const lastEventSeq = db.prepare<{ runId: string }>(`
     SELECT COALESCE(MAX(seq), 0) AS seq
@@ -530,6 +562,8 @@ export function createRunRepository(db: Database.Database): RunRepository {
         queueState: 'none',
         submissionMode: 'enqueue',
         sourceId: null,
+        initiatorUserId: null,
+        initiatorAgentId: null,
         publicPrompt: null,
         triggeredAt: null,
         timeoutMs: null,
@@ -543,8 +577,8 @@ export function createRunRepository(db: Database.Database): RunRepository {
     getRun(id: string): RunRow | undefined {
       return get.get(id) as RunRow | undefined;
     },
-    listRuns(limit = 50): RunRow[] {
-      return list.all({ limit }) as RunRow[];
+    listRuns(limit = 50, options = {}): RunRow[] {
+      return list.all({ limit, publicOnly: options.publicOnly ? 1 : 0 }) as RunRow[];
     },
     listRunsByThread(threadId: string, limit = 50): RunRow[] {
       return listByThread.all({ threadId, limit }) as RunRow[];
@@ -583,7 +617,10 @@ export function createRunRepository(db: Database.Database): RunRepository {
         seq: event.seq,
         type: event.type,
         payloadJson: JSON.stringify(event.payload),
-        rawEventId: event.rawEventId ?? null
+        rawEventId: event.rawEventId ?? null,
+        turnId: event.turnId ?? null,
+        normalizerVersion: event.normalizerVersion,
+        ts: event.ts
       });
     },
     getLastRunEventSeq(runId: string): number {
@@ -591,16 +628,19 @@ export function createRunRepository(db: Database.Database): RunRepository {
     },
     listRunEvents(runId: string, afterSeq = 0): AgentEventEnvelope[] {
       const rows = listEvents.all({ runId, afterSeq }) as RunEventRow[];
-      return rows.map(row => ({
-        id: row.id,
-        runId: row.run_id,
-        seq: row.seq,
-        ts: normalizeDatabaseTimestamp(row.created_at),
-        type: row.type,
-        payload: JSON.parse(row.payload_json),
-        normalizerVersion: 1,
-        ...(row.raw_event_id === null ? {} : { rawEventId: row.raw_event_id })
-      })) as AgentEventEnvelope[];
+      return rows.map(mapRunEventRow);
+    },
+    listRunHistoryEvents(runId: string): RunHistoryEvents {
+      const rows = listHistoryEvents.all({ runId }) as RunEventRow[];
+      const identities = listEventIdentities.all({ runId }) as Pick<RunEventRow, 'turn_id' | 'raw_event_id'>[];
+      return {
+        events: rows.map(mapRunEventRow),
+        identities: identities.map(row => ({
+          runId,
+          ...(row.turn_id === null ? {} : { turnId: row.turn_id }),
+          ...(row.raw_event_id === null ? {} : { rawEventId: row.raw_event_id })
+        }))
+      };
     }
   };
 }
@@ -617,11 +657,11 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
     INSERT INTO threads (
       id, title, codex_thread_id, project_id, enterprise_subject_id, origin,
       cwd, canonical_cwd, workspace_mode,
-      profile, sandbox, model, reasoning, status, purpose, created_at, updated_at
+      profile, sandbox, model, reasoning, status, purpose, skill_review_json, agent_prompt_policy_json, created_at, updated_at
     ) VALUES (
       @id, @title, @codexThreadId, @projectId, @enterpriseSubjectId, @origin,
       @cwd, @canonicalCwd, @workspaceMode,
-      @profile, @sandbox, @model, @reasoning, @status, @purpose,
+      @profile, @sandbox, @model, @reasoning, @status, @purpose, @skillReviewJSON, @agentPromptPolicyJSON,
       COALESCE(@createdAt, CURRENT_TIMESTAMP), COALESCE(@updatedAt, CURRENT_TIMESTAMP)
     )
   `);
@@ -651,11 +691,19 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
   const listKnowledge = db.prepare<{
     enterpriseSubjectId: string;
     status: 'active' | 'archived' | 'all';
+    assignment: 'assigned' | 'unassigned' | null;
     limit: number;
   }>(`
     ${threadSelect}
     WHERE threads.enterprise_subject_id = @enterpriseSubjectId
       AND (@status = 'all' OR threads.status = @status)
+      AND (@assignment IS NULL
+        OR (@assignment = 'assigned' AND threads.project_id IS NOT NULL)
+        OR (@assignment = 'unassigned' AND threads.project_id IS NULL
+          AND threads.purpose = 'conversation'
+          AND threads.origin = 'clawee_created'
+          AND threads.workspace_mode = 'managed'
+          AND threads.sandbox = 'read-only'))
     ORDER BY threads.updated_at DESC, threads.id DESC
     LIMIT @limit
   `);
@@ -668,6 +716,7 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
   }>(`
     ${threadSelect}
     WHERE (@status = 'all' OR threads.status = @status)
+      AND threads.enterprise_subject_id IS NULL
       AND threads.purpose <> 'knowledge_conversation'
       AND (@purpose IS NULL OR threads.purpose = @purpose)
       AND (@excludePurpose IS NULL OR threads.purpose <> @excludePurpose)
@@ -792,6 +841,12 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
         updated_at = CURRENT_TIMESTAMP
     WHERE id = @threadId
   `);
+  const setAgentPromptPolicySnapshot = db.prepare(`
+    UPDATE threads
+    SET agent_prompt_policy_json = @snapshotJSON,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = @threadId
+  `);
   const listCodexBindingRepairCandidates = db.prepare(`
     SELECT
       threads.id AS threadId,
@@ -799,6 +854,7 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
     FROM threads
     INNER JOIN runs ON runs.thread_id = threads.id
     WHERE threads.codex_thread_id IS NULL
+      AND threads.purpose <> 'skill_review'
       AND runs.codex_thread_id IS NOT NULL
       AND NOT EXISTS (
         SELECT 1
@@ -823,6 +879,7 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
     FROM threads
     INNER JOIN runs ON runs.thread_id = threads.id
     WHERE threads.codex_thread_id IS NULL
+      AND threads.purpose <> 'skill_review'
       AND runs.codex_thread_id IS NOT NULL
     ORDER BY threads.id ASC
   `);
@@ -860,6 +917,8 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
         model: null,
         reasoning: null,
         purpose: 'conversation',
+        skillReviewJSON: null,
+        agentPromptPolicyJSON: null,
         createdAt: null,
         updatedAt: null,
         ...input
@@ -883,6 +942,7 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
       return listKnowledge.all({
         enterpriseSubjectId: input.enterpriseSubjectId,
         status: input.status ?? 'active',
+        assignment: input.assignment ?? null,
         limit: input.limit ?? 50
       }) as ThreadRow[];
     },
@@ -938,6 +998,9 @@ export function createThreadRepository(db: Database.Database): ThreadRepository 
     setCodexThreadId(threadId: string, codexThreadId: string): void {
       setCodexThreadId.run({ threadId, codexThreadId });
     },
+    setAgentPromptPolicySnapshot(threadId: string, snapshotJSON: string): void {
+      setAgentPromptPolicySnapshot.run({ threadId, snapshotJSON });
+    },
     listCodexBindingRepairCandidates(): Array<{
       threadId: string;
       codexThreadId: string;
@@ -992,5 +1055,21 @@ type RunEventRow = {
   type: AgentEventEnvelope['type'];
   payload_json: string;
   raw_event_id: string | null;
+  turn_id: string | null;
+  normalizer_version: number;
   created_at: string;
 };
+
+function mapRunEventRow(row: RunEventRow): AgentEventEnvelope {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    seq: row.seq,
+    ts: normalizeDatabaseTimestamp(row.created_at),
+    type: row.type,
+    payload: JSON.parse(row.payload_json),
+    normalizerVersion: row.normalizer_version,
+    ...(row.turn_id === null ? {} : { turnId: row.turn_id }),
+    ...(row.raw_event_id === null ? {} : { rawEventId: row.raw_event_id })
+  } as AgentEventEnvelope;
+}

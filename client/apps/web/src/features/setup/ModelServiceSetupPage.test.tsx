@@ -27,7 +27,7 @@ describe('ModelServiceSetupPage', () => {
     await user.type(screen.getByLabelText('Model'), ' model-1 ');
     await user.type(screen.getByLabelText('API Key'), ' secret-key ');
     await user.click(screen.getByRole('button', {
-      name: '验证并启动 Clawee'
+      name: '保存并启动 Clawee'
     }));
 
     expect(onConfigure).toHaveBeenCalledWith({
@@ -58,7 +58,7 @@ describe('ModelServiceSetupPage', () => {
     const apiKey = screen.getByLabelText('API Key');
     await user.type(apiKey, 'secret-key');
     await user.click(screen.getByRole('button', {
-      name: '验证并启动 Clawee'
+      name: '保存并启动 Clawee'
     }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -88,11 +88,11 @@ describe('ModelServiceSetupPage', () => {
     await user.type(screen.getByLabelText('Model'), 'model-1');
     await user.type(screen.getByLabelText('API Key'), 'secret-key');
     await user.click(screen.getByRole('button', {
-      name: '验证并启动 Clawee'
+      name: '保存并启动 Clawee'
     }));
 
     const submit = screen.getByRole('button', {
-      name: '正在验证模型服务'
+      name: '正在保存配置'
     });
     expect(submit).toBeDisabled();
     expect(

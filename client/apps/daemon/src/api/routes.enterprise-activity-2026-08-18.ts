@@ -29,6 +29,15 @@ export async function registerEnterpriseActivityRoutes(
     }
   });
 
+  server.get('/enterprise/activity/runtime', async (request, reply) => {
+    if (!z.object({}).strict().safeParse(request.query).success) return invalidRequest(reply);
+    try {
+      return await manager.getRuntime();
+    } catch (error) {
+      return sendActivityError(reply, error);
+    }
+  });
+
   server.get<{ Querystring: unknown }>(
     '/enterprise/activity/statistics',
     async (request, reply) => {

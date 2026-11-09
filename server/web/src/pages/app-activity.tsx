@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   getMyActivityStatistics,
   type ActivityAgent,
+  type ActivityEmployeeSkillUsage,
   type ActivityRange,
   type ActivityStatistics,
   type ActivitySkillUsage,
@@ -244,6 +245,8 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
 
       <SkillEvidenceTable items={data.organization.skill_usage ?? []} />
 
+      <EmployeeSkillUsageTable items={data.organization.employee_skill_usage ?? []} timezone={data.timezone} />
+
       <AgentActivityTable agents={data.agents} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -280,6 +283,31 @@ function SkillEvidenceTable({ items }: { items: ActivitySkillUsage[] }) {
               <TableCell className="text-right font-mono">{formatInteger(item.requested_runs)}</TableCell>
               <TableCell className="text-right font-mono">{formatInteger(item.observed_runs)}</TableCell>
               <TableCell className="text-right font-mono">{formatInteger(item.implicit_runs)}</TableCell>
+            </TableRow>
+          ))}</TableBody>
+        </Table>
+      )}
+    </section>
+  );
+}
+
+function EmployeeSkillUsageTable({ items, timezone }: { items: ActivityEmployeeSkillUsage[]; timezone: string }) {
+  return (
+    <section aria-label="员工 Skill 使用">
+      <div className="mb-3"><h2 className="text-base font-semibold">员工 Skill 使用</h2></div>
+      {items.length === 0 ? <EmptyState title="当前范围内暂无员工 Skill 使用记录" /> : (
+        <Table aria-label="员工 Skill 使用">
+          <TableHeader><TableRow>
+            <TableHead>员工</TableHead><TableHead className="text-right">Skill 数</TableHead>
+            <TableHead className="text-right">明确请求</TableHead><TableHead className="text-right">观测使用</TableHead><TableHead className="text-right">最近使用</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>{items.map((item) => (
+            <TableRow key={item.employee_id}>
+              <TableCell className="font-medium">{item.employee_name || "未命名员工"}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.observed_skill_count)}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.requested_skill_runs)}</TableCell>
+              <TableCell className="text-right font-mono">{formatInteger(item.observed_skill_runs)}</TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">{item.last_observed_at ? formatDateTime(item.last_observed_at, timezone) : "尚无观测"}</TableCell>
             </TableRow>
           ))}</TableBody>
         </Table>

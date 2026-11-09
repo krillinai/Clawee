@@ -176,6 +176,8 @@ func (s *MemoryStore) ListAccountRoles(ctx context.Context, userID string) ([]Ac
 		binding.RoleCode = role.Code
 		binding.RoleName = role.Name
 		binding.System = role.System
+		binding.DepartmentID = role.DepartmentID
+		binding.DepartmentRoleType = role.DepartmentRoleType
 		out = append(out, binding)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RoleCode < out[j].RoleCode })

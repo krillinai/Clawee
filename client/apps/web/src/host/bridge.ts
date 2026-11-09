@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../runtime/types.js';
+import type { DesktopUpdateState } from '@clawee/protocol';
 
 export type HostBridgeResult = { ok: true } | { ok: false; code: 'UNSUPPORTED' | 'FAILED'; message: string };
 
@@ -30,9 +31,11 @@ export type HostWindowChrome = {
 export type HostBridge = {
   kind: 'browser' | 'desktop';
   platform?: DesktopPlatform;
+  installationDirectory?: string | null;
   windowChrome?: HostWindowChrome;
   readConnectionConfig(): Promise<ConnectionConfig | null>;
   openExternal(url: string): Promise<void>;
+  openFile?(path: string): Promise<HostBridgeResult>;
   revealPath(path: string): Promise<HostBridgeResult>;
   notify(message: HostNotification): Promise<void>;
   configureBackgroundNotifications?(
@@ -42,6 +45,7 @@ export type HostBridge = {
     listener: (connection: ConnectionConfig | null) => void
   ): () => void;
   restartRuntime?(): Promise<HostBridgeResult>;
+  exportDiagnostics?(): Promise<HostBridgeResult>;
   readDesktopPreferences?(): Promise<DesktopPreferences>;
   updateDesktopPreferences?(
     preferences: Partial<DesktopPreferences>
@@ -49,5 +53,15 @@ export type HostBridge = {
   selectProjectDirectory?(
     purpose?: ProjectDirectorySelectionPurpose
   ): Promise<string | null>;
+  selectContextDirectory?(): Promise<string | null>;
   resolveDroppedFilePath?(file: File): string | null;
+  readUpdateState?(): Promise<DesktopUpdateState>;
+  subscribeUpdateState?(listener: (state: DesktopUpdateState) => void): () => void;
+  checkForUpdates?(): Promise<HostBridgeResult>;
+  deferUpdate?(): Promise<HostBridgeResult>;
+  acknowledgeUpdateQuiescence?(updateId: string, busy?: boolean): Promise<void>;
+  downloadUpdate?(): Promise<HostBridgeResult>;
+  installUpdate?(): Promise<HostBridgeResult>;
+  testUpdate?(simulatedVersion: string): Promise<HostBridgeResult>;
+  cancelUpdateTest?(): Promise<HostBridgeResult>;
 };

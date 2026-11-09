@@ -182,6 +182,11 @@ func (s *PostgresStore) ApplyApprovalResult(ctx context.Context, providerID, tem
 		if _, err = tx.Exec(ctx, `UPDATE skill_versions SET approval_status=$2,approved_space_id=$3,reviewed_by='dingtalk',reviewed_at=$4,review_comment='' WHERE version_id=$1`, item.VersionID, decision, spaceID, now); err != nil {
 			return err
 		}
+		if decision == "approved" {
+			if err = recordFirstApproval(ctx, tx, skillID, item.VersionID, "dingtalk", item.ID, nil, now); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit(ctx)
 }

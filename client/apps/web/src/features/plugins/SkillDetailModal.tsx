@@ -7,6 +7,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
 import type { SkillMarketViewEntry } from './skill-market-model.js';
 import {
   getSkillMarketAction,
@@ -42,8 +43,6 @@ export function SkillDetailModal({
 }) {
   const dialogRef = useRef<HTMLElement>(null);
   const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const previewOpenRef = useRef(false);
-  const onCloseRef = useRef(onClose);
   const [previewExample, setPreviewExample] = useState<
     SkillMarketViewEntry['entry']['examples'][number] | undefined
   >();
@@ -55,50 +54,8 @@ export function SkillDetailModal({
   const riskNotes = getRiskNotes(item);
   const detailTags = getDetailTags(item);
 
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
 
-  useEffect(() => {
-    previewOpenRef.current = previewExample !== undefined;
-  }, [previewExample]);
-
-  useEffect(() => {
-    lockBodyScroll();
-    dialogRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (previewOpenRef.current) {
-          closePreview();
-          return;
-        }
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const focusable = getFocusableElements(dialogRef.current);
-      if (focusable.length === 0) return;
-
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      unlockBodyScroll();
-    };
-  }, [item.id]);
+  useModalBehavior(dialogRef, { open: true, onClose, initialFocusRef: dialogRef, restoreFocus: false });
 
   function closePreview() {
     setPreviewExample(undefined);
@@ -299,7 +256,9 @@ function SkillExamplePreview({
   onClose(): void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const source = normalizeSkillMarketAssetUrl(example.url);
+  useModalBehavior(previewRef, { open: true, onClose, initialFocusRef: closeRef });
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -313,6 +272,7 @@ function SkillExamplePreview({
       }}
     >
       <section
+        ref={previewRef}
         aria-label={`预览 ${example.title}`}
         aria-modal="true"
         className="skill-market-example-preview"
@@ -409,37 +369,6 @@ function getActionIcon(kind: SkillMarketAction['kind']) {
   if (kind === 'update') return <RefreshCw size={15} aria-hidden="true" />;
   if (kind === 'use') return <CheckCircle2 size={15} aria-hidden="true" />;
   return <Download size={15} aria-hidden="true" />;
-}
-
-function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
-  if (root === null) return [];
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )
-  ).filter((element) => (
-    !element.hasAttribute('disabled')
-    && element.closest('[aria-hidden="true"]') === null
-  ));
-}
-
-let scrollLockDepth = 0;
-let previousBodyOverflow = '';
-
-function lockBodyScroll() {
-  if (scrollLockDepth === 0) {
-    previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-  }
-  scrollLockDepth += 1;
-}
-
-function unlockBodyScroll() {
-  scrollLockDepth = Math.max(0, scrollLockDepth - 1);
-  if (scrollLockDepth === 0) {
-    document.body.style.overflow = previousBodyOverflow;
-    previousBodyOverflow = '';
-  }
 }
 
 function sanitizeId(value: string): string {

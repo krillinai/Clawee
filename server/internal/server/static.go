@@ -19,6 +19,10 @@ func registerStaticFallback(router *gin.Engine, staticDir string) {
 	embeddedStatic, _ := fs.Sub(webdist.Files, "dist")
 
 	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+			writeModelError(c, http.StatusNotFound, "unsupported_endpoint", "The requested model endpoint is not supported")
+			return
+		}
 		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 			c.Status(http.StatusNotFound)
 			return

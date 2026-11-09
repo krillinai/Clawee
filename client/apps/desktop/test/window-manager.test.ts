@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserWindow } from 'electron';
 import {
   DebouncedWindowStateWriter,
@@ -8,12 +8,13 @@ import {
 } from '../src/main/window-manager.js';
 
 const windowMocks = vi.hoisted(() => ({
-  hide: vi.fn(), show: vi.fn(), loadURL: vi.fn(),
+  hide: vi.fn(), show: vi.fn(), focus: vi.fn(), loadURL: vi.fn(),
   on: vi.fn(), isDestroyed: () => false,
   isMinimized: () => false, isMaximized: () => false,
   getBounds: () => ({ width: 1280, height: 820 }),
   webContents: {
-    setZoomFactor: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn()
+    setZoomFactor: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn(),
+    getURL: vi.fn(() => 'clawee-app://app/index.html'), isDestroyed: vi.fn(() => false), isCrashed: vi.fn(() => false)
   }
 }));
 vi.mock('electron', () => ({
@@ -21,7 +22,48 @@ vi.mock('electron', () => ({
   screen: {}, shell: {}
 }));
 
+beforeEach(() => { vi.clearAllMocks(); });
+
 describe('窗口退出', () => {
+  it('仅仍存活的工作台需要编辑确认，启动失败页与崩溃渲染进程不阻止修复更新', () => {
+    const manager = new WindowManager({
+      preloadPath: '', development: false, appEntryAt: 0, requestQuit: vi.fn(),
+      settings: { read: () => ({ closeBehavior: 'hide', notificationsEnabled: true }), update: vi.fn(), flush: vi.fn() }
+    });
+    expect(manager.hasWorkspace).toBe(false);
+    manager.create();
+    expect(manager.hasWorkspace).toBe(true);
+    windowMocks.webContents.isCrashed.mockReturnValueOnce(true);
+    expect(manager.hasWorkspace).toBe(false);
+    windowMocks.webContents.getURL.mockReturnValueOnce('clawee-app://bootstrap/index.html');
+    expect(manager.hasWorkspace).toBe(false);
+    expect(manager.hasWorkspace).toBe(true);
+  });
+
+  it.each(['hide', 'quit'] as const)('原生更新关窗前放行关闭，取消安装后恢复 %s 行为', closeBehavior => {
+    const requestQuit = vi.fn();
+    const manager = new WindowManager({
+      preloadPath: '', development: false, appEntryAt: 0, requestQuit,
+      settings: {
+        read: () => ({ closeBehavior, notificationsEnabled: true }),
+        update: vi.fn(), flush: vi.fn()
+      }
+    });
+    manager.create();
+    const close = windowMocks.on.mock.calls.find(([event]) => event === 'close')![1] as (event: { preventDefault(): void }) => void;
+    const event = { preventDefault: vi.fn() };
+    manager.beginQuit();
+    close(event);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(requestQuit).not.toHaveBeenCalled();
+    manager.cancelQuit();
+    close(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(requestQuit).toHaveBeenCalledTimes(closeBehavior === 'quit' ? 1 : 0);
+    manager.show();
+    expect(windowMocks.show).toHaveBeenCalledOnce();
+  });
+
   it('立即隐藏窗口，且退出期间不再显示或加载启动页', async () => {
     const update = vi.fn(() => ({ closeBehavior: 'hide' as const, notificationsEnabled: true }));
     const manager = new WindowManager({
@@ -54,7 +96,8 @@ describe('PDF 预览窗口', () => {
     manager.create();
     expect(BrowserWindow).toHaveBeenLastCalledWith(expect.objectContaining({
       webPreferences: expect.objectContaining({
-        plugins: true, nodeIntegration: false, contextIsolation: true, sandbox: true
+        plugins: true, nodeIntegration: false, contextIsolation: true, sandbox: true,
+        additionalArguments: ['--clawee-packaged']
       })
     }));
   });

@@ -1,14 +1,17 @@
-import type { WorkspaceFileMeta } from '@clawee/protocol';
+import type { OfficePreview, WorkspaceFileMeta } from '@clawee/protocol';
 import { FileCode2, FileImage, FileText, Image as ImageIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { JsonViewer } from '../../components/json/JsonViewer.js';
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer.js';
 import { HtmlPreview, type HtmlPreviewResources } from './HtmlPreview.js';
+import { OfficeFilePreview } from './OfficeFilePreview.js';
 import { TextFileEditor } from './TextFileEditor.js';
 
 export type FileEditorPaneProps = {
   meta?: WorkspaceFileMeta;
   content?: string;
   objectUrl?: string;
+  officePreview?: OfficePreview;
   dirty?: boolean;
   saving?: boolean;
   loadError?: string;
@@ -131,6 +134,7 @@ export function FileEditorPane(props: FileEditorPaneProps) {
         mode: currentMode,
         content: props.content ?? '',
         objectUrl: props.objectUrl,
+        officePreview: props.officePreview,
         htmlPreviewResources: props.htmlPreviewResources,
         onOpenExternal: props.onOpenExternal,
         onChange: props.onChange,
@@ -145,6 +149,7 @@ type RenderContentArgs = {
   mode: FileEditorMode;
   content: string;
   objectUrl?: string;
+  officePreview?: OfficePreview;
   htmlPreviewResources?: HtmlPreviewResources;
   onOpenExternal?: (url: string) => void;
   onChange?: (value: string) => void;
@@ -154,6 +159,12 @@ type RenderContentArgs = {
 function renderContent(args: RenderContentArgs) {
   if (!args.meta.previewable && !args.meta.editable) {
     return renderUnsupported(args.meta);
+  }
+
+  if (args.meta.kind === 'office') {
+    return args.officePreview
+      ? <OfficeFilePreview key={`${args.meta.path}:${args.meta.versionToken}`} preview={args.officePreview} />
+      : <div className="file-preview file-preview-empty"><p>暂无可用预览</p></div>;
   }
 
   if (isImagePreview(args.meta)) {
@@ -207,6 +218,14 @@ function renderTextPreview(
   htmlPreviewResources?: HtmlPreviewResources,
   onOpenExternal?: (url: string) => void
 ) {
+  if (isSvgSource(meta)) {
+    return (
+      <div className="file-preview file-preview-media">
+        <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`} alt={meta.name} />
+      </div>
+    );
+  }
+
   if (meta.kind === 'html') {
     return (
       <HtmlPreview
@@ -228,35 +247,16 @@ function renderTextPreview(
   }
 
   if (meta.kind === 'json') {
-    return <JsonPreview content={content} />;
+    return (
+      <div className="file-preview">
+        <JsonViewer content={content} />
+      </div>
+    );
   }
 
   return (
     <div className="file-preview">
       <pre>{content}</pre>
-    </div>
-  );
-}
-
-function JsonPreview(props: { content: string }) {
-  const parsed = useMemo(() => {
-    try {
-      return {
-        ok: true as const,
-        text: JSON.stringify(JSON.parse(props.content), null, 2)
-      };
-    } catch {
-      return {
-        ok: false as const,
-        text: props.content
-      };
-    }
-  }, [props.content]);
-
-  return (
-    <div className="file-preview">
-      {parsed.ok ? null : <p className="file-preview-note">JSON 解析失败，以下保留原始内容。</p>}
-      <pre>{parsed.text}</pre>
     </div>
   );
 }
@@ -319,11 +319,7 @@ export function defaultModeForMeta(meta?: WorkspaceFileMeta): FileEditorMode {
     return 'edit';
   }
 
-  if (isSvgSource(meta) && meta.editable) {
-    return 'edit';
-  }
-
-  if (meta.kind === 'html') {
+  if (meta.kind === 'html' || isSvgSource(meta)) {
     return 'preview';
   }
 

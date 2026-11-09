@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { feedbackAdminApi, type FeedbackReport } from '@/lib/feedback-admin-api';
@@ -10,8 +10,112 @@ const access = vi.hoisted(() => ({ allowed: true }));
 vi.mock('@/components/admin-permissions', () => ({ useAdminPermission: () => access.allowed }));
 vi.mock('@/lib/feedback-admin-api', async () => { const actual = await vi.importActual<typeof import('@/lib/feedback-admin-api')>('@/lib/feedback-admin-api'); return { ...actual, feedbackAdminApi: { ...actual.feedbackAdminApi, list: vi.fn(), get: vi.fn(), read: vi.fn(), operate: vi.fn() } }; });
 const report: FeedbackReport = { report_id: 'fb_test0001', display_number: 'FB-TEST', description: '<img src=x onerror=alert(1)>', environment: { app_version: 'test' }, manifest: { missing_items: ['desktop:unavailable'], warnings: [] }, artifacts: [], events: [], created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), completeness: 'partial', processing_status: 'open', upload_state: 'ready', security_state: 'normal', version: 1 };
+const automatic: FeedbackReport = { ...report, kind: 'automatic_incident', display_number: 'AI-TEST', manifest: undefined,
+  incident: { incident_id: 'incident_1', installation_id: 'installation_12345678', app_session_id: 'session_1', revision: 3, source: 'daemon', layer: 'codex_model', stage: 'response', error_code: 'responseStreamDisconnected', message: 'responseStreamDisconnected', first_message: 'responseStreamDisconnected', first_seen_at: report.created_at, last_seen_at: report.created_at, occurrence_count: 3, outcome: 'recovered', environment: { runtime_version: '0.146.0', endpoint_fingerprint: 'a'.repeat(64) } } };
+it('未登录的自动异常展示 Agent 并明确员工尚未关联', async () => {
+  vi.mocked(feedbackAdminApi.get).mockResolvedValue({ ...automatic, incident: { ...automatic.incident!, reporter: { enterprise_key: 'a'.repeat(64), agent_id: 'agent_1' } } });
+  page('/admin/feedback/incident_1');
+  const facts = await screen.findByLabelText('自动异常事实');
+  expect(facts).toHaveTextContent('agent_1');
+  expect(facts).toHaveTextContent('未关联员工');
+  expect(facts).not.toHaveTextContent('客户端企业账号快照');
+});
+it('自动异常展示员工账号、技术错误、时间线与原始日志下载', async () => {
+  const enriched: FeedbackReport = { ...automatic, artifacts: [{ artifact_id: 'incident_raw_logs', kind: 'logs', name: 'incident-raw-logs.ndjson', size_bytes: 128, content_type: 'application/x-ndjson', record_count: 1, source: 'incident_snapshot', upload_state: 'received' }],
+    incident: { ...automatic.incident!, reporter: { enterprise_key: 'a'.repeat(64), subject_id: 'user_zhang', display_name: '张三', agent_id: 'agent_1' }, logs_expected: true,
+      diagnostics: { error_message: 'connection reset', error_stack: 'Error: connection reset\n at /app/client.ts:42', request_method: 'POST', request_path: '/runs' },
+      first_diagnostics: { error_message: 'Reconnecting... 1/5', additional_details: 'HTTP 503', request_id: 'req_first' },
+      timeline: [{ at: report.created_at, event_type: 'error', stage: 'response', error_code: 'responseStreamDisconnected' }] } };
+  vi.mocked(feedbackAdminApi.get).mockResolvedValue(enriched);
+  vi.mocked(feedbackAdminApi.read).mockResolvedValue({ records: [{ text: 'TLS connection reset', artifact_id: 'incident_raw_logs', continuation: false, fragment_offset: 0 }], next_cursor: '', has_next: false });
+  page('/admin/feedback/incident_1');
+  expect(await screen.findByLabelText('自动异常事实')).toHaveTextContent('张三');
+  expect(screen.getByLabelText('自动异常事实')).toHaveTextContent('接收中心未核验');
+  expect(screen.getByLabelText('最近错误详情')).toHaveTextContent('/app/client.ts:42');
+  expect(screen.getByLabelText('首次错误详情')).toHaveTextContent('HTTP 503');
+  expect(screen.getByLabelText('首次错误详情')).toHaveTextContent('req_first');
+  expect(screen.getByLabelText('异常时间线')).toHaveTextContent('发生异常');
+  expect(await screen.findByText('TLS connection reset')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'incident-raw-logs.ndjson' })).toHaveAttribute('download');
+});
+it('列表按员工查找并显示发生时账号快照', async () => {
+  vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [{ ...automatic, incident: { ...automatic.incident!, reporter: { enterprise_key: 'a'.repeat(64), subject_id: 'user_zhang', display_name: '张三' } } }], meta: { next_cursor: '', has_next: false } });
+  page('/admin/feedback?cursor=old-page');
+  expect(await screen.findByText('张三 · 客户端自动上报')).toBeInTheDocument();
+  expect(screen.getByText('账号 user_zhang（客户端快照）')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('员工姓名或账号 ID'), { target: { value: '张三' } });
+  await waitFor(() => { const params = vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)![0]; expect(params.get('reporter')).toBe('张三'); expect(params.has('cursor')).toBe(false); });
+});
+it('自动异常展示技术事实、未知值与独立人工状态，不读取会话或附件', async () => {
+  vi.mocked(feedbackAdminApi.get).mockResolvedValue(automatic); page('/admin/feedback/incident_1');
+  expect(await screen.findByLabelText('自动异常事实')).toHaveTextContent('运行已恢复');
+  expect(screen.getByLabelText('自动异常事实')).toHaveTextContent('0.146.0');
+  expect(screen.getByLabelText('自动异常事实')).toHaveTextContent('未知');
+  expect(screen.getByRole('button', { name: '标记已处理' })).toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: '会话' })).not.toBeInTheDocument(); expect(feedbackAdminApi.read).not.toHaveBeenCalled();
+});
+it('自动异常列表显示安装后缀、次数及恢复，并传递类型与链路筛选', async () => {
+  vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [automatic], meta: { next_cursor: '', has_next: false } }); page('/admin/feedback');
+  expect(await screen.findByText('AI-TEST')).toBeInTheDocument(); expect(screen.getByText('3 次')).toBeInTheDocument(); expect(screen.getByText('运行已恢复')).toBeInTheDocument();
+  expect(screen.getByText(/匿名 \/ 自报 · 12345678/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('combobox', { name: '反馈类型' })); fireEvent.click(await screen.findByRole('option', { name: '自动异常' }));
+  fireEvent.click(screen.getByRole('combobox', { name: '异常链路' })); fireEvent.click(await screen.findByRole('option', { name: 'Codex 到模型' }));
+  await waitFor(() => { const params = vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)?.[0]; expect(params?.get('kind')).toBe('automatic_incident'); expect(params?.get('layer')).toBe('codex_model'); });
+});
+it('过期自动异常列表仍按类型展示，不冒充手工反馈', async () => {
+  const expired = { ...automatic, incident: undefined, description: undefined, upload_state: 'expired', expires_at: new Date(Date.now() - 86400000).toISOString() };
+  vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [expired], meta: { next_cursor: '', has_next: false } });
+  page('/admin/feedback?kind=automatic_incident&include_unavailable=true');
+  expect(await screen.findByRole('link', { name: 'AI-TEST' })).toBeInTheDocument();
+  const row = screen.getByRole('row', { name: /AI-TEST/ });
+  expect(within(row).getByText('自动异常')).toBeInTheDocument();
+  expect(within(row).queryByText('手工反馈')).not.toBeInTheDocument();
+  expect(screen.getByText('expired / normal')).toBeInTheDocument();
+  expect(screen.queryByText('3 次')).not.toBeInTheDocument();
+});
+it.each(['expired', 'quarantine'])('不可读取的自动异常详情保留类型且不显示手工材料入口：%s', async state => {
+  const unavailable = { ...automatic, incident: undefined, description: undefined,
+    upload_state: state === 'expired' ? 'expired' : 'ready', security_state: state === 'quarantine' ? 'quarantine' : 'normal',
+    expires_at: new Date(Date.now() + (state === 'expired' ? -1 : 1) * 86400000).toISOString() };
+  vi.mocked(feedbackAdminApi.get).mockResolvedValue(unavailable);
+  page('/admin/feedback/incident_1');
+  expect(await screen.findByRole('heading', { name: 'AI-TEST' })).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('不能读取正文与处理');
+  expect(screen.getByRole('region', { name: '处理记录' })).toBeInTheDocument();
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '标记已处理' })).not.toBeInTheDocument();
+  expect(feedbackAdminApi.read).not.toHaveBeenCalled();
+});
 beforeEach(() => { vi.clearAllMocks(); access.allowed = true; vi.spyOn(window, 'scrollTo').mockImplementation(() => {}); vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [], meta: { next_cursor: '', has_next: false } }); vi.mocked(feedbackAdminApi.get).mockResolvedValue(report); vi.mocked(feedbackAdminApi.read).mockResolvedValue({ records: [], has_next: false, next_cursor: '' }); });
 function page(path: string) { const query = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }); return { ...render(<QueryClientProvider client={query}><MemoryRouter initialEntries={[path]}><Routes><Route path="/admin/feedback" element={<FeedbackPageView />} /><Route path="/admin/feedback/:id" element={<FeedbackDetailPage />} /></Routes></MemoryRouter></QueryClientProvider>), query }; }
+it.each([
+  ['开始处理', 'open', '处理人将记录为当前中心账号。'],
+  ['标记已处理', 'open', '记录处理结论和验证结果，并将反馈标记为已处理。'],
+  ['重新打开', 'resolved', '填写重新打开原因，将反馈恢复为待处理。']
+])('%s弹窗有可访问描述且不产生警告', async (title, status, description) => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    vi.mocked(feedbackAdminApi.get).mockResolvedValue({ ...report, processing_status: status });
+    page('/admin/feedback/fb_test0001');
+    fireEvent.click(await screen.findByRole('button', { name: title }));
+    expect(screen.getByRole('dialog', { name: title })).toHaveAccessibleDescription(description);
+    expect(warning).not.toHaveBeenCalled();
+  } finally {
+    warning.mockRestore();
+  }
+});
+it('截图预览不关联不存在的描述且不产生警告', async () => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    vi.mocked(feedbackAdminApi.get).mockResolvedValue({ ...report, artifacts: [{ artifact_id: 'shot_1', kind: 'screenshot', name: '截图', size_bytes: 1, content_type: 'image/png', record_count: 0, source: 'browser', upload_state: 'ready' }] });
+    page('/admin/feedback/fb_test0001');
+    fireEvent.click(await screen.findByRole('button', { name: '截图' }));
+    expect(screen.getByRole('dialog', { name: '问题截图' })).not.toHaveAttribute('aria-describedby');
+    expect(warning).not.toHaveBeenCalled();
+  } finally {
+    warning.mockRestore();
+  }
+});
 it('列表只加载摘要，筛选进入URL，空列表可用', async () => { page('/admin/feedback?status=resolved'); expect(await screen.findByText('没有符合条件的反馈')).toBeInTheDocument(); expect(feedbackAdminApi.read).not.toHaveBeenCalled(); fireEvent.change(screen.getByLabelText('编号或描述'), { target: { value: '排障' } }); await waitFor(() => expect(vi.mocked(feedbackAdminApi.list).mock.calls.at(-1)?.[0].get('keyword')).toBe('排障')); });
 it('列表复用统一表格，状态与异常材料筛选保留参数并重置分页', async () => {
   vi.mocked(feedbackAdminApi.list).mockResolvedValue({ items: [report], meta: { next_cursor: 'next-page', has_next: true } });

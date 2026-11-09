@@ -5,6 +5,7 @@
   height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  padding-top: 32px;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -20,7 +21,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px clamp(20px, 2.4vw, 32px);
+  padding: 8px clamp(20px, 2.4vw, 32px) 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
@@ -34,8 +35,8 @@
 }
 
 .plugins-source-tabs {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: inline-flex;
+  flex: 0 0 auto;
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border);
@@ -44,6 +45,7 @@
 }
 
 .plugins-source-tabs button {
+  flex: 0 0 116px;
   min-width: 116px;
   min-height: 32px;
   padding: 0 12px;
@@ -74,7 +76,7 @@
   display: grid;
   align-content: start;
   gap: 14px;
-  padding: 16px clamp(16px, 2vw, 28px) 32px;
+  padding: 10px clamp(16px, 2vw, 28px) 32px;
   background: var(--bg);
 }
 
@@ -91,7 +93,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 20px;
+  font-size: var(--page-title-size);
   line-height: 1.2;
 }
 
@@ -594,11 +596,26 @@
 }
 
 @media (max-width: 520px) {
+  .plugins-source-header {
+    flex-wrap: wrap;
+  }
+
   .plugins-source-tabs {
     width: 100%;
   }
 
+  .plugins-source-actions {
+    width: 100%;
+  }
+
+  .plugins-source-actions .skill-market-search {
+    min-width: 0;
+    width: auto;
+    flex: 1 1 auto;
+  }
+
   .plugins-source-tabs button {
+    flex: 1 1 0;
     min-width: 0;
   }
 
@@ -632,7 +649,7 @@
   align-content: start;
   gap: 24px;
   margin: 0;
-  padding: 16px clamp(20px, 2.4vw, 32px) 40px;
+  padding: 10px clamp(20px, 2.4vw, 32px) 40px;
   background: var(--bg);
   color: var(--text);
 }
@@ -658,7 +675,7 @@
   align-items: center;
   gap: 8px;
   color: var(--text);
-  font-size: 17px;
+  font-size: var(--page-title-size);
   line-height: 1.2;
 }
 
@@ -1235,6 +1252,13 @@
   color: var(--text);
   font-weight: 600;
   object-fit: cover;
+}
+
+/* Transparent participant images need a stable backdrop in either theme. */
+img.skill-market-avatar {
+  background: #fff;
+  object-fit: contain;
+  padding: 4px;
 }
 
 .skill-market-avatar--small {
@@ -2075,7 +2099,11 @@
   .plugins-source-header {
     position: sticky;
     top: 0;
-    padding: 10px 12px;
+    padding: 10px 12px 20px;
+  }
+
+  .plugins-source-actions .skill-market-search {
+    height: 44px;
   }
 
   .plugins-source-content {
@@ -2212,7 +2240,7 @@
   }
 
   .skill-market-heading h1 {
-    font-size: 17px;
+    font-size: var(--page-title-size);
   }
 
   .skill-market-search {
@@ -2444,6 +2472,12 @@
   border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   background: var(--accent-soft);
   color: var(--accent-strong);
+}
+
+.enterprise-skill-row.skill-market-card .cloud-skill-card__avatar {
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
 }
 
 @media (max-width: 1560px) {

@@ -31,7 +31,7 @@ export function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
         {themeOptions.map((option) => (
           <ToggleGroupItem
             aria-label={option.label}
-            className={cn(compact && "h-6 min-w-6 px-1 [&_svg]:size-3.5")}
+            className={cn(compact && "h-7 min-w-7 px-1 [&_svg]:size-3.5")}
             key={option.value}
             value={option.value}
           >

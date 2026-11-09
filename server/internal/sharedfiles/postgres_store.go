@@ -14,28 +14,94 @@ type PostgresStore struct{ pool *pgxpool.Pool }
 
 func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore { return &PostgresStore{pool: pool} }
 
+func (s *PostgresStore) EnsurePersonalSpace(ctx context.Context, space Space) (SpaceSummary, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return SpaceSummary{}, err
+	}
+	defer tx.Rollback(ctx)
+	var active bool
+	var ownerName string
+	if err := tx.QueryRow(ctx, `SELECT status='active',COALESCE(NULLIF(btrim(name),''),NULLIF(btrim(email),''),user_id) FROM accounts WHERE user_id=$1 FOR UPDATE`, space.PersonalOwnerUserID).Scan(&active, &ownerName); err != nil || !active {
+		return SpaceSummary{}, ErrMemberNotFound
+	}
+	var existing SpaceSummary
+	err = tx.QueryRow(ctx, spaceSummarySQL+` WHERE s.personal_owner_user_id=$1 GROUP BY s.space_id`, space.PersonalOwnerUserID).Scan(spaceSummaryDest(&existing)...)
+	if err == nil {
+		return existing, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return SpaceSummary{}, err
+	}
+	space.Name = personalSpaceBaseName(ownerName)
+	if err := s.createGeneratedSpaceTx(ctx, tx, space); err != nil {
+		return SpaceSummary{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SpaceSummary{}, err
+	}
+	return s.GetSpaceSummary(ctx, space.SpaceID)
+}
+
+func (s *PostgresStore) createGeneratedSpaceTx(ctx context.Context, tx pgx.Tx, space Space) error {
+	for attempt := 0; attempt < 100; attempt++ {
+		candidate := space
+		candidate.Name = generatedSpaceName(space.Name, space.CreatedAt, attempt)
+		savepoint := "shared_space_name_" + string(rune('a'+attempt%26))
+		if _, err := tx.Exec(ctx, "SAVEPOINT "+savepoint); err != nil {
+			return err
+		}
+		err := s.CreateSpaceTx(ctx, tx, candidate)
+		if err == nil {
+			_, releaseErr := tx.Exec(ctx, "RELEASE SAVEPOINT "+savepoint)
+			return releaseErr
+		}
+		if _, rollbackErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+savepoint); rollbackErr != nil {
+			return rollbackErr
+		}
+		if _, releaseErr := tx.Exec(ctx, "RELEASE SAVEPOINT "+savepoint); releaseErr != nil {
+			return releaseErr
+		}
+		if !errors.Is(err, ErrSpaceNameConflict) {
+			return err
+		}
+	}
+	return ErrSpaceNameConflict
+}
+
 func (s *PostgresStore) CreateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return SpaceSummary{}, err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO shared_spaces
-(space_id,name,description,created_by,updated_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7)`, space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, space.CreatedAt, space.UpdatedAt)
-	if err != nil {
-		return SpaceSummary{}, mapPostgresError(err, ErrSpaceNameConflict)
-	}
-	for _, action := range []string{ActionRead, ActionWrite} {
-		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, newID("drg_"), space.CreatedBy, ResourceTypeSharedSpace, space.SpaceID, action, space.CreatedBy, space.CreatedAt); err != nil {
-			return SpaceSummary{}, err
-		}
+	if err := s.CreateSpaceTx(ctx, tx, space); err != nil {
+		return SpaceSummary{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return SpaceSummary{}, err
 	}
 	return SpaceSummary{Space: space, MemberCount: 1}, nil
+}
+
+func (s *PostgresStore) CreateSpaceTx(ctx context.Context, tx pgx.Tx, space Space) error {
+	_, err := tx.Exec(ctx, `INSERT INTO shared_spaces
+(space_id,name,description,created_by,updated_by,created_at,updated_at,personal_owner_user_id)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, space.CreatedAt, space.UpdatedAt, nullableString(space.PersonalOwnerUserID))
+	if err != nil {
+		return mapPostgresError(err, ErrSpaceNameConflict)
+	}
+	owner := space.CreatedBy
+	if space.PersonalOwnerUserID != "" {
+		owner = space.PersonalOwnerUserID
+	}
+	for _, action := range []string{ActionRead, ActionWrite} {
+		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, newID("drg_"), owner, ResourceTypeSharedSpace, space.SpaceID, action, space.CreatedBy, space.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) UpdateSpace(ctx context.Context, space Space) (SpaceSummary, error) {
@@ -61,10 +127,10 @@ func (s *PostgresStore) GetSpaceSummary(ctx context.Context, spaceID string) (Sp
 
 func (s *PostgresStore) ListSpaceSummaries(ctx context.Context, filter SpaceFilter) ([]SpaceSummary, error) {
 	rows, err := s.pool.Query(ctx, spaceSummarySQL+`
-WHERE ($1='' OR strpos(lower(s.name),lower($1))>0)
+WHERE ($1='' OR strpos(lower(s.name),lower($1))>0) AND ($5='' OR s.personal_owner_user_id=$5)
   AND ($2::timestamptz IS NULL OR s.updated_at<$2 OR (s.updated_at=$2 AND s.space_id>$3))
 GROUP BY s.space_id
-ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $4`, filter.Query, nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit)
+ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $4`, filter.Query, nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, filter.PersonalOwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,13 +147,13 @@ ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $4`, filter.Query, nullableTime(
 }
 
 func (s *PostgresStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilter) ([]Space, error) {
-	rows, err := s.pool.Query(ctx, `SELECT s.space_id,s.name,s.description,s.updated_at,
+	rows, err := s.pool.Query(ctx, `SELECT s.space_id,s.name,s.description,s.updated_at,COALESCE(s.personal_owner_user_id,''),
 EXISTS (SELECT 1 FROM data_resource_grants w WHERE w.resource_type=$1 AND w.resource_id=s.space_id AND w.action=$7 AND w.user_id=$3)
 FROM shared_spaces s
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=s.space_id AND g.action=$2 AND g.user_id=$3
-WHERE ($4::timestamptz IS NULL OR s.updated_at<$4 OR (s.updated_at=$4 AND s.space_id>$5))
-ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, ActionRead, filter.UserID,
-		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, ActionWrite)
+WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND ($4::timestamptz IS NULL OR ($8='personal' AND s.personal_owner_user_id IS NULL) OR ((s.personal_owner_user_id IS NOT NULL)=($8='personal') AND (s.updated_at<$4 OR (s.updated_at=$4 AND s.space_id>$5))))
+ORDER BY (s.personal_owner_user_id IS NOT NULL) DESC,s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, ActionRead, filter.UserID,
+		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, ActionWrite, filter.Cursor.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +162,7 @@ ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, Ac
 	for rows.Next() {
 		var item Space
 		permissions := &SpacePermissions{Read: true}
-		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &permissions.Write); err != nil {
+		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &item.PersonalOwnerUserID, &permissions.Write); err != nil {
 			return nil, err
 		}
 		item.Permissions = permissions
@@ -160,6 +226,34 @@ ORDER BY COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.user_id LIMIT $8`, Reso
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *PostgresStore) EnsureMembersTx(ctx context.Context, tx pgx.Tx, spaceID string, users []string, operator string) error {
+	if err := lockSharedSpace(ctx, tx, spaceID); err != nil {
+		return err
+	}
+	for _, user := range users {
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT status='active' FROM accounts WHERE user_id=$1 FOR NO KEY UPDATE`, user).Scan(&active); err != nil {
+			return err
+		}
+		if !active {
+			continue
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3)`, user, ResourceTypeSharedSpace, spaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		for _, action := range []string{ActionRead, ActionWrite} {
+			if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants(grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,now(),now()) ON CONFLICT(user_id,resource_type,resource_id,action) DO NOTHING`, newID("drg_"), user, ResourceTypeSharedSpace, spaceID, action, operator); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) AddMember(ctx context.Context, spaceID, userID string, actions []string, createdBy string) (Member, error) {
@@ -268,7 +362,7 @@ func (s *PostgresStore) ListFiles(ctx context.Context, filter FileFilter) ([]Fil
 f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
-WHERE ($4='' OR f.space_id=$4)
+WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND ($4='' OR f.space_id=$4)
   AND ($5='' OR strpos(lower(f.file_id),lower($5))>0 OR strpos(lower(f.file_name),lower($5))>0)
   AND ($6='' OR left(f.logical_path,length($6))=$6)
   AND ($7::timestamptz IS NULL OR f.updated_at<$7 OR (f.updated_at=$7 AND f.file_id>$8))
@@ -316,11 +410,21 @@ ORDER BY f.updated_at DESC,f.file_id ASC LIMIT $6`, filter.SpaceID, filter.Query
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) CheckSpaceAccessTx(ctx context.Context, tx pgx.Tx, user, space, action string) error {
+	var id string
+	err := tx.QueryRow(ctx, `SELECT g.grant_id FROM data_resource_grants g JOIN shared_spaces s ON s.space_id=g.resource_id JOIN accounts a ON a.user_id=g.user_id AND a.status='active' WHERE g.user_id=$1 AND g.resource_type=$2 AND g.resource_id=$3 AND g.action=$4 AND (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$1) FOR SHARE OF g,a,s`, user, ResourceTypeSharedSpace, space, action).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSharedSpaceNotFound
+	}
+	return err
+}
+
 func (s *PostgresStore) CheckSpaceAccess(ctx context.Context, userID, spaceID, action string) error {
 	var ignored string
 	err := s.pool.QueryRow(ctx, `SELECT s.space_id FROM shared_spaces s
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=s.space_id AND g.action=$2 AND g.user_id=$3
-WHERE s.space_id=$4`, ResourceTypeSharedSpace, action, userID, spaceID).Scan(&ignored)
+JOIN accounts a ON a.user_id=g.user_id AND a.status='active'
+WHERE s.space_id=$4 AND (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3)`, ResourceTypeSharedSpace, action, userID, spaceID).Scan(&ignored)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSharedSpaceNotFound
 	}
@@ -333,7 +437,18 @@ func (s *PostgresStore) GetAuthorizedFile(ctx context.Context, userID, fileID, a
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
-WHERE f.file_id=$4`, ResourceTypeSharedSpace, action, userID, fileID).Scan(fileDest(&item)...)
+WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND f.file_id=$4`, ResourceTypeSharedSpace, action, userID, fileID).Scan(fileDest(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return File{}, ErrSharedFileNotFound
+	}
+	return item, err
+}
+
+func (s *PostgresStore) GetFileTx(ctx context.Context, tx pgx.Tx, user, fileID string) (File, error) {
+	var item File
+	err := tx.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
+FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3 WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND f.file_id=$4 FOR SHARE OF f,g`, ResourceTypeSharedSpace, ActionRead, user, fileID).Scan(fileDest(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return File{}, ErrSharedFileNotFound
 	}
@@ -346,7 +461,7 @@ func (s *PostgresStore) GetAuthorizedFileByPath(ctx context.Context, userID, spa
 f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
 FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
-WHERE f.space_id=$4 AND f.logical_path=$5`, ResourceTypeSharedSpace, action, userID, spaceID, logicalPath).Scan(fileDest(&item)...)
+WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND f.space_id=$4 AND f.logical_path=$5`, ResourceTypeSharedSpace, action, userID, spaceID, logicalPath).Scan(fileDest(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return File{}, ErrSharedFileNotFound
 	}
@@ -474,8 +589,8 @@ func (e *RevisionConflictError) Unwrap() error { return ErrRevisionConflict }
 
 func lockWriteGrant(ctx context.Context, tx pgx.Tx, userID, spaceID string) error {
 	var ignored string
-	err := tx.QueryRow(ctx, `SELECT g.grant_id FROM data_resource_grants g JOIN shared_spaces s ON s.space_id=g.resource_id
-WHERE g.user_id=$1 AND g.resource_type=$2 AND g.resource_id=$3 AND g.action=$4 FOR SHARE OF g,s`,
+	err := tx.QueryRow(ctx, `SELECT g.grant_id FROM data_resource_grants g JOIN shared_spaces s ON s.space_id=g.resource_id JOIN accounts a ON a.user_id=g.user_id AND a.status='active'
+WHERE g.user_id=$1 AND g.resource_type=$2 AND g.resource_id=$3 AND g.action=$4 AND (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$1) FOR SHARE OF g,s,a`,
 		userID, ResourceTypeSharedSpace, spaceID, ActionWrite).Scan(&ignored)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSharedSpaceNotFound
@@ -492,14 +607,16 @@ func lockSharedSpace(ctx context.Context, tx pgx.Tx, spaceID string) error {
 	return err
 }
 
-const spaceSummarySQL = `SELECT s.space_id,s.name,s.description,s.created_by,s.updated_by,s.created_at,s.updated_at,
+const spaceSummarySQL = `SELECT s.space_id,s.name,s.description,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(s.personal_owner_user_id,''),
+COALESCE((SELECT COALESCE(NULLIF(a.name,''),a.email,a.user_id) FROM accounts a WHERE a.user_id=s.personal_owner_user_id),''),
+COALESCE((SELECT a.email FROM accounts a WHERE a.user_id=s.personal_owner_user_id),''),
 (SELECT count(DISTINCT g.user_id) FROM data_resource_grants g WHERE g.resource_type='shared_space' AND g.resource_id=s.space_id AND g.action='read'),
 (SELECT count(*) FROM shared_files f WHERE f.space_id=s.space_id),
 (SELECT COALESCE(sum(f.size_bytes),0) FROM shared_files f WHERE f.space_id=s.space_id)
 FROM shared_spaces s`
 
 func spaceSummaryDest(item *SpaceSummary) []any {
-	return []any{&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt,
+	return []any{&item.SpaceID, &item.Name, &item.Description, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt, &item.PersonalOwnerUserID, &item.PersonalOwnerName, &item.PersonalOwnerEmail,
 		&item.MemberCount, &item.FileCount, &item.SizeBytes}
 }
 

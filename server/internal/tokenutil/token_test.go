@@ -6,15 +6,15 @@ import (
 )
 
 func TestGenerate32(t *testing.T) {
-	pattern := regexp.MustCompile(`^(agt|col)_[A-Za-z0-9_-]{28}$`)
 	seen := map[string]bool{}
-	for _, prefix := range []string{"agt_", "col_"} {
+	for _, prefix := range []string{"sk-", "col_"} {
+		pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `[A-Za-z0-9_-]{28}$`)
 		for range 32 {
 			token, err := Generate32(prefix)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(token) != 32 || !pattern.MatchString(token) {
+			if len(token) != len(prefix)+28 || !pattern.MatchString(token) {
 				t.Fatalf("Generate32(%q) = %q", prefix, token)
 			}
 			if seen[token] {

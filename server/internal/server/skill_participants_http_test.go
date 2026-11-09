@@ -23,7 +23,7 @@ func TestSkillParticipantsAndAvatarRespectSpaceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
+	service := newTestSkillHubService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()})
 	space, err := service.CreateSpace(ctx, "产品技能", "", creator.Account.UserID)
 	if err != nil {
 		t.Fatal(err)

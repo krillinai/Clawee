@@ -1,6 +1,7 @@
 package platformbranding
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -49,7 +50,15 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql", "00063_platform_branding_admin_url.sql"} {
+	legacyLogo := encodePNG(t, 12, 8)
+	for _, name := range []string{"00048_platform_branding.sql", "00053_sidebar_menu_labels.sql", "00055_sidebar_menu_label_length.sql", "00063_platform_branding_admin_url.sql", "00068_platform_branding_accent_color.sql", "00076_platform_branding_dark_logos.sql"} {
+		if name == "00076_platform_branding_dark_logos.sql" {
+			if _, err := pool.Exec(ctx, `INSERT INTO platform_branding
+(id, sidebar_logo, sidebar_logo_content_type, updated_by, created_at, updated_at)
+VALUES ('default', $1, 'image/png', 'legacy-admin', NOW(), NOW())`, legacyLogo); err != nil {
+				t.Fatal(err)
+			}
+		}
 		raw, err := migrations.FS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -60,6 +69,10 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 		}
 	}
 	service := NewService(NewPostgresStore(pool))
+	legacy, err := service.Get(ctx)
+	if err != nil || legacy.SidebarLogo == nil || !bytes.Equal(legacy.SidebarLogo.Content, legacyLogo) || legacy.SidebarLogoDark != nil || legacy.SidebarCompactLogoDark != nil {
+		t.Fatalf("migration changed legacy logo: %#v, %v", legacy, err)
+	}
 	label := "𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷𠮷"
 	drive := "网盘"
 	input := UpdateInput{
@@ -77,18 +90,26 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 	}
 	input.SidebarMenuLabels = nil
 	adminURL := "https://gateway.example/admin"
+	accentColor := "#f2e9ea"
 	input.AdminURL = &adminURL
+	input.AccentColor = &accentColor
 	current, err = service.Update(ctx, input)
 	if err != nil || current.SidebarMenuLabels.Skills != label || current.AdminURL != adminURL {
 		t.Fatalf("legacy update configuration=%#v error=%v", current, err)
 	}
 	input.SidebarMenuLabels = map[string]*string{"skills": nil}
 	input.AdminURL = nil
+	input.AccentColor = nil
 	current, err = service.Update(ctx, input)
 	if err != nil || current.SidebarMenuLabels.Skills != "" || current.SidebarMenuLabels.Drive != drive || current.AdminURL != adminURL {
 		t.Fatalf("reset configuration=%#v error=%v", current, err)
 	}
 	var resetIsNull bool
+	service = NewService(NewPostgresStore(pool))
+	current, err = service.Get(ctx)
+	if err != nil || current.AccentColor != accentColor {
+		t.Fatalf("品牌高亮色未持久化: %#v, %v", current, err)
+	}
 	if err := pool.QueryRow(ctx, `SELECT sidebar_skills_label IS NULL FROM platform_branding`).Scan(&resetIsNull); err != nil || !resetIsNull {
 		t.Fatalf("reset is null=%v error=%v", resetIsNull, err)
 	}
@@ -101,5 +122,38 @@ func TestPostgresMenuLabelsPersistenceAndMigration(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `UPDATE platform_branding SET sidebar_drive_label='一二三四五'`); err == nil {
 		t.Fatal("回滚后数据库未恢复 4 字上限")
+	}
+	dark := encodeJPEG(t, 8, 12)
+	input.SidebarMenuLabels = nil
+	input.SidebarLogoDarkAction, input.SidebarLogoDark = ActionReplace, dark
+	input.SidebarCompactLogoDarkAction, input.SidebarCompactLogoDark = ActionReplace, dark
+	if _, err := service.Update(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	service = NewService(NewPostgresStore(pool))
+	current, err = service.Get(ctx)
+	if err != nil || current.SidebarLogoDark == nil || current.SidebarCompactLogoDark == nil ||
+		!bytes.Equal(current.SidebarLogoDark.Content, dark) || current.SidebarLogoDark.ContentType != "image/jpeg" ||
+		!bytes.Equal(current.SidebarCompactLogoDark.Content, dark) {
+		t.Fatalf("dark logos not persisted: %#v, %v", current, err)
+	}
+	input.SidebarLogoDarkAction, input.SidebarLogoDark = "", nil
+	input.SidebarCompactLogoDarkAction, input.SidebarCompactLogoDark = "", nil
+	current, err = service.Update(ctx, input)
+	if err != nil || current.SidebarLogoDark == nil || current.SidebarCompactLogoDark == nil {
+		t.Fatalf("legacy update changed dark logos: %#v, %v", current, err)
+	}
+	input.SidebarLogoDarkAction = ActionReset
+	current, err = service.Update(ctx, input)
+	if err != nil || current.SidebarLogoDark != nil || current.SidebarCompactLogoDark == nil || current.SidebarLogo == nil {
+		t.Fatalf("dark reset changed other logos: %#v, %v", current, err)
+	}
+	raw, _ = migrations.FS.ReadFile("00076_platform_branding_dark_logos.sql")
+	if _, err := pool.Exec(ctx, strings.SplitN(string(raw), "-- +goose Down", 2)[1]); err != nil {
+		t.Fatalf("dark logo migration rollback: %v", err)
+	}
+	var preservedLogo []byte
+	if err := pool.QueryRow(ctx, `SELECT sidebar_logo FROM platform_branding`).Scan(&preservedLogo); err != nil || !bytes.Equal(preservedLogo, legacyLogo) {
+		t.Fatalf("rollback changed legacy logo: %v", err)
 	}
 }

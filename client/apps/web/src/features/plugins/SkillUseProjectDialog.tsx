@@ -1,5 +1,7 @@
 import { Check, Folder, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useModalBehavior } from '../../components/dialogs/use-modal-behavior.js';
+import './skill-market.css';
 
 export type SkillMarketProjectOption = {
   id: string;
@@ -27,46 +29,9 @@ export function SkillUseProjectDialog({
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  useModalBehavior(dialogRef, { open: true, onClose, initialFocusRef: closeRef });
 
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    closeRef.current?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      const focusable = getFocusableElements(dialogRef.current);
-      if (focusable.length === 0) return;
-
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
 
   return (
     <div
@@ -148,14 +113,5 @@ export function SkillUseProjectDialog({
         </footer>
       </section>
     </div>
-  );
-}
-
-function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
-  if (root === null) return [];
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )
   );
 }

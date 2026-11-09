@@ -58,7 +58,7 @@ func writeSharedFilePreview(c *gin.Context, item sharedfiles.File, reader io.Rea
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": item.FileName}))
+	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": item.FileName}))
 	c.Header("X-Preview-Kind", kind)
 	c.Data(http.StatusOK, contentType, content)
 }

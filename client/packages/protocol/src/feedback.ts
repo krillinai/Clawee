@@ -1,7 +1,15 @@
 import { canonicalize } from 'json-canonicalize';
 
-export const FEEDBACK_ORIGIN = 'https://gateway.clawee.work';
 export const FEEDBACK_POLICY_VERSION = 1;
+export type FeedbackPolicy = { enabled: boolean; policy_version: number; expires_at: string };
+export function resolveFeedbackOrigin(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.hostname === 'enterprise.invalid') return undefined;
+    return url.origin;
+  } catch { return undefined; }
+}
 export type DesktopFeedbackSnapshot = { environment: Record<string, string>; records: unknown[]; warnings: string[] };
 export type EmergencyFeedbackScreenshot = { content_type: string; data: Uint8Array };
 export type FeedbackArtifact = {

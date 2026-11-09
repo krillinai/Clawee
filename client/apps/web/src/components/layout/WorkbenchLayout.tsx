@@ -8,6 +8,7 @@ export function WorkbenchLayout(props: {
   detail?: ReactNode;
   detailOpen?: boolean;
   sidebarCollapsed?: boolean;
+  sidebarHidden?: boolean;
   mobileSidebarOpen?: boolean;
   onOpenMobileSidebar?(): void;
   onCloseMobileSidebar?(): void;
@@ -15,11 +16,12 @@ export function WorkbenchLayout(props: {
   const sidebarRef = useRef<HTMLElement>(null);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   const onCloseMobileSidebarRef = useRef(props.onCloseMobileSidebar);
-  const mobileSidebarOpen = props.mobileSidebarOpen === true;
+  const mobileSidebarOpen = props.mobileSidebarOpen === true && props.sidebarHidden !== true;
   const shellClassName = [
     'clawee-shell',
     props.detailOpen ? 'has-detail' : undefined,
-    props.sidebarCollapsed ? 'sidebar-collapsed' : undefined
+    props.sidebarCollapsed ? 'sidebar-collapsed' : undefined,
+    props.sidebarHidden ? 'sidebar-hidden' : undefined
   ].filter(Boolean).join(' ');
 
   useEffect(() => {
@@ -69,7 +71,7 @@ export function WorkbenchLayout(props: {
           type="button"
         />
       ) : null}
-      <aside
+      {props.sidebarHidden ? null : <aside
         className="clawee-sidebar-pane"
         aria-label="Clawee 导航"
         data-collapsed={props.sidebarCollapsed ? 'true' : 'false'}
@@ -86,7 +88,7 @@ export function WorkbenchLayout(props: {
           <X aria-hidden="true" size={18} />
         </button>
         {props.sidebar}
-      </aside>
+      </aside>}
       <section
         className="clawee-main-pane"
         aria-label="Clawee 工作区"
@@ -95,7 +97,7 @@ export function WorkbenchLayout(props: {
         {props.mainHeader === undefined ? null : (
           <div className="clawee-main-titlebar">{props.mainHeader}</div>
         )}
-        <div className="mobile-navigation-toolbar">
+        {props.sidebarHidden ? null : <div className="mobile-navigation-toolbar">
           <button
             aria-expanded={mobileSidebarOpen}
             aria-label="打开导航"
@@ -107,7 +109,7 @@ export function WorkbenchLayout(props: {
           >
             <Menu aria-hidden="true" size={20} />
           </button>
-        </div>
+        </div>}
         <div className="clawee-main-content">{props.main}</div>
       </section>
       {props.detailOpen ? (

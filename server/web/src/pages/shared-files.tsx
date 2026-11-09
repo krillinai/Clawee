@@ -1,7 +1,9 @@
+import { listAccounts } from "@/lib/accounts-api";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, Pencil, Plus } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { useAdminPermission } from "@/components/admin-permissions";
 import { MemberAuthorizationDrawer, type MemberAuthorizationAdapter } from "@/components/member-authorization";
@@ -45,6 +47,11 @@ type SpaceForm = { mode: "create" | "edit"; spaceId: string; name: string; descr
 
 export function SharedFilesPage() {
   const storageEnabled = useAdminFeatureEnabled("shared_file_storage");
+  const canReadAccounts = useAdminPermission(permissions.accountRead);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const ownerId = searchParams.get("personal_owner_user_id") ?? "";
+  const setOwnerId = (id: string) => setSearchParams(id ? { personal_owner_user_id: id } : {});
+  const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: listAccounts, enabled: canReadAccounts });
   const canCreate = useAdminPermission(permissions.sharedFilesSpaceCreate);
   const canReadStorage = useAdminPermission(permissions.sharedFilesStorageRead) && storageEnabled;
   const canUpdate = useAdminPermission(permissions.sharedFilesSpaceUpdate);
@@ -62,8 +69,8 @@ export function SharedFilesPage() {
   const [lastSpaces, setLastSpaces] = useState<SharedSpace[]>([]);
 
   const spacesQuery = useQuery({
-    queryKey: ["shared-spaces", query, cursor],
-    queryFn: () => listSharedSpaces({ query, cursor }),
+    queryKey: ["shared-spaces", query, ownerId, cursor],
+    queryFn: () => listSharedSpaces({ query, cursor, ...(ownerId ? { personalOwnerUserId: ownerId } : {}) }),
     placeholderData: (previous) => previous
   });
   const detailQuery = useQuery({ queryKey: ["shared-space", selectedId], queryFn: () => getSharedSpace(selectedId ?? ""), enabled: Boolean(selectedId) });
@@ -145,23 +152,29 @@ export function SharedFilesPage() {
           value={query}
           onChange={(event) => { setQuery(event.target.value); setCursor(""); setCursorHistory([]); }}
         />
+        {canReadAccounts ? <NativeSelect aria-label="所属员工" value={ownerId} onChange={(event) => { setOwnerId(event.target.value); setCursor(""); setCursorHistory([]); }}>
+          <option value="">全部员工与共享空间</option>
+          {accountsQuery.data?.map((account) => <option key={account.userId} value={account.userId}>{account.name || account.email || account.userId}（{account.email || account.userId}）</option>)}
+        </NativeSelect> : <Input aria-label="所属员工 ID" placeholder="按员工 ID 筛选" value={ownerId} onChange={(event) => { setOwnerId(event.target.value.trim()); setCursor(""); setCursorHistory([]); }} />}
       </FilterRow>
+      {accountsQuery.isError ? <ErrorAlert>{accountsQuery.error.message}</ErrorAlert> : null}
       <DataTableShell minWidth={760}>
-        <TableHeader><TableRow><TableHead>空间名称</TableHead><TableHead>成员</TableHead><TableHead>文件</TableHead><TableHead>占用空间</TableHead><TableHead>更新时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>空间名称</TableHead><TableHead>类型 / 所属员工</TableHead><TableHead>成员</TableHead><TableHead>文件</TableHead><TableHead>占用空间</TableHead><TableHead>更新时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
         <TableBody>
-          {spacesQuery.isLoading ? <TableStateRow colSpan={6}>正在加载共享空间...</TableStateRow> : null}
-          {spacesQuery.isError ? <TableStateRow colSpan={6} tone="danger">{spacesQuery.error.message}</TableStateRow> : null}
+          {spacesQuery.isLoading ? <TableStateRow colSpan={7}>正在加载共享空间...</TableStateRow> : null}
+          {spacesQuery.isError ? <TableStateRow colSpan={7} tone="danger">{spacesQuery.error.message}</TableStateRow> : null}
           {!spacesQuery.isLoading && !spacesQuery.isError && spaces.length === 0 ? (
-            <TableRow><TableCell colSpan={6}><EmptyState title="暂无共享空间" description={canCreate ? "创建空间后即可添加成员。" : "当前没有可查看的共享空间。"} /></TableCell></TableRow>
+            <TableRow><TableCell colSpan={7}><EmptyState title="暂无共享空间" description={canCreate ? "创建空间后即可添加成员。" : "当前没有可查看的共享空间。"} /></TableCell></TableRow>
           ) : null}
           {spaces.map((space) => (
             <TableRow key={space.spaceId}>
               <TableCell><div className="font-medium">{space.name}</div><div className="max-w-96 truncate text-xs text-muted-foreground">{space.description || "-"}</div></TableCell>
+              <TableCell>{space.personalOwnerUserId ? <><div>个人空间</div><div className="text-xs text-muted-foreground">{space.personalOwnerName || space.personalOwnerEmail || space.personalOwnerUserId}</div><div className="text-xs text-muted-foreground">{space.personalOwnerEmail || space.personalOwnerUserId}</div></> : "共享空间"}</TableCell>
               <TableCell className="font-mono">{space.memberCount}</TableCell><TableCell className="font-mono">{space.fileCount}</TableCell>
               <TableCell className="font-mono text-xs">{formatBytes(space.sizeBytes)}</TableCell><TableCell className="font-mono text-xs">{formatDateTime(space.updatedAt)}</TableCell>
               <TableCell className="text-right"><div className="flex justify-end gap-2">
                 <Button asChild size="sm" variant="secondary"><Link aria-label={`管理${space.name}文件`} to={`/admin/shared-files/detail?space_id=${encodeURIComponent(space.spaceId)}`}>管理文件</Link></Button>
-                <Button aria-label={`管理${space.name}成员授权`} size="sm" variant="secondary" onClick={() => setAuthorizationId(space.spaceId)}>成员授权</Button>
+                {!space.personalOwnerUserId ? <Button aria-label={`管理${space.name}成员授权`} size="sm" variant="secondary" onClick={() => setAuthorizationId(space.spaceId)}>成员授权</Button> : null}
                 <Button aria-label={`查看${space.name}详情`} size="sm" variant="secondary" onClick={() => selectSpace(space.spaceId)}>查看详情</Button>
               </div></TableCell>
             </TableRow>
@@ -176,7 +189,9 @@ export function SharedFilesPage() {
       <DetailDrawer open={Boolean(selectedId)} title={selected?.name ?? "共享空间"} subtitle={selected?.description || "未填写空间说明"} contextLabel="空间详情" onClose={() => setSelectedId(null)} titleAction={canUpdate && selected ? <Button size="sm" variant="outline" onClick={() => openEdit(selected)}><Pencil data-icon="inline-start" />编辑</Button> : null}>
         {detailQuery.isError ? <ErrorAlert>{detailQuery.error.message}</ErrorAlert> : null}
         {selected ? <KeyValueList items={[
-          { label: "空间名称", value: selected.name }, { label: "空间说明", value: selected.description || "-" },
+          { label: "空间名称", value: selected.name },
+          { label: "空间类型", value: selected.personalOwnerUserId ? "个人空间" : "共享空间" },
+          { label: "所属员工", value: selected.personalOwnerName || selected.personalOwnerEmail || selected.personalOwnerUserId || "-" }, { label: "空间说明", value: selected.description || "-" },
           { label: "成员数量", value: selected.memberCount }, { label: "文件数量", value: selected.fileCount },
           { label: "占用空间", value: formatBytes(selected.sizeBytes) }, { label: "创建人", value: selected.createdBy || "-" },
           { label: "创建时间", value: formatDateTime(selected.createdAt) }, { label: "更新人", value: selected.updatedBy || "-" },
@@ -186,9 +201,9 @@ export function SharedFilesPage() {
 
       <MemberAuthorizationDrawer
         adapter={authorizationAdapter}
-        canAdd={canCreateMembers}
-        canRemove={canDeleteMembers}
-        canUpdate={canUpdateMembers}
+        canAdd={canCreateMembers && !authorizationTarget?.personalOwnerUserId}
+        canRemove={canDeleteMembers && !authorizationTarget?.personalOwnerUserId}
+        canUpdate={canUpdateMembers && !authorizationTarget?.personalOwnerUserId}
         memberCount={authorizationTarget?.memberCount}
         onChanged={refreshAuthorizationSummary}
         onClose={() => setAuthorizationId(null)}

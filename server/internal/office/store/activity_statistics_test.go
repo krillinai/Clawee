@@ -48,6 +48,58 @@ func TestActivityStatisticsUsesTurnBoundaries(t *testing.T) {
 	}
 }
 
+func TestActivityStatisticsComputesPlatformActivity(t *testing.T) {
+	db := openOfficeTestDB(t)
+	ctx := context.Background()
+	store := NewPostgresStore(db)
+	cleanupOfficePostgresStore(t, db)
+	resetOfficeTables(t, ctx, db)
+
+	start := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 7)
+	for _, userID := range []string{"platform_all", "platform_partial", "platform_error", "platform_disabled"} {
+		ensureOfficeTestAccount(t, ctx, db, userID)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE accounts SET status='disabled' WHERE user_id='platform_disabled'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ collectorID, userID string }{
+		{"platform_collector_all", "platform_all"},
+		{"platform_collector_partial", "platform_partial"},
+		{"platform_collector_error", "platform_error"},
+		{"platform_collector_disabled", "platform_disabled"},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO office_collector_tokens (collector_id,token_hash,device_label,user_id) VALUES ($1,$2,'test',$3)`, item.collectorID, item.collectorID+"_hash", item.userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for day := 0; day < 7; day++ {
+		at := start.AddDate(0, 0, day).Add(time.Hour)
+		if err := store.UpsertTurn(ctx, state.TurnState{CollectorID: "platform_collector_all", AgentID: "agent", TurnID: fmt.Sprintf("all-%d", day), SessionID: "session", Status: collectorapi.StatusIdle, StartedAt: at, UpdatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+		if day < 6 {
+			if err := store.UpsertTurn(ctx, state.TurnState{CollectorID: "platform_collector_partial", AgentID: "agent", TurnID: fmt.Sprintf("partial-%d", day), SessionID: "session", Status: collectorapi.StatusIdle, StartedAt: at, UpdatedAt: at}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := store.UpsertTurn(ctx, state.TurnState{CollectorID: "platform_collector_error", AgentID: "agent", TurnID: fmt.Sprintf("error-%d", day), SessionID: "session", Status: collectorapi.StatusError, StartedAt: at, UpdatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertTurn(ctx, state.TurnState{CollectorID: "platform_collector_disabled", AgentID: "agent", TurnID: fmt.Sprintf("disabled-%d", day), SessionID: "session", Status: collectorapi.StatusIdle, StartedAt: at, UpdatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	statistics, err := store.Statistics(ctx, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statistics.PlatformActivity.ActiveUsers != 1 || statistics.PlatformActivity.TotalUsers != 3 || statistics.PlatformActivity.Rate < 0.333 || statistics.PlatformActivity.Rate > 0.334 {
+		t.Fatalf("platform activity = %#v", statistics.PlatformActivity)
+	}
+}
+
 func TestActivityStatisticsTotalsIgnoreDetailLimitAndUseOccurrenceTime(t *testing.T) {
 	db := openOfficeTestDB(t)
 	ctx := context.Background()
@@ -171,6 +223,67 @@ func TestActivityStatisticsDeduplicatesSkillEvidencePerRun(t *testing.T) {
 	}
 }
 
+func TestActivityStatisticsAggregatesEmployeeSkillUsageAcrossCollectors(t *testing.T) {
+	db := openOfficeTestDB(t)
+	ctx := context.Background()
+	store := NewPostgresStore(db)
+	cleanupOfficePostgresStore(t, db)
+	resetOfficeTables(t, ctx, db)
+	start := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	for _, userID := range []string{"employee-a", "employee-b"} {
+		ensureOfficeTestAccount(t, ctx, db, userID)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE accounts SET name = '' WHERE user_id = 'employee-b'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, collector := range []struct{ id, userID string }{
+		{"employee_collector_a1", "employee-a"}, {"employee_collector_a2", "employee-a"},
+		{"employee_collector_b", "employee-b"}, {"employee_collector_unbound", ""},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO office_collector_tokens (collector_id, token_hash, device_label, user_id) VALUES ($1, $1, 'test', NULLIF($2, ''))`, collector.id, collector.userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertEvidence := func(collector, agent, run, skill, evidence, invocation, eventID string) {
+		t.Helper()
+		at := start.Add(time.Hour)
+		_, err := store.ApplySourceEvent(ctx, state.SourceEventState{
+			CollectorID: collector, SourceEventID: eventID, SourceType: "clawee", SourceEventType: "skill_evidence",
+			StandardEventType: collectorapi.EventSourceEventReceived, AgentID: agent, TurnID: run, OccurredAt: at, ReceivedAt: at,
+		}, func(ctx context.Context, tx state.Store) error {
+			return tx.InsertSkillEvidence(ctx, state.SkillEvidenceState{
+				CollectorID: collector, SourceEventID: eventID, AgentID: agent, RunID: run,
+				SkillID: skill, SkillName: skill, SkillKey: skill, Source: "local", Evidence: evidence,
+				Invocation: invocation, OccurredAt: at,
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertEvidence("employee_collector_a1", "agent-a", "run-a1", "reports", "explicit_request", "explicit", "employee_a_request")
+	insertEvidence("employee_collector_a1", "agent-a", "run-a1", "reports", "skill_file_read", "explicit", "employee_a_read")
+	insertEvidence("employee_collector_a1", "agent-a", "run-a1", "reports", "skill_file_read", "explicit", "employee_a_read_duplicate")
+	insertEvidence("employee_collector_a2", "agent-b", "run-a2", "finance", "skill_resource_run", "implicit", "employee_a_other_skill")
+	insertEvidence("employee_collector_b", "agent-c", "run-b", "reports", "skill_file_read", "implicit", "employee_b_read")
+	insertEvidence("employee_collector_unbound", "agent-d", "run-unbound", "hidden", "skill_file_read", "implicit", "employee_unbound_read")
+
+	statistics, err := store.Statistics(ctx, start, start.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statistics.EmployeeSkillUsage) != 2 {
+		t.Fatalf("employee skill usage = %#v", statistics.EmployeeSkillUsage)
+	}
+	first, second := statistics.EmployeeSkillUsage[0], statistics.EmployeeSkillUsage[1]
+	if first.EmployeeID != "employee-a" || first.EmployeeName != "employee-a" || first.ObservedSkillCount != 2 || first.RequestedSkillRuns != 1 || first.ObservedSkillRuns != 2 || first.ExplicitSkillRuns != 1 || first.ImplicitSkillRuns != 1 || first.LastObservedAt == nil {
+		t.Fatalf("employee-a usage = %#v", first)
+	}
+	if second.EmployeeID != "employee-b" || second.EmployeeName != "employee-b" || second.ObservedSkillCount != 1 || second.RequestedSkillRuns != 0 || second.ObservedSkillRuns != 1 || second.ExplicitSkillRuns != 0 || second.ImplicitSkillRuns != 1 || second.LastObservedAt == nil {
+		t.Fatalf("employee-b usage = %#v", second)
+	}
+}
+
 func TestActivityStatisticsUsesSkillEvidenceDateAcrossRunBoundary(t *testing.T) {
 	db := openOfficeTestDB(t)
 	ctx := context.Background()
@@ -215,5 +328,11 @@ func TestActivityStatisticsUsesSkillEvidenceDateAcrossRunBoundary(t *testing.T) 
 	if first.SkillUsageTotals.RequestedSkillRuns != 1 || first.SkillUsageTotals.ObservedSkillRuns != 0 ||
 		second.SkillUsageTotals.RequestedSkillRuns != 0 || second.SkillUsageTotals.ObservedSkillRuns != 1 || second.SkillUsageTotals.ExplicitSkillRuns != 1 {
 		t.Fatalf("first day = %#v; second day = %#v", first.SkillUsageTotals, second.SkillUsageTotals)
+	}
+	if len(first.EmployeeSkillUsage) != 1 || first.EmployeeSkillUsage[0].RequestedSkillRuns != 1 || first.EmployeeSkillUsage[0].ObservedSkillRuns != 0 || first.EmployeeSkillUsage[0].LastObservedAt != nil {
+		t.Fatalf("first day employee usage = %#v", first.EmployeeSkillUsage)
+	}
+	if len(second.EmployeeSkillUsage) != 1 || second.EmployeeSkillUsage[0].RequestedSkillRuns != 0 || second.EmployeeSkillUsage[0].ObservedSkillRuns != 1 || second.EmployeeSkillUsage[0].LastObservedAt == nil {
+		t.Fatalf("second day employee usage = %#v", second.EmployeeSkillUsage)
 	}
 }

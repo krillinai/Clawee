@@ -2,19 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deleteAccountAvatar, unbindDingTalk, uploadAccountAvatar } from "@/lib/auth-api";
+import { deleteAccountAvatar, uploadAccountAvatar } from "@/lib/auth-api";
 
 import { ThemeProvider } from "./theme-provider";
 import { AccountPane, dingtalkBindURL, startDingTalkBinding } from "./account-pane";
 
 vi.mock("@/lib/auth-api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/auth-api")>(),
-  unbindDingTalk: vi.fn(),
   uploadAccountAvatar: vi.fn(),
   deleteAccountAvatar: vi.fn()
 }));
-
-const unbindDingTalkMock = vi.mocked(unbindDingTalk);
 
 const baseAccount = { userId: "usr_1", email: "user@example.com", name: "User", status: "active" };
 
@@ -24,6 +21,19 @@ describe("AccountPane", () => {
   function renderPane(account: Parameters<typeof AccountPane>[0]["account"]) {
     return render(<ThemeProvider><MemoryRouter><AccountPane account={account} /></MemoryRouter></ThemeProvider>);
   }
+
+  it("账户区显示实际角色名称而不是内部编码", () => {
+    renderPane({ ...baseAccount, adminRoles: ["admin", "role_generated"], adminRoleNames: ["系统管理员", "安全审计员"] });
+    expect(screen.getByText("系统管理员、安全审计员")).toHaveAttribute("class", "truncate");
+    expect(screen.getByTitle("系统管理员、安全审计员")).toBeInTheDocument();
+    expect(screen.queryByText("admin, role_generated")).not.toBeInTheDocument();
+  });
+
+  it("角色名称缺失时使用中文身份，不显示内部编码", () => {
+    renderPane({ ...baseAccount, adminRoles: ["role_generated"], adminPermissions: ["console:rbac:read"] });
+    expect(screen.getByText("后台用户")).toBeInTheDocument();
+    expect(screen.queryByText("role_generated")).not.toBeInTheDocument();
+  });
 
   it("图片失败后在更换头像时重新加载，并支持恢复默认头像", async () => {
     vi.mocked(uploadAccountAvatar).mockResolvedValueOnce({});
@@ -82,67 +92,48 @@ describe("AccountPane", () => {
     expect(screen.queryByRole("dialog", { name: "头像设置" })).not.toBeInTheDocument();
   });
 
-  it("hides dingtalk controls when the provider is disabled", () => {
+  it("钉钉未启用时更多菜单不显示绑定入口", () => {
     renderPane({ ...baseAccount, dingtalkEnabled: false });
+    fireEvent.click(screen.getByRole("button", { name: "账户操作" }));
     expect(screen.queryByText("绑定钉钉")).not.toBeInTheDocument();
     expect(screen.queryByText("已绑定钉钉")).not.toBeInTheDocument();
   });
 
-  it("starts binding when enabled and unbound", () => {
+  it("启用且未绑定时仅在更多菜单显示绑定入口", () => {
     const assign = vi.fn();
     renderPane({ ...baseAccount, dingtalkEnabled: true, dingtalkBound: false });
+    expect(screen.queryByRole("button", { name: "绑定钉钉" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "账户操作" }));
     expect(screen.getByRole("button", { name: "绑定钉钉" })).toBeInTheDocument();
     startDingTalkBinding(assign);
     expect(assign).toHaveBeenCalledWith(dingtalkBindURL);
   });
 
-  it("shows unbind for a bound account even when the provider is disabled", () => {
-    renderPane({ ...baseAccount, dingtalkEnabled: false, dingtalkBound: true, localPasswordConfigured: true });
-    expect(screen.getByText("已绑定钉钉")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "解绑钉钉" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "更多钉钉操作" }));
-
-    expect(screen.getByRole("button", { name: "解绑钉钉" })).toHaveTextContent("解绑钉钉");
-    expect(screen.queryByRole("button", { name: "绑定钉钉" })).not.toBeInTheDocument();
+  it.each([false, true])("钉钉启用状态为 %s 时反馈入口收进更多菜单", (dingtalkEnabled) => {
+    render(
+      <ThemeProvider><MemoryRouter>
+        <AccountPane
+          account={{ ...baseAccount, dingtalkEnabled, dingtalkBound: false }}
+          accountActions={<button type="button">提交异常反馈</button>}
+        />
+      </MemoryRouter></ThemeProvider>
+    );
+    expect(screen.queryByRole("button", { name: "提交异常反馈" })).not.toBeInTheDocument();
+    expect(screen.getByText(baseAccount.email)).toBeVisible();
+    expect(screen.getByRole("link", { name: "下载客户端" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "账户操作" }));
+    expect(screen.getByRole("button", { name: "提交异常反馈" })).toBeVisible();
   });
 
-  it("requires the current password before unbinding", async () => {
-    unbindDingTalkMock.mockResolvedValueOnce();
-    renderPane({ ...baseAccount, dingtalkEnabled: true, dingtalkBound: true, localPasswordConfigured: true });
-
-    fireEvent.click(screen.getByRole("button", { name: "更多钉钉操作" }));
-    fireEvent.click(screen.getByRole("button", { name: "解绑钉钉" }));
-    const dialog = screen.getByRole("dialog", { name: "解绑钉钉账户" });
-    fireEvent.change(within(dialog).getByLabelText("当前密码"), { target: { value: "passw0rd!" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认解绑" }));
-
-    await waitFor(() => expect(unbindDingTalkMock).toHaveBeenCalledWith("passw0rd!"));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "解绑钉钉账户" })).not.toBeInTheDocument());
+  it.each([
+    [false, false], [false, true], [true, false], [true, true]
+  ])("已绑定账户仅显示状态，不提供解绑（钉钉启用 %s，本地密码 %s）", (dingtalkEnabled, localPasswordConfigured) => {
+    renderPane({ ...baseAccount, dingtalkEnabled, dingtalkBound: true, localPasswordConfigured });
     expect(screen.queryByText("已绑定钉钉")).not.toBeInTheDocument();
-  });
-
-  it("blocks unbinding when no local password is configured", () => {
-    renderPane({ ...baseAccount, dingtalkEnabled: true, dingtalkBound: true, localPasswordConfigured: false });
-    expect(screen.queryByRole("button", { name: "解绑钉钉" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "更多钉钉操作" }));
-
-    expect(screen.getByRole("button", { name: "解绑钉钉" })).toBeDisabled();
-    expect(screen.getByText("当前账户仅支持钉钉登录，请先联系管理员设置本地密码。")).toBeInTheDocument();
-  });
-
-  it("keeps the dialog open when unbinding fails", async () => {
-    unbindDingTalkMock.mockRejectedValueOnce(new Error("当前密码错误"));
-    renderPane({ ...baseAccount, dingtalkEnabled: true, dingtalkBound: true, localPasswordConfigured: true });
-
-    fireEvent.click(screen.getByRole("button", { name: "更多钉钉操作" }));
-    fireEvent.click(screen.getByRole("button", { name: "解绑钉钉" }));
-    const dialog = screen.getByRole("dialog", { name: "解绑钉钉账户" });
-    fireEvent.change(within(dialog).getByLabelText("当前密码"), { target: { value: "wrong-password" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认解绑" }));
-
-    expect(await within(dialog).findByText("当前密码错误")).toBeInTheDocument();
-    expect(dialog).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "账户操作" }));
+    expect(screen.getByText("已绑定钉钉")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "绑定钉钉" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/解绑/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "解绑钉钉账户" })).not.toBeInTheDocument();
   });
 });

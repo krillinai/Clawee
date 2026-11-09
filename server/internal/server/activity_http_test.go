@@ -33,6 +33,13 @@ func (f *activityHTTPSnapshotClient) Snapshot(context.Context, activity.Snapshot
 
 type activityHTTPStore struct{}
 
+func (activityHTTPStore) AgentUsage(_ context.Context, userID, collectorID, agentID string, _ activity.DateRange) (activity.AgentUsage, error) {
+	if userID == "" || collectorID != "source" || agentID != "agent" {
+		return activity.AgentUsage{}, activity.ErrAgentNotFound
+	}
+	return activity.AgentUsage{TurnCount: 123, MCPStatus: "unlinked"}, nil
+}
+
 func (activityHTTPStore) Statistics(context.Context, time.Time, time.Time) (activity.ActivitySnapshot, error) {
 	return activity.ActivitySnapshot{}, nil
 }
@@ -82,12 +89,28 @@ func TestActivityHTTPRequiresCurrentAccountDataViewGrant(t *testing.T) {
 	if snapshotClient.calls != 0 {
 		t.Fatalf("unauthorized request called billing provider %d times", snapshotClient.calls)
 	}
+	if recorder := request("/api/v1/app/activity/agent-usage?range=7d&collector_id=source&agent_id=agent"); recorder.Code != http.StatusForbidden {
+		t.Fatalf("personal statistics bypassed authorization: %d", recorder.Code)
+	}
 	if _, err := dataService.Create(ctx, dataaccess.SetInput{UserID: registered.Account.UserID, ResourceType: dataaccess.ResourceDataView,
 		ResourceID: dataaccess.ViewAgentActivity, Actions: []string{dataaccess.ActionRead}, CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if recorder := request("/api/v1/app/data-views"); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"view_id":"agent_activity"`) {
 		t.Fatalf("granted views status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	for _, test := range []struct {
+		query  string
+		status int
+	}{
+		{"range=7d&collector_id=source&agent_id=agent", http.StatusOK},
+		{"range=invalid&collector_id=source&agent_id=agent", http.StatusBadRequest},
+		{"range=7d&agent_id=agent", http.StatusBadRequest},
+		{"range=7d&collector_id=other&agent_id=agent", http.StatusNotFound},
+	} {
+		if recorder := request("/api/v1/app/activity/agent-usage?" + test.query); recorder.Code != test.status {
+			t.Fatalf("personal usage %s: %d %s", test.query, recorder.Code, recorder.Body.String())
+		}
 	}
 	if recorder := request("/api/v1/app/activity/statistics?range=invalid"); recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"invalid_activity_range"`) {
 		t.Fatalf("invalid range status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -98,7 +121,7 @@ func TestActivityHTTPRequiresCurrentAccountDataViewGrant(t *testing.T) {
 	if recorder := request("/api/v1/app/activity/statistics?range=7d&user_id=other"); recorder.Code != http.StatusOK {
 		t.Fatalf("statistics status=%d body=%s", recorder.Code, recorder.Body.String())
 	} else {
-		if !strings.Contains(recorder.Body.String(), `"skill_contributions":{"created_count":0,"updated_count":0}`) || !strings.Contains(recorder.Body.String(), `"skill_usage_totals":{"explicit_skill_runs":0,"implicit_skill_runs":0,"observed_skill_runs":0,"requested_skill_runs":0}`) {
+		if !strings.Contains(recorder.Body.String(), `"skill_contributions":{"created_count":0,"updated_count":0}`) || !strings.Contains(recorder.Body.String(), `"skill_usage_totals":{"explicit_skill_runs":0,"implicit_skill_runs":0,"observed_skill_runs":0,"requested_skill_runs":0}`) || !strings.Contains(recorder.Body.String(), `"employee_skill_usage":[]`) {
 			t.Fatalf("statistics missing skill totals: %s", recorder.Body.String())
 		}
 		if strings.Contains(strings.ToLower(recorder.Body.String()), "sub2api") {

@@ -11,24 +11,148 @@ const signedOutSession: EnterpriseSessionResponse = {
 };
 
 describe('EnterpriseAccountPage', () => {
+  it.each(['13800000000', '+86 138-0000-0000', '用户13800000000', '', '   '])(
+    '纯手机号账户隐藏手机号，并为不适合展示的姓名 %j 使用默认名称', name => {
+      const { container } = renderAccount({
+        session: {
+          status: 'signed_in',
+          account: { subjectId: 'acct-phone', email: '', phone: '13800000000', name },
+          expiresAt: '2026-08-30T12:00:00.000Z',
+          transportSecurity: 'secure_https'
+        }
+      });
+
+      expect(screen.getByRole('heading', { name: '企业用户' })).toBeInTheDocument();
+      expect(screen.getByText(/会话有效期至/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '退出登录' })).toBeEnabled();
+      expect(container.querySelector('.enterprise-account-profile-copy > p')).toBeNull();
+      expect(container.innerHTML).not.toContain('13800000000');
+      if (name.trim()) expect(container.innerHTML).not.toContain(name);
+    }
+  );
+
+  it.each(['', 'member@example.com'])('手机号账户保留正常姓名和已有邮箱 %j', email => {
+    const { container } = renderAccount({
+      session: {
+        status: 'signed_in',
+        account: { subjectId: 'acct-phone', email, phone: '13800000000', name: '员工' },
+        transportSecurity: 'secure_https'
+      }
+    });
+
+    expect(screen.getByRole('heading', { name: '员工' })).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain('13800000000');
+    if (email) expect(screen.getByText(email)).toBeInTheDocument();
+    else expect(container.querySelector('.enterprise-account-profile-copy > p')).toBeNull();
+  });
+
+  it('旧会话缺少 phone 字段时仍隐藏作为姓名的手机号', () => {
+    renderAccount({
+      session: {
+        status: 'signed_in',
+        account: { subjectId: 'acct-legacy', email: '', name: '13800000000' },
+        transportSecurity: 'secure_https'
+      }
+    });
+
+    expect(screen.getByRole('heading', { name: '企业用户' })).toBeInTheDocument();
+    expect(screen.queryByText('13800000000')).not.toBeInTheDocument();
+  });
+
+  it('支持手机号密码登录和注册，不将手机号写入邮箱字段', async () => {
+    const user = userEvent.setup();
+    const onLogin = vi.fn(async () => signedOutSession);
+    const onRegister = vi.fn(async () => signedOutSession);
+    renderAccount({ onLogin, onRegister });
+    await user.type(screen.getByLabelText('邮箱或手机号'), '+8613800000000');
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    await user.click(document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!);
+    expect(onLogin).toHaveBeenCalledWith({ phone: '13800000000', password: 'password123' });
+    await user.click(screen.getByRole('button', { name: '注册', pressed: false }));
+    await user.type(screen.getByLabelText('名称'), '员工');
+    await user.type(screen.getByLabelText('密码'), 'register123');
+    await user.type(screen.getByLabelText('确认密码'), 'register123');
+    await user.click(document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!);
+    expect(onRegister).toHaveBeenCalledWith({ phone: '13800000000', name: '员工', password: 'register123' });
+  });
+
   it('saves the shared gateway and blocks login while the address is changing', async () => {
     const user = userEvent.setup();
     let finish!: () => void;
     const onSaveGateway = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    renderAccount({ onReadGateway: async () => ({ gateway: 'https://old.example', configurable: true }), onSaveGateway });
-    const address = await screen.findByLabelText('服务端地址');
-    await user.clear(address);
-    await user.type(address, 'https://new.example');
-    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    renderAccount({ onReadGateway: async () => ({ gateway: 'https://old.example', gateways: ['https://old.example', 'https://new.example'], configurable: true }), onSaveGateway });
+    const address = await screen.findByLabelText('服务器');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
     await user.type(screen.getByLabelText('密码'), 'password123');
-    await user.click(screen.getByRole('button', { name: '保存地址' }));
-    expect(onSaveGateway).toHaveBeenCalledWith('https://new.example');
+    await user.selectOptions(address, 'https://new.example');
+    expect(onSaveGateway).toHaveBeenCalledWith('https://new.example', ['https://old.example', 'https://new.example']);
     expect(address).toBeDisabled();
-    expect(screen.getByLabelText('密码')).toHaveValue('');
+    expect(screen.getByLabelText('密码')).toHaveValue('password123');
     expect(document.querySelector('.enterprise-email-submit')).toBeDisabled();
     finish();
     await screen.findByText('服务端地址已保存');
     expect(address).toBeEnabled();
+    expect(screen.getByLabelText('密码')).toHaveValue('');
+  });
+
+  it('默认勾选协议，按服务器恢复已保存的账号密码并保留未提交的修改', async () => {
+    const user = userEvent.setup();
+    let gateway = 'https://a.example';
+    const saved = new Map([
+      ['https://a.example', { email: 'a@example.com', password: 'password-a' }],
+      ['https://b.example', { phone: '13800000000', password: 'password-b' }]
+    ]);
+    renderAccount({
+      onReadGateway: async () => ({ gateway, gateways: [...saved.keys()], configurable: true }),
+      onSaveGateway: async value => { gateway = value; },
+      onReadLogin: async value => saved.get(value) ?? null
+    });
+    const address = await screen.findByLabelText('服务器');
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByLabelText('邮箱或手机号')).toHaveValue('a@example.com');
+    expect(screen.getByLabelText('密码')).toHaveValue('password-a');
+    await user.clear(screen.getByLabelText('密码'));
+    await user.type(screen.getByLabelText('密码'), 'updated-password-a');
+    await user.selectOptions(address, 'https://b.example');
+    await waitFor(() => expect(screen.getByLabelText('密码')).toHaveValue('password-b'));
+    expect(screen.getByLabelText('邮箱或手机号')).toHaveValue('13800000000');
+    await user.selectOptions(address, 'https://a.example');
+    await waitFor(() => expect(screen.getByLabelText('密码')).toHaveValue('updated-password-a'));
+    expect(screen.getByLabelText('邮箱或手机号')).toHaveValue('a@example.com');
+  });
+
+  it('切换失败时保留原服务器的账号密码', async () => {
+    const user = userEvent.setup();
+    renderAccount({
+      onReadGateway: async () => ({ gateway: 'https://a.example', gateways: ['https://a.example', 'https://b.example'], configurable: true }),
+      onSaveGateway: async () => { throw new Error('服务器配置保存失败'); }
+    });
+    const address = await screen.findByLabelText('服务器');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'a@example.com');
+    await user.type(screen.getByLabelText('密码'), 'password-a');
+    await user.selectOptions(address, 'https://b.example');
+    await screen.findByText('服务器配置保存失败');
+    expect(address).toHaveValue('https://a.example');
+    expect(screen.getByLabelText('邮箱或手机号')).toHaveValue('a@example.com');
+    expect(screen.getByLabelText('密码')).toHaveValue('password-a');
+  });
+
+  it('没有服务器时显示填写表单，保存后显示下拉选择且允许登录', async () => {
+    const user = userEvent.setup();
+    const onSaveGateway = vi.fn(async () => undefined);
+    renderAccount({ onReadGateway: async () => ({ gateway: '', gateways: [], configurable: true }), onSaveGateway });
+    const address = await screen.findByLabelText('服务端地址');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    expect(document.querySelector('.enterprise-email-submit')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '钉钉登录' })).toBeDisabled();
+    await user.type(address, 'https://first.example/');
+    await user.click(screen.getByRole('button', { name: '保存地址' }));
+    expect(onSaveGateway).toHaveBeenCalledWith('https://first.example', ['https://first.example']);
+    expect(await screen.findByLabelText('服务器')).toHaveValue('https://first.example');
+    expect(screen.queryByLabelText('服务端地址')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('密码'), 'password123');
+    expect(document.querySelector('.enterprise-email-submit')).toBeEnabled();
   });
 
   it('supports the existing email login and registration flows', async () => {
@@ -44,9 +168,8 @@ describe('EnterpriseAccountPage', () => {
     expect(screen.queryByLabelText('手机号')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('验证码')).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
     await user.type(screen.getByLabelText('密码'), 'password123');
-    await user.click(screen.getByRole('checkbox'));
     await user.click(document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!);
     expect(onLogin).toHaveBeenCalledWith({
       email: 'member@example.com',
@@ -82,9 +205,8 @@ describe('EnterpriseAccountPage', () => {
     });
     renderAccount({ onLogin });
 
-    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
     await user.type(screen.getByLabelText('密码'), 'password123');
-    await user.click(screen.getByRole('checkbox'));
     await user.click(document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -98,8 +220,10 @@ describe('EnterpriseAccountPage', () => {
     renderAccount({ onLogin });
     const submit = document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!;
 
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    await user.click(screen.getByRole('checkbox'));
     expect(submit).toBeDisabled();
-    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
     expect(submit).toBeDisabled();
     await user.type(screen.getByLabelText('密码'), 'pass123');
     expect(submit).toBeDisabled();
@@ -133,7 +257,7 @@ describe('EnterpriseAccountPage', () => {
 
     await user.click(screen.getByRole('button', { name: '注册', pressed: false }));
     const submit = document.querySelector<HTMLButtonElement>('.enterprise-email-submit')!;
-    await user.type(screen.getByLabelText('邮箱'), 'member@example.com');
+    await user.type(screen.getByLabelText('邮箱或手机号'), 'member@example.com');
     await user.type(screen.getByLabelText('密码'), 'register123');
     expect(submit).toBeDisabled();
 
@@ -165,7 +289,6 @@ describe('EnterpriseAccountPage', () => {
     const button = await screen.findByRole('button', { name: '钉钉登录' });
     await waitFor(() => expect(button).toBeEnabled());
     expect(onPrepareDingTalkLogin).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('checkbox'));
     await user.click(button);
 
     await waitFor(() => {
@@ -176,7 +299,7 @@ describe('EnterpriseAccountPage', () => {
     });
     expect(screen.getByRole('button', { name: '等待钉钉授权' })).toBeDisabled();
     expect(screen.queryByText('扫码登录')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('邮箱')).toBeDisabled();
+    expect(screen.getByLabelText('邮箱或手机号')).toBeDisabled();
     expect(screen.getByText('请在系统浏览器中完成授权')).toBeInTheDocument();
 
     expect(JSON.stringify(onPrepareDingTalkLogin.mock.calls)).not.toContain('verifier');
@@ -208,7 +331,6 @@ describe('EnterpriseAccountPage', () => {
 
     const button = await screen.findByRole('button', { name: '钉钉登录' });
     await waitFor(() => expect(button).toBeEnabled());
-    await user.click(screen.getByRole('checkbox'));
     await user.click(button);
 
     await waitFor(() => expect(onCheckSession).toHaveBeenCalledOnce(), {
@@ -234,7 +356,6 @@ describe('EnterpriseAccountPage', () => {
 
     const button = await screen.findByRole('button', { name: '钉钉登录' });
     await waitFor(() => expect(button).toBeEnabled());
-    await user.click(screen.getByRole('checkbox'));
     await user.click(button);
 
     expect(await screen.findByText('无法打开系统浏览器，请稍后重试。'))
@@ -268,7 +389,6 @@ describe('EnterpriseAccountPage', () => {
     await waitFor(() => expect(button).toBeEnabled());
     expect(onPrepareDingTalkLogin).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('checkbox'));
     await user.click(button);
     await waitFor(() => expect(onPrepareDingTalkLogin).toHaveBeenCalledOnce());
   });
@@ -326,6 +446,7 @@ describe('EnterpriseAccountPage', () => {
       }
     }));
     expect(screen.getByText('Member')).toBeInTheDocument();
+    expect(screen.getByText('member@example.com')).toBeInTheDocument();
     expect(screen.queryByText(/采集器/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试安装' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '退出登录' })).toBeInTheDocument();
@@ -351,6 +472,7 @@ function createAccount(
     onCheckSession?: EnterpriseAccountPageProps['onCheckSession'];
     onReadGateway?: EnterpriseAccountPageProps['onReadGateway'];
     onSaveGateway?: EnterpriseAccountPageProps['onSaveGateway'];
+    onReadLogin?: EnterpriseAccountPageProps['onReadLogin'];
   } = {}
 ) {
   return (
@@ -369,6 +491,7 @@ function createAccount(
       onCheckSession={overrides.onCheckSession ?? (async () => signedOutSession)}
       onReadGateway={overrides.onReadGateway}
       onSaveGateway={overrides.onSaveGateway}
+      onReadLogin={overrides.onReadLogin}
       onLogout={async () => signedOutSession}
       onRefresh={async () => signedOutSession}
     />

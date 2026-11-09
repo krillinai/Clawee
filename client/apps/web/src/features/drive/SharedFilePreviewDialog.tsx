@@ -2,6 +2,8 @@ import type { EnterpriseSharedFileResponse } from '@clawee/protocol';
 import { Download, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { JsonViewer } from '../../components/json/JsonViewer.js';
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer.js';
 import { ApiClientError } from '../../runtime/errors.js';
 
 export function SharedFilePreviewDialog(props: {
@@ -64,7 +66,7 @@ export function SharedFilePreviewDialog(props: {
       </header>
       <div className="shared-file-preview-body">
         {error ? <p role="alert">{error}</p> : !content ? <p role="status">正在加载预览...</p>
-          : content.kind === 'text' ? <pre>{content.value}</pre>
+          : content.kind === 'text' ? <TextPreview fileName={props.file.fileName} content={content.value} />
             : content.kind === 'image' ? <img src={content.value} alt={props.file.fileName} onError={() => setError('图片预览失败，请下载后查看')} />
               : <object data={content.value} type="application/pdf" aria-label={`${props.file.fileName} PDF 预览`}><p>当前环境无法预览 PDF，请下载后查看</p></object>}
       </div>
@@ -76,4 +78,16 @@ export function SharedFilePreviewDialog(props: {
     </dialog>,
     document.body
   );
+}
+
+// The preview endpoint returns every text file as text/plain, so pick the
+// presentation from the file extension.
+function TextPreview(props: { fileName: string; content: string }) {
+  const extension = props.fileName.toLowerCase().split('.').pop() ?? '';
+
+  if (extension === 'md' || extension === 'markdown') {
+    return <MarkdownRenderer text={props.content} variant="document" />;
+  }
+  if (extension === 'json') return <JsonViewer content={props.content} />;
+  return <pre>{props.content}</pre>;
 }

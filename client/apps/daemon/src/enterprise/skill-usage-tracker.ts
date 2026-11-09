@@ -129,7 +129,8 @@ function validLabel(value: string): boolean {
 }
 
 function commandArgs(command: string): string[] | undefined {
-  if (/[;&|<>`$#\\\r\n]/.test(command)) return undefined;
+  if (/[;&|<>`$#\r\n]/.test(command)) return undefined;
+  if (process.platform !== 'win32' && command.includes('\\')) return undefined;
   const args: string[] = [];
   const token = /\s*(?:'([^']*)'|"([^"]*)"|([^\s'"]+))/gy;
   let position = 0;

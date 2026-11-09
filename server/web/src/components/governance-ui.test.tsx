@@ -71,6 +71,7 @@ describe("governance ui components", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "编辑配置" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "编辑配置" })).toHaveAccessibleDescription("保存前请确认字段。");
     unmount();
 
     render(
@@ -82,6 +83,17 @@ describe("governance ui components", () => {
     expect(screen.getByRole("dialog", { name: "详情" })).toBeInTheDocument();
     expect(screen.getByText("追踪详情")).not.toHaveClass("font-mono", "uppercase");
     expect(screen.getByText("trace_1")).toBeInTheDocument();
+  });
+
+  it("无副标题的弹窗不关联不存在的描述，也不产生描述缺失警告", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      render(<ModalShell open title="编辑配置" onClose={vi.fn()}><Button>内部操作</Button></ModalShell>);
+      expect(screen.getByRole("dialog", { name: "编辑配置" })).not.toHaveAttribute("aria-describedby");
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("renders page headers without decorative context labels", () => {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { desktopIpc } from '../shared/ipc.js';
+import { resolveInstallationDirectory } from '../shared/installation-directory.js';
 import type {
   DesktopApi,
   DesktopBootstrapState,
@@ -8,12 +9,19 @@ import type {
 } from '../shared/types.js';
 import {
   DESKTOP_TITLE_BAR_HEIGHT,
-  DESKTOP_TRAFFIC_LIGHT_INSET
+  DESKTOP_TRAFFIC_LIGHT_INSET,
+  DESKTOP_PACKAGED_ARGUMENT
 } from '../shared/types.js';
 
 const api: DesktopApi = {
+  reportIncident: observation => ipcRenderer.invoke(desktopIpc.reportIncident, observation),
   kind: 'desktop',
   platform: resolveDesktopPlatform(process.platform),
+  installationDirectory: resolveInstallationDirectory(
+    process.platform,
+    typeof process.resourcesPath === 'string' ? process.resourcesPath : undefined,
+    Array.isArray(process.argv) && process.argv.includes(DESKTOP_PACKAGED_ARGUMENT)
+  ) ?? null,
   windowChrome: process.platform === 'darwin'
     ? {
         integratedTitleBar: true,
@@ -32,8 +40,18 @@ const api: DesktopApi = {
     return subscribe(desktopIpc.bootstrapChanged, listener);
   },
   retryBootstrap: () => ipcRenderer.invoke(desktopIpc.bootstrapRetry),
+  readUpdateState: () => ipcRenderer.invoke(desktopIpc.readUpdateState),
+  subscribeUpdateState: listener => subscribe(desktopIpc.updateStateChanged, listener),
+  checkForUpdates: () => ipcRenderer.invoke(desktopIpc.checkForUpdates),
+  downloadUpdate: () => ipcRenderer.invoke(desktopIpc.downloadUpdate),
+  installUpdate: () => ipcRenderer.invoke(desktopIpc.installUpdate),
+  testUpdate: simulatedVersion => ipcRenderer.invoke(desktopIpc.testUpdate, simulatedVersion),
+  cancelUpdateTest: () => ipcRenderer.invoke(desktopIpc.cancelUpdateTest),
+  deferUpdate: () => ipcRenderer.invoke(desktopIpc.deferUpdate),
+  acknowledgeUpdateQuiescence: (id, busy) => ipcRenderer.invoke(desktopIpc.updateQuiesced, id, busy),
   selectProjectDirectory: purpose =>
     ipcRenderer.invoke(desktopIpc.selectProjectDirectory, purpose),
+  selectContextDirectory: () => ipcRenderer.invoke(desktopIpc.selectContextDirectory),
   resolveDroppedFilePath: file => {
     const path = webUtils.getPathForFile(file);
     return path.length > 0 ? path : null;
@@ -45,6 +63,7 @@ const api: DesktopApi = {
   updateDesktopPreferences: preferences =>
     ipcRenderer.invoke(desktopIpc.updatePreferences, preferences),
   openExternal: url => ipcRenderer.invoke(desktopIpc.openExternal, url),
+  openFile: path => ipcRenderer.invoke(desktopIpc.openFile, path),
   revealPath: path => ipcRenderer.invoke(desktopIpc.revealPath, path),
   notify: message => ipcRenderer.invoke(desktopIpc.notify, message),
   configureBackgroundNotifications: configuration =>

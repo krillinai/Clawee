@@ -75,21 +75,17 @@ describe('enterprise knowledge conversation API', () => {
 
     const publicList = await request('GET', '/threads?status=active');
     expect(publicList.statusCode).toBe(200);
-    expect(publicList.json().threads).toEqual([
-      expect.objectContaining({ id: threadId, projectId: project.id })
-    ]);
+    expect(publicList.json().threads).toEqual([]);
     expect((await request(
       'GET',
       '/threads?status=active&excludePurpose=schedule_task&limit=50'
-    )).json().threads).toEqual([
-      expect.objectContaining({ id: threadId, projectId: project.id })
-    ]);
-    expect((await request('GET', `/threads/${threadId}`)).statusCode).toBe(200);
-    expect((await request('GET', `/threads/${threadId}/history`)).statusCode).toBe(200);
-    expect((await request('GET', `/threads/${threadId}/runs`)).statusCode).toBe(200);
+    )).json().threads).toEqual([]);
+    expect((await request('GET', `/threads/${threadId}`)).statusCode).toBe(404);
+    expect((await request('GET', `/threads/${threadId}/history`)).statusCode).toBe(404);
+    expect((await request('GET', `/threads/${threadId}/runs`)).statusCode).toBe(404);
     expect((await request('PATCH', `/threads/${threadId}`, {
       sandbox: 'read-only'
-    })).statusCode).toBe(200);
+    })).statusCode).toBe(404);
 
     const suppliedSubject = await request('POST', '/threads', {
       purpose: 'schedule_draft',

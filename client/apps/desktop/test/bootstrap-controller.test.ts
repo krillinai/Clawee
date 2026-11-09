@@ -30,7 +30,8 @@ describe('Desktop renderer Runtime connection', () => {
       readFileSync('src/preload/index.ts', 'utf8'),
       readFileSync('src/bootstrap/main.ts', 'utf8'),
       readFileSync('src/bootstrap/index.html', 'utf8'),
-      readFileSync('src/main/main.ts', 'utf8')
+      readFileSync('src/main/main.ts', 'utf8'),
+      readFileSync('src/main/desktop-main.ts', 'utf8')
     ].join('\n');
 
     expect(sources).not.toMatch(/selectCodex|select-codex|选择 Codex|选择 ChatGPT/);

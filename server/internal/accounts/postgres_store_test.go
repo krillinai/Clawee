@@ -24,6 +24,13 @@ func TestSaveAccountMapsEmailUniqueViolation(t *testing.T) {
 	}
 }
 
+func TestSaveAccountMapsPhoneUniqueViolation(t *testing.T) {
+	runner := accountErrorRunner{err: &pgconn.PgError{Code: "23505", ConstraintName: "accounts_phone_key"}}
+	if err := saveAccount(context.Background(), runner, Account{UserID: "usr_1", Phone: "13800000000"}); !errors.Is(err, ErrPhoneExists) {
+		t.Fatalf("phone conflict = %v", err)
+	}
+}
+
 func TestPostgresStorePersistsAvatarAndDoesNotOverwriteItOnBackfill(t *testing.T) {
 	ctx := context.Background()
 	store := NewPostgresStore(openAccountsTestPool(t))
@@ -234,7 +241,8 @@ func openAccountsTestPool(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(context.Background(), `
 		CREATE TABLE accounts (
 			user_id TEXT PRIMARY KEY,
-			email TEXT NOT NULL UNIQUE,
+			email TEXT NOT NULL DEFAULT '',
+			phone TEXT NOT NULL DEFAULT '',
 			name TEXT NOT NULL,
 			password_hash TEXT NOT NULL,
 			status TEXT NOT NULL,
@@ -244,12 +252,15 @@ func openAccountsTestPool(t *testing.T) *pgxpool.Pool {
 			avatar_content_type TEXT NOT NULL DEFAULT '',
 			avatar_source TEXT NOT NULL DEFAULT 'generated'
 		);
+		CREATE UNIQUE INDEX accounts_email_key ON accounts(email) WHERE email <> '';
+		CREATE UNIQUE INDEX accounts_phone_key ON accounts(phone) WHERE phone <> '';
 			CREATE TABLE account_identities (
 			provider_type TEXT NOT NULL,
 			provider_key TEXT NOT NULL,
 			provider_subject TEXT NOT NULL,
 			user_id TEXT NOT NULL REFERENCES accounts(user_id) ON DELETE CASCADE,
 			external_user_id TEXT NOT NULL DEFAULT '',
+			enterprise_user_id TEXT NOT NULL DEFAULT '',
 			verified_at TIMESTAMPTZ NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL,
@@ -286,4 +297,60 @@ func (accountErrorRunner) Query(context.Context, string, ...any) (pgx.Rows, erro
 
 func (accountErrorRunner) QueryRow(context.Context, string, ...any) pgx.Row {
 	panic("unexpected QueryRow")
+}
+
+func TestPostgresClaweeSessionRenewal(t *testing.T) {
+	ctx := context.Background()
+	pool := openAccountsTestPool(t)
+	if _, err := pool.Exec(ctx, `CREATE TABLE account_sessions (
+		session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES accounts(user_id) ON DELETE CASCADE,
+		agent_id TEXT, token_hash TEXT NOT NULL UNIQUE, expires_at TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresStore(pool)
+	now := time.Date(2026, 10, 16, 10, 0, 0, 0, time.UTC)
+	svc := NewService(Config{Store: store, Clock: func() time.Time { return now }, SessionDuration: time.Hour, JWTSigningKey: []byte(testUserJWTSigningKey)})
+	account := Account{UserID: "usr_pg_renew", Name: "续期用户", Status: StatusActive, CreatedAt: now, UpdatedAt: now}
+	if err := store.SaveAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := svc.IssueTokens(ctx, account, []TokenRequest{{Audience: AudienceFrontend, ClientID: ClientClaweeAgent, AgentID: "clawee_pg_renew"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := batch.Token(AudienceFrontend)
+	now = now.Add(30 * time.Minute)
+	renewed, err := svc.RenewClaweeSession(ctx, original.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Session.LastSeenAt == nil || !renewed.Session.LastSeenAt.Equal(now) {
+		t.Fatal("未记录本次用户活动")
+	}
+	if _, err := svc.AuthenticateToken(ctx, original.Token, AudienceFrontend); err != nil {
+		t.Fatalf("在途 Token = %v", err)
+	}
+	shorter, err := store.ExtendSession(ctx, original.Session.SessionID, now.Add(-time.Minute), now.Add(time.Minute))
+	if err != nil || !shorter.ExpiresAt.Equal(renewed.Session.ExpiresAt) || !shorter.LastSeenAt.Equal(now) {
+		t.Fatalf("较早请求缩短会话: %#v, %v", shorter, err)
+	}
+	now = now.Add(40 * time.Minute)
+	if _, err := svc.AuthenticateToken(ctx, renewed.Token, AudienceFrontend); err != nil {
+		t.Fatalf("续期后跨越原到期时间: %v", err)
+	}
+	now = renewed.Session.ExpiresAt
+	if _, err := svc.RenewClaweeSession(ctx, renewed.Token); !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("闲置到期后续期 = %v", err)
+	}
+	if _, err := store.ExtendSession(ctx, original.Session.SessionID, now, now.Add(time.Hour)); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("复活过期会话 = %v", err)
+	}
+	if err := store.DeleteSession(ctx, original.Session.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ExtendSession(ctx, original.Session.SessionID, now, now.Add(time.Hour)); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("复活已删除会话 = %v", err)
+	}
 }

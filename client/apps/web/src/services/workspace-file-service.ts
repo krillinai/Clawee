@@ -5,7 +5,8 @@ import type {
   WorkspaceFileRevealRequest,
   WorkspaceFileRevealResponse,
   WorkspaceFileSaveRequest,
-  WorkspaceFileSaveResponse
+  WorkspaceFileSaveResponse,
+  WorkspaceOfficePreviewResponse
 } from '@clawee/protocol';
 import type { RuntimeClient } from '../runtime/client.js';
 
@@ -22,6 +23,9 @@ export function createWorkspaceFileService(client: WorkspaceFileClient) {
     openText(threadId: string, path: string): Promise<WorkspaceFileContentResponse> {
       return client.get(`/workspace/files/content?${buildThreadPathQuery(threadId, path)}`);
     },
+    openOfficePreview(threadId: string, path: string): Promise<WorkspaceOfficePreviewResponse> {
+      return client.get(`/workspace/files/office-preview?${buildThreadPathQuery(threadId, path)}`);
+    },
     saveText(input: WorkspaceFileSaveRequest): Promise<WorkspaceFileSaveResponse> {
       return client.post('/workspace/files/content', input);
     },
@@ -32,6 +36,16 @@ export function createWorkspaceFileService(client: WorkspaceFileClient) {
         objectUrl: URL.createObjectURL(blob),
         mime: blob.type || response.headers.get('content-type') || 'application/octet-stream',
         size: blob.size
+      };
+    },
+    async download(threadId: string, path: string): Promise<{ objectUrl: string; fileName: string }> {
+      const response = await client.rawGet(`/workspace/files/download?${buildThreadPathQuery(threadId, path)}`);
+      const blob = await response.blob();
+      const basename = path.replace(/\\/g, '/').split('/').at(-1) ?? '';
+      const fileName = basename.replace(/[\u0000-\u001f\u007f:*?"<>|]/g, '_');
+      return {
+        objectUrl: URL.createObjectURL(blob),
+        fileName: fileName && fileName !== '.' && fileName !== '..' ? fileName : 'download'
       };
     },
     revokeBlob(objectUrl: string): void {

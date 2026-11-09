@@ -1,8 +1,15 @@
 import { ApiClientError } from './errors.js';
+import { incidentErrorDiagnostics, safeIncidentIdentifier } from '@clawee/protocol';
 import type { ApiErrorPayload, ConnectionConfig } from './types.js';
 import { isRecord } from './validators.js';
+import { createWebIncidentObserver } from '../services/incident-observer.js';
 
 export { ApiClientError };
+
+function requestDiagnostics(method: string, path: string) {
+  try { return { request_method: method, request_path: new URL(path, 'http://localhost').pathname.slice(0, 512) }; }
+  catch { return { request_method: method }; }
+}
 
 export type RuntimeClientInput = ConnectionConfig & {
   fetchImpl?: typeof fetch;
@@ -18,6 +25,26 @@ export class RuntimeClient {
   private readonly fetchImpl: typeof fetch;
   private feedbackThreadId?: string;
   private diagnosticCount = 0;
+  private incidentObserver = createWebIncidentObserver();
+  private incidentObservationDisposed = false;
+  private readonly connectionListeners = new Set<(available: boolean) => void>();
+
+  subscribeConnectionStatus(listener: (available: boolean) => void): () => void {
+    this.connectionListeners.add(listener);
+    return () => { this.connectionListeners.delete(listener); };
+  }
+
+  disposeIncidentObservation(): void {
+    this.incidentObservationDisposed = true;
+    this.incidentObserver.dispose();
+    this.connectionListeners.clear();
+  }
+
+  activateIncidentObservation(): void {
+    if (!this.incidentObservationDisposed) return;
+    this.incidentObservationDisposed = false;
+    this.incidentObserver = createWebIncidentObserver();
+  }
 
   setFeedbackThread(threadId?: string) { this.feedbackThreadId = threadId; this.diagnosticCount = 0; }
   recordFeedbackError(errorCode: 'network_failed' | 'http_failed' | 'browser_error' | 'unhandled_rejection', method?: string, status?: number) {
@@ -54,12 +81,14 @@ export class RuntimeClient {
     body: BodyInit,
     contentType = 'application/octet-stream'
   ): Promise<T> {
+    const startedAt = Date.now();
+    const observer = this.incidentObserver;
     const response = await this.rawRequest(path, {
       method: 'POST',
       binaryBody: body,
       binaryContentType: contentType
     });
-    return await readSuccessfulJson(response) as T;
+    return await this.readResponse<T>(path, 'POST', response, startedAt, undefined, observer);
   }
 
   async patch<T = unknown>(path: string, body: unknown): Promise<T> {
@@ -78,9 +107,30 @@ export class RuntimeClient {
       signal?: AbortSignal;
     }
   ): Promise<T> {
+    const startedAt = Date.now();
+    const observer = this.incidentObserver;
     const response = await this.rawRequest(path, input);
-    const payload = await readSuccessfulJson(response);
-    return payload as T;
+    return await this.readResponse<T>(path, input.method, response, startedAt, input.signal, observer);
+  }
+
+  private async readResponse<T>(path: string, method: string, response: Response, startedAt: number, signal?: AbortSignal, observer = this.incidentObserver): Promise<T> {
+    try {
+      const payload = await readSuccessfulJson(response);
+      if (!path.startsWith('/feedback')) observer.report({ event_type: 'recovered', stage: 'request', error_code: 'WEB_REQUEST_FAILED' }, `${method}:${path}`);
+      return payload as T;
+    } catch (error) {
+      if (!(error instanceof ApiClientError)) this.observeRequestFailure(path, method, error, startedAt, signal, observer);
+      throw error;
+    }
+  }
+
+  private observeRequestFailure(path: string, method: string, error: unknown, startedAt: number, signal?: AbortSignal, observer = this.incidentObserver): void {
+    const timedOut = (error instanceof Error && error.name === 'TimeoutError') || signal?.reason?.name === 'TimeoutError';
+    if (path.startsWith('/feedback') || (!timedOut && (signal?.aborted || (error instanceof Error && error.name === 'AbortError')))) return;
+    this.recordFeedbackError('network_failed', method);
+    observer.report({ event_type: 'error', stage: 'request', error_code: timedOut ? 'WEB_REQUEST_TIMEOUT' : 'WEB_REQUEST_FAILED', duration_ms: Math.max(0, Date.now() - startedAt),
+      diagnostics: { ...incidentErrorDiagnostics(error), ...requestDiagnostics(method, path) } }, `${method}:${path}`);
+    if (observer === this.incidentObserver) for (const listener of this.connectionListeners) listener(false);
   }
 
   async rawRequest(
@@ -103,6 +153,8 @@ export class RuntimeClient {
         input.binaryContentType ?? 'application/octet-stream';
     }
 
+    const startedAt = Date.now();
+    const observer = this.incidentObserver;
     let response: Response;
     try { response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: input.method,
@@ -111,18 +163,27 @@ export class RuntimeClient {
       body: input.binaryBody ?? (
         input.body === undefined ? undefined : JSON.stringify(input.body)
       )
-    }); } catch (error) { if (!path.startsWith('/feedback') && !input.signal?.aborted) this.recordFeedbackError('network_failed', input.method); throw error; }
+    }); } catch (error) {
+      this.observeRequestFailure(path, input.method, error, startedAt, input.signal, observer);
+      throw error;
+    }
+
+    if (!path.startsWith('/feedback') && observer === this.incidentObserver) for (const listener of this.connectionListeners) listener(true);
 
     if (!response.ok) {
       if (!path.startsWith('/feedback')) this.recordFeedbackError('http_failed', input.method, response.status);
       const payload = await readErrorPayload(response);
       const error = parseApiError(payload);
-      throw new ApiClientError({
+      const failure = new ApiClientError({
         status: response.status,
         code: error.error.code,
         message: error.error.message,
         details: error.error.details
       });
+      const requestId = safeIncidentIdentifier(failure.details?.requestId) ?? safeIncidentIdentifier(response.headers.get('X-Request-ID'));
+      if (!path.startsWith('/feedback') && response.status >= 500) observer.report({ event_type: 'error', stage: 'request', error_code: 'WEB_HTTP_FAILED', http_status: response.status, duration_ms: Math.max(0, Date.now() - startedAt),
+        diagnostics: { ...incidentErrorDiagnostics(failure), ...requestDiagnostics(input.method, path), ...(requestId ? { request_id: requestId } : {}) } }, `${input.method}:${path}`);
+      throw failure;
     }
     return response;
   }

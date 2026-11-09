@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ var (
 
 type authRequest struct {
 	Email              string `json:"email"`
+	Phone              string `json:"phone"`
 	Name               string `json:"name"`
 	Password           string `json:"password"`
 	ClientID           string `json:"client_id"`
@@ -62,7 +64,7 @@ func handleRegister(accountSvc *accounts.Service, rbacSvc *rbac.Service, provisi
 		defer registerMu.Unlock()
 
 		result, err := accountSvc.Register(c.Request.Context(), accounts.RegisterRequest{
-			Email: req.Email, Name: req.Name, Password: req.Password,
+			Email: req.Email, Phone: req.Phone, Name: req.Name, Password: req.Password,
 		})
 		if err != nil {
 			authError(c, err)
@@ -161,7 +163,7 @@ func handleLogin(accountSvc *accounts.Service, rbacSvc *rbac.Service, provisione
 			return
 		}
 		account, err := accountSvc.AuthenticateCredentials(c.Request.Context(), accounts.LoginRequest{
-			Email: req.Email, Password: req.Password,
+			Email: req.Email, Phone: req.Phone, Password: req.Password,
 		})
 		if err != nil {
 			authError(c, err)
@@ -214,6 +216,20 @@ func handleLogin(accountSvc *accounts.Service, rbacSvc *rbac.Service, provisione
 	}
 }
 
+func handleRenewClaweeSession(accountSvc *accounts.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		issued, err := accountSvc.RenewClaweeSession(c.Request.Context(), bearerToken(c.Request))
+		if err != nil {
+			authError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{
+			"access_token": issued.Token, "token_type": "Bearer", "expires_at": issued.Session.ExpiresAt,
+		}})
+	}
+}
+
 func handleLogout(accountSvc *accounts.Service, cookies authCookieConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var revokeErr error
@@ -248,7 +264,7 @@ func handleLogout(accountSvc *accounts.Service, cookies authCookieConfig) gin.Ha
 	}
 }
 
-func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts DingTalkAuthOptions, agentActivityReportingEnabled bool, externalAllowed ...*bool) gin.HandlerFunc {
+func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts DingTalkAuthOptions, agentActivityReportingEnabled bool, modelGatewayEnabled bool, externalAllowed ...*bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		account, ok := currentAccount(c)
 		if !ok {
@@ -264,11 +280,19 @@ func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts 
 			abortAuthorizationError(c, http.StatusInternalServerError, "permission_check_failed", "权限检查失败")
 			return
 		}
-		roles, err := rbacSvc.ListEffectiveRoles(c.Request.Context(), account.UserID)
+		bindings, err := rbacSvc.ListAccountRoles(c.Request.Context(), account.UserID)
 		if err != nil {
 			abortAuthorizationError(c, http.StatusInternalServerError, "permission_check_failed", "权限检查失败")
 			return
 		}
+		roles := make([]string, 0, len(bindings))
+		roleNames := make([]string, 0, len(bindings))
+		for _, binding := range bindings {
+			roles = append(roles, binding.RoleCode)
+			roleNames = append(roleNames, binding.RoleName)
+		}
+		sort.Strings(roles)
+		sort.Strings(roleNames)
 		permissions, err := rbacSvc.ListEffectivePermissions(c.Request.Context(), account.UserID)
 		if err != nil {
 			abortAuthorizationError(c, http.StatusInternalServerError, "permission_check_failed", "权限检查失败")
@@ -277,10 +301,14 @@ func handleMe(accountSvc *accounts.Service, rbacSvc *rbac.Service, dingtalkOpts 
 		data := gin.H{
 			"account":      accountResponse(account, false),
 			"applications": gin.H{"frontend": true, "admin": hasAdmin},
-			"admin_roles":  roles, "admin_permissions": permissions,
+			"admin_roles":  roles, "admin_role_names": roleNames, "admin_permissions": permissions,
+		}
+		if principal, ok := currentPrincipal(c); ok {
+			data["session_id"] = principal.SessionID
 		}
 		data["dingtalk_enabled"] = dingtalkOpts.Enabled
 		data["agent_activity_reporting_enabled"] = agentActivityReportingEnabled
+		data["model_gateway_enabled"] = modelGatewayEnabled
 		if len(externalAllowed) > 0 && externalAllowed[0] != nil {
 			data["external_feedback_allowed"] = *externalAllowed[0]
 		}
@@ -578,7 +606,7 @@ func writeWebAuthResponse(c *gin.Context, account accounts.Account, hasAdmin boo
 
 func accountResponse(account accounts.Account, legacy bool) gin.H {
 	return gin.H{
-		"user_id": account.UserID, "email": account.Email, "name": account.Name, "status": account.Status,
+		"user_id": account.UserID, "email": account.Email, "phone": account.Phone, "name": account.Name, "status": account.Status,
 		"avatar_url": "/api/v1/auth/avatar/" + account.UserID,
 	}
 }
@@ -594,12 +622,14 @@ func authError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, errRegistrationRollbackFailed):
 		status, code, message = http.StatusInternalServerError, "internal_error", "认证服务错误"
-	case errors.Is(err, accounts.ErrInvalidCredentials):
+	case errors.Is(err, accounts.ErrInvalidCredentials), errors.Is(err, accounts.ErrInvalidSession):
 		status, code, message = http.StatusUnauthorized, "unauthorized", "未认证"
 	case errors.Is(err, accounts.ErrInvalidAccountRequest), errors.Is(err, accounts.ErrPasswordTooShort):
 		status, code, message = http.StatusBadRequest, "invalid_request", "请求无效"
 	case errors.Is(err, accounts.ErrEmailExists):
 		status, code, message = http.StatusConflict, "email_exists", "该邮箱已注册"
+	case errors.Is(err, accounts.ErrPhoneExists):
+		status, code, message = http.StatusConflict, "phone_exists", "该手机号已注册"
 	case errors.Is(err, agentprovisioning.ErrInvalidAgentID):
 		status, code, message = http.StatusBadRequest, "invalid_agent_id", "Agent ID 无效"
 	case errors.Is(err, agentprovisioning.ErrAgentForbidden):
@@ -617,7 +647,7 @@ func mountAuthRoutes(auth *gin.RouterGroup, opts Options, cookies authCookieConf
 	register := handleRegister(opts.AccountService, opts.RBACService, opts.AgentProvisioningService, cookies)
 	login := handleLogin(opts.AccountService, opts.RBACService, opts.AgentProvisioningService, cookies)
 	logout := handleLogout(opts.AccountService, cookies)
-	me := handleMe(opts.AccountService, opts.RBACService, opts.DingTalkAuth, opts.ActivityReportingEnabled, opts.ExternalFeedbackAllowed)
+	me := handleMe(opts.AccountService, opts.RBACService, opts.DingTalkAuth, opts.ActivityReportingEnabled, modelAccessMode(opts) == ModelAccessPlatformManaged, opts.ExternalFeedbackAllowed)
 	requireFrontend := requireJWT(opts.AccountService, accounts.AudienceFrontend, cookies.FrontendName)
 	requireClaweeAgent := requireClaweeAgentBinding(opts.AccountService, opts.ProxyGateway)
 
@@ -632,4 +662,5 @@ func mountAuthRoutes(auth *gin.RouterGroup, opts Options, cookies authCookieConf
 	auth.POST("/avatar", requireFrontend, handleUploadAccountAvatar(opts.AccountService))
 	auth.DELETE("/avatar", requireFrontend, handleDeleteAccountAvatar(opts.AccountService))
 	auth.GET("/me", requireFrontend, requireClaweeAgent, me)
+	auth.POST("/session/renew", requireFrontend, requireClaweeAgent, handleRenewClaweeSession(opts.AccountService))
 }

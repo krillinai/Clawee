@@ -49,6 +49,7 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceCreate), handleAdminCreateSkillSpace(opts.SkillHubService))
 	admin.PUT("/skill-spaces", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleAdminUpdateSkillSpace(opts.SkillHubService))
 	admin.GET("/skill-spaces/approver-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverCandidates(opts.SkillHubService, opts.AccountService, opts.RBACService))
+	admin.GET("/skill-spaces/approver-role-candidates", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproverRoleCandidates(opts.SkillHubService, opts.RBACService))
 	admin.PUT("/skill-spaces/approver", skillOperationLog(opts.Logger, "skill_space_approver_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApprover(opts.SkillHubService, opts.AccountService, opts.RBACService))
 	admin.PUT("/skill-spaces/approval", skillOperationLog(opts.Logger, "skill_space_approval_update"), skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceUpdate), handleSkillSpaceApproval(opts))
 	admin.GET("/skill-spaces/account-grants", read, handleAdminSkillSpaceMembers(opts.SkillHubService, opts.AccountService))
@@ -56,6 +57,37 @@ func mountSkillSpaceAdminRoutes(admin *gin.RouterGroup, opts Options) {
 	admin.POST("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberCreate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, false))
 	admin.PUT("/skill-spaces/account-grants", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberUpdate), handleAdminSetSkillSpaceMember(opts.SkillHubService, opts.AccountService, true))
 	admin.POST("/skill-spaces/account-grants/remove", skillRequirePermission(opts.RBACService, rbac.PermissionSkillSpaceMemberDelete), handleAdminRemoveSkillSpaceMember(opts.SkillHubService))
+}
+
+func handleSkillSpaceApproverRoleCandidates(service *skillhub.Service, rbacService *rbac.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !checkAdminSpaceRead(c, service, strings.TrimSpace(c.Query("space_id"))) {
+			return
+		}
+		roles, err := rbacService.ListRoles(c.Request.Context())
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		query := strings.ToLower(strings.TrimSpace(c.Query("query")))
+		items := []skillhub.ApprovalRole{}
+		for _, role := range roles {
+			if query == "" || strings.Contains(strings.ToLower(role.Name), query) || strings.Contains(strings.ToLower(role.Code), query) {
+				items = append(items, skillhub.ApprovalRole{RoleID: role.RoleID, Name: role.Name})
+			}
+		}
+		c.JSON(http.StatusOK, itemsResponse(items))
+	}
+}
+
+func checkSkillApprovalRoles(c *gin.Context, service *rbac.Service, roleIDs []string) bool {
+	for _, id := range roleIDs {
+		if _, err := service.GetRole(c.Request.Context(), id); err != nil {
+			skillError(c, skillhub.ErrInvalidRequest)
+			return false
+		}
+	}
+	return true
 }
 
 func handleSkillSpaceApproverCandidates(service *skillhub.Service, accountService *accounts.Service, rbacService *rbac.Service) gin.HandlerFunc {
@@ -92,6 +124,7 @@ func handleSkillSpaceApprover(service *skillhub.Service, accountService *account
 		var request struct {
 			SpaceID   string   `json:"space_id"`
 			UserIDs   []string `json:"approver_user_ids"`
+			RoleIDs   []string `json:"approver_role_ids"`
 			Confirmed bool     `json:"confirm_reset"`
 		}
 		if decodeSkillJSON(c, &request) != nil {
@@ -124,7 +157,10 @@ func handleSkillSpaceApprover(service *skillhub.Service, accountService *account
 			}
 		}
 		account, _ := currentAccount(c)
-		count, err := service.SetSpaceApprovers(c.Request.Context(), request.SpaceID, "local", "", request.UserIDs, request.Confirmed, account.UserID)
+		if !checkSkillApprovalRoles(c, rbacService, request.RoleIDs) {
+			return
+		}
+		count, err := service.SetSpaceApprovalSubjects(c.Request.Context(), request.SpaceID, "local", "", request.UserIDs, request.RoleIDs, request.Confirmed, account.UserID)
 		if err != nil {
 			skillError(c, err)
 			return

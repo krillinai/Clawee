@@ -20,6 +20,7 @@ import (
 type createGrantRequest struct {
 	AgentID      json.RawMessage    `json:"agent_id"`
 	UserID       string             `json:"user_id"`
+	RoleID       string             `json:"role_id"`
 	CapabilityID string             `json:"capability_id"`
 	GrantType    string             `json:"grant_type"`
 	DataScope    mcpgateway.JSONMap `json:"data_scope"`
@@ -131,6 +132,26 @@ func adminGateDecisionError(c *gin.Context, gate mcpgateway.GateRequest, err err
 }
 
 func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
+	admin.GET("/mcp/grants/roles", requireAnyPermission(opts.RBACService, rbac.PermissionMCPGrantRead, rbac.PermissionMCPGrantCreate), func(c *gin.Context) {
+		if opts.ProxyGateway == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})
+			return
+		}
+		if opts.RBACService == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "rbac service is disabled"})
+			return
+		}
+		roles, err := opts.RBACService.ListRoles(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		items := make([]gin.H, 0, len(roles))
+		for _, role := range roles {
+			items = append(items, gin.H{"role_id": role.RoleID, "code": role.Code, "name": role.Name})
+		}
+		c.JSON(http.StatusOK, itemsResponse(items))
+	})
 	admin.POST("/mcp/grants", requirePermission(opts.RBACService, rbac.PermissionMCPGrantCreate), func(c *gin.Context) {
 		if opts.ProxyGateway == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp gateway proxy is disabled"})
@@ -150,7 +171,9 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 			abortAuthorizationError(c, http.StatusUnauthorized, "unauthorized", "未认证")
 			return
 		}
-		if strings.TrimSpace(req.UserID) == "" {
+		req.UserID = strings.TrimSpace(req.UserID)
+		req.RoleID = strings.TrimSpace(req.RoleID)
+		if (req.UserID == "") == (req.RoleID == "") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
@@ -162,22 +185,37 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		if opts.AccountService == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "account service is disabled"})
-			return
-		}
-		targetAccount, err := opts.AccountService.Account(c.Request.Context(), req.UserID)
-		if errors.Is(err, accounts.ErrAccountNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "account_not_found"})
-			return
-		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if targetAccount.Status != accounts.StatusActive {
-			c.JSON(http.StatusConflict, gin.H{"error": "account_not_active"})
-			return
+		if req.UserID != "" {
+			if opts.AccountService == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "account service is disabled"})
+				return
+			}
+			targetAccount, err := opts.AccountService.Account(c.Request.Context(), req.UserID)
+			if errors.Is(err, accounts.ErrAccountNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "account_not_found"})
+				return
+			}
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if targetAccount.Status != accounts.StatusActive {
+				c.JSON(http.StatusConflict, gin.H{"error": "account_not_active"})
+				return
+			}
+		} else {
+			if opts.RBACService == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "rbac service is disabled"})
+				return
+			}
+			if _, err := opts.RBACService.GetRole(c.Request.Context(), req.RoleID); err != nil {
+				if errors.Is(err, rbac.ErrRoleNotFound) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "role_not_found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		capabilities, err := opts.ProxyGateway.Store().ListCapabilities(c.Request.Context(), mcpgateway.CapabilityFilter{})
 		if err != nil {
@@ -195,11 +233,22 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusNotFound, gin.H{"error": mcpgateway.ErrCapabilityNotFound.Error()})
 			return
 		}
+		if capability.UpstreamServerID == "skill-contributions" {
+			upstream, err := opts.ProxyGateway.Store().GetUpstreamServer(c.Request.Context(), capability.UpstreamServerID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "upstream_unavailable"})
+				return
+			}
+			if mcpgateway.IsSkillContributionsTool(upstream, capability) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "data_authorization_required"})
+				return
+			}
+		}
 		if capability.Status != mcpgateway.StatusActive {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		existing, err := opts.ProxyGateway.Store().ListGrants(c.Request.Context(), mcpgateway.GrantFilter{UserID: req.UserID, CapabilityID: req.CapabilityID, GrantType: req.GrantType})
+		existing, err := opts.ProxyGateway.Store().ListGrants(c.Request.Context(), mcpgateway.GrantFilter{UserID: req.UserID, RoleID: req.RoleID, CapabilityID: req.CapabilityID, GrantType: req.GrantType})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -216,6 +265,7 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 		grant := mcpgateway.AccountGrant{
 			ID:           grantID,
 			UserID:       req.UserID,
+			RoleID:       req.RoleID,
 			CapabilityID: req.CapabilityID,
 			GrantType:    req.GrantType,
 			DataScope:    req.DataScope,
@@ -252,7 +302,11 @@ func mountAdminMCPGovernanceRoutes(admin *gin.RouterGroup, opts Options) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 			return
 		}
-		items, err := opts.ProxyGateway.Store().ListGrants(c.Request.Context(), mcpgateway.GrantFilter{UserID: c.Query("user_id"), CapabilityID: c.Query("capability_id"), GrantType: c.Query("grant_type")})
+		if c.Query("user_id") != "" && c.Query("role_id") != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+			return
+		}
+		items, err := opts.ProxyGateway.Store().ListGrants(c.Request.Context(), mcpgateway.GrantFilter{UserID: c.Query("user_id"), RoleID: c.Query("role_id"), CapabilityID: c.Query("capability_id"), GrantType: c.Query("grant_type")})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

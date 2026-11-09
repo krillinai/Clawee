@@ -31,7 +31,7 @@ func TestPostgresStoreCreateVersionAndLoadAdminDetail(t *testing.T) {
 		WithArgs(version.VersionID, skill.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, version.UploadedByUserID, nil, version.UploadedByName, skill.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectLocalInsert(mock, version.VersionID, skill.SpaceID, version.PackageSHA256, now)
-	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "user", version.UploadedByUserID, "admin_upload", skill.SkillID, skill.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "user", version.UploadedByUserID, "admin_upload", skill.SkillID, skill.Name, version.VersionID, version.Version, version.UploadedByName).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
 	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), skill, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName, Origin: "admin_upload"})
@@ -61,8 +61,8 @@ func TestPostgresCreateSpaceGrantsCreatorAtomically(t *testing.T) {
 			mock.ExpectCommit()
 			mock.ExpectQuery(`SELECT sp.space_id`).WithArgs(space.SpaceID).WillReturnRows(pgxmock.NewRows([]string{
 				"space_id", "name", "description", "created_by", "updated_by", "created_at", "updated_at",
-				"member_count", "skill_count", "published_count", "approvers", "approval_provider", "external_approval_template_id",
-			}).AddRow(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now, 1, 0, 0, []byte("[]"), "local", ""))
+				"member_count", "skill_count", "published_count", "approvers", "approval_provider", "external_approval_template_id", "approver_roles",
+			}).AddRow(space.SpaceID, space.Name, space.Description, space.CreatedBy, space.UpdatedBy, now, now, 1, 0, 0, []byte("[]"), "local", "", []byte("[]")))
 		}
 		created, err := store.CreateSpace(context.Background(), space)
 		if failGrant {
@@ -113,7 +113,7 @@ func TestPostgresStoreContributionFactIsAtomic(t *testing.T) {
 			if tc.actor == "system" {
 				actor = nil
 			}
-			fact := mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), tc.event, tc.actor, actor, tc.origin, storedID, "report", "ver-1")
+			fact := mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), tc.event, tc.actor, actor, tc.origin, storedID, "report", "ver-1", version.Version, version.UploadedByName)
 			if tc.failFact {
 				fact.WillReturnError(errors.New("fact write failed"))
 				mock.ExpectRollback()
@@ -155,7 +155,7 @@ func TestPostgresStoreReplacementRenameIsTransactional(t *testing.T) {
 			} else {
 				insert.WillReturnResult(pgxmock.NewResult("INSERT", 1))
 				expectLocalInsert(mock, "v2", DefaultSpaceID, "hash", now)
-				mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "original", "old-name", "v2").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "original", "old-name", "v2", "2", "").WillReturnResult(pgxmock.NewResult("INSERT", 1))
 				mock.ExpectCommit()
 			}
 			skill, _, err := store.CreateVersion(context.Background(), Skill{Name: "new-name", SpaceID: DefaultSpaceID}, Version{VersionID: "v2", Version: "2", PackagePath: "v2.zip", PackageSHA256: "hash", CreatedAt: now}, CreateVersionOptions{Resolution: VersionResolutionReplace, TargetSkillID: "original", Publish: true, Origin: "admin_upload"})
@@ -220,7 +220,7 @@ func TestPostgresStoreCreateVersionPreservesCurrentUntilApproval(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs(version.VersionID, "skill-1", version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectLocalInsert(mock, version.VersionID, proposed.SpaceID, version.PackageSHA256, now)
-	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID, version.Version, version.UploadedByName).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
 	skill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionByName, Origin: "admin_upload"})
@@ -286,7 +286,7 @@ func TestPostgresStoreCreateVersionCreateOnlyStoresSourceWithoutPublishing(t *te
 		WithArgs(version.VersionID, proposed.SkillID, version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, source.SourceID, source.Path, source.CommitSHA, source.ContentSHA256, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectLocalInsert(mock, version.VersionID, proposed.SpaceID, version.PackageSHA256, now)
-	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "system", nil, "source_sync", proposed.SkillID, proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.created", "system", nil, "source_sync", proposed.SkillID, proposed.Name, version.VersionID, version.Version, version.UploadedByName).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
 	gotSkill, gotVersion, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: false, Resolution: VersionResolutionCreateOnly, Origin: "source_sync"})
@@ -314,7 +314,7 @@ func TestPostgresStoreCreateVersionTargetDoesNotBypassApproval(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs(version.VersionID, "skill-1", version.Version, version.Description, version.Changelog, version.PackagePath, version.PackageSHA256, now, nil, nil, nil, nil, nil, nil, "", proposed.Name).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectLocalInsert(mock, version.VersionID, "skillspace-moved", version.PackageSHA256, now)
-	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO employee_ai_activity_facts`).WithArgs(pgxmock.AnyArg(), "skill.version_uploaded", "user", "", "admin_upload", "skill-1", proposed.Name, version.VersionID, version.Version, version.UploadedByName).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 
 	gotSkill, _, err := store.CreateVersion(context.Background(), proposed, version, CreateVersionOptions{Publish: true, Resolution: VersionResolutionTarget, TargetSkillID: "skill-1", Origin: "admin_upload"})
@@ -403,15 +403,17 @@ func TestPostgresStoreListsAdminAndPublishedSkills(t *testing.T) {
 	store := NewPostgresStore(mock)
 	now := time.Date(2026, 7, 27, 17, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
 	current := "version-1"
+	score := 3
 
 	mock.ExpectQuery(regexp.QuoteMeta(adminSkillSelect + ` ORDER BY s.updated_at DESC`)).
 		WillReturnRows(adminSkillRows().AddRow("skill-1", DefaultSpaceID, "默认技能空间", "code-review", "description", current, "admin", now, now, "version-2", "2.0", "pending", "writer-id", "sha").
 			AddRow("skill-2", DefaultSpaceID, "默认技能空间", "other-skill", "description", nil, "admin", now, now, "version-3", "1.0", "pending", "writer-id", "other-sha"))
 	mock.ExpectQuery(`SELECT r.id,r.business_id,r.scope_id,r.content_digest`).WithArgs([]string{"version-2", "version-3"}).
-		WillReturnRows(pgxmock.NewRows([]string{"id", "business_id", "scope_id", "content_digest", "status", "user_id", "name", "status", "comment", "decided_at"}).
-			AddRow("old-request", "version-2", "other-space", "sha", "approved", "old-reviewer", "旧审批人", "approved", "", nil).
-			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "reviewer", "审核员", "approved", "同意", nil).
-			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "second", "另一审批人", "pending", "", nil))
+		WillReturnRows(pgxmock.NewRows([]string{"id", "business_id", "scope_id", "content_digest", "status", "user_id", "name", "status", "comment", "decided_at", "scoring_standard_version", "scenario_value", "result_effectiveness", "ease_of_use", "reuse_value"}).
+			AddRow("old-request", "version-2", "other-space", "sha", "approved", "old-reviewer", "旧审批人", "approved", "", nil, "", nil, nil, nil, nil).
+			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "reviewer", "审核员", "approved", "同意", nil, "manual-v1", &score, &score, &score, &score).
+			AddRow("request-1", "version-2", DefaultSpaceID, "sha", "pending", "second", "另一审批人", "pending", "", nil, "manual-v1", nil, nil, nil, nil))
+	expectEmptyAIAttempts(mock, "request-1")
 	adminItems, err := store.ListAdmin(context.Background())
 	if err != nil || len(adminItems) != 2 || adminItems[0].CurrentVersionID == nil {
 		t.Fatalf("ListAdmin() = %#v, %v", adminItems, err)
@@ -464,7 +466,7 @@ func TestPostgresStoreAdminDetailNormalizesVersionTimestampsToUTC(t *testing.T) 
 		if id == "version-manual" {
 			digest = "sha-manual"
 		}
-		mock.ExpectQuery(`SELECT id,status FROM approval_requests`).WithArgs(id, DefaultSpaceID, digest).WillReturnError(pgx.ErrNoRows)
+		mock.ExpectQuery(`SELECT id,status,COALESCE`).WithArgs(id, DefaultSpaceID, digest).WillReturnError(pgx.ErrNoRows)
 	}
 
 	detail, err := store.GetAdmin(context.Background(), "skill-1")
@@ -487,7 +489,7 @@ func TestPostgresStoreListsOnlyOwnWritablePendingVersions(t *testing.T) {
 	store := NewPostgresStore(mock)
 	now := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`FROM skill_versions v JOIN skills s`).WithArgs("writer-id").
-		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "space_id", "name", "version_id", "version", "created_at", "approval_provider", "id", "status", "decision", "provider_instance_id"}).AddRow("skill-1", DefaultSpaceID, "code-review", "version-1", "1.0", now, "local", nil, nil, nil, nil))
+		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "space_id", "name", "version_id", "version", "created_at", "approval_provider", "id", "status", "decision", "provider_instance_id", "request_id", "workflow_stage"}).AddRow("skill-1", DefaultSpaceID, "code-review", "version-1", "1.0", now, "local", nil, nil, nil, nil, nil, ""))
 	items, err := store.ListOwnPendingVersions(context.Background(), "writer-id")
 	if err != nil || len(items) != 1 || items[0].VersionID != "version-1" {
 		t.Fatalf("own pending versions = %#v, %v", items, err)
@@ -567,6 +569,7 @@ func TestPostgresStoreClearCurrentResubmitsAfterApproverChange(t *testing.T) {
 	mock.ExpectExec(`UPDATE skill_versions SET approval_status='pending'`).WithArgs("version-1").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(`INSERT INTO approval_requests`).WithArgs(pgxmock.AnyArg(), "version-1", DefaultSpaceID, "sha", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectExec(`INSERT INTO approval_request_approvers`).WithArgs(pgxmock.AnyArg(), DefaultSpaceID).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectExec(`INSERT INTO skill_ai_review_attempts`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), "version-1", DefaultSpaceID, now).WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	mock.ExpectCommit()
 	if _, err := store.ClearCurrentVersion(context.Background(), "skill-1", now); err != nil {
 		t.Fatal(err)
@@ -630,6 +633,11 @@ func expectSpaceLock(mock pgxmock.PgxPoolIface, spaceID string) {
 func expectLocalInsert(mock pgxmock.PgxPoolIface, versionID, spaceID, digest string, now time.Time) {
 	mock.ExpectExec(`INSERT INTO approval_requests`).WithArgs(pgxmock.AnyArg(), versionID, spaceID, digest, now).WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	mock.ExpectExec(`INSERT INTO approval_request_approvers`).WithArgs(pgxmock.AnyArg(), spaceID).WillReturnResult(pgxmock.NewResult("INSERT", 0))
+}
+
+func expectEmptyAIAttempts(mock pgxmock.PgxPoolIface, request string) {
+	mock.ExpectExec(`UPDATE skill_ai_review_attempts`).WithArgs(request, pgxmock.AnyArg(), AIReviewTimeout).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	mock.ExpectQuery(`SELECT attempt_id,agent_id,status`).WithArgs(request).WillReturnRows(pgxmock.NewRows([]string{"attempt_id", "agent_id", "status", "created_at", "updated_at", "started_at", "report", "error", "manual_by", "manual_at", "manual_comment"}))
 }
 
 func skillRows() *pgxmock.Rows {

@@ -7,7 +7,7 @@ import (
 )
 
 func Generate32(prefix string) (string, error) {
-	if prefix != "agt_" && prefix != "col_" {
+	if prefix != "sk-" && prefix != "col_" {
 		return "", errors.New("unsupported token prefix")
 	}
 	var random [21]byte

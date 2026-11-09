@@ -53,12 +53,22 @@ describe('Desktop Runtime proxy', () => {
     }
   });
 
-  it('stops reading a streaming body once the 10 MiB limit is exceeded', async () => {
+  it('accepts a request body at the 50 MiB limit', async () => {
+    const content = new Uint8Array(50 * 1024 * 1024);
+    content[content.length - 1] = 65;
+    const request = new Request('http://localhost/attachments', { method: 'POST', body: content });
+
+    const result = await readBoundedRequestBody(request);
+    expect(result?.byteLength).toBe(content.length);
+    expect(new Uint8Array(result!)[content.length - 1]).toBe(65);
+  });
+
+  it('stops reading a streaming body once the 50 MiB limit is exceeded', async () => {
     let pullCount = 0;
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
         pullCount += 1;
-        controller.enqueue(new Uint8Array(6 * 1024 * 1024));
+        controller.enqueue(new Uint8Array(26 * 1024 * 1024));
         if (pullCount >= 3) controller.close();
       }
     });

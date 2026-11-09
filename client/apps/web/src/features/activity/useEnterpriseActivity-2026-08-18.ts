@@ -1,6 +1,7 @@
 import type {
   EnterpriseActivityDetailResponse,
   EnterpriseActivityRange,
+  EnterpriseActivityRuntimeResponse,
   EnterpriseActivityStatisticsResponse,
   EnterpriseSessionResponse
 } from '@clawee/protocol';
@@ -16,6 +17,7 @@ export type EnterpriseActivityCapabilityState =
 
 type EnterpriseActivityService = {
   getActivityCapability(): Promise<{ allowed: boolean; refreshedAt: string }>;
+  getActivityRuntime?(): Promise<EnterpriseActivityRuntimeResponse>;
   getActivityStatistics(
     range: EnterpriseActivityRange
   ): Promise<EnterpriseActivityStatisticsResponse>;
@@ -47,6 +49,13 @@ export function useEnterpriseActivity(input: {
   const [statisticsReloadKey, setStatisticsReloadKey] = useState(0);
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const [capabilityReloadKey, setCapabilityReloadKey] = useState(0);
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<{
+    subjectId?: string; data: EnterpriseActivityRuntimeResponse;
+  }>();
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeError, setRuntimeError] = useState<string>();
+  const [runtimeReloadKey, setRuntimeReloadKey] = useState(0);
+  const runtimeGenerationRef = useRef(0);
   const capabilityGenerationRef = useRef(0);
   const dataGenerationRef = useRef(0);
   const detailGenerationRef = useRef(0);
@@ -60,6 +69,10 @@ export function useEnterpriseActivity(input: {
   unauthorizedRef.current = input.onUnauthorized;
 
   function clearData(): void {
+    runtimeGenerationRef.current += 1;
+    setRuntimeSnapshot(undefined);
+    setRuntimeLoading(false);
+    setRuntimeError(undefined);
     dataGenerationRef.current += 1;
     detailGenerationRef.current += 1;
     setStatistics(undefined);
@@ -107,6 +120,68 @@ export function useEnterpriseActivity(input: {
   ]);
 
   const routeRange = activityRange(input.route);
+  const runtimeEnabled = capability === 'allowed' && input.connected
+    && input.session.status === 'signed_in' && input.route.view === 'activity';
+
+  useEffect(() => {
+    const generation = ++runtimeGenerationRef.current;
+    setRuntimeSnapshot(undefined);
+    setRuntimeError(undefined);
+    setRuntimeLoading(false);
+    if (!runtimeEnabled || input.service === null) return;
+    const service = input.service;
+    if (service.getActivityRuntime === undefined) {
+      setRuntimeError('当前网关尚未提供团队运行状态');
+      return;
+    }
+    const loadRuntime = service.getActivityRuntime.bind(service);
+    let cancelled = false;
+    let inFlight = false;
+    let initialPoll = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const current = () => !cancelled && generation === runtimeGenerationRef.current;
+    async function poll() {
+      if (!current() || inFlight || document.hidden) return;
+      inFlight = true;
+      // Background polls keep the refresh control steady; only the first load or a manual retry shows progress.
+      if (initialPoll) setRuntimeLoading(true);
+      initialPoll = false;
+      try {
+        const data = await loadRuntime();
+        if (!current()) return;
+        setRuntimeSnapshot({ subjectId: input.session.account?.subjectId, data });
+        setRuntimeError(undefined);
+      } catch (error) {
+        if (!current()) return;
+        setRuntimeSnapshot(undefined);
+        if (isAuthorizationFailure(error)) {
+          clearData();
+          void closeAfterAuthorizationFailure(service, error);
+          return;
+        }
+        setRuntimeError(error instanceof ApiClientError && error.status === 404
+          ? '当前网关尚未提供团队运行状态，请升级网关后重试'
+          : formatActivityError(error, '实时运行状态暂不可用'));
+      } finally {
+        inFlight = false;
+        if (current()) {
+          setRuntimeLoading(false);
+          if (!document.hidden) timer = setTimeout(() => void poll(), 15_000);
+        }
+      }
+    }
+    function onVisibilityChange() {
+      clearTimeout(timer);
+      if (!document.hidden) void poll();
+    }
+    void poll();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [runtimeEnabled, input.service, input.session.status, input.session.account?.subjectId, runtimeReloadKey]);
 
   useEffect(() => {
     if (
@@ -266,6 +341,11 @@ export function useEnterpriseActivity(input: {
 
   return {
     capability,
+    runtime: runtimeEnabled && runtimeSnapshot?.subjectId === input.session.account?.subjectId
+      ? runtimeSnapshot?.data : undefined,
+    runtimeLoading: runtimeEnabled && runtimeLoading,
+    runtimeError: runtimeEnabled ? runtimeError : undefined,
+    retryRuntime() { setRuntimeReloadKey(current => current + 1); },
     statistics: visibleStatistics,
     statisticsLoading,
     statisticsError,

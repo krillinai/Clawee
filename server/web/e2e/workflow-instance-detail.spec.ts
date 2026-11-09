@@ -16,7 +16,7 @@ const instance = {
 };
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-  test(`工作流实例详情展示节点正文 ${viewport.width}`, async ({ page }, testInfo) => {
+  test(`流程任务详情展示节点正文 ${viewport.width}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.route('**/api/v1/**', async route => {
       const path = new URL(route.request().url()).pathname;
@@ -27,9 +27,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await route.fulfill({ json: { data, meta: { next_cursor: '', has_next: false } } });
     });
     await page.goto('/admin/workflow-instances');
-    await page.getByRole('link', { name: '查看实例 instance-e2e 详情' }).click();
+    await page.getByRole('link', { name: '查看流程任务 instance-e2e 详情' }).click();
     await expect(page).toHaveURL(/\/admin\/workflow-instances\/instance-e2e$/);
-    await expect(page.getByRole('heading', { name: '实例 instance-e2e' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '整理内容', level: 2 })).toBeVisible();
     await page.getByRole('button', { name: '展开节点“整理内容”的内容' }).click();
     await expect(page.getByText('测试主题')).toBeVisible();
     await expect(page.getByText('要点二')).toBeVisible();

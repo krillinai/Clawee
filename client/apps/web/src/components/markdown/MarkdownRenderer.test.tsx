@@ -1,11 +1,25 @@
 import type { MouseEvent } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
 import { extractWorkspaceFilePaths } from './markdown-inline.js';
 
 describe('MarkdownRenderer', () => {
+  it('中文空格绝对路径与 ZIP 成果链接交给现有工作区回调，不打开外部页面', async () => {
+    const user = userEvent.setup();
+    const onLinkClick = vi.fn((_href: string, event: MouseEvent<HTMLAnchorElement>) => event.preventDefault());
+    render(<MarkdownRenderer variant="assistant" linkifyWorkspaceFiles onLinkClick={onLinkClick}
+      text={'[报告](/srv/任务 工作区/中文 报告.txt) [压缩包](outputs/成果.zip)'} />);
+
+    await user.click(screen.getByRole('link', { name: '报告' }));
+    await user.click(screen.getByRole('link', { name: '压缩包' }));
+
+    expect(onLinkClick.mock.calls.map(call => call[0])).toEqual(['/srv/任务 工作区/中文 报告.txt', 'outputs/成果.zip']);
+    expect(screen.getByRole('link', { name: '报告' })).not.toHaveAttribute('target');
+    expect(extractWorkspaceFilePaths('[压缩包](outputs/成果.zip)')).toEqual(['outputs/成果.zip']);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: undefined });
@@ -161,6 +175,28 @@ describe('MarkdownRenderer', () => {
     expect(onLinkClick).toHaveBeenCalledWith('docs/readme.md', expect.any(Object));
   });
 
+  it('shows the cited site favicon without a referrer and falls back to a globe', () => {
+    const { container } = render(
+      <MarkdownRenderer variant="assistant" text={'据 [CNBC](https://www.cnbc.com/2026/10/13/ai.html) 报道，联系 [编辑部](mailto:news@example.com)。'} />
+    );
+
+    const link = screen.getByRole('link', { name: 'CNBC' });
+    const icon = link.querySelector('img.md-link-site-icon')!;
+    expect(icon).toHaveAttribute('src', 'https://www.cnbc.com/favicon.ico');
+    expect(icon).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(screen.getByRole('link', { name: '编辑部' }).querySelector('.md-link-site-icon')).toBeNull();
+
+    fireEvent.error(icon);
+    expect(link.querySelector('img')).toBeNull();
+    expect(link.querySelector('svg.md-link-site-icon.is-fallback')).not.toBeNull();
+    expect(container.querySelectorAll('.md-link-site-icon')).toHaveLength(1);
+  });
+
+  it('keeps user messages free of labelled-link favicons', () => {
+    render(<MarkdownRenderer variant="user" text={'[CNBC](https://www.cnbc.com/ai)'} />);
+    expect(screen.getByRole('link', { name: 'CNBC' }).querySelector('.md-link-site-icon')).toBeNull();
+  });
+
   it('shows html and image syntax as text without creating DOM nodes or images', () => {
     render(<MarkdownRenderer variant="assistant" text={'<script>alert(1)</script>\n\n![alt text](https://example.com/a.png)'} />);
 
@@ -168,6 +204,104 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByText(/alt text/)).toBeInTheDocument();
     expect(document.querySelector('script')).not.toBeInTheDocument();
     expect(document.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('renders a collapsible reference section with markdown and working code copy', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { container } = render(<MarkdownRenderer text={[
+      '工作总结。',
+      '<details>',
+      '<summary>**记录定位**（collector_id / session_id / turn_id）</summary>',
+      '',
+      '```text',
+      '[1] collector_test / thread_test / run_test',
+      '```',
+      '',
+      '</details>',
+      '后续说明。'
+    ].join('\n')} />);
+    const details = container.querySelector('details');
+    const summary = container.querySelector('summary')!;
+
+    expect(details).toBeInTheDocument();
+    expect(details).not.toHaveAttribute('open');
+    expect(summary.querySelector('strong')).toHaveTextContent('记录定位');
+    expect(container).not.toHaveTextContent('<details>');
+    expect(screen.getByText('后续说明。')).toBeInTheDocument();
+
+    await user.click(summary);
+    expect(details).toHaveAttribute('open');
+    await user.click(screen.getByRole('button', { name: '复制' }));
+    expect(writeText).toHaveBeenCalledWith('[1] collector_test / thread_test / run_test');
+    await user.click(summary);
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  it('keeps nested details and closing tags inside code in their own sections', () => {
+    const { container } = render(<MarkdownRenderer text={[
+      '<details open>',
+      '<summary>外层</summary>',
+      '```html',
+      '</details>',
+      '<details>',
+      '```',
+      '<details>',
+      '<summary>内层</summary>',
+      '- 测试项',
+      '</details>',
+      '</details>',
+      '正文结束。'
+    ].join('\n')} />);
+
+    expect(container.querySelectorAll('details')).toHaveLength(2);
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('details details li')).toHaveTextContent('测试项');
+    expect(container.querySelector('code')?.textContent).toBe('</details>\n<details>');
+    expect(screen.getByText('正文结束。').closest('details')).toBeNull();
+  });
+
+  it('renders streamed details before the closing tag arrives', () => {
+    const { container, rerender } = render(<MarkdownRenderer text={'<details>\n<summary>记录定位</summary>\n\n第一条记录'} />);
+    expect(container.querySelector('details .md-p')).toHaveTextContent('第一条记录');
+    const details = container.querySelector('details')!;
+    fireEvent.click(container.querySelector('summary')!);
+
+    rerender(<MarkdownRenderer text={'<details>\n<summary>记录定位</summary>\n\n第一条记录\n\n第二条记录\n</details>'} />);
+    expect(details).toHaveAttribute('open');
+    expect(details).toHaveTextContent('第二条记录');
+  });
+
+  it('does not interpret arbitrary HTML or event attributes in details', () => {
+    const { container } = render(<MarkdownRenderer text={[
+      '<details open>',
+      '<summary><img src=x onerror=alert(1)>记录</summary>',
+      '<script>alert(1)</script>',
+      '</details>',
+      '',
+      '<details ontoggle="alert(1)">',
+      '<summary>不支持的属性</summary>',
+      '正文',
+      '</details>'
+    ].join('\n')} />);
+
+    expect(container.querySelectorAll('details')).toHaveLength(1);
+    expect(container.querySelector('details')).not.toHaveAttribute('ontoggle');
+    expect(container.querySelector('img, script')).toBeNull();
+    expect(container).toHaveTextContent('<details ontoggle="alert(1)">');
+  });
+
+  it.each(['user', 'code'] as const)('keeps details syntax literal in %s content', variant => {
+    const source = '<details>\n<summary>记录定位</summary>\n\n正文\n</details>';
+    const { container } = render(<MarkdownRenderer
+      variant={variant === 'user' ? 'user' : 'assistant'}
+      text={variant === 'code' ? `\`\`\`html\n${source}\n\`\`\`` : source}
+    />);
+
+    expect(container.querySelector('details, summary')).toBeNull();
+    expect(container).toHaveTextContent('<details>');
+    expect(container).toHaveTextContent('<summary>记录定位</summary>');
   });
 
   it('keeps user variant conservative', () => {
@@ -227,6 +361,68 @@ describe('MarkdownRenderer', () => {
     expect(extractWorkspaceFilePaths(
       '打开 reports/aso-audit.html，也可以查看 `reports/aso-audit.html` 和 data/score.xlsx。'
     )).toEqual(['reports/aso-audit.html', 'data/score.xlsx']);
+  });
+
+  it('prefers a Windows absolute path over a repeated basename', () => {
+    const path = String.raw`C:\Users\example\Documents\Clawee\Default Project\AI-Agent-内容整理.md`;
+    expect(extractWorkspaceFilePaths(`文件：\`AI-Agent-内容整理.md\`\n位置：\`${path}\``)).toEqual([path]);
+    expect(extractWorkspaceFilePaths(`[笔记](<${path}>)`)).toEqual([path]);
+  });
+
+  it('keeps a relative root file distinct from a same-named file in a subdirectory', () => {
+    expect(extractWorkspaceFilePaths('报告：report.md 和 docs/report.md')).toEqual(['report.md', 'docs/report.md']);
+  });
+
+  it('opens angle-wrapped Windows file links through the workspace callback', async () => {
+    const path = 'C:/Users/example/Documents/Clawee/Default Project/AI-Agent-内容整理.md';
+    const onLinkClick = vi.fn((_href: string, event: MouseEvent<HTMLAnchorElement>) => event.preventDefault());
+    render(<MarkdownRenderer linkifyWorkspaceFiles onLinkClick={onLinkClick}
+      text={`[Markdown 笔记](<${path}>)`} />);
+
+    const link = screen.getByRole('link', { name: 'Markdown 笔记' });
+    expect(link).toHaveAttribute('href', path);
+    await userEvent.setup().click(link);
+    expect(onLinkClick).toHaveBeenCalledWith(path, expect.any(Object));
+  });
+
+  it.each([
+    "/Users/example/Documents/AI项目/Example's AI projects/MokaHelper/reports/面试报告.html",
+    "reports/Melissa's interview.md",
+    '/Users/example/Documents/Clawee/Default Project/outputs/image-generator/demo-ai-wordmark-test-02.png',
+    '/Users/test/Documents/Clawee/默认 项目/输出 图片/玫瑰 标志.png',
+    'outputs/中文 目录/中文 图片.png'
+  ])('完整提取行内代码文件路径：%s', path => {
+    expect(extractWorkspaceFilePaths(`已生成：\`${path}\``)).toEqual([path]);
+  });
+
+  it.each([false, true])('含单引号的报告链接保留完整路径并可点击（尖括号：%s）', async angleWrapped => {
+    const path = "/Users/example/Documents/AI项目/Example's AI projects/MokaHelper/reports/面试报告.md";
+    const onLinkClick = vi.fn((_href: string, event: MouseEvent<HTMLAnchorElement>) => event.preventDefault());
+    const target = angleWrapped ? `<${path}>` : path;
+    const text = `备用 Markdown 版本：[打开 Markdown 报告](${target})\n\n\`${path}\``;
+    expect(extractWorkspaceFilePaths(text)).toEqual([path]);
+    render(<MarkdownRenderer text={text} linkifyWorkspaceFiles onLinkClick={onLinkClick} />);
+    const link = screen.getByRole('link', { name: '打开 Markdown 报告' });
+    expect(link).toHaveAttribute('href', path);
+    await userEvent.setup().click(link);
+    expect(onLinkClick).toHaveBeenCalledWith(path, expect.any(Object));
+  });
+
+  it('Markdown 链接与行内代码引用同一空格路径时只生成一个成果', () => {
+    const path = '/Users/test/Documents/Clawee/Default Project/outputs/玫瑰 标志.png';
+    expect(extractWorkspaceFilePaths(
+      `\`${path}\` [玫瑰 标志.png](${path}) \`${path}\``
+    )).toEqual([path]);
+    expect(extractWorkspaceFilePaths(
+      `[玫瑰 标志.png](${path}) \`${path}\``
+    )).toEqual([path]);
+  });
+
+  it('非文件行内代码保留内部路径提取行为，普通文本不吞入说明文字', () => {
+    expect(extractWorkspaceFilePaths(
+      '打开 outputs/report.png，`const file = "reports/report.pdf"`，`const value = 1`，'
+      + '[外部图片](https://example.com/image.png)'
+    )).toEqual(['outputs/report.png', 'reports/report.pdf']);
   });
 
   it('extracts the target of a markdown file link instead of its filename label', () => {

@@ -19,10 +19,11 @@ import (
 )
 
 type Actor struct {
-	UserID    string `json:"user_id"`
-	AgentID   string `json:"agent_id,omitempty"`
-	TokenID   string `json:"token_id,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
+	ManualOnly bool   `json:"-"`
+	UserID     string `json:"user_id"`
+	AgentID    string `json:"agent_id,omitempty"`
+	TokenID    string `json:"token_id,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
 }
 type Authorizer func(context.Context, Actor, string) error
 type Service struct {
@@ -229,7 +230,7 @@ func (s *Service) Status(ctx context.Context, id, raw string) (map[string]any, e
 	})
 	return out, err
 }
-func (s *Service) Upload(ctx context.Context, id, aid, raw, ctype, digest string, size int64, src io.Reader) (received bool, err error) {
+func (s *Service) Upload(ctx context.Context, id, aid, raw, ctype, digest string, size int64, src io.Reader, incidentRecordCount ...int64) (received bool, err error) {
 	defer func() {
 		observeOperation("upload", err)
 		if err == nil && received {
@@ -250,11 +251,33 @@ func (s *Service) Upload(ctx context.Context, id, aid, raw, ctype, digest string
 		if e != nil {
 			return fail(401, "feedback_invalid_credential")
 		}
-		if e = credential(r, raw, "upload", s.clock()); e != nil {
-			return e
-		}
-		if r.UploadState != "uploading" || r.SubmittedAt != nil {
-			return fail(409, "feedback_upload_conflict")
+		if r.Kind == "automatic_incident" {
+			if !equalToken(raw, r.UploadHash) {
+				return fail(403, "feedback_invalid_credential")
+			}
+			if e = readable(r, s.clock()); e != nil {
+				return e
+			}
+			if r.Incident == nil || r.Incident.LogsExpected == nil || !*r.Incident.LogsExpected || aid != "incident_raw_logs" || ctype != "application/x-ndjson" || size < 1 || size > MaxIncidentLogBytes || !digestPattern.MatchString(digest) || len(incidentRecordCount) != 1 || incidentRecordCount[0] < 1 || incidentRecordCount[0] > 100 {
+				return fail(400, "feedback_invalid_incident_logs")
+			}
+			if len(r.Artifacts) == 0 {
+				r.Artifacts = []StoredArtifact{{Artifact: Artifact{ID: aid, Kind: "logs", Name: "incident-raw-logs.ndjson", ContentType: ctype, Size: size, SHA256: digest, RecordCount: incidentRecordCount[0], Source: "incident_snapshot", PartIndex: 1}, UploadState: "declared"}}
+			} else if r.Artifacts[0].ID == aid && r.Artifacts[0].UploadState == "declared" {
+				r.Artifacts[0].Size = size
+				r.Artifacts[0].SHA256 = digest
+				r.Artifacts[0].RecordCount = incidentRecordCount[0]
+			}
+		} else {
+			if len(incidentRecordCount) != 0 {
+				return ErrNotFound
+			}
+			if e = credential(r, raw, "upload", s.clock()); e != nil {
+				return e
+			}
+			if r.UploadState != "uploading" || r.SubmittedAt != nil {
+				return fail(409, "feedback_upload_conflict")
+			}
 		}
 		index := -1
 		active := 0
@@ -351,7 +374,7 @@ func (s *Service) Upload(ctx context.Context, id, aid, raw, ctype, digest string
 		if e = live(r, s.clock()); e != nil {
 			return e
 		}
-		if r.UploadState != "uploading" {
+		if r.UploadState != "uploading" && r.Kind != "automatic_incident" {
 			return fail(409, "feedback_upload_conflict")
 		}
 		for i := range r.Artifacts {
@@ -463,7 +486,15 @@ func (s *Service) Submit(ctx context.Context, id, raw, mh string, partial bool) 
 }
 func publicReport(r Report) map[string]any {
 	out := map[string]any{"report_id": r.ID, "display_number": r.DisplayNumber, "description": r.Description, "occurred_at": r.OccurredAt, "reproduction_steps": r.ReproductionSteps, "source_claim": r.SourceClaim, "trusted_source": r.TrustedSource, "environment": r.Environment, "created_at": r.CreatedAt, "expires_at": r.ExpiresAt, "upload_state": r.UploadState, "security_state": r.SecurityState, "completeness": r.Completeness, "processing_status": r.ProcessingStatus, "version": r.Version, "assigned_to": r.AssignedTo, "resolved_at": r.ResolvedAt, "resolved_by": r.ResolvedBy, "public_resolution_summary": r.PublicResolutionSummary}
+	out["kind"] = "manual"
+	if r.Kind == "automatic_incident" {
+		out["kind"] = r.Kind
+	}
 	if r.SecurityState == "normal" && time.Now().Before(r.ExpiresAt) {
+		if r.Kind == "automatic_incident" {
+			out["incident"] = r.Incident
+			out["last_occurred_at"] = r.LastOccurredAt
+		}
 		arts := []any{}
 		for _, a := range r.Artifacts {
 			arts = append(arts, map[string]any{"artifact_id": a.ID, "kind": a.Kind, "name": a.Name, "content_type": a.ContentType, "size_bytes": a.Size, "sha256": a.SHA256, "record_count": a.RecordCount, "source": a.Source, "part_index": a.PartIndex, "upload_state": a.UploadState})
@@ -487,13 +518,35 @@ func (s *Service) Get(ctx context.Context, a Actor, id string) (map[string]any, 
 		if e != nil {
 			return e
 		}
+		if r.Kind == "automatic_incident" && (a.AgentID != "" || a.ManualOnly) {
+			return ErrNotFound
+		}
 		out = publicReport(r)
 		return nil
 	})
 	return out, err
 }
 func (s *Service) List(ctx context.Context, a Actor, f Filter) ([]map[string]any, string, error) {
+	if a.AgentID != "" || a.ManualOnly {
+		f.Kind = "manual"
+	}
+	if f.Kind != "" && f.Kind != "manual" && f.Kind != "automatic_incident" {
+		return nil, "", fail(400, "feedback_invalid_filter")
+	}
+	if f.Cursor != "" {
+		parts := strings.Split(f.Cursor, "|")
+		if len(parts) != 2 || !IDPattern.MatchString(parts[1]) {
+			return nil, "", fail(400, "feedback_invalid_cursor")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, parts[0]); err != nil {
+			return nil, "", fail(400, "feedback_invalid_cursor")
+		}
+	}
 	f.Keyword = textutil.TrimInput(f.Keyword)
+	f.Reporter = textutil.TrimInput(f.Reporter)
+	if len(f.Reporter) > 256 {
+		return nil, "", fail(400, "feedback_invalid_filter")
+	}
 	f.Source = textutil.TrimInput(f.Source)
 	f.Version = textutil.TrimInput(f.Version)
 	if e := s.check(ctx, a, "read"); e != nil {
@@ -523,12 +576,19 @@ func (s *Service) List(ctx context.Context, a Actor, f Filter) ([]map[string]any
 	if len(reports) > limit {
 		reports = reports[:limit]
 		last := reports[len(reports)-1]
-		next = last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
+		next = reportSortTime(last).Format(time.RFC3339Nano) + "|" + last.ID
 	}
 	out := []map[string]any{}
 	bytes := 0
 	for _, r := range reports {
 		v := publicReport(r)
+		if _, visible := v["incident"]; visible && r.Incident != nil {
+			summary := *r.Incident
+			summary.Diagnostics = nil
+			summary.FirstDiagnostics = nil
+			summary.Timeline = nil
+			v["incident"] = &summary
+		}
 		delete(v, "manifest")
 		delete(v, "artifacts")
 		delete(v, "events")
@@ -543,7 +603,7 @@ func (s *Service) List(ctx context.Context, a Actor, f Filter) ([]map[string]any
 		encoded, _ := json.Marshal(v)
 		if len(out) > 0 && bytes+len(encoded) > 200<<10 {
 			last := reports[len(out)-1]
-			next = last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
+			next = reportSortTime(last).Format(time.RFC3339Nano) + "|" + last.ID
 			break
 		}
 		bytes += len(encoded)
@@ -592,6 +652,9 @@ func (s *Service) Operate(ctx context.Context, a Actor, id, op string, in Operat
 		}
 		if e = readable(r, s.clock()); e != nil {
 			return e
+		}
+		if r.Kind == "automatic_incident" && (a.AgentID != "" || a.ManualOnly) {
+			return ErrNotFound
 		}
 		for _, event := range r.Events {
 			if event.Actor.UserID == a.UserID && event.Operation == op && event.Input.IdempotencyKey == in.IdempotencyKey {
@@ -658,6 +721,9 @@ func (s *Service) Open(ctx context.Context, a Actor, id, aid string, download bo
 		if e != nil {
 			return e
 		}
+		if r.Kind == "automatic_incident" && (a.AgentID != "" || a.ManualOnly) {
+			return ErrNotFound
+		}
 		if e = readable(r, s.clock()); e != nil {
 			return e
 		}
@@ -714,6 +780,8 @@ func (s *Service) Cleanup(ctx context.Context) (err error) {
 			r.SourceClaim = nil
 			r.TrustedSource = ""
 			r.Environment = nil
+			r.Incident = nil
+			r.LastOccurredAt = nil
 			r.Manifest = nil
 			r.Artifacts = nil
 			r.Events = nil
@@ -796,6 +864,9 @@ func (s *Service) GetReady(ctx context.Context, a Actor, id string) (out map[str
 		}
 		if e = readable(r, s.clock()); e != nil {
 			return e
+		}
+		if r.Kind == "automatic_incident" && (a.AgentID != "" || a.ManualOnly) {
+			return ErrNotFound
 		}
 		out = publicReport(r)
 		return nil

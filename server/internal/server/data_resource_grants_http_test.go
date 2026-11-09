@@ -43,7 +43,7 @@ func TestSummarizeDataResourceGrantsUsesGrantDimensions(t *testing.T) {
 	if len(types) != 5 || types[1].ResourceType != dataaccess.ResourceSharedSpace || types[1].ResourceCount != 2 || types[1].ActionCount != 2 || types[1].UserCount != 2 {
 		t.Fatalf("resource types = %#v", types)
 	}
-	if types[4].ResourceType != dataaccess.ResourceDataView || types[4].ResourceCount != 4 || types[4].ActionCount != 3 || types[4].UserCount != 0 {
+	if types[4].ResourceType != dataaccess.ResourceDataView || types[4].ResourceCount != 4 || types[4].ActionCount != 4 || types[4].UserCount != 0 {
 		t.Fatalf("data view type = %#v", types[3])
 	}
 	resources := summarizeDataResources(dataaccess.ResourceSharedSpace, grants, resourceNames[dataaccess.ResourceSharedSpace], "市场")
@@ -61,6 +61,10 @@ func TestSummarizeDataResourceGrantsUsesGrantDimensions(t *testing.T) {
 	dataViewActions := summarizeDataResourceActions(dataaccess.ResourceDataView, dataaccess.ViewBilibiliOperation, nil)
 	if len(dataViewActions) != 3 || dataViewActions[0].Action != dataaccess.ActionRead || dataViewActions[1].Action != dataaccess.ActionConnect || dataViewActions[2].Action != dataaccess.ActionManage {
 		t.Fatalf("data view actions = %#v", dataViewActions)
+	}
+	activityActions := dataResourceActionDefinitions(dataaccess.ResourceDataView, dataaccess.ViewAgentActivity)
+	if len(activityActions) != 2 || activityActions[1].Action != dataaccess.ActionReadContent || activityActions[1].DefaultChecked || activityActions[1].Required {
+		t.Fatalf("activity content permission must be explicitly selectable: %#v", activityActions)
 	}
 	users := dataResourceGrantUsers(grants[:1], []accounts.Account{{UserID: "usr_1", Name: "张三", Email: "zhang@example.com", Status: accounts.StatusActive}}, "张")
 	if len(users) != 1 || users[0].GrantID != "drg_1" || users[0].Name != "张三" {

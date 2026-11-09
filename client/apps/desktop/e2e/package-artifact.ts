@@ -22,6 +22,7 @@ export type DesktopBuildManifest = {
   platform: string;
   arch: string;
   mode: string;
+  releaseVersion: string;
   packageRoot: string;
   codexRuntimeId: string;
   codexRuntimeVersion: string;
@@ -45,20 +46,7 @@ export function packagedExecutable(desktopDir: string): string {
 }
 
 export function readDesktopPackageVersion(desktopDir: string): string {
-  const configuredVersion = process.env.CLAWEE_VERSION?.trim();
-  if (configuredVersion) return configuredVersion.replace(/^v/, '');
-  const productVersionPath = resolve(desktopDir, '../../../VERSION');
-  if (existsSync(productVersionPath)) {
-    const productVersion = readFileSync(productVersionPath, 'utf8').trim();
-    if (productVersion.length > 0) return productVersion;
-  }
-  const manifest = JSON.parse(
-    readFileSync(join(desktopDir, 'package.json'), 'utf8')
-  ) as { version?: unknown };
-  if (typeof manifest.version !== 'string' || manifest.version.length === 0) {
-    throw new Error('Desktop package version is missing');
-  }
-  return manifest.version;
+  return readDesktopBuildManifest(desktopDir).releaseVersion;
 }
 
 export function packagedPackageRoot(desktopDir: string): string {
@@ -85,6 +73,9 @@ export function readDesktopBuildManifest(
   const manifest = JSON.parse(
     readFileSync(manifestPath, 'utf8')
   ) as Partial<DesktopBuildManifest>;
+  if (typeof manifest.releaseVersion !== 'string' || manifest.releaseVersion.trim().length === 0) {
+    throw new Error(`Desktop 构建清单缺少产品版本：${manifestPath}`);
+  }
   if (
     typeof manifest.packageRoot !== 'string'
     || typeof manifest.codexRuntimeId !== 'string'

@@ -1,5 +1,6 @@
+import { skillWorkflowStageLabels } from "@/lib/skill-ai-review-api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Edit3, FolderInput, PackageCheck, PackagePlus, Plus, Power, PowerOff, RefreshCw, Trash2, Upload, UserPlus } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -31,13 +32,18 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { APIError } from "@/lib/api";
+import { SkillReviewForm } from "./skill-detail";
 import {
   createGitHubSource,
+  createSkillSpace,
   deleteUnpublishedSkill,
   disableGitHubSource,
   enableGitHubSource,
   getGitHubSourceToken,
+  getCloudSkillSettings,
   getSkillSourceAvailability,
+  hasLocalSkillApproval,
   listGitHubSources,
   listSkillSpaces,
   listSkills,
@@ -47,8 +53,12 @@ import {
   queueGitHubSourceSync,
   reviewSkillVersion,
   updateGitHubSource,
+  updateSkillSpace,
+  updateCloudSkillSettings,
   type GitHubSource,
   type AdminSkill,
+  type SkillReviewInput,
+  type SkillSpace,
   uploadSkillVersion
 } from "@/lib/skillhub-api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
@@ -67,6 +77,7 @@ export function SkillsPage() {
   const canDelete = useAdminPermission(permissions.skillDelete);
   const canMove = useAdminPermission(permissions.skillMove);
   const canPublish = useAdminPermission(permissions.skillPublish);
+  const canManage = useAdminPermission(permissions.skillManage);
   const canCreateSpace = useAdminPermission(permissions.skillSpaceCreate);
   const canUpdateSpace = useAdminPermission(permissions.skillSpaceUpdate);
   const canCreateSpaceMembers = useAdminPermission(permissions.skillSpaceMemberCreate);
@@ -95,8 +106,8 @@ export function SkillsPage() {
   const [batchSpaceOpen, setBatchSpaceOpen] = useState(false);
   const [targetSpaceId, setTargetSpaceId] = useState("");
   const [activeTab, setActiveTab] = useState("spaces");
-  const [reviewTarget, setReviewTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]>; decision: "approved" | "rejected" } | null>(null);
-  const [reviewComment, setReviewComment] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]>; requestId: string } | null>(null);
+  const [reviewConflict, setReviewConflict] = useState("");
   const [ownPublishTarget, setOwnPublishTarget] = useState<{ skill: AdminSkill; version: NonNullable<AdminSkill["latestVersion"]> } | null>(null);
   const [sourceFormOpen, setSourceFormOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<GitHubSource | null>(null);
@@ -104,15 +115,23 @@ export function SkillsPage() {
   const [disableTarget, setDisableTarget] = useState<GitHubSource | null>(null);
   const [statusAction, setStatusAction] = useState<"enable" | "disable" | null>(null);
   const [sourceActionError, setSourceActionError] = useState<string | null>(null);
+  const [cloudSettingsOpen, setCloudSettingsOpen] = useState(false);
+  const [cloudAgentEmail, setCloudAgentEmail] = useState("");
+  const [cloudPromptTemplate, setCloudPromptTemplate] = useState("");
+  const [spaceEditor, setSpaceEditor] = useState<{ space: SkillSpace | null } | null>(null);
+  const [spaceName, setSpaceName] = useState("");
+  const [spaceDescription, setSpaceDescription] = useState("");
 
   const skillsQuery = useQuery({ queryKey: skillsKey, queryFn: listSkills, enabled: Boolean(spaceId) });
   const spacesQuery = useQuery({ queryKey: ["skill-spaces"], queryFn: listSkillSpaces });
   const sourceAvailabilityQuery = useQuery({ queryKey: skillSourceAvailabilityKey, queryFn: getSkillSourceAvailability });
+  const cloudSettingsQuery = useQuery({ queryKey: ["cloud-skill-settings"], queryFn: getCloudSkillSettings });
   const skillSourceEnabled = sourceAvailabilityQuery.data === true;
   const sourcesQuery = useQuery({ queryKey: skillSourcesKey, queryFn: listGitHubSources, enabled: skillSourceEnabled && activeTab === "sources" });
   const skills = skillsQuery.data ?? [];
   const selectedSpace = (spacesQuery.data ?? []).find((space) => space.spaceId === spaceId);
-  const canSelectSkills = canMove || (canPublish && Boolean(selectedSpace?.approvers.length));
+  const localApprovalEnabled = hasLocalSkillApproval(selectedSpace);
+  const canSelectSkills = canMove || (canPublish && localApprovalEnabled);
   const spaceSkills = skills.filter((item) => item.spaceId === spaceId);
   const filtered = useMemo(() => {
     const normalized = trimInput(query).toLowerCase();
@@ -135,6 +154,42 @@ export function SkillsPage() {
   const allFilteredSelected = filtered.length > 0 && filtered.every((item) => selectedSkillIds.has(item.skillId));
   const someFilteredSelected = filtered.some((item) => selectedSkillIds.has(item.skillId));
 
+  const cloudSettingsMutation = useMutation({
+    mutationFn: () => updateCloudSkillSettings({ agentEmail: cloudAgentEmail, promptTemplate: cloudPromptTemplate, version: cloudSettingsQuery.data?.version ?? 0 }),
+    onSuccess: () => {
+      setCloudSettingsOpen(false);
+      setNotice("云 Skill 设置已保存");
+      void queryClient.invalidateQueries({ queryKey: ["cloud-skill-settings"] });
+    }
+  });
+
+  const spaceMutation = useMutation({
+    mutationFn: () => spaceEditor?.space
+      ? updateSkillSpace({ spaceId: spaceEditor.space.spaceId, name: trimInput(spaceName), description: trimInput(spaceDescription) })
+      : createSkillSpace({ name: trimInput(spaceName), description: trimInput(spaceDescription) }),
+    onSuccess: () => {
+      setSpaceEditor(null);
+      void queryClient.invalidateQueries({ queryKey: ["skill-spaces"] });
+    }
+  });
+
+  function openSpaceEditor(space: SkillSpace | null) {
+    setSpaceName(space?.name ?? "");
+    setSpaceDescription(space?.description ?? "");
+    spaceMutation.reset();
+    setSpaceEditor({ space });
+  }
+
+  function openCloudSettings() {
+    const settings = cloudSettingsQuery.data;
+    if (settings) {
+      setCloudAgentEmail(settings.agentEmail);
+      setCloudPromptTemplate(settings.promptTemplate);
+    }
+    cloudSettingsMutation.reset();
+    setCloudSettingsOpen(true);
+  }
+
   useEffect(() => {
     const available = new Set(skills.map((item) => item.skillId));
     setSelectedSkillIds((current) => {
@@ -146,14 +201,29 @@ export function SkillsPage() {
   useEffect(() => { setSelectedSkillIds(new Set()); }, [spaceId]);
 
   const reviewMutation = useMutation({
-    mutationFn: () => reviewSkillVersion(reviewTarget!.skill.skillId, reviewTarget!.version.versionId, reviewTarget!.decision, trimInput(reviewComment)),
-    onSuccess: () => {
-      setNotice(reviewTarget?.decision === "approved" ? "版本审批通过" : "版本已驳回");
+    mutationFn: (input: SkillReviewInput) => reviewSkillVersion(input.skillId, input.versionId, input.requestId, input.decision, input.comment, input.scores),
+    onSuccess: (_result, input) => {
+      setNotice(input.decision === "approved" ? "版本审批通过" : "版本已驳回");
       void queryClient.invalidateQueries({ queryKey: skillsKey });
-      void queryClient.invalidateQueries({ queryKey: ["skill", reviewTarget?.skill.skillId] });
+      void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
       setReviewTarget(null);
+    },
+    onError: (error, input) => {
+      if (error instanceof APIError && [403, 409].includes(error.status)) {
+        setReviewConflict(error.status === 403 ? "审核权限已变化，请刷新后确认可用操作。" : "审核状态已变化，请查看最新审核记录后重新操作。");
+        setReviewTarget(null);
+        void queryClient.invalidateQueries({ queryKey: skillsKey });
+        void queryClient.invalidateQueries({ queryKey: ["skill", input.skillId] });
+      }
     }
   });
+
+  useEffect(() => {
+    if (reviewTarget && !reviewMutation.isPending && skillsQuery.data) {
+      const current = skillsQuery.data.find((skill) => skill.skillId === reviewTarget.skill.skillId)?.latestVersion;
+      if (current?.versionId !== reviewTarget.version.versionId || current.localApproval?.requestId !== reviewTarget.requestId) setReviewTarget(null);
+    }
+  }, [skillsQuery.data, reviewTarget, reviewMutation.isPending]);
   const ownPublishMutation = useMutation({
     mutationFn: () => publishOwnSkillVersion(ownPublishTarget!.skill.skillId, ownPublishTarget!.version.versionId),
     onSuccess: (result) => {
@@ -442,42 +512,62 @@ export function SkillsPage() {
     batchSpaceMutation.mutate();
   }
 
+  const cloudSettingsAction = canManage ? (
+    <Button onClick={openCloudSettings} variant="outline">云 Skill 设置</Button>
+  ) : null;
+  const spaceListActions = canCreateSpace ? (
+    <Button onClick={() => openSpaceEditor(null)} variant="primary">
+      <UserPlus data-icon="inline-start" aria-hidden="true" />
+      新建空间
+    </Button>
+  ) : null;
+  const sourceListActions = canCreateSource ? (
+    <Button onClick={() => openSourceForm()} variant="primary">
+      <Plus data-icon="inline-start" aria-hidden="true" />
+      新增来源
+    </Button>
+  ) : null;
+  const spaceDetailActions = (canSelectSkills || canUpload) && Boolean(spaceId) ? (
+    <>
+      {selectedSkills.length > 0 ? (
+        <>
+          {canMove ? <Button disabled={spacesQuery.isLoading} onClick={openBatchSpace} variant="outline">
+            <FolderInput data-icon="inline-start" aria-hidden="true" />
+            调整空间（{selectedSkills.length}）
+          </Button> : null}
+          {canPublish && localApprovalEnabled ? <Button onClick={openBatchPublish} variant="outline">
+            <PackageCheck data-icon="inline-start" aria-hidden="true" />
+            批量发布（{selectedSkills.length}）
+          </Button> : null}
+        </>
+      ) : null}
+      {canUpload ? <Button onClick={() => openUpload()} variant="primary">
+        <PackagePlus data-icon="inline-start" aria-hidden="true" />
+        上传版本
+      </Button> : null}
+    </>
+  ) : null;
+  const viewAction = activeTab === "spaces" ? (spaceId ? spaceDetailActions : spaceListActions) : activeTab === "sources" ? sourceListActions : null;
+  const toolbarActions = cloudSettingsAction || viewAction ? <>{cloudSettingsAction}{viewAction}</> : null;
+
   return (
     <PageShell>
-      <PageHeader
-        title="技能中心"
-        actions={(canSelectSkills || canUpload) && activeTab === "spaces" && Boolean(spaceId) ? (
-          <>
-            {selectedSkills.length > 0 ? (
-              <>
-                {canMove ? <Button disabled={spacesQuery.isLoading} onClick={openBatchSpace} variant="outline">
-                  <FolderInput data-icon="inline-start" aria-hidden="true" />
-                  调整空间（{selectedSkills.length}）
-                </Button> : null}
-                {canPublish && selectedSpace?.approvers.length ? <Button onClick={openBatchPublish} variant="outline">
-                  <PackageCheck data-icon="inline-start" aria-hidden="true" />
-                  批量发布（{selectedSkills.length}）
-                </Button> : null}
-              </>
-            ) : null}
-            {canUpload ? <Button onClick={() => openUpload()} variant="primary">
-              <PackagePlus data-icon="inline-start" aria-hidden="true" />
-              上传版本
-            </Button> : null}
-          </>
-        ) : undefined}
-      >
+      <PageHeader title="技能中心">
         集中校验、发布和回滚企业 Skill 包。技能中心只管理可安装版本，不处理用户本地安装目录、文件冲突或安装回滚。
       </PageHeader>
 
       {notice ? <SuccessAlert>{notice}</SuccessAlert> : null}
+      {reviewConflict ? <ErrorAlert>{reviewConflict}</ErrorAlert> : null}
       {batchPublishError ? <ErrorAlert>{batchPublishError}</ErrorAlert> : null}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="h-auto justify-start">
-          <TabsTrigger value="spaces">技能空间</TabsTrigger>
-          {skillSourceEnabled ? <TabsTrigger value="sources">GitHub 来源</TabsTrigger> : null}
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList className="h-auto justify-start">
+            <TabsTrigger value="spaces">技能空间</TabsTrigger>
+            {skillSourceEnabled ? <TabsTrigger value="sources">GitHub 来源</TabsTrigger> : null}
+          </TabsList>
+          {toolbarActions ? <div className="flex flex-wrap items-center gap-2">{toolbarActions}</div> : null}
+        </div>
         <TabsContent className="mt-6" value="spaces">
           {spaceId ? <>
           <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -547,7 +637,7 @@ export function SkillsPage() {
                         />
                       </TableCell>
                     ) : null}
-                    <TableCell className="font-medium">{item.name}{item.latestVersion?.localApproval ? <div className="text-xs font-normal text-muted-foreground">已通过 {item.latestVersion.localApproval.approved}/{item.latestVersion.localApproval.total}</div> : null}</TableCell>
+                    <TableCell className="font-medium">{item.name}{item.latestVersion?.localApproval ? <div className="text-xs font-normal text-muted-foreground">{skillWorkflowStageLabels[item.latestVersion.localApproval.workflowStage ?? ""] ?? `已通过 ${item.latestVersion.localApproval.approved}/${item.latestVersion.localApproval.total}`}</div> : null}</TableCell>
                     <TableCell><Badge variant="outline">{item.spaceName}</Badge></TableCell>
                     <TableCell className="max-w-80 text-muted-foreground"><span className="block truncate" title={item.description}>{item.description}</span></TableCell>
                     <TableCell><PublicationBadge published={item.currentVersionId !== null} /></TableCell>
@@ -559,8 +649,8 @@ export function SkillsPage() {
                         const latest = item.latestVersion;
                         const pending = latest?.approvalStatus === "pending";
                         return <>
-                          {pending && latest.localApproval?.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <><Button aria-label={`审批通过 ${item.name}`} title="审批通过" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "approved" }); setReviewComment(""); reviewMutation.reset(); }}><Check /></Button><Button aria-label={`驳回 ${item.name}`} title="驳回" size="icon" variant="ghost" onClick={() => { setReviewTarget({ skill: item, version: latest, decision: "rejected" }); setReviewComment(""); reviewMutation.reset(); }}><X /></Button></> : null}
-                          {pending && !selectedSpace?.approvers.length && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
+                          {pending && latest.localApproval?.requestId && latest.localApproval.status === "pending" && latest.localApproval.approvers.some((person) => person.userId === account?.userId && person.status === "pending") ? <Button aria-label={`技能审核 ${item.name}`} size="sm" variant="secondary" onClick={() => { setReviewTarget({ skill: item, version: latest, requestId: latest.localApproval!.requestId! }); setReviewConflict(""); reviewMutation.reset(); }}>技能审核</Button> : null}
+                          {pending && selectedSpace && selectedSpace.approvalProvider !== "dingtalk" && !localApprovalEnabled && account?.userId && latest.uploadedByUserId === account.userId ? <Button size="sm" variant="secondary" onClick={() => { setOwnPublishTarget({ skill: item, version: latest }); ownPublishMutation.reset(); }}>发布</Button> : null}
                         </>;
                       })()}
                       {canUpload ? <Button aria-label={`替换上传 ${item.name}`} title="替换上传" size="icon" variant="ghost" onClick={() => openUpload(item)}><Upload /></Button> : null}
@@ -576,18 +666,17 @@ export function SkillsPage() {
           </section>
           </> :
           <SkillSpacesPanel
-            canCreate={canCreateSpace}
             canCreateMembers={canCreateSpaceMembers}
             canDeleteMembers={canDeleteSpaceMembers}
             canUpdate={canUpdateSpace}
             canUpdateMembers={canUpdateSpaceMembers}
+            onEditSpace={openSpaceEditor}
             onOpenSpace={(id) => { setSearchParams({ space_id: id }); setQuery(""); setPublication("all"); }}
           />
           }
         </TabsContent>
         {skillSourceEnabled ? <TabsContent className="mt-6" value="sources">
           <SkillSourcesTable
-            canCreate={canCreateSource}
             canDisable={canDisableSource}
             canEdit={canUpdateSource}
             canEnable={canEnableSource}
@@ -595,7 +684,6 @@ export function SkillsPage() {
             error={sourcesQuery.isError ? errorMessage(sourcesQuery.error) : null}
             actionError={sourceActionError}
             loading={sourcesQuery.isLoading}
-            onCreate={() => openSourceForm()}
             onDisable={openDisableConfirmation}
             onEdit={openSourceForm}
             onEnable={(source) => startStatusMutation(source, true)}
@@ -608,13 +696,51 @@ export function SkillsPage() {
         </TabsContent> : null}
       </Tabs>
 
-      <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title={reviewTarget?.decision === "approved" ? "审批通过" : "驳回版本"} contextLabel={reviewTarget?.skill.name}>
-        <form onSubmit={(event) => { event.preventDefault(); reviewMutation.mutate(); }}>
-          <FieldGroup><Field><FieldLabel htmlFor="skill-review-comment">审批意见</FieldLabel><Textarea id="skill-review-comment" maxLength={2000} value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} /></Field>
-            {reviewMutation.isError ? <ErrorAlert error={reviewMutation.error}>审批失败：{errorMessage(reviewMutation.error)}</ErrorAlert> : null}
-            <Field className="justify-end" orientation="horizontal"><Button type="button" variant="outline" disabled={reviewMutation.isPending} onClick={() => setReviewTarget(null)}>取消</Button><Button type="submit" variant="primary" disabled={reviewMutation.isPending}>{reviewTarget?.decision === "approved" ? "确认通过" : "确认驳回"}</Button></Field>
+      <ModalShell contentClassName="max-w-[560px]" contextLabel="技能中心" open={cloudSettingsOpen} onClose={() => { if (!cloudSettingsMutation.isPending) setCloudSettingsOpen(false); }} title="云 Skill 设置">
+        <form onSubmit={(event) => { event.preventDefault(); if (!cloudSettingsMutation.isPending) cloudSettingsMutation.mutate(); }}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="cloud-skill-agent-email">云 Skill 账户邮箱</FieldLabel>
+              <Input id="cloud-skill-agent-email" type="email" required maxLength={320} value={cloudAgentEmail} onChange={(event) => setCloudAgentEmail(event.target.value)} />
+              <FieldDescription>该账户用于读取有权限的已发布 Skill，请填写企业内实际存在的服务账户邮箱。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="cloud-skill-prompt-template">默认提示词</FieldLabel>
+              <Textarea id="cloud-skill-prompt-template" maxLength={1000} required value={cloudPromptTemplate} onChange={(event) => setCloudPromptTemplate(event.target.value)} />
+              <FieldDescription>支持 {"{agent_name}"} 和 {"{skill_name}"} 变量。</FieldDescription>
+            </Field>
+            {cloudSettingsQuery.isError ? <ErrorAlert error={cloudSettingsQuery.error}>设置加载失败，请刷新后重试。</ErrorAlert> : null}
+            {cloudSettingsMutation.isError ? <ErrorAlert error={cloudSettingsMutation.error}>保存失败，请刷新后重试。</ErrorAlert> : null}
+            <Field className="flex-wrap justify-end" orientation="horizontal">
+              <Button type="button" variant="outline" onClick={() => setCloudSettingsOpen(false)}>取消</Button>
+              <Button disabled={cloudSettingsMutation.isPending || !cloudAgentEmail.trim() || !cloudPromptTemplate.trim()} type="submit" variant="primary">{cloudSettingsMutation.isPending ? "保存中..." : "保存设置"}</Button>
+            </Field>
           </FieldGroup>
         </form>
+      </ModalShell>
+
+      <ModalShell contextLabel="技能中心" open={spaceEditor !== null} onClose={() => { if (!spaceMutation.isPending) setSpaceEditor(null); }} title={spaceEditor?.space ? "编辑技能空间" : "新建技能空间"}>
+        <form onSubmit={(event) => { event.preventDefault(); if (trimInput(spaceName) && !spaceMutation.isPending) spaceMutation.mutate(); }}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="skill-space-name">空间名称</FieldLabel>
+              <Input id="skill-space-name" maxLength={100} required value={spaceName} onChange={(event) => setSpaceName(event.target.value)} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="skill-space-description">说明</FieldLabel>
+              <Textarea id="skill-space-description" maxLength={500} value={spaceDescription} onChange={(event) => setSpaceDescription(event.target.value)} />
+            </Field>
+            {spaceMutation.isError ? <ErrorAlert>保存失败：{errorMessage(spaceMutation.error)}</ErrorAlert> : null}
+            <Field className="justify-end" orientation="horizontal">
+              <Button disabled={spaceMutation.isPending} type="button" variant="outline" onClick={() => setSpaceEditor(null)}>取消</Button>
+              <Button disabled={spaceMutation.isPending || !trimInput(spaceName)} type="submit" variant="primary">{spaceMutation.isPending ? "保存中..." : "保存"}</Button>
+            </Field>
+          </FieldGroup>
+        </form>
+      </ModalShell>
+
+      <ModalShell open={Boolean(reviewTarget)} onClose={() => { if (!reviewMutation.isPending) setReviewTarget(null); }} title="技能审核" contextLabel={reviewTarget?.skill.name}>
+        {reviewTarget ? <SkillReviewForm key={`${reviewTarget.version.versionId}:${reviewTarget.requestId}`} pending={reviewMutation.isPending} error={reviewMutation.isError ? reviewMutation.error : undefined} aiReview={reviewTarget.version.localApproval?.aiReview} onCancel={() => setReviewTarget(null)} onSubmit={(scores, comment, decision) => reviewMutation.mutate({ skillId: reviewTarget.skill.skillId, versionId: reviewTarget.version.versionId, requestId: reviewTarget.requestId, decision, scores, comment })} /> : null}
       </ModalShell>
       <ConfirmDialog open={Boolean(ownPublishTarget)} onClose={() => { if (!ownPublishMutation.isPending) setOwnPublishTarget(null); }} onConfirm={() => ownPublishMutation.mutate()} title="发布 Skill" description={ownPublishTarget ? `将“${ownPublishTarget.skill.name}”版本 ${ownPublishTarget.version.version} 发布到当前空间。` : ""} confirmLabel="确认发布" pending={ownPublishMutation.isPending} error={ownPublishMutation.isError ? `发布失败：${errorMessage(ownPublishMutation.error)}` : undefined} />
 
@@ -750,7 +876,6 @@ function PublicationBadge({ published }: { published: boolean }) {
 
 function SkillSourcesTable({
   actionError,
-  canCreate,
   canDisable,
   canEdit,
   canEnable,
@@ -758,7 +883,6 @@ function SkillSourcesTable({
   error,
   editPending,
   loading,
-  onCreate,
   onDisable,
   onEdit,
   onEnable,
@@ -768,7 +892,6 @@ function SkillSourcesTable({
   syncPending
 }: {
   actionError: string | null;
-  canCreate: boolean;
   canDisable: boolean;
   canEdit: boolean;
   canEnable: boolean;
@@ -776,7 +899,6 @@ function SkillSourcesTable({
   error: string | null;
   editPending: boolean;
   loading: boolean;
-  onCreate: () => void;
   onDisable: (source: GitHubSource) => void;
   onEdit: (source: GitHubSource) => void;
   onEnable: (source: GitHubSource) => void;
@@ -787,11 +909,6 @@ function SkillSourcesTable({
 }) {
   return (
     <section aria-label="GitHub 来源" className="grid gap-5">
-      {canCreate ? (
-        <div className="flex justify-end">
-          <Button onClick={onCreate} variant="primary"><Plus data-icon="inline-start" aria-hidden="true" />新增来源</Button>
-        </div>
-      ) : null}
       {actionError ? <ErrorAlert>{actionError}</ErrorAlert> : null}
       <DataTableShell dense minWidth={1280}>
         <TableHeader>

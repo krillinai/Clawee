@@ -73,16 +73,22 @@ func mountOfficeAgentRoutes(app *gin.RouterGroup, opts Options) {
 	if opts.OfficeUserDashboardAPI != nil {
 		app.GET("/activity/overview", wrapOfficeHandler(opts.OfficeUserDashboardAPI))
 		app.GET("/activity/agents", wrapOfficeHandler(opts.OfficeUserDashboardAPI))
+		app.GET("/activity/detail", func(c *gin.Context) {
+			if !requireAgentActivityRead(c, opts) {
+				return
+			}
+			serveOfficeHandler(c, opts.OfficeUserDashboardAPI)
+		})
 		app.GET("/activity/sub-agents", wrapOfficeHandler(opts.OfficeUserDashboardAPI))
 		app.GET("/activity/recent", wrapOfficeHandler(opts.OfficeUserDashboardAPI))
 		app.GET("/activity/events", wrapOfficeHandler(opts.OfficeUserDashboardAPI))
 	}
 	if opts.OfficeDashboardAPI != nil {
-		app.GET("/activity/detail", func(c *gin.Context) {
+		app.GET("/activity/runtime", func(c *gin.Context) {
 			if !requireAgentActivityRead(c, opts) {
 				return
 			}
-			serveOfficeHandler(c, opts.OfficeDashboardAPI.DetailHandler())
+			serveOfficeHandler(c, opts.OfficeDashboardAPI.RuntimeHandler())
 		})
 	}
 	if opts.OfficeUserCollectorsAPI != nil {

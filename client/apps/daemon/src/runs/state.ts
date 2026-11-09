@@ -4,6 +4,7 @@ export type InternalRunStatus =
   | 'spawning'
   | 'running'
   | 'canceling'
+  | 'finalizing'
   | 'succeeded'
   | 'failed'
   | 'canceled'

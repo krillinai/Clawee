@@ -21,6 +21,7 @@ var (
 	ErrAgentOwnerInconsistent   = errors.New("Agent 归属数据不一致")
 	ErrIdentityConflict         = errors.New("目标账号已绑定相同类型的外部身份")
 	ErrAccountGrantConflict     = errors.New("源账号与目标账号的 MCP Grant 语义冲突")
+	ErrPersonalSpaceConflict    = errors.New("源账号拥有个人网盘，不能合并或变更网盘所有者")
 	ErrPendingGate              = errors.New("Agent 存在待处理或执行中的门禁请求")
 )
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { UPDATE_DESKTOP_STOP_MS } from '@clawee/protocol';
 import { EventEmitter } from 'node:events';
 import type {
   DesktopBootstrapState,
@@ -28,11 +29,14 @@ type BootstrapControllerEvents = {
 export class BootstrapController extends EventEmitter<BootstrapControllerEvents> {
   private state: DesktopBootstrapState = initialState();
   private runWork: Promise<void> | undefined;
+  private recoveryWork: Promise<void> | undefined;
   private resolvedRuntime: ResolvedDesktopRuntime | undefined;
   private verifiedFingerprint: string | undefined;
   private automaticRestarts = 0;
   private stableTimer: NodeJS.Timeout | undefined;
   private runAbortController: AbortController | undefined;
+  private updateStopped = false;
+  private stopped = false;
 
   constructor(private readonly input: {
     daemon: DaemonManager;
@@ -82,6 +86,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
       this.emit('connection', connection === null ? null : this.rendererConnection());
     });
     input.daemon.on('exit', event => {
+      if (this.updateStopped || this.stopped) return;
       if (event.reason !== 'unexpected' || this.state.phase === 'failed') return;
       void this.recoverUnexpectedExit();
     });
@@ -98,6 +103,8 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   start(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error('DAEMON_START_CANCELLED'));
+    if (this.updateStopped) return Promise.reject(new Error('更新安装期间不能启动 Runtime'));
     if (this.runWork !== undefined) return this.runWork;
     const abortController = new AbortController();
     this.runAbortController = abortController;
@@ -110,18 +117,37 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     return this.runWork;
   }
 
-  async restartRuntime(): Promise<void> {
+  restartRuntime(): Promise<void> {
+    if (this.recoveryWork !== undefined) return this.recoveryWork;
+    const work = this.restartRuntimeInternal().finally(() => {
+      if (this.recoveryWork === work) this.recoveryWork = undefined;
+    });
+    this.recoveryWork = work;
+    return work;
+  }
+
+  async recoverConnection(): Promise<void> {
+    if (this.stopped || this.updateStopped) return;
+    if (this.recoveryWork !== undefined) return await this.recoveryWork;
+    if (this.runWork !== undefined || this.input.daemon.hasProcess || this.state.phase === 'failed') return;
+    await this.recoverUnexpectedExit();
+  }
+
+  private async restartRuntimeInternal(): Promise<void> {
+    if (this.stopped) throw new Error('DAEMON_START_CANCELLED');
+    if (this.updateStopped) throw new Error('更新安装期间不能重启 Runtime');
+    if (this.runWork !== undefined) await this.runWork;
+    if (this.stopped || this.updateStopped) throw new Error('DAEMON_START_CANCELLED');
     if (this.resolvedRuntime === undefined) {
       await this.start();
       return;
     }
-    await this.input.daemon.restart(this.daemonStartInput(
-      this.resolvedRuntime,
-      false,
-      true
-    ));
+    await this.input.daemon.restart(this.daemonStartInput(this.resolvedRuntime, false, true));
+    if (this.stopped || this.updateStopped) return;
+    this.automaticRestarts = 0;
     this.updateState({ phase: 'starting_runtime', error: undefined });
     this.emit('ready');
+    this.armStableTimer();
   }
 
   markMigratingData(): void {
@@ -153,6 +179,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
   }
 
   async stop(timeoutMs = 5_000): Promise<void> {
+    this.stopped = true;
     const deadline = Date.now() + timeoutMs;
     const remaining = () => Math.max(0, deadline - Date.now());
     if (this.stableTimer !== undefined) clearTimeout(this.stableTimer);
@@ -160,9 +187,38 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     const runWork = this.runWork;
     await settlesWithin(Promise.all([
       this.input.daemon.stop(remaining()),
-      runWork?.catch(() => undefined) ?? Promise.resolve()
+      runWork?.catch(() => undefined) ?? Promise.resolve(),
+      this.recoveryWork?.catch(() => undefined) ?? Promise.resolve()
     ]).then(() => undefined), remaining());
     await this.input.daemon.stop(remaining());
+  }
+
+  async stopForUpdate(timeoutMs = UPDATE_DESKTOP_STOP_MS, updateId?: string): Promise<void> {
+    this.updateStopped = true;
+    const deadline = Date.now() + timeoutMs;
+    if (this.stableTimer !== undefined) clearTimeout(this.stableTimer);
+    this.runAbortController?.abort();
+    if (!await settlesWithin(Promise.all([this.runWork, this.recoveryWork]).then(() => undefined), timeoutMs)) {
+      throw new Error('Bootstrap 停止超时，已取消安装');
+    }
+    await this.input.daemon.stopForUpdate(Math.max(0, deadline - Date.now()), updateId);
+  }
+
+  async resumeAfterUpdate(restart = false): Promise<void> {
+    try {
+      if (!restart && this.input.daemon.currentConnection !== undefined) {
+        this.armStableTimer();
+        return;
+      }
+      if (this.input.daemon.pid !== undefined) {
+        await this.input.daemon.stop();
+      }
+      await this.input.daemon.stopForUpdate();
+    } finally {
+      this.updateStopped = false;
+      this.input.daemon.resumeAfterUpdate();
+    }
+    await this.start();
   }
 
   private async startInternal(signal?: AbortSignal): Promise<void> {
@@ -289,7 +345,17 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     }
   }
 
-  private async recoverUnexpectedExit(): Promise<void> {
+  private recoverUnexpectedExit(): Promise<void> {
+    if (this.recoveryWork !== undefined) return this.recoveryWork;
+    if (this.stopped || this.updateStopped) return Promise.resolve();
+    const work = this.recoverUnexpectedExitInternal().finally(() => {
+      if (this.recoveryWork === work) this.recoveryWork = undefined;
+    });
+    this.recoveryWork = work;
+    return work;
+  }
+
+  private async recoverUnexpectedExitInternal(): Promise<void> {
     const runtime = this.resolvedRuntime;
     if (runtime === undefined || this.automaticRestarts >= 1) {
       this.updateState({
@@ -308,6 +374,7 @@ export class BootstrapController extends EventEmitter<BootstrapControllerEvents>
     });
     try {
       await this.input.daemon.start(this.daemonStartInput(runtime, false, true));
+      if (this.stopped || this.updateStopped) return;
       this.updateState({ phase: 'starting_runtime' });
       this.emit('ready');
       this.armStableTimer();

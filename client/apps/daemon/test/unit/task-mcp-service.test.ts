@@ -2,6 +2,7 @@ import type {
   AgentEventEnvelope,
   ProjectResponse,
   PublicRunStatus,
+  SharedDriveState,
   TaskItem
 } from '@clawee/protocol';
 import { describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,170 @@ import {
 import type { RuntimeThread, ThreadManager } from '../../src/threads/types.js';
 
 describe('TaskMcpService', () => {
+  it('健康检查只读取执行条件，模型配置恢复后立即反映，不创建任务', () => {
+    let ready = false;
+    const fixture = createFixture(undefined, () => ready);
+    expect(fixture.service.getHealth()).toEqual({
+      runtime: 'unknown', model: 'configuration_required'
+    });
+    ready = true;
+    expect(fixture.service.getHealth()).toEqual({
+      runtime: 'unknown', model: 'configured'
+    });
+    expect(fixture.threads.size).toBe(0);
+    expect(fixture.runInputs).toEqual([]);
+  });
+
+  it('模型未就绪时拒绝提交且不创建对话，恢复后可以执行', async () => {
+    let ready = false;
+    const fixture = createFixture(undefined, () => ready);
+
+    await expect(fixture.service.submit({ prompt: '执行任务' })).rejects.toMatchObject({
+      code: 'MODEL_SERVICE_CONFIGURATION_REQUIRED'
+    });
+    expect(fixture.threads.size).toBe(0);
+    expect(fixture.runInputs).toEqual([]);
+
+    ready = true;
+    await expect(fixture.service.submit({ prompt: '执行任务' })).resolves.toMatchObject({
+      taskId: 'run_1', threadId: 'thread_1'
+    });
+    expect(fixture.runInputs).toHaveLength(1);
+  });
+
+  it('将可选发起身份传入任务创建，不修改模型提示词', async () => {
+    const fixture = createFixture();
+    await fixture.service.submit({
+      prompt: '执行任务', initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    });
+    expect(fixture.runInputs[0]).toMatchObject({
+      prompt: '执行任务', executionPrompt: '执行任务',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    });
+    await fixture.service.submit({ prompt: '直连任务' });
+    expect(fixture.runInputs[1]?.initiatorUserId).toBeUndefined();
+    expect(fixture.runInputs[1]?.initiatorAgentId).toBeUndefined();
+  });
+
+  it('继续原任务时保留会话与项目，每轮创建独立任务并明确恢复 Runtime 会话', async () => {
+    const fixture = createFixture();
+    const caller = { initiatorUserId: 'user_1', initiatorAgentId: 'agent_1' };
+    const first = await fixture.service.submit({
+      prompt: '生成商品海报', projectId: 'project_other', ...caller
+    });
+    fixture.seedSubmittedTask(first, 'succeeded');
+    fixture.threads.get(first.threadId)!.codexThreadId = 'codex_original';
+    fixture.events.set(first.taskId, [assistantMessage(first.taskId, 1, '海报第一版')]);
+
+    const second = await fixture.service.submit({
+      prompt: '编辑上一版海报，把背景改成蓝色', threadId: first.threadId, ...caller
+    });
+
+    expect(second).toMatchObject({
+      threadId: first.threadId, projectId: first.projectId, projectName: first.projectName
+    });
+    expect(second.taskId).not.toBe(first.taskId);
+    expect(fixture.threads.size).toBe(1);
+    expect(fixture.runInputs[1]).toMatchObject({
+      prompt: '编辑上一版海报，把背景改成蓝色',
+      threadId: first.threadId,
+      cwd: '/workspace/other',
+      resumeMode: 'resume_thread',
+      ...caller
+    });
+    expect(await fixture.service.getTaskResult(first.taskId)).toMatchObject({
+      task_id: first.taskId, thread_id: first.threadId, result: '海报第一版'
+    });
+  });
+
+  it.each([
+    { initiatorUserId: 'other_user', initiatorAgentId: 'agent_1' },
+    { initiatorUserId: 'user_1', initiatorAgentId: 'other_agent' },
+    { initiatorUserId: 'user_1' },
+    { initiatorAgentId: 'agent_1' },
+    {}
+  ])('拒绝来源不符或不完整的续聊调用 %j', async caller => {
+    const fixture = createContinuationFixture();
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous', ...caller
+    })).rejects.toMatchObject({ code: 'THREAD_ACCESS_DENIED' });
+    expect(fixture.threads.size).toBe(1);
+    expect(fixture.runInputs).toEqual([]);
+  });
+
+  it.each([
+    { initiatorUserId: undefined },
+    { initiatorAgentId: undefined }
+  ])('不开放来源记录不完整的历史会话 %j', async missing => {
+    const fixture = createContinuationFixture();
+    Object.assign(fixture.tasks.get('run_previous')!, missing);
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    })).rejects.toMatchObject({ code: 'THREAD_ACCESS_DENIED' });
+    expect(fixture.runInputs).toEqual([]);
+  });
+
+  it.each([
+    { projectId: 'project_default' },
+    { projectName: '默认项目' }
+  ])('续聊项目参数必须与原会话一致 %j', async selector => {
+    const fixture = createContinuationFixture();
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1', ...selector
+    })).rejects.toMatchObject({ code: 'PROJECT_SELECTOR_MISMATCH' });
+    expect(fixture.runInputs).toEqual([]);
+  });
+
+  it('续聊允许传入与原项目一致的名称和 ID', async () => {
+    const fixture = createContinuationFixture();
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous',
+      projectId: 'project_other', projectName: '其他项目',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    })).resolves.toMatchObject({ threadId: 'thread_previous', projectId: 'project_other' });
+  });
+
+  it.each([
+    { state: '项目已删除', code: 'PROJECT_NOT_FOUND' },
+    { state: '项目已归档', code: 'PROJECT_ARCHIVED' },
+    { state: '目录不可用', code: 'PROJECT_DIRECTORY_UNAVAILABLE' }
+  ])('续聊时$state则拒绝执行', async ({ state, code }) => {
+    const fixture = createContinuationFixture();
+    const project = fixture.projects.get('project_other')!;
+    if (state === '项目已删除') fixture.projects.delete(project.id);
+    if (state === '项目已归档') project.status = 'archived';
+    if (state === '目录不可用') project.directoryState = 'missing';
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    })).rejects.toMatchObject({ code });
+    expect(fixture.runInputs).toEqual([]);
+  });
+
+  it.each([
+    { state: '不存在', code: 'THREAD_NOT_FOUND' },
+    { state: '已归档', code: 'THREAD_ARCHIVED' },
+    { state: '未建立 Runtime 会话', code: 'CODEX_THREAD_ID_MISSING' },
+    { state: '企业专用会话', code: 'THREAD_NOT_FOUND' }
+  ])('原会话$state时不回退新建会话', async ({ state, code }) => {
+    const fixture = createContinuationFixture();
+    const thread = fixture.threads.get('thread_previous')!;
+    if (state === '不存在') fixture.threads.delete(thread.id);
+    if (state === '已归档') thread.status = 'archived';
+    if (state === '未建立 Runtime 会话') thread.codexThreadId = null;
+    if (state === '企业专用会话') thread.enterpriseSubjectId = 'enterprise_subject';
+    const threadCount = fixture.threads.size;
+
+    await expect(fixture.service.submit({
+      prompt: '修改海报', threadId: 'thread_previous',
+      initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+    })).rejects.toMatchObject({ code });
+    expect(fixture.threads.size).toBe(threadCount);
+    expect(fixture.runInputs).toEqual([]);
+  });
+
   it('rejects protected input before resolving a project or creating a thread and run', async () => {
     const serverSkillInputGuard = vi.fn(() => true);
     const fixture = createFixture(serverSkillInputGuard);
@@ -104,6 +269,22 @@ describe('TaskMcpService', () => {
     ]);
   });
 
+  it.each(['DefaultProject', 'Default Project', '/workspace/DefaultProject'])(
+    'treats the default project directory alias %s as the default project',
+    async projectName => {
+      const fixture = createFixture();
+
+      await expect(fixture.service.submit({
+        prompt: '默认目录别名任务',
+        projectName
+      })).resolves.toMatchObject({
+        projectId: 'project_default',
+        projectName: '默认项目'
+      });
+      expect(fixture.runInputs).toHaveLength(1);
+    }
+  );
+
   it('requires project id and name selectors to refer to the same project', async () => {
     const fixture = createFixture();
 
@@ -187,7 +368,7 @@ describe('TaskMcpService', () => {
     expect(fixture.runInputs).toEqual([]);
   });
 
-  it('reports waiting_approval while the underlying run remains running', () => {
+  it('reports waiting_approval while the underlying run remains running', async () => {
     const fixture = createFixture();
     fixture.seedTask({
       runId: 'run_waiting',
@@ -203,7 +384,7 @@ describe('TaskMcpService', () => {
       status: 'waiting_approval',
       result_available: false
     });
-    expect(fixture.service.getTaskResult('run_waiting')).toEqual({
+    await expect(fixture.service.getTaskResult('run_waiting')).resolves.toEqual({
       task_id: 'run_waiting',
       ready: false,
       status: 'waiting_approval'
@@ -224,7 +405,7 @@ describe('TaskMcpService', () => {
       status: 'canceled' as const,
       terminationReason: 'user_canceled'
     }
-  ])('returns the $status result with its error and termination details', details => {
+  ])('returns the $status result with its error and termination details', async details => {
     const fixture = createFixture();
     const runId = `run_${details.status}`;
     const threadId = `thread_${details.status}`;
@@ -240,7 +421,7 @@ describe('TaskMcpService', () => {
       doneEvent(runId, 2, details.status, details.terminationReason)
     ]);
 
-    expect(fixture.service.getTaskResult(runId)).toEqual({
+    await expect(fixture.service.getTaskResult(runId)).resolves.toEqual({
       ready: true,
       task_id: runId,
       thread_id: threadId,
@@ -249,9 +430,72 @@ describe('TaskMcpService', () => {
       status: details.status,
       result: `${details.status} 前的最后消息`,
       last_event_seq: 2,
+      delivery_status: 'none',
+      files: [],
+      delivery_errors: [],
       ...(details.errorCode === undefined ? {} : { error_code: details.errorCode }),
       ...(details.errorMessage === undefined ? {} : { error_message: details.errorMessage }),
       termination_reason: details.terminationReason
+    });
+  });
+
+  it('在终态查询时自动上传 outputs 文件并返回文件回执', async () => {
+    const runStates = new Map<string, SharedDriveState>();
+    const deliverOutputFiles = vi.fn(async (taskId: string, paths: string[]) => {
+      runStates.set(taskId, {
+        uploads: paths.map(path => ({
+          path,
+          logicalPath: `tasks/${taskId}/${path}`,
+          status: 'uploaded' as const,
+          artifact: {
+            space_id: 'space_1',
+            file_id: `file_${path.replaceAll('/', '_')}`,
+            logical_path: `tasks/${taskId}/${path}`,
+            file_name: path.split('/').at(-1)!,
+            content_type: 'text/plain',
+            size_bytes: 3,
+            revision: 1,
+            sha256: 'a'.repeat(64)
+          }
+        })),
+        downloads: []
+      });
+    });
+    const fixture = createFixture(undefined, undefined, deliverOutputFiles, runStates);
+    fixture.seedTask({
+      runId: 'run_output',
+      threadId: 'thread_output',
+      projectId: 'project_default',
+      status: 'succeeded',
+      runStatus: 'succeeded'
+    });
+    fixture.events.set('run_output', [
+      fileChangeEvent('run_output', 1, ['/workspace/default/outputs/report.txt'])
+    ]);
+
+    await expect(fixture.service.getTaskResult('run_output')).resolves.toMatchObject({
+      delivery_status: 'complete',
+      files: [expect.objectContaining({ file_id: 'file_outputs_report.txt' })]
+    });
+    expect(deliverOutputFiles).toHaveBeenCalledWith('run_output', ['outputs/report.txt']);
+  });
+
+  it('网盘上传未完成时返回交付错误，不返回成功结果', async () => {
+    const deliverOutputFiles = vi.fn(async () => undefined);
+    const fixture = createFixture(undefined, undefined, deliverOutputFiles);
+    fixture.seedTask({
+      runId: 'run_delivery_failed',
+      threadId: 'thread_delivery_failed',
+      projectId: 'project_default',
+      status: 'succeeded',
+      runStatus: 'succeeded'
+    });
+    fixture.events.set('run_delivery_failed', [
+      fileChangeEvent('run_delivery_failed', 1, ['/workspace/default/outputs/report.txt'])
+    ]);
+
+    await expect(fixture.service.getTaskResult('run_delivery_failed')).rejects.toMatchObject({
+      code: 'TASK_DELIVERY_INCOMPLETE'
     });
   });
 
@@ -287,12 +531,12 @@ describe('TaskMcpService', () => {
     expect(fixture.service.getTask(second.taskId).events).toEqual([
       expect.objectContaining({ runId: second.taskId, payload: expect.objectContaining({ text: 'B 结果' }) })
     ]);
-    expect(fixture.service.getTaskResult(first.taskId)).toMatchObject({
+    await expect(fixture.service.getTaskResult(first.taskId)).resolves.toMatchObject({
       thread_id: first.threadId,
       project_id: 'project_default',
       result: 'A 结果'
     });
-    expect(fixture.service.getTaskResult(second.taskId)).toMatchObject({
+    await expect(fixture.service.getTaskResult(second.taskId)).resolves.toMatchObject({
       thread_id: second.threadId,
       project_id: 'project_other',
       result: 'B 结果'
@@ -324,7 +568,12 @@ describe('TaskMcpService', () => {
   });
 });
 
-function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
+function createFixture(
+  serverSkillInputGuard?: (prompt: string) => boolean,
+  canRunAgent?: () => boolean,
+  deliverOutputFiles?: (taskId: string, paths: string[]) => Promise<void>,
+  runStates = new Map<string, SharedDriveState>()
+) {
   const projects = new Map<string, ProjectResponse>([
     ['project_default', project('project_default', '/workspace/default', 'active', '默认项目')],
     ['project_other', project('project_other', '/workspace/other', 'active', '其他项目')],
@@ -375,8 +624,13 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
   const runs = {
     startRun(input: CreateRunInput) {
       runInputs.push(input);
+      const runId = `run_${++runSequence}`;
+      tasks.set(runId, taskItem({
+        runId, threadId: input.threadId!, status: 'queued', runStatus: 'queued',
+        initiatorUserId: input.initiatorUserId, initiatorAgentId: input.initiatorAgentId
+      }, input.cwd!));
       return {
-        id: `run_${++runSequence}`,
+        id: runId,
         threadId: input.threadId,
         status: 'queued' as const,
         submissionMode: input.submissionMode ?? 'enqueue'
@@ -385,8 +639,11 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
     cancelRun() {
       return true;
     },
-    getRun() {
-      return undefined;
+    getRun(runId: string) {
+      return { sharedDriveState: runStates.get(runId) ?? { uploads: [], downloads: [] } };
+    },
+    listRunsByThread(threadId: string, limit = 50) {
+      return [...tasks.values()].filter(task => task.threadId === threadId).reverse().slice(0, limit);
     },
     getLastEventSeq(runId: string) {
       return events.get(runId)?.at(-1)?.seq ?? 0;
@@ -414,7 +671,9 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
     runs,
     tasks: { getByRunId: runId => tasks.get(runId) },
     threadRunOptions: { threadManager },
-    serverSkillInputGuard
+    serverSkillInputGuard,
+    canRunAgent,
+    deliverOutputFiles
   });
 
   const seedTask = (input: {
@@ -426,6 +685,8 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
     errorCode?: string;
     errorMessage?: string;
     terminationReason?: string;
+    initiatorUserId?: string;
+    initiatorAgentId?: string;
   }) => {
     const selected = projects.get(input.projectId)!;
     if (!threads.has(input.threadId)) {
@@ -439,7 +700,9 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
     projects,
     threads,
     events,
+    runStates,
     runInputs,
+    tasks,
     seedTask,
     seedSubmittedTask(
       submitted: { taskId: string; threadId: string; projectId: string },
@@ -451,13 +714,26 @@ function createFixture(serverSkillInputGuard?: (prompt: string) => boolean) {
         projectId: submitted.projectId,
         status,
         runStatus: status,
-        terminationReason: 'completed'
+        terminationReason: 'completed',
+        initiatorUserId: tasks.get(submitted.taskId)?.initiatorUserId,
+        initiatorAgentId: tasks.get(submitted.taskId)?.initiatorAgentId
       });
     },
     publish(runId: string, event: AgentEventEnvelope) {
       for (const listener of subscriptions.get(runId) ?? []) listener(event);
     }
   };
+}
+
+function createContinuationFixture() {
+  const fixture = createFixture();
+  fixture.seedTask({
+    runId: 'run_previous', threadId: 'thread_previous', projectId: 'project_other',
+    status: 'succeeded', runStatus: 'succeeded',
+    initiatorUserId: 'user_1', initiatorAgentId: 'agent_1'
+  });
+  fixture.threads.get('thread_previous')!.codexThreadId = 'codex_original';
+  return fixture;
 }
 
 function project(
@@ -510,6 +786,22 @@ function runtimeThread(
   };
 }
 
+function fileChangeEvent(runId: string, seq: number, paths: string[]): AgentEventEnvelope {
+  return {
+    id: `${runId}:file_change:${seq}`,
+    runId,
+    seq,
+    ts: '2026-11-05T00:00:00.000Z',
+    type: 'file_change',
+    payload: {
+      type: 'file_change',
+      status: 'completed',
+      changes: paths.map(path => ({ path, kind: 'add' as const }))
+    },
+    normalizerVersion: 2
+  };
+}
+
 function taskItem(
   input: {
     runId: string;
@@ -519,6 +811,8 @@ function taskItem(
     errorCode?: string;
     errorMessage?: string;
     terminationReason?: string;
+    initiatorUserId?: string;
+    initiatorAgentId?: string;
   },
   cwd: string
 ): TaskItem {
@@ -532,6 +826,8 @@ function taskItem(
     cwd,
     profile: 'default',
     createdBy: 'api',
+    initiatorUserId: input.initiatorUserId,
+    initiatorAgentId: input.initiatorAgentId,
     submissionMode: 'enqueue',
     createdAt: '2026-09-02T00:00:00.000Z',
     updatedAt: '2026-09-02T00:00:00.000Z',

@@ -22,6 +22,7 @@ const (
 type Account struct {
 	UserID       string
 	Email        string
+	Phone        string
 	Name         string
 	PasswordHash string
 	Status       string
@@ -48,6 +49,9 @@ func (a Account) DisplayName() string {
 	if email := strings.TrimSpace(a.Email); email != "" {
 		return email
 	}
+	if phone := strings.TrimSpace(a.Phone); phone != "" {
+		return phone
+	}
 	return strings.TrimSpace(a.UserID)
 }
 
@@ -69,12 +73,14 @@ type AccountAgent struct {
 
 type RegisterRequest struct {
 	Email    string
+	Phone    string
 	Name     string
 	Password string
 }
 
 type LoginRequest struct {
 	Email    string
+	Phone    string
 	Password string
 }
 
@@ -123,14 +129,15 @@ type AuthenticatedIdentity struct {
 }
 
 type AccountIdentity struct {
-	ProviderType    string
-	ProviderKey     string
-	ProviderSubject string
-	UserID          string
-	ExternalUserID  string
-	VerifiedAt      time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ProviderType     string
+	ProviderKey      string
+	ProviderSubject  string
+	UserID           string
+	ExternalUserID   string
+	EnterpriseUserID string
+	VerifiedAt       time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type OAuthLoginState struct {
@@ -168,5 +175,6 @@ type OAuthAuthorizationCodeConsumeRequest struct {
 
 type ExternalAccountRequest struct {
 	Email string
+	Phone string
 	Name  string
 }

@@ -18,7 +18,7 @@ describe('timeline model', () => {
       normalizerVersion: 1
     };
 
-    expect(eventToTimelineItem(event)).toEqual({
+    expect(eventToTimelineItem(event)).toMatchObject({
       kind: 'schedule_trigger',
       id: 'evt_schedule_trigger',
       runId: 'run_schedule',
@@ -82,6 +82,32 @@ describe('timeline model', () => {
       text: 'hello',
       source: 'runtime'
     });
+  });
+
+  it('实时回复保留 Runtime 消息 ID，避免历史先加载时 SSE 回放重复追加', () => {
+    const event: AgentEventEnvelope = {
+      id: 'evt_run_1_5',
+      rawEventId: 'assistant-item-1',
+      runId: 'run_1',
+      seq: 5,
+      ts: '2026-07-06T00:00:00.000Z',
+      type: 'assistant_message',
+      payload: {
+        type: 'assistant_message',
+        text: '失败前的公开摘要',
+        format: 'plain_text',
+        delivery: 'message'
+      },
+      normalizerVersion: 1
+    };
+
+    expect(eventToTimelineItem(event)).toMatchObject({
+      id: 'run_1:assistant-item-1',
+      runId: 'run_1',
+      text: '失败前的公开摘要'
+    });
+    expect(eventToTimelineItem({ ...event, runId: 'run_2' })?.id)
+      .not.toBe(eventToTimelineItem(event)?.id);
   });
 
   it('maps reasoning_summary events as visible process summaries', () => {

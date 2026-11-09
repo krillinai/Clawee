@@ -24,17 +24,21 @@ import (
 var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type Config struct {
-	Store       Store
-	SpaceStore  SpaceStore
-	PackageRoot string
-	Clock       func() time.Time
+	ReviewAgentID string
+	Store         Store
+	SpaceStore    SpaceStore
+	PackageRoot   string
+	Clock         func() time.Time
 }
 
 type Service struct {
-	store       Store
-	spaces      SpaceStore
-	packageRoot string
-	clock       func() time.Time
+	reviewAgentID    string
+	aiIdentityLookup AIReviewIdentityLookup
+	aiReviewPresence aiReviewAgentPresence
+	store            Store
+	spaces           SpaceStore
+	packageRoot      string
+	clock            func() time.Time
 }
 
 func NewService(cfg Config) *Service {
@@ -46,7 +50,7 @@ func NewService(cfg Config) *Service {
 	if spaces == nil {
 		spaces, _ = cfg.Store.(SpaceStore)
 	}
-	return &Service{store: cfg.Store, spaces: spaces, packageRoot: cfg.PackageRoot, clock: clock}
+	return &Service{reviewAgentID: strings.TrimSpace(cfg.ReviewAgentID), store: cfg.Store, spaces: spaces, packageRoot: cfg.PackageRoot, clock: clock}
 }
 
 func PreparePackageRoot(root string) (string, error) {
@@ -227,7 +231,11 @@ func (s *Service) CreateVersionFromPackage(ctx context.Context, input CreateVers
 		_ = os.Remove(finalPath)
 		return MutationResult{}, err
 	}
-	return MutationResult{Skill: storedSkill, Version: storedVersion}, nil
+	result := MutationResult{Skill: storedSkill, Version: storedVersion}
+	if storedVersion.Source == nil {
+		result.ApprovalRequestID = storedVersion.ApprovalRequestID
+	}
+	return result, nil
 }
 
 func validVersionSourceEvidence(source *VersionSourceEvidence) bool {
@@ -283,7 +291,18 @@ func (s *Service) GetAdmin(ctx context.Context, skillID string) (AdminDetail, er
 	if strings.TrimSpace(skillID) == "" {
 		return AdminDetail{}, ErrNotFound
 	}
-	return s.store.GetAdmin(ctx, skillID)
+	detail, err := s.store.GetAdmin(ctx, skillID)
+	if err != nil {
+		return detail, err
+	}
+	for _, version := range detail.Versions {
+		if version.LocalApproval != nil && version.LocalApproval.AIReview != nil {
+			if err := s.checkAIPackageDigest(version); err != nil {
+				return AdminDetail{}, err
+			}
+		}
+	}
+	return detail, nil
 }
 
 func (s *Service) ListPublished(ctx context.Context) ([]PublishedItem, error) {
@@ -324,6 +343,9 @@ func (s *Service) SetCurrentVersion(ctx context.Context, skillID, versionID stri
 	if strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" {
 		return MutationResult{}, ErrInvalidRequest
 	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return MutationResult{}, err
+	}
 	skill, version, err := s.store.SetCurrentVersion(ctx, skillID, versionID, s.clock().UTC())
 	if err != nil {
 		return MutationResult{}, err
@@ -337,6 +359,9 @@ func (s *Service) PublishOwnVersion(ctx context.Context, skillID, versionID, use
 	})
 	if !ok || strings.TrimSpace(skillID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(userID) == "" {
 		return MutationResult{}, ErrInvalidRequest
+	}
+	if err := s.checkAIHumanDigest(ctx, skillID, versionID); err != nil {
+		return MutationResult{}, err
 	}
 	skill, version, err := store.PublishOwnVersion(ctx, skillID, versionID, userID, s.clock().UTC())
 	if err != nil {
@@ -380,7 +405,7 @@ func (s *Service) OpenCurrentPackageForVersion(ctx context.Context, skillID, exp
 	}
 	file, err := os.Open(filepath.Join(s.packageRoot, detail.PackagePath))
 	if errors.Is(err, os.ErrNotExist) {
-		return PackageDownload{}, err
+		return PackageDownload{}, fmt.Errorf("%w: %w", ErrStoredPackageMissing, err)
 	}
 	if err != nil {
 		return PackageDownload{}, err
@@ -637,6 +662,9 @@ func (s *Service) openVersionFile(version Version) (*os.File, os.FileInfo, error
 		return nil, nil, storedPackageInvalidf("存储路径不合法")
 	}
 	file, err := os.Open(filepath.Join(s.packageRoot, version.PackagePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("%w: %w", ErrStoredPackageMissing, err)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

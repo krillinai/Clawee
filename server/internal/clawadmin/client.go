@@ -32,6 +32,7 @@ type AccountReference struct {
 	ID    string `json:"account_id"`
 	Name  string `json:"account_name"`
 	Email string `json:"account_email"`
+	Phone string `json:"account_phone,omitempty"`
 }
 
 type BillingUsage struct {
@@ -126,7 +127,8 @@ func (c *Client) EnsureModelConfiguration(ctx context.Context, account AccountRe
 	account.ID = strings.TrimSpace(account.ID)
 	account.Name = strings.TrimSpace(account.Name)
 	account.Email = strings.ToLower(strings.TrimSpace(account.Email))
-	if !c.Configured() || account.ID == "" || account.Email == "" {
+	account.Phone = strings.TrimSpace(account.Phone)
+	if !c.Configured() || account.ID == "" || (account.Email == "" && account.Phone == "") {
 		return ModelConfiguration{}, ErrUnavailable
 	}
 	payload, err := json.Marshal(account)

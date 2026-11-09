@@ -1,12 +1,23 @@
 import type {
   AgentEventEnvelope,
   AttachmentResponse,
+  EnterpriseWorkflowCompletion,
+  ModelResponseError,
   PublicRunStatus,
+  RunQueueReason,
   RuntimeApproval,
   RunSubmissionMode
 } from '@clawee/protocol';
 
-export type TimelineItem =
+export type TimelineItem = {
+  turnId?: string;
+  rawEventId?: string;
+  eventId?: string;
+  eventSeq?: number;
+  historyIds?: string[];
+  historyOnly?: boolean;
+  terminalSource?: 'daemon' | 'runtime_turn';
+} & (
   | {
       kind: 'workflow_start'; id: string; runId: string; taskId: string;
       instanceId: string; workflowName: string; nodeTitle: string; nodeOrder: number;
@@ -14,7 +25,7 @@ export type TimelineItem =
     }
   | {
       kind: 'workflow_status'; id: string; runId: string; taskId: string;
-      status: string; timestamp: string; source: 'runtime';
+      status: string; completion?: EnterpriseWorkflowCompletion; timestamp: string; source: 'runtime';
     }
   | {
       kind: 'user_message';
@@ -28,6 +39,7 @@ export type TimelineItem =
       runStatus?: PublicRunStatus;
       submissionMode?: RunSubmissionMode;
       queuePosition?: number;
+      queueReason?: RunQueueReason;
       wasQueued?: boolean;
       source: 'runtime' | 'mock';
     }
@@ -40,8 +52,8 @@ export type TimelineItem =
       source: 'runtime';
     }
   | { kind: 'approval'; id: string; runId: string; approval: RuntimeApproval; source: 'runtime' }
-  | { kind: 'reasoning_summary'; id: string; runId?: string; timestamp?: string; text: string; content?: string; source: 'runtime' }
-  | { kind: 'assistant_message'; id: string; runId?: string; timestamp?: string; text: string; content?: string; source: 'runtime' | 'mock' }
+  | { kind: 'reasoning_summary'; id: string; runId?: string; timestamp?: string; text: string; delivery?: 'message' | 'delta'; content?: string; source: 'runtime' }
+  | { kind: 'assistant_message'; id: string; runId?: string; timestamp?: string; text: string; content?: string; source: 'runtime' | 'mock'; delivery?: 'message' | 'delta'; messageState?: 'streaming' | 'complete' | 'interrupted' }
   | { kind: 'tool_step'; id: string; runId?: string; timestamp?: string; name: string; content: string; source: 'runtime' }
   | { kind: 'change_card'; id: string; runId?: string; title: string; path: string; delta: string; source: 'runtime' | 'mock' }
   | {
@@ -52,10 +64,12 @@ export type TimelineItem =
       severity: 'info' | 'warning' | 'error';
       message: string;
       content: string;
+      modelResponse?: ModelResponseError;
+      modelResponseState?: 'retrying' | 'recovered' | 'failed' | 'canceled' | 'unknown';
       source: 'runtime';
     }
   | { kind: 'run_status'; id: string; runId?: string; timestamp?: string; label: string; content?: string; source: 'runtime' }
-  | { kind: 'done'; id: string; runId?: string; timestamp?: string; status: string; terminationReason?: string; content: string; source: 'runtime' };
+  | { kind: 'done'; id: string; runId?: string; timestamp?: string; status: string; terminationReason?: string; content: string; source: 'runtime' });
 
 function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
@@ -113,6 +127,18 @@ function formatFileChangeTitle(changes: Array<{ kind: 'add' | 'modify' | 'delete
 }
 
 export function eventToTimelineItem(event: AgentEventEnvelope): TimelineItem | null {
+  const item = mapEventToTimelineItem(event);
+  if (item === null) return null;
+  const suffix = event.type === 'tool_use' ? ':use' : event.type === 'tool_result' ? ':result' : '';
+  return {
+    ...item,
+    ...(event.rawEventId === undefined || event.type === 'done' || event.type === 'status' || event.type === 'diagnostic' || event.type === 'error'
+      ? {} : { id: `${event.runId}:${event.rawEventId}${suffix}` }),
+    turnId: event.turnId, rawEventId: event.rawEventId, eventId: event.id, eventSeq: event.seq
+  };
+}
+
+function mapEventToTimelineItem(event: AgentEventEnvelope): TimelineItem | null {
   switch (event.type) {
     case 'schedule_trigger':
       return {
@@ -126,10 +152,12 @@ export function eventToTimelineItem(event: AgentEventEnvelope): TimelineItem | n
     case 'assistant_message':
       return {
         kind: 'assistant_message',
-        id: event.id,
+        id: event.rawEventId === undefined ? event.id : `${event.runId}:${event.rawEventId}`,
         runId: event.runId,
         timestamp: event.ts,
         text: event.payload.text,
+        delivery: event.payload.delivery,
+        messageState: event.payload.delivery === 'delta' ? 'streaming' : 'complete',
         content: safeStringify(event.payload),
         source: 'runtime'
       };
@@ -140,6 +168,7 @@ export function eventToTimelineItem(event: AgentEventEnvelope): TimelineItem | n
         runId: event.runId,
         timestamp: event.ts,
         text: event.payload.text,
+        delivery: event.payload.delivery === 'delta' ? 'delta' : 'message',
         content: safeStringify(event.payload),
         source: 'runtime'
       };
@@ -184,6 +213,7 @@ export function eventToTimelineItem(event: AgentEventEnvelope): TimelineItem | n
         severity: event.payload.severity,
         message: event.payload.message,
         content: safeStringify(event.payload),
+        ...(event.payload.modelResponse ? { modelResponse: event.payload.modelResponse } : {}),
         source: 'runtime'
       };
     case 'approval':
@@ -203,11 +233,13 @@ export function eventToTimelineItem(event: AgentEventEnvelope): TimelineItem | n
         severity: 'error',
         message: event.payload.message,
         content: safeStringify(event.payload),
+        ...(event.payload.modelResponse ? { modelResponse: event.payload.modelResponse } : {}),
         source: 'runtime'
       };
     case 'done':
       return {
         kind: 'done',
+        terminalSource: 'daemon',
         id: event.id,
         runId: event.runId,
         timestamp: event.ts,

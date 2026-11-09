@@ -99,7 +99,7 @@ describe('skill usage tracker', () => {
 
   it('keeps healthy skills when a neighboring link is broken and associates enterprise versions', async () => {
     const { root, codexHome, cwd } = fixture();
-    symlinkSync(join(root, 'missing'), join(codexHome, 'skills', 'broken'));
+    symlinkSync(join(root, 'missing'), join(codexHome, 'skills', 'broken'), process.platform === 'win32' ? 'junction' : 'dir');
     const tracker = await createSkillUsageTracker({
       codexHome, cwd, homeDir: root,
       enterpriseVersion: async name => name === 'reports' ? { skillId: 'skill_1', versionId: 'version_1' } : undefined

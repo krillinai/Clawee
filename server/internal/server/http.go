@@ -15,11 +15,13 @@ import (
 	"github.com/krillinai/Clawee/server/internal/accountgovernance"
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/activity"
+	"github.com/krillinai/Clawee/server/internal/agentprompt"
 	"github.com/krillinai/Clawee/server/internal/agentprovisioning"
 	"github.com/krillinai/Clawee/server/internal/buildinfo"
 	"github.com/krillinai/Clawee/server/internal/businessdata"
 	"github.com/krillinai/Clawee/server/internal/clawadmin"
 	"github.com/krillinai/Clawee/server/internal/clientdownloads"
+	"github.com/krillinai/Clawee/server/internal/cloudskills"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
 	"github.com/krillinai/Clawee/server/internal/dingtalk"
 	"github.com/krillinai/Clawee/server/internal/feedback"
@@ -36,21 +38,24 @@ import (
 )
 
 type Options struct {
-	FeedbackTrustedProxies     []string
-	FeedbackAdminUIEnabled     bool
-	ExternalFeedbackAllowed    *bool
-	FeedbackService            *feedback.Service
-	ClientDownloadsService     *clientdownloads.Service
-	ProxyGateway               *mcpgateway.Service
-	AgentProvisioningService   *agentprovisioning.Service
-	AccountService             *accounts.Service
-	AccountGovernanceService   *accountgovernance.Service
-	RBACService                *rbac.Service
-	DataAccessService          *dataaccess.Service
-	ActivityService            *activity.Service
-	ModelConfigurationProvider interface {
-		EnsureModelConfiguration(context.Context, clawadmin.AccountReference) (clawadmin.ModelConfiguration, error)
-	}
+	FeedbackTrustedProxies   []string
+	FeedbackAdminUIEnabled   bool
+	ExternalFeedbackAllowed  *bool
+	FeedbackService          *feedback.Service
+	ClientDownloadsService   *clientdownloads.Service
+	CloudSkillService        *cloudskills.Service
+	ProxyGateway             *mcpgateway.Service
+	ModelCredentialCipher    mcpgateway.TokenCipher
+	ModelGroupStore          mcpgateway.ModelGroupStore
+	ModelUpstreamStore       mcpgateway.ModelUpstreamStore
+	ModelGatewayBaseURL      string
+	AgentProvisioningService *agentprovisioning.Service
+	AgentPromptPolicyService *agentprompt.Service
+	AccountService           *accounts.Service
+	AccountGovernanceService *accountgovernance.Service
+	RBACService              *rbac.Service
+	DataAccessService        *dataaccess.Service
+	ActivityService          *activity.Service
 	ModelCredentialLifecycle interface {
 		DisableModelCredential(context.Context, string) error
 	}
@@ -135,6 +140,7 @@ type DingTalkAuthOptions struct {
 	RedirectURL      string
 	AutoProvision    bool
 	StateTTL         time.Duration
+	RequestTimeout   time.Duration
 	Client           DingTalkClient
 }
 
@@ -175,6 +181,25 @@ func firstNonEmpty(values ...string) string {
 
 func NewRouter(opts Options) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
+	if opts.ProxyGateway != nil && opts.RBACService != nil {
+		opts.ProxyGateway.SetRoleIDsResolver(func(ctx context.Context, userID string) ([]string, error) {
+			bindings, err := opts.RBACService.ListAccountRoles(ctx, userID)
+			if err != nil {
+				if errors.Is(err, accounts.ErrAccountNotFound) {
+					return []string{}, nil
+				}
+				return nil, err
+			}
+			roleIDs := make([]string, 0, len(bindings))
+			for _, binding := range bindings {
+				roleIDs = append(roleIDs, binding.RoleID)
+			}
+			return roleIDs, nil
+		})
+	}
+	if opts.DingTalkAuth.RequestTimeout <= 0 {
+		opts.DingTalkAuth.RequestTimeout = 10 * time.Second
+	}
 
 	cookieName := strings.TrimSpace(opts.SessionCookieName)
 	if cookieName == "" {
@@ -227,6 +252,9 @@ func NewRouter(opts Options) http.Handler {
 	})
 
 	mountMCPEndpoints(router, opts)
+	if modelAccessMode(opts) == ModelAccessPlatformManaged {
+		mountModelProxyRoutes(router, opts)
+	}
 
 	mountOfficePublicRoutes(router, opts)
 
@@ -238,6 +266,8 @@ func NewRouter(opts Options) http.Handler {
 	mountClientDownloadsRoutes(api, adminAPI, opts)
 	mountSkillHubRoutes(appAPI, adminAPI, opts)
 	mountWorkflowRoutes(appAPI, adminAPI, opts)
+	mountApprovalRoutes(appAPI, opts)
+	mountAdminApprovalRoutes(adminAPI, opts)
 	status := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service":              "clawee-gateway",
@@ -251,6 +281,7 @@ func NewRouter(opts Options) http.Handler {
 				"platform_branding":      opts.PlatformBrandingService != nil,
 				"client_downloads":       opts.ClientDownloadsService != nil,
 				"mcp":                    opts.ProxyGateway != nil,
+				"model_gateway":          modelAccessMode(opts) == ModelAccessPlatformManaged,
 				"activity":               opts.OfficeDashboardAPI != nil,
 				"agent_management":       opts.OfficeManagementAPI != nil,
 				"knowledge":              opts.KnowledgeService != nil,
@@ -269,13 +300,21 @@ func NewRouter(opts Options) http.Handler {
 	mountAccountGovernanceRoutes(adminAPI, opts)
 	mountDataResourceGrantRoutes(adminAPI, opts)
 	mountActivityRoutes(appAPI, opts)
+	mountSkillContributionRoutes(appAPI, opts)
 	mountBilibiliAppRoutes(appAPI, opts)
 	mountBillingRoutes(appAPI, opts)
 	mountModelConfigurationRoutes(appAPI, opts)
 	mountBusinessDataRoutes(appAPI, opts)
 	mountPlatformBrandingRoutes(appAPI, adminAPI, opts)
+	mountAgentPromptPolicyRoutes(appAPI, adminAPI, opts)
+	if modelAccessMode(opts) == ModelAccessPlatformManaged {
+		mountModelUpstreamAdminRoutes(adminAPI, opts)
+	}
 
 	mountAgentRoutes(appAPI, opts)
+	if modelAccessMode(opts) == ModelAccessPlatformManaged {
+		mountModelUsageRoutes(appAPI, opts)
+	}
 	mountKnowledgeAppRoutes(appAPI, opts)
 	mountOfficeAdminRoutes(adminAPI, opts)
 	mountKnowledgeAdminRoutes(adminAPI, opts)

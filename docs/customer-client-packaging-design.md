@@ -83,7 +83,7 @@ GitHub 的手动 workflow 发现依赖默认分支存在相应 workflow。试点
 执行顺序：
 
 1. 校验客户与提交，执行客户端测试、类型检查和 Runtime 契约检查。
-2. 在 `macos-15-intel/x64`、`macos-14/arm64`、`windows-latest/x64` 三个平台安装锁定依赖，复用依赖和 Runtime 下载缓存。
+2. 在 `macos-15-intel/x64`、`macos-15/arm64`、`windows-latest/x64` 三个平台安装锁定依赖，复用依赖和 Runtime 下载缓存。
 3. 生成所选客户临时 TOML，设置可选配置路径，随后运行原命令；每个平台独立构建，不缓存或跨客户复用 `.pack`、应用包和 release 输出目录。
 4. macOS 沿用 `release` Environment 的 Developer ID 签名、公证、装订及校验链路。Windows 首期沿用未签名 NSIS EXE；只有配置并验证 Authenticode 证书后，才切换到现有 `desktop:release` 路径并标注已签名。
 5. 运行现有包内 Runtime E2E 和真实 Codex 会话检查，再验证包内 Gateway 配置及首次启动复制行为。

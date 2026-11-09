@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/krillinai/Clawee/server/internal/sharedfiles"
 )
 
 var (
@@ -21,48 +23,59 @@ var (
 	ErrMissing   = errors.New("not_found")
 	ErrForbidden = errors.New("forbidden")
 	ErrConflict  = errors.New("conflict")
+	ErrAssignees = fmt.Errorf("%w: invalid_assignees", ErrInvalid)
 )
 
 type Node struct {
-	ID          string `json:"node_id"`
-	Order       int    `json:"order"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Assignee    string `json:"assignee_user_id"`
-	Instruction string `json:"instruction"`
+	ID                string   `json:"node_id"`
+	Order             int      `json:"order"`
+	Type              string   `json:"type"`
+	Title             string   `json:"title"`
+	Assignee          string   `json:"assignee_user_id"`
+	AssigneeUsers     []string `json:"assignee_user_ids,omitempty"`
+	AssigneeRoles     []string `json:"assignee_role_ids,omitempty"`
+	AssigneeInitiator bool     `json:"assignee_initiator,omitempty"`
+	ResolvedUsers     []string `json:"resolved_user_ids,omitempty"`
+	Instruction       string   `json:"instruction"`
 }
 
 type Template struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	Revision    int       `json:"revision"`
-	Nodes       []Node    `json:"nodes"`
-	CreatedBy   string    `json:"created_by"`
-	UpdatedBy   string    `json:"updated_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	SharedSpaceID string            `json:"shared_space_id,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	Status        string            `json:"status"`
+	Revision      int               `json:"revision"`
+	Nodes         []Node            `json:"nodes"`
+	UserNames     map[string]string `json:"user_names,omitempty"`
+	CreatedBy     string            `json:"created_by"`
+	UpdatedBy     string            `json:"updated_by"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 type Task struct {
-	ID          string          `json:"task_id"`
-	InstanceID  string          `json:"instance_id"`
-	NodeID      string          `json:"node_id"`
-	Order       int             `json:"node_order"`
-	Type        string          `json:"type"`
-	Assignee    string          `json:"assignee_user_id"`
-	Instruction string          `json:"instruction"`
-	Input       json.RawMessage `json:"input"`
-	Output      json.RawMessage `json:"output,omitempty"`
-	Status      string          `json:"status"`
-	Decision    string          `json:"decision,omitempty"`
-	Comment     string          `json:"comment,omitempty"`
-	HandledBy   string          `json:"handled_by,omitempty"`
-	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	SharedContext
+	Artifacts     []Artifact      `json:"artifacts"`
+	ID            string          `json:"task_id"`
+	InstanceID    string          `json:"instance_id"`
+	NodeID        string          `json:"node_id"`
+	Order         int             `json:"node_order"`
+	Type          string          `json:"type"`
+	Assignee      string          `json:"assignee_user_id"`
+	AssigneeUsers []string        `json:"assignee_user_ids"`
+	Instruction   string          `json:"instruction"`
+	Input         json.RawMessage `json:"input"`
+	Output        json.RawMessage `json:"output,omitempty"`
+	Status        string          `json:"status"`
+	Decision      string          `json:"decision,omitempty"`
+	Comment       string          `json:"comment,omitempty"`
+	HandledBy     string          `json:"handled_by,omitempty"`
+	CompletedAt   *time.Time      `json:"completed_at,omitempty"`
 }
 
 type Instance struct {
+	SharedContext
 	ID               string            `json:"id"`
 	TemplateID       string            `json:"template_id"`
 	TemplateRevision int               `json:"template_revision"`
@@ -78,13 +91,18 @@ type Instance struct {
 }
 
 type Result struct {
-	InstanceID string `json:"instance_id"`
-	TaskID     string `json:"task_id"`
-	Status     string `json:"status"`
-	NextTask   *Task  `json:"next_task,omitempty"`
+	SharedSpaceID      string `json:"shared_space_id,omitempty"`
+	InstancePathPrefix string `json:"instance_path_prefix,omitempty"`
+	InstanceID         string `json:"instance_id"`
+	TaskID             string `json:"task_id"`
+	Status             string `json:"status"`
+	NextTask           *Task  `json:"next_task,omitempty"`
 }
 
-type Service struct{ DB *pgxpool.Pool }
+type Service struct {
+	DB    *pgxpool.Pool
+	Files *sharedfiles.Service
+}
 
 func object(value json.RawMessage) (json.RawMessage, error) {
 	if len(value) == 0 {
@@ -106,6 +124,66 @@ func digest(value any) string {
 	return fmt.Sprintf("%x", sum)
 }
 
+func directUsers(node Node) []string {
+	users := append([]string(nil), node.AssigneeUsers...)
+	if node.Assignee != "" {
+		users = append(users, node.Assignee)
+	}
+	slices.Sort(users)
+	return slices.Compact(users)
+}
+
+func resolveNode(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, node Node, starter ...string) ([]string, error) {
+	direct := directUsers(node)
+	if len(direct) == 0 && len(node.AssigneeRoles) == 0 && !node.AssigneeInitiator {
+		return nil, ErrAssignees
+	}
+	var users []string
+	if len(direct) > 0 {
+		if err := db.QueryRow(ctx, `SELECT ARRAY(SELECT user_id FROM accounts WHERE user_id=ANY($1) AND status='active' ORDER BY user_id)`, direct).Scan(&users); err != nil {
+			return nil, err
+		}
+		if len(users) != len(direct) {
+			return nil, ErrAssignees
+		}
+	}
+	roles := slices.Clone(node.AssigneeRoles)
+	slices.Sort(roles)
+	for _, role := range slices.Compact(roles) {
+		var exists bool
+		var members []string
+		if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rbac_roles WHERE role_id=$1), ARRAY(SELECT a.user_id FROM effective_account_roles r JOIN accounts a ON a.user_id=r.user_id WHERE r.role_id=$1 AND a.status='active' ORDER BY a.user_id)`, role).Scan(&exists, &members); err != nil {
+			return nil, err
+		}
+		if !exists || len(members) == 0 {
+			return nil, ErrAssignees
+		}
+		users = append(users, members...)
+	}
+	if node.AssigneeInitiator && len(starter) > 0 && starter[0] != "" {
+		users = append(users, starter[0])
+	}
+	slices.Sort(users)
+	return slices.Compact(users), nil
+}
+
+func legacyAssignee(node Node) string {
+	if slices.Contains(node.ResolvedUsers, node.Assignee) {
+		return node.Assignee
+	}
+	return node.ResolvedUsers[0]
+}
+
+const templateCandidateSQL = `(t.definition_json->0->>'assignee_user_id'=$3
+	OR COALESCE(t.definition_json->0->'assignee_user_ids','[]'::jsonb) ? $3
+	OR EXISTS (SELECT 1 FROM effective_account_roles r WHERE r.user_id=$3
+		AND COALESCE(t.definition_json->0->'assignee_role_ids','[]'::jsonb) ? r.role_id))
+	AND EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=$3 AND a.status='active')`
+
+const taskAssigneesSQL = `ARRAY(SELECT a.user_id FROM workflow_task_assignees a WHERE a.task_id=t.id ORDER BY a.user_id)`
+
 func (s *Service) validate(ctx context.Context, nodes []Node, full bool) error {
 	if !full && len(nodes) == 0 {
 		return nil
@@ -118,16 +196,15 @@ func (s *Service) validate(ctx context.Context, nodes []Node, full bool) error {
 		if node.ID == "" || seen[node.ID] || node.Order != i || (node.Type != "agent" && node.Type != "approval") {
 			return ErrInvalid
 		}
+		if i == 0 && node.AssigneeInitiator {
+			return ErrAssignees
+		}
 		seen[node.ID] = true
-		if !full {
-			continue
-		}
-		if strings.TrimSpace(node.Title) == "" || strings.TrimSpace(node.Instruction) == "" || node.Assignee == "" {
+		if full && (strings.TrimSpace(node.Title) == "" || strings.TrimSpace(node.Instruction) == "") {
 			return ErrInvalid
 		}
-		var active bool
-		if err := s.DB.QueryRow(ctx, `SELECT status = 'active' FROM accounts WHERE user_id = $1`, node.Assignee).Scan(&active); err != nil || !active {
-			return ErrInvalid
+		if _, err := resolveNode(ctx, s.DB, node); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -136,7 +213,7 @@ func (s *Service) validate(ctx context.Context, nodes []Node, full bool) error {
 func scanTemplate(row pgx.Row) (Template, error) {
 	var t Template
 	var raw []byte
-	err := row.Scan(&t.ID, &t.Name, &t.Description, &t.Status, &t.Revision, &raw, &t.CreatedBy, &t.UpdatedBy, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Name, &t.Description, &t.Status, &t.Revision, &raw, &t.CreatedBy, &t.UpdatedBy, &t.CreatedAt, &t.UpdatedAt, &t.SharedSpaceID)
 	if err == pgx.ErrNoRows {
 		return t, ErrMissing
 	}
@@ -147,25 +224,10 @@ func scanTemplate(row pgx.Row) (Template, error) {
 	return t, err
 }
 
-const templateColumns = `id, name, description, status, revision, definition_json, created_by, updated_by, created_at, updated_at`
+const templateColumns = `id, name, description, status, revision, definition_json, created_by, updated_by, created_at, updated_at, COALESCE(shared_space_id,'')`
 
 func (s *Service) Template(ctx context.Context, id, user string, admin bool) (Template, error) {
-	t, err := scanTemplate(s.DB.QueryRow(ctx, `SELECT `+templateColumns+` FROM workflow_templates WHERE id = $1`, id))
-	if err != nil {
-		return t, err
-	}
-	if !admin {
-		if t.Status != "enabled" {
-			return Template{}, ErrMissing
-		}
-		for _, node := range t.Nodes {
-			if node.Assignee == user {
-				return t, nil
-			}
-		}
-		return Template{}, ErrMissing
-	}
-	return t, nil
+	return scanTemplate(s.DB.QueryRow(ctx, `SELECT `+templateColumns+` FROM workflow_templates t WHERE id=$1 AND ($2 OR (status='enabled' AND (`+templateCandidateSQL+`)))`, id, admin, user))
 }
 
 func (s *Service) Save(ctx context.Context, actor, id, name, description string, expected int, nodes []Node) (Template, error) {
@@ -180,6 +242,10 @@ func (s *Service) Save(ctx context.Context, actor, id, name, description string,
 	}
 	if nodes == nil {
 		nodes = []Node{}
+	}
+	nodes = slices.Clone(nodes)
+	for index := range nodes {
+		nodes[index].ResolvedUsers = nil
 	}
 	previous, err := s.Template(ctx, id, "", true)
 	if err != nil && !errors.Is(err, ErrMissing) {
@@ -213,6 +279,9 @@ func (s *Service) Save(ctx context.Context, actor, id, name, description string,
 		}
 	}
 	if err != nil {
+		return Template{}, err
+	}
+	if _, err = s.ensureTemplateSpace(ctx, tx, id); err != nil {
 		return Template{}, err
 	}
 	if err = s.event(ctx, tx, id, "", "", "template_saved", actor, "", ""); err != nil {
@@ -295,7 +364,7 @@ func (s *Service) Templates(ctx context.Context, user string, admin bool, limit 
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT `+templateColumns+` FROM workflow_templates t WHERE (t.created_at,t.id)<($1,$2) AND ($3 OR (t.status='enabled' AND EXISTS (SELECT 1 FROM jsonb_array_elements(t.definition_json) n WHERE n->>'assignee_user_id'=$4))) ORDER BY t.created_at DESC,t.id DESC LIMIT $5`, at, id, admin, user, limit+1)
+	rows, err := s.DB.Query(ctx, `SELECT `+templateColumns+` FROM workflow_templates t WHERE (t.created_at,t.id)<($1,$2) AND ($4 OR (t.status='enabled' AND (`+templateCandidateSQL+`))) ORDER BY t.created_at DESC,t.id DESC LIMIT $5`, at, id, user, admin, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -352,38 +421,52 @@ func (s *Service) Start(ctx context.Context, templateID, user, key string, input
 	if err != pgx.ErrNoRows {
 		return Result{}, err
 	}
-	visible := false
-	for _, node := range t.Nodes {
-		if node.Assignee == user {
-			visible = true
-			break
+	if len(t.Nodes) == 0 {
+		return Result{}, ErrInvalid
+	}
+	for index := range t.Nodes {
+		if index == 0 && t.Nodes[index].AssigneeInitiator {
+			return Result{}, ErrAssignees
+		}
+		t.Nodes[index].ResolvedUsers, err = resolveNode(ctx, tx, t.Nodes[index], user)
+		if err != nil {
+			return Result{}, err
 		}
 	}
-	if !visible {
+	if !slices.Contains(t.Nodes[0].ResolvedUsers, user) {
 		return Result{}, ErrMissing
 	}
 	if t.Status != "enabled" {
 		return Result{}, ErrConflict
 	}
-	if len(t.Nodes) == 0 || t.Nodes[0].Assignee != user {
-		return Result{}, ErrForbidden
+	spaceID, err := s.ensureTemplateSpace(ctx, tx, templateID)
+	if err != nil {
+		return Result{}, err
 	}
 	instanceID, taskID := uuid.NewString(), uuid.NewString()
 	snapshot, _ := json.Marshal(t.Nodes)
-	result := Result{InstanceID: instanceID, TaskID: taskID, Status: "running"}
+	result := Result{InstanceID: instanceID, TaskID: taskID, Status: "running", SharedSpaceID: spaceID, InstancePathPrefix: instancePrefix(instanceID)}
 	response, _ := json.Marshal(result)
-	_, err = tx.Exec(ctx, `INSERT INTO workflow_instances (id,template_id,template_revision,template_snapshot_json,status,current_node_id,initial_input_json,started_by,start_key,start_digest,start_response_json) VALUES ($1,$2,$3,$4,'running',$5,$6,$7,$8,$9,$10)`, instanceID, templateID, t.Revision, snapshot, t.Nodes[0].ID, input, user, key, requestDigest, response)
+	_, err = tx.Exec(ctx, `INSERT INTO workflow_instances (id,template_id,template_revision,template_snapshot_json,status,current_node_id,initial_input_json,started_by,start_key,start_digest,start_response_json,shared_files_initialized) VALUES ($1,$2,$3,$4,'running',$5,$6,$7,$8,$9,$10,true)`, instanceID, templateID, t.Revision, snapshot, t.Nodes[0].ID, input, user, key, requestDigest, response)
 	if err != nil {
 		return Result{}, err
 	}
 	participants := map[string]bool{user: true}
 	for _, n := range t.Nodes {
-		participants[n.Assignee] = true
+		for _, candidate := range n.ResolvedUsers {
+			participants[candidate] = true
+		}
 	}
+	memberIDs := make([]string, 0, len(participants))
 	for participant := range participants {
+		memberIDs = append(memberIDs, participant)
 		if _, err = tx.Exec(ctx, `INSERT INTO workflow_instance_participants (instance_id,user_id) VALUES ($1,$2)`, instanceID, participant); err != nil {
 			return Result{}, err
 		}
+	}
+	slices.Sort(memberIDs)
+	if err = s.Files.EnsureMembersTx(ctx, tx, spaceID, memberIDs, user); err != nil {
+		return Result{}, err
 	}
 	if err = s.insertTask(ctx, tx, taskID, instanceID, t.Nodes[0], input); err != nil {
 		return Result{}, err
@@ -395,7 +478,11 @@ func (s *Service) Start(ctx context.Context, templateID, user, key string, input
 }
 
 func (s *Service) insertTask(ctx context.Context, tx pgx.Tx, id, instance string, node Node, input json.RawMessage) error {
-	_, err := tx.Exec(ctx, `INSERT INTO workflow_node_tasks (id,instance_id,node_id,node_order,type,assignee_user_id,input_json,status) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')`, id, instance, node.ID, node.Order, node.Type, node.Assignee, input)
+	_, err := tx.Exec(ctx, `INSERT INTO workflow_node_tasks (id,instance_id,node_id,node_order,type,assignee_user_id,input_json,status) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')`, id, instance, node.ID, node.Order, node.Type, legacyAssignee(node), input)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO workflow_task_assignees (task_id,user_id) SELECT $1,unnest($2::text[])`, id, node.ResolvedUsers)
 	return err
 }
 
@@ -408,7 +495,7 @@ func (s *Service) event(ctx context.Context, tx pgx.Tx, template, instance, task
 	return err
 }
 
-func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, comment string, output json.RawMessage) (Result, error) {
+func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, comment string, output json.RawMessage, attachments ...Artifact) (Result, error) {
 	if id == "" || key == "" || len(key) > 200 || len(comment) > 4096 {
 		return Result{}, ErrInvalid
 	}
@@ -426,17 +513,21 @@ func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, 
 			return Result{}, err
 		}
 	}
-	requestDigest := digest(struct {
-		Decision, Comment string
-		Output            json.RawMessage
-	}{decision, comment, output})
+	requestDigest := completionDigest(decision, comment, output, attachments)
+	archived, replay, err := s.archiveSubmission(ctx, id, user, agent, key, decision, comment, output, attachments, requestDigest)
+	if err != nil {
+		return Result{}, err
+	}
+	if replay != nil {
+		return *replay, nil
+	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	defer tx.Rollback(ctx)
 	var instanceID string
-	if err = tx.QueryRow(ctx, `SELECT instance_id FROM workflow_node_tasks WHERE id=$1 AND assignee_user_id=$2`, id, user).Scan(&instanceID); err == pgx.ErrNoRows {
+	if err = tx.QueryRow(ctx, `SELECT instance_id FROM workflow_node_tasks t WHERE id=$1 AND EXISTS (SELECT 1 FROM workflow_task_assignees a JOIN accounts u ON u.user_id=a.user_id WHERE a.task_id=t.id AND a.user_id=$2 AND u.status='active')`, id, user).Scan(&instanceID); err == pgx.ErrNoRows {
 		return Result{}, ErrMissing
 	}
 	if err != nil {
@@ -450,12 +541,22 @@ func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, 
 	var task Task
 	var savedDigest string
 	var saved []byte
-	err = tx.QueryRow(ctx, `SELECT node_id,node_order,type,input_json,status,COALESCE(complete_key,''),COALESCE(complete_digest,''),complete_response_json FROM workflow_node_tasks WHERE id=$1`, id).Scan(&task.NodeID, &task.Order, &task.Type, &task.Input, &task.Status, &task.ID, &savedDigest, &saved)
+	err = tx.QueryRow(ctx, `SELECT node_id,node_order,type,input_json,status,COALESCE(complete_key,''),COALESCE(complete_digest,''),complete_response_json,COALESCE(handled_by,'') FROM workflow_node_tasks WHERE id=$1 FOR UPDATE`, id).Scan(&task.NodeID, &task.Order, &task.Type, &task.Input, &task.Status, &task.ID, &savedDigest, &saved, &task.HandledBy)
 	if err != nil {
 		return Result{}, err
 	}
+	spaceID, err := s.spaceForInstance(ctx, tx, instanceID)
+	if err != nil {
+		return Result{}, err
+	}
+	if err = s.Files.CheckSpaceAccessTx(ctx, tx, user, spaceID, sharedfiles.ActionWrite); err != nil {
+		return Result{}, fileAccessError(err)
+	}
+	if err = s.validateArtifactsTx(ctx, tx, user, spaceID, archived); err != nil {
+		return Result{}, err
+	}
 	if task.Status != "pending" {
-		if task.ID == key && savedDigest == requestDigest && len(saved) > 0 {
+		if task.HandledBy == user && task.ID == key && savedDigest == requestDigest && len(saved) > 0 {
 			var result Result
 			_ = json.Unmarshal(saved, &result)
 			return result, tx.Commit(ctx)
@@ -475,7 +576,7 @@ func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, 
 	if err = json.Unmarshal(snapshot, &nodes); err != nil {
 		return Result{}, err
 	}
-	result := Result{InstanceID: instanceID, TaskID: id, Status: "running"}
+	result := Result{InstanceID: instanceID, TaskID: id, Status: "running", SharedSpaceID: spaceID, InstancePathPrefix: instancePrefix(instanceID)}
 	taskStatus := "completed"
 	event := "task_completed"
 	if decision == "reject" {
@@ -485,12 +586,13 @@ func (s *Service) Complete(ctx context.Context, id, user, agent, key, decision, 
 	} else if task.Order+1 < len(nodes) {
 		next := nodes[task.Order+1]
 		nextID := uuid.NewString()
-		result.NextTask = &Task{ID: nextID, InstanceID: instanceID, NodeID: next.ID, Order: next.Order, Type: next.Type, Assignee: next.Assignee, Instruction: next.Instruction, Status: "pending"}
+		result.NextTask = &Task{ID: nextID, InstanceID: instanceID, NodeID: next.ID, Order: next.Order, Type: next.Type, Assignee: legacyAssignee(next), AssigneeUsers: next.ResolvedUsers, Instruction: next.Instruction, Status: "pending"}
 	} else {
 		result.Status = "succeeded"
 	}
 	response, _ := json.Marshal(result)
-	_, err = tx.Exec(ctx, `UPDATE workflow_node_tasks SET output_json=$2,status=$3,decision=NULLIF($4,''),comment=$5,complete_key=$6,complete_digest=$7,complete_response_json=$8,handled_by=$9,completed_at=now() WHERE id=$1`, id, output, taskStatus, decision, comment, key, requestDigest, response, user)
+	artifactsJSON, _ := json.Marshal(archived)
+	_, err = tx.Exec(ctx, `UPDATE workflow_node_tasks SET output_json=$2,status=$3,decision=NULLIF($4,''),comment=$5,complete_key=$6,complete_digest=$7,complete_response_json=$8,handled_by=$9,completed_at=now(),artifacts_json=$10 WHERE id=$1`, id, output, taskStatus, decision, comment, key, requestDigest, response, user, artifactsJSON)
 	if err != nil {
 		return Result{}, err
 	}
@@ -548,7 +650,7 @@ func (s *Service) Terminate(ctx context.Context, id, user, reason string) error 
 	return tx.Commit(ctx)
 }
 
-func (s *Service) Instance(ctx context.Context, id, user string, admin bool) (Instance, error) {
+func (s *Service) Instance(ctx context.Context, id, user string, admin bool, fileAdmin ...bool) (Instance, error) {
 	var item Instance
 	var snapshot []byte
 	err := s.DB.QueryRow(ctx, `SELECT id,template_id,template_revision,template_snapshot_json,status,COALESCE(current_node_id,''),initial_input_json,started_by,started_at,ended_at FROM workflow_instances WHERE id=$1 AND ($2 OR EXISTS (SELECT 1 FROM workflow_instance_participants p WHERE p.instance_id=id AND p.user_id=$3))`, id, admin, user).Scan(&item.ID, &item.TemplateID, &item.TemplateRevision, &snapshot, &item.Status, &item.CurrentNodeID, &item.InitialInput, &item.StartedBy, &item.StartedAt, &item.EndedAt)
@@ -558,10 +660,14 @@ func (s *Service) Instance(ctx context.Context, id, user string, admin bool) (In
 	if err != nil {
 		return item, err
 	}
+	item.SharedContext, err = s.readSharedContext(ctx, id, user, admin && len(fileAdmin) > 0 && fileAdmin[0])
+	if err != nil {
+		return Instance{}, err
+	}
 	if err = json.Unmarshal(snapshot, &item.Nodes); err != nil {
 		return item, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT id,instance_id,node_id,node_order,type,assignee_user_id,input_json,output_json,status,COALESCE(decision,''),comment,COALESCE(handled_by,''),completed_at FROM workflow_node_tasks WHERE instance_id=$1 ORDER BY node_order`, id)
+	rows, err := s.DB.Query(ctx, `SELECT id,instance_id,node_id,node_order,type,assignee_user_id,`+taskAssigneesSQL+`,input_json,output_json,status,COALESCE(decision,''),comment,COALESCE(handled_by,''),completed_at,artifacts_json FROM workflow_node_tasks t WHERE instance_id=$1 ORDER BY node_order`, id)
 	if err != nil {
 		return item, err
 	}
@@ -569,10 +675,16 @@ func (s *Service) Instance(ctx context.Context, id, user string, admin bool) (In
 	item.Tasks = []Task{}
 	for rows.Next() {
 		var t Task
-		err = rows.Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.Input, &t.Output, &t.Status, &t.Decision, &t.Comment, &t.HandledBy, &t.CompletedAt)
+		var artifacts []byte
+		err = rows.Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.AssigneeUsers, &t.Input, &t.Output, &t.Status, &t.Decision, &t.Comment, &t.HandledBy, &t.CompletedAt, &artifacts)
 		if err != nil {
 			return item, err
 		}
+		if err = json.Unmarshal(artifacts, &t.Artifacts); err != nil {
+			return Instance{}, err
+		}
+		t.SharedContext = item.SharedContext
+		t.NodePathPrefix = nodePrefix(id, t.NodeID)
 		t.Instruction = item.Nodes[t.Order].Instruction
 		item.Tasks = append(item.Tasks, t)
 	}
@@ -606,6 +718,7 @@ func (s *Service) Instances(ctx context.Context, user string, admin bool, status
 		if err = json.Unmarshal(snapshot, &item.Nodes); err != nil {
 			return nil, "", err
 		}
+		item.InitialInput = nil
 		items = append(items, item)
 	}
 	if err = rows.Err(); err != nil {
@@ -624,7 +737,7 @@ func (s *Service) Tasks(ctx context.Context, user, kind string, limit int, curso
 	if err != nil {
 		return nil, "", err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT t.id,t.instance_id,t.node_id,t.node_order,t.type,t.assignee_user_id,t.input_json,t.status,i.template_snapshot_json,t.created_at FROM workflow_node_tasks t JOIN workflow_instances i ON i.id=t.instance_id WHERE t.assignee_user_id=$1 AND t.status='pending' AND i.status='running' AND ($2='' OR t.type=$2) AND (t.created_at,t.id)<($3,$4) ORDER BY t.created_at DESC,t.id DESC LIMIT $5`, user, kind, at, id, limit+1)
+	rows, err := s.DB.Query(ctx, `SELECT t.id,t.instance_id,t.node_id,t.node_order,t.type,t.assignee_user_id,`+taskAssigneesSQL+`,t.input_json,t.status,i.template_snapshot_json,t.created_at FROM workflow_node_tasks t JOIN workflow_instances i ON i.id=t.instance_id WHERE EXISTS (SELECT 1 FROM workflow_task_assignees a JOIN accounts u ON u.user_id=a.user_id WHERE a.task_id=t.id AND a.user_id=$1 AND u.status='active') AND t.status='pending' AND i.status='running' AND ($2='' OR t.type=$2) AND (t.created_at,t.id)<($3,$4) ORDER BY t.created_at DESC,t.id DESC LIMIT $5`, user, kind, at, id, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -632,10 +745,10 @@ func (s *Service) Tasks(ctx context.Context, user, kind string, limit int, curso
 	items := []Task{}
 	created := []time.Time{}
 	for rows.Next() {
-		var t Task
+		t := Task{Artifacts: []Artifact{}}
 		var raw []byte
 		var createdAt time.Time
-		err = rows.Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.Input, &t.Status, &raw, &createdAt)
+		err = rows.Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.AssigneeUsers, &t.Input, &t.Status, &raw, &createdAt)
 		if err != nil {
 			return nil, "", err
 		}
@@ -644,6 +757,7 @@ func (s *Service) Tasks(ctx context.Context, user, kind string, limit int, curso
 			return nil, "", err
 		}
 		t.Instruction = nodes[t.Order].Instruction
+		t.Input = json.RawMessage(`{}`)
 		items = append(items, t)
 		created = append(created, createdAt)
 	}
@@ -660,7 +774,7 @@ func (s *Service) Tasks(ctx context.Context, user, kind string, limit int, curso
 func (s *Service) Task(ctx context.Context, id, user, kind string) (Task, error) {
 	var t Task
 	var snapshot []byte
-	err := s.DB.QueryRow(ctx, `SELECT t.id,t.instance_id,t.node_id,t.node_order,t.type,t.assignee_user_id,t.input_json,t.status,i.template_snapshot_json FROM workflow_node_tasks t JOIN workflow_instances i ON i.id=t.instance_id WHERE t.id=$1 AND t.assignee_user_id=$2 AND t.status='pending' AND i.status='running' AND ($3='' OR t.type=$3)`, id, user, kind).Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.Input, &t.Status, &snapshot)
+	err := s.DB.QueryRow(ctx, `SELECT t.id,t.instance_id,t.node_id,t.node_order,t.type,t.assignee_user_id,`+taskAssigneesSQL+`,t.input_json,t.status,i.template_snapshot_json FROM workflow_node_tasks t JOIN workflow_instances i ON i.id=t.instance_id WHERE t.id=$1 AND EXISTS (SELECT 1 FROM workflow_task_assignees a JOIN accounts u ON u.user_id=a.user_id WHERE a.task_id=t.id AND a.user_id=$2 AND u.status='active') AND t.status='pending' AND i.status='running' AND ($3='' OR t.type=$3)`, id, user, kind).Scan(&t.ID, &t.InstanceID, &t.NodeID, &t.Order, &t.Type, &t.Assignee, &t.AssigneeUsers, &t.Input, &t.Status, &snapshot)
 	if err == pgx.ErrNoRows {
 		return t, ErrMissing
 	}
@@ -672,5 +786,11 @@ func (s *Service) Task(ctx context.Context, id, user, kind string) (Task, error)
 		return t, err
 	}
 	t.Instruction = nodes[t.Order].Instruction
+	t.SharedContext, err = s.readSharedContext(ctx, t.InstanceID, user)
+	if err != nil {
+		return Task{}, err
+	}
+	t.NodePathPrefix = nodePrefix(t.InstanceID, t.NodeID)
+	t.Artifacts = []Artifact{}
 	return t, nil
 }

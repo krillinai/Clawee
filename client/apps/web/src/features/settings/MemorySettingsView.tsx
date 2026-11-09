@@ -22,7 +22,9 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
 import { ApiClientError } from '../../runtime/errors.js';
+import type { AgentPromptPolicyStatus } from '../../services/enterprise-service-2026-07-30.js';
 
 export type MemorySettingsService = {
   listMemories(query?: MemoryListQuery): Promise<MemoryListResponse>;
@@ -52,6 +54,7 @@ export function MemorySettingsView(props: {
   service: MemorySettingsService | null;
   projects: MemoryScopeOption[];
   threads: MemoryScopeOption[];
+  agentPromptPolicyStatus?: AgentPromptPolicyStatus;
 }) {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<MemoryScope | 'all'>('all');
@@ -64,6 +67,7 @@ export function MemorySettingsView(props: {
   const [error, setError] = useState<string>();
   const [confirmingSensitive, setConfirmingSensitive] = useState(false);
   const [confirmingDisableAll, setConfirmingDisableAll] = useState(false);
+  const { confirm, confirmDialog } = useConfirmDialog();
   const available = props.connected && props.service !== null;
 
   useEffect(() => {
@@ -194,6 +198,7 @@ export function MemorySettingsView(props: {
 
   async function deleteMemory(id: string) {
     if (!available) return;
+    if (!(await confirm({ title: '删除记忆', description: '删除后无法恢复，确定删除这条记忆吗？', confirmLabel: '删除', destructive: true }))) return;
     setError(undefined);
     try {
       await props.service!.deleteMemory(id);
@@ -217,6 +222,7 @@ export function MemorySettingsView(props: {
 
   async function deleteSummary(id: string) {
     if (!available) return;
+    if (!(await confirm({ title: '删除摘要', description: '删除后无法恢复，确定删除这条会话摘要吗？', confirmLabel: '删除', destructive: true }))) return;
     setError(undefined);
     try {
       await props.service!.deleteSummary(id);
@@ -408,6 +414,53 @@ export function MemorySettingsView(props: {
           </ul>
         )}
       </section>
+      <section className="memory-block agent-prompt-policy-block" aria-labelledby="agent-prompt-policy-title">
+        <div className="memory-block__header">
+          <div>
+            <h2 id="agent-prompt-policy-title">Agent 提示词片段</h2>
+            <p>
+              {props.agentPromptPolicyStatus === undefined
+                ? '尚未加载'
+                : `版本 ${props.agentPromptPolicyStatus.version}`}
+            </p>
+          </div>
+        </div>
+        {props.agentPromptPolicyStatus === undefined ? (
+          <div className="settings-state">登录并连接本地服务后加载</div>
+        ) : (
+          <div className="agent-prompt-policy-card">
+            <dl className="agent-prompt-policy-meta">
+              <div><dt>配置更新时间</dt><dd>{props.agentPromptPolicyStatus.fetchedAt || '尚未同步'}</dd></div>
+              <div><dt>生效范围</dt><dd>{props.agentPromptPolicyStatus.promptType === 'server_agent' ? '服务端 Agent' : 'Clawee Agent'}</dd></div>
+            </dl>
+            {props.agentPromptPolicyStatus.prompt.trim().length === 0 ? (
+              <div className="settings-state">
+                {props.agentPromptPolicyStatus.promptType === 'server_agent'
+                  ? '暂无服务端 Agent 提示词，当前使用内置规则。'
+                  : '暂无 Clawee Agent 提示词，当前使用内置规则。'}
+              </div>
+            ) : (
+              <label className="agent-prompt-policy-content">
+                <span>
+                  {props.agentPromptPolicyStatus.promptType === 'server_agent'
+                    ? '服务端 Agent 提示词'
+                    : 'Clawee Agent 提示词'}
+                </span>
+                <textarea
+                  readOnly
+                  rows={8}
+                  value={props.agentPromptPolicyStatus.prompt}
+                  aria-label={props.agentPromptPolicyStatus.promptType === 'server_agent'
+                    ? '服务端 Agent 提示词'
+                    : 'Clawee Agent 提示词'}
+                />
+              </label>
+            )}
+            <p className="agent-prompt-policy-hint">更新后只对新建 Agent 会话生效，当前会话继续使用旧配置。</p>
+          </div>
+        )}
+      </section>
+      {confirmDialog}
     </section>
   );
 }

@@ -4,11 +4,11 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Archive,
-  Activity,
   Blocks,
   ChevronDown,
   ChevronRight,
   Clock3,
+  ClipboardCheck,
   Folder,
   FolderCog,
   FolderMinus,
@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import type { ActiveView } from '../../app/app-state.js';
 import { ConfirmDialog } from '../../components/dialogs/ConfirmDialog.js';
+import { getEnterpriseAccountDisplayName } from '../account/enterprise-account-display.js';
 import type { ColorMode } from '../../styles/color-mode.js';
 import type {
   ClaweeConversation,
@@ -56,8 +57,10 @@ const PROJECT_DRAG_DATA_TYPE = 'application/x-clawee-project-id';
 export function ClaweeSidebar(props: {
   projects: ClaweeProject[];
   conversations: ClaweeConversation[];
+  workspaceNotice?: string;
   tasks: SidebarTaskSummary[];
   runningConversationIds?: ReadonlySet<string>;
+  unreadConversationIds?: ReadonlySet<string>;
   currentProjectId?: string;
   selectedConversationId?: string;
   activeView: ActiveView;
@@ -67,9 +70,10 @@ export function ClaweeSidebar(props: {
   enterpriseSession?: EnterpriseSessionResponse;
   sidebarLogoUrl?: string;
   sidebarCompactLogoUrl?: string;
+  sidebarLogoDarkUrl?: string;
+  sidebarCompactLogoDarkUrl?: string;
   sidebarMenuLabels?: EnterpriseSidebarMenuLabels;
   adminUrl?: string;
-  activityAllowed?: boolean;
   onNewConversation(projectId?: string): void;
   onSelectProject(projectId: string): void;
   onSelectConversation(conversationId: string): void;
@@ -95,6 +99,7 @@ export function ClaweeSidebar(props: {
 }) {
   const [projectAddMenuOpen, setProjectAddMenuOpen] = useState(false);
   const [projectMenuId, setProjectMenuId] = useState<string>();
+  const [projectsCollapsed, setProjectsCollapsed] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(
     () => new Set(props.currentProjectId === undefined ? [] : [props.currentProjectId])
   );
@@ -143,9 +148,16 @@ export function ClaweeSidebar(props: {
   const collapsed = props.collapsed === true;
   const autoCollapsed = props.autoCollapsed === true;
   const logoColor = props.colorMode === 'light' ? 'black' : 'white';
+  const sidebarLogoUrl = props.colorMode === 'light'
+    ? props.sidebarLogoUrl
+    : props.sidebarLogoDarkUrl ?? props.sidebarLogoUrl;
+  const sidebarCompactLogoUrl = props.colorMode === 'light'
+    ? props.sidebarCompactLogoUrl
+    : props.sidebarCompactLogoDarkUrl ?? props.sidebarCompactLogoUrl;
   const account = props.enterpriseSession?.account;
-  const accountTitle = account?.name ?? '企业账户';
+  const accountTitle = account === undefined ? '企业账户' : getEnterpriseAccountDisplayName(account.name);
   const fullLogoSrc = props.colorMode === 'light' ? '/logo-v2-black.svg' : '/logo-v2-white.svg';
+  const navigationView = props.activeView === 'skill-contributions' ? 'dashboard' : props.activeView;
   const globalActions: Array<{
     label: string;
     icon: LucideIcon;
@@ -153,11 +165,9 @@ export function ClaweeSidebar(props: {
     onClick(): void;
   }> = [
     { label: '新建会话', icon: SquarePen, onClick: () => props.onNewConversation() },
-    { label: props.sidebarMenuLabels?.dashboard ?? '数据看板', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
+    { label: props.sidebarMenuLabels?.dashboard ?? '工作台', icon: LayoutDashboard, view: 'dashboard', onClick: () => props.onOpenView('dashboard') },
     { label: '工作流', icon: Workflow, view: 'workflow', onClick: () => props.onOpenView('workflow') },
-    ...(props.activityAllowed === true
-      ? [{ label: 'Agent动态', icon: Activity, view: 'activity' as const, onClick: () => props.onOpenView('activity') }]
-      : []),
+    ...(props.enterpriseSession?.status === 'signed_in' ? [{ label: '审批中心', icon: ClipboardCheck, view: 'enterprise-approvals' as const, onClick: () => props.onOpenView('enterprise-approvals') }] : []),
     { label: props.sidebarMenuLabels?.skills ?? '企业Skill', icon: Blocks, view: 'plugins', onClick: () => props.onOpenView('plugins') },
     { label: '连接器', icon: Link2, view: 'connections', onClick: () => props.onOpenView('connections') },
     { label: props.sidebarMenuLabels?.knowledge ?? '企业知识库', icon: LibraryBig, view: 'knowledge', onClick: () => props.onOpenView('knowledge') },
@@ -175,6 +185,7 @@ export function ClaweeSidebar(props: {
   const conversationsByProject = useMemo(() => {
     const grouped = new Map<string, ClaweeConversation[]>();
     for (const conversation of props.conversations) {
+      if (conversation.projectId === null) continue;
       const projectConversations = grouped.get(conversation.projectId);
       if (projectConversations === undefined) {
         grouped.set(conversation.projectId, [conversation]);
@@ -203,7 +214,7 @@ export function ClaweeSidebar(props: {
     const selectedProjectId = props.conversations.find(
       conversation => conversation.id === props.selectedConversationId
     )?.projectId;
-    if (selectedProjectId === undefined) return;
+    if (selectedProjectId == null) return;
     setExpandedProjectIds(current => addExpandedProject(current, selectedProjectId));
   }, [props.conversations, props.selectedConversationId]);
 
@@ -366,7 +377,7 @@ export function ClaweeSidebar(props: {
             <span className="sidebar-logo-mark">
               <img
                 className="sidebar-logo-image"
-                src={props.sidebarCompactLogoUrl ?? `/krillinai-mark-${logoColor}.png`}
+                src={sidebarCompactLogoUrl ?? `/krillinai-mark-${logoColor}.png`}
                 alt="KrillinAI"
               />
             </span>
@@ -378,7 +389,7 @@ export function ClaweeSidebar(props: {
               <span className="sidebar-brand-lockup-logo">
                 <img
                   className="sidebar-logo-image"
-                  src={props.sidebarLogoUrl ?? `/krillinai-wordmark-${logoColor}.png`}
+                  src={sidebarLogoUrl ?? `/krillinai-wordmark-${logoColor}.png`}
                   alt="KrillinAI"
                 />
               </span>
@@ -405,7 +416,7 @@ export function ClaweeSidebar(props: {
               type="button"
               className="sidebar-row"
               title={collapsed ? action.label : undefined}
-              aria-current={action.view && props.activeView === action.view ? 'page' : undefined}
+              aria-current={action.view && navigationView === action.view ? 'page' : undefined}
               onClick={action.onClick}
             >
               <Icon size={18} strokeWidth={1.9} aria-hidden="true" />
@@ -419,7 +430,23 @@ export function ClaweeSidebar(props: {
         <div className="sidebar-content">
           <section className="sidebar-section" aria-labelledby="clawee-projects-heading">
             <div className="sidebar-section-heading">
-              <h2 id="clawee-projects-heading">项目</h2>
+              <h2 id="clawee-projects-heading" className="sidebar-section-title">
+                <button
+                  type="button"
+                  className="sidebar-section-toggle"
+                  aria-label={projectsCollapsed ? '展开项目' : '收起项目'}
+                  aria-expanded={!projectsCollapsed}
+                  aria-controls="clawee-projects-content"
+                  onClick={() => setProjectsCollapsed(current => !current)}
+                >
+                  <span>项目</span>
+                  {projectsCollapsed ? (
+                    <ChevronRight size={15} strokeWidth={1.9} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
+                  )}
+                </button>
+              </h2>
               <div className="sidebar-section-actions">
                 {props.onAddProject || props.onAddProjectDirectory ? (
                   <div className="sidebar-project-menu-shell" ref={projectAddMenuRef}>
@@ -499,7 +526,7 @@ export function ClaweeSidebar(props: {
                 </button>
               </div>
             </div>
-            <div className="sidebar-project-tree" aria-label="项目">
+            <div id="clawee-projects-content" className="sidebar-project-tree" aria-label="项目" hidden={projectsCollapsed}>
               {props.projects.map((project) => {
                 const isCurrentProject =
                   !selectedTaskThread && project.id === props.currentProjectId;
@@ -675,6 +702,8 @@ export function ClaweeSidebar(props: {
                                     strokeWidth={2}
                                     aria-hidden="true"
                                   />
+                                ) : props.unreadConversationIds?.has(conversation.id) ? (
+                                  <span className="conversation-unread-dot" role="img" aria-label="未读结果" />
                                 ) : null}
                               </a>
                             </div>
@@ -702,21 +731,23 @@ export function ClaweeSidebar(props: {
 
           <section className="sidebar-section sidebar-recent-section" aria-label="侧栏会话历史">
             <div className="sidebar-recent-heading">
-              <h2 id="clawee-recent-heading">最近会话</h2>
-              <button
-                type="button"
-                className="sidebar-recent-toggle"
-                aria-label={recentConversationsCollapsed ? '展开最近会话' : '收起最近会话'}
-                aria-expanded={!recentConversationsCollapsed}
-                aria-controls="clawee-recent-content"
-                onClick={() => setRecentConversationsCollapsed(current => !current)}
-              >
-                {recentConversationsCollapsed ? (
-                  <ChevronRight size={15} strokeWidth={1.9} aria-hidden="true" />
-                ) : (
-                  <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
-                )}
-              </button>
+              <h2 id="clawee-recent-heading" className="sidebar-section-title">
+                <button
+                  type="button"
+                  className="sidebar-section-toggle"
+                  aria-label={recentConversationsCollapsed ? '展开最近会话' : '收起最近会话'}
+                  aria-expanded={!recentConversationsCollapsed}
+                  aria-controls="clawee-recent-content"
+                  onClick={() => setRecentConversationsCollapsed(current => !current)}
+                >
+                  <span>最近会话</span>
+                  {recentConversationsCollapsed ? (
+                    <ChevronRight size={15} strokeWidth={1.9} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
+                  )}
+                </button>
+              </h2>
             </div>
             <div
               id="clawee-recent-content"
@@ -724,7 +755,7 @@ export function ClaweeSidebar(props: {
               hidden={recentConversationsCollapsed}
             >
               {recentItems.length === 0 ? (
-                <p className="sidebar-empty">暂无最近会话</p>
+                <p className="sidebar-empty">{props.workspaceNotice ?? '暂无最近会话'}</p>
               ) : (
                 <div className="sidebar-recent-list" aria-label="最近会话">
                   {recentItems.map(item => {
@@ -803,6 +834,8 @@ export function ClaweeSidebar(props: {
                                   strokeWidth={2}
                                   aria-label="正在运行"
                                 />
+                              ) : props.unreadConversationIds?.has(conversation.id) ? (
+                                <span className="conversation-unread-dot" role="img" aria-label="未读结果" />
                               ) : null}
                               <span className="conversation-updated-label">
                                 {item.updatedLabel}
@@ -810,7 +843,7 @@ export function ClaweeSidebar(props: {
                             </span>
                           </button>
                         )}
-                        {conversationRename?.id === conversation.id ? null : (
+                        {conversationRename?.id === conversation.id || conversation.readOnly ? null : (
                           <div
                             className={`sidebar-conversation-actions${conversationShortcutClassName}`}
                             ref={conversationMenuId === conversation.id ? conversationMenuRef : undefined}

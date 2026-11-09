@@ -11,15 +11,18 @@ import type {
   CreateMemoryRequest,
   CreateThreadRequest,
   EnterpriseDingTalkLoginPrepareResponse,
+  EnterpriseWorkflowExecution,
   EnterpriseKnowledgeBaseResponse,
   EnterpriseKnowledgeDocumentResponse,
   EnterpriseLoginRequest,
   EnterpriseMcpCatalogResponse,
+  EnterprisePlatformBrandingImageKind,
   EnterpriseRegisterRequest,
   EnterpriseSessionResponse,
   EnterpriseSidebarMenuLabels,
   EnterpriseSharedFileResponse,
   EnterpriseSharedSpaceResponse,
+  EnterpriseCloudSkillListResponse,
   EnterpriseSkillDetailResponse,
   EnterpriseSkillResponse,
   ModelAccessState,
@@ -30,23 +33,26 @@ import type {
   SandboxMode,
   ScheduleResponse,
   TaskItem,
-  ThreadHistoryItem,
   ThreadResponse
 } from '@clawee/protocol';
+import { isModelResponseEvent } from '@clawee/protocol';
 import { skillMarketCatalog } from '@clawee/skill-market';
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
   KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-  WheelEvent as ReactWheelEvent
+  MouseEvent as ReactMouseEvent
 } from 'react';
-import { FolderInput } from 'lucide-react';
+import { ArrowLeft, FolderInput } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/dialogs/ConfirmDialog.js';
+import { useEnterpriseSessionRenewal } from '../features/account/use-enterprise-session-renewal.js';
+import { getEnterpriseAccountDisplayName } from '../features/account/enterprise-account-display.js';
 import { WorkbenchLayout } from '../components/layout/WorkbenchLayout.js';
 import { beginPaneResize } from '../components/layout/pane-resize-2026-07-29.js';
 import { Timeline, type TimelineHandle } from '../components/timeline/Timeline.js';
+import { WorkflowDeliveryPanel } from '../features/workflow/WorkflowDeliveryPanel.js';
+import type { WorkflowNavigationState, WorkflowTaskContext } from '../features/workflow/WorkflowPage.js';
 import { eventToTimelineItem, type TimelineItem } from '../components/timeline/timeline-model.js';
 import type { CapabilitiesViewProps } from '../features/capabilities/CapabilitiesView.js';
 import {
@@ -61,15 +67,14 @@ import {
 } from '../features/activity/useEnterpriseBilling-2026-08-28.js';
 import { ConversationHeader } from '../features/conversation/ConversationHeader.js';
 import { FeedbackButton } from '../features/feedback/FeedbackButton.js';
+import { RuntimeConnectionNotice } from '../features/connection/RuntimeConnectionNotice.js';
+import { AgentPromptPolicyUpdateNotice } from '../features/settings/AgentPromptPolicyUpdateNotice.js';
+import { useRuntimeConnection } from '../features/connection/use-runtime-connection.js';
 import { MemorySuggestion } from '../features/conversation/MemorySuggestion.js';
 import { ApprovalPanel } from '../features/approvals/ApprovalPanel.js';
 import { shouldShowComposerProjectSelector } from '../features/conversation/composer-visibility.js';
 import { useThreadHistory } from '../features/conversation/use-thread-history.js';
 import { DetailPanel } from '../features/details/DetailPanel.js';
-import {
-  ModelAccessStatusPage,
-  ModelServiceSetupPage
-} from '../features/setup/ModelServiceSetupPage.js';
 import { getSkillMarketDisplayTitle } from '../features/plugins/skill-market-model.js';
 import { EnterpriseSkillUploadDialog } from '../features/plugins/EnterpriseSkillUploadDialog.js';
 import {
@@ -90,6 +95,7 @@ import type {
   KnowledgeUploadState
 } from '../features/knowledge/KnowledgePage.js';
 import { collectConversationFilePaths } from '../features/files/conversation-file-paths.js';
+import { useReadableFilePaths } from '../features/files/use-readable-file-paths.js';
 import type {
   SharedDriveOperationState
 } from '../features/drive/SharedDrivePage.js';
@@ -139,12 +145,17 @@ import type {
 } from '../features/settings/ClaweeSettingsView.js';
 import type { McpCapabilities } from '../features/settings/McpSettingsView.js';
 import { ClaweeSidebar } from '../features/shell/ClaweeSidebar.js';
+import { mapHistoryItemsToTimelineItems } from '../components/timeline/history-mapping.js';
+import { applyTimelineItems } from '../features/runs/run-event-application.js';
+import { useRunRecoveryTriggers } from '../features/runs/use-run-recovery-triggers.js';
 import {
   createScheduleDraftSidebarSummaries,
   createSidebarTaskSummaries
 } from '../features/shell/sidebar-task-model.js';
 import type { SidebarTaskSummary } from '../features/shell/sidebar-task-model.js';
 import { browserBridge } from '../host/browser-bridge.js';
+import { DesktopUpdateNotice, useDesktopUpdates } from '../features/settings/DesktopUpdates.js';
+import { createUpdateRequestGate } from '../runtime/update-gate.js';
 import type {
   HostBridge,
   ProjectDirectorySelectionPurpose
@@ -159,8 +170,13 @@ import { createApprovalService } from '../services/approval-service.js';
 import { createConnectionService, type ConnectionState } from '../services/connection-service.js';
 import { createCleanupService } from '../services/cleanup-service.js';
 import { createDiagnosticsService } from '../services/diagnostics-service.js';
-import { createEnterpriseService } from '../services/enterprise-service-2026-07-30.js';
+import {
+  createEnterpriseService,
+  type AgentPromptPolicyStatus
+} from '../services/enterprise-service-2026-07-30.js';
 import { createWorkflowService } from '../services/workflow-service.js';
+import { createEnterpriseApprovalService } from '../services/enterprise-approval-service.js';
+import type { ApprovalNavigationState } from '../features/enterprise-approvals/EnterpriseApprovalsPage.js';
 import { createMockFileService } from '../services/file-service.js';
 import type { FileTreeNode, WorkspaceFile } from '../services/file-service.js';
 import { createProjectService } from '../services/project-service.js';
@@ -172,10 +188,16 @@ import {
 import {
   createModelService,
   readCachedModelCatalog,
+  writeCachedModelCatalog,
   readRecentModelConfig,
   writeRecentModelConfig,
   type RecentModelConfig
 } from '../services/model-service-2026-08-05.js';
+import {
+  readModelReasoningPreferences,
+  writeModelReasoningPreferences,
+  resolveModelReasoning
+} from '../services/model-reasoning-preferences.js';
 import { createNotificationService } from '../services/notification-service.js';
 import { createProfileService } from '../services/profile-service.js';
 import { createRunService } from '../services/run-service.js';
@@ -184,6 +206,7 @@ import { createSearchService } from '../services/search-service.js';
 import { createSkillMarketService } from '../services/skill-market-service.js';
 import { createTaskService } from '../services/task-service.js';
 import { createThreadService } from '../services/thread-service.js';
+import { useContributionAccess } from '../features/skill-contributions/use-contribution-access.js';
 import { createWorkspaceFileService } from '../services/workspace-file-service.js';
 import { readJsonFromStorage, writeJsonToStorage } from '../storage/browser-storage.js';
 import {
@@ -216,6 +239,8 @@ type EnterpriseService = ReturnType<typeof createEnterpriseService>;
 type PlatformBrandingUrls = {
   sidebarLogoUrl?: string;
   sidebarCompactLogoUrl?: string;
+  sidebarLogoDarkUrl?: string;
+  sidebarCompactLogoDarkUrl?: string;
 };
 type ThreadService = ReturnType<typeof createThreadService>;
 type ScheduleService = ReturnType<typeof createScheduleService>;
@@ -306,9 +331,17 @@ const WorkflowPage = lazy(async () => {
   const module = await import('../features/workflow/WorkflowPage.js');
   return { default: module.WorkflowPage };
 });
+const EnterpriseApprovalsPage = lazy(async () => {
+  const module = await import('../features/enterprise-approvals/EnterpriseApprovalsPage.js');
+  return { default: module.EnterpriseApprovalsPage };
+});
 const DashboardPage = lazy(async () => {
   const module = await import('../features/dashboard/DashboardPage.js');
   return { default: module.DashboardPage };
+});
+const SkillContributionsPage = lazy(async () => {
+  const module = await import('../features/skill-contributions/SkillContributionsPage.js');
+  return { default: module.SkillContributionsPage };
 });
 const ScheduleThreadHeader = lazy(async () => {
   const module = await import('../features/schedules/ScheduleThreadHeader.js');
@@ -359,6 +392,7 @@ export function AppController(props: AppControllerProps) {
   const defaultFileService = useMemo(() => createMockFileService(), []);
   const fileService = props.fileService ?? defaultFileService;
   const hostBridge = props.hostBridge ?? browserBridge;
+  const desktopUpdates = useDesktopUpdates(hostBridge);
   const integratedTitleBar = hostBridge.windowChrome;
   const appShellStyle = integratedTitleBar === undefined
     ? undefined
@@ -366,7 +400,8 @@ export function AppController(props: AppControllerProps) {
         '--clawee-titlebar-height': `${integratedTitleBar.titleBarHeight}px`,
         '--clawee-traffic-light-inset': `${integratedTitleBar.trafficLightInset}px`
       } as CSSProperties;
-  const runtimeFetch = useMemo(() => props.runtimeFetch ?? globalThis.fetch.bind(globalThis), [props.runtimeFetch]);
+  const updateRequestGate = useMemo(() => createUpdateRequestGate(props.runtimeFetch ?? globalThis.fetch.bind(globalThis)), [props.runtimeFetch]);
+  const runtimeFetch = updateRequestGate.fetch;
   const subscribeRunEvents = props.subscribeRunEvents ?? defaultSubscribeRunEvents;
   const [treeNodes, setTreeNodes] = useState<FileTreeNode[]>([]);
   const [treeLoadError, setTreeLoadError] = useState<string>();
@@ -380,6 +415,9 @@ export function AppController(props: AppControllerProps) {
   const [runtimeSchedules, setRuntimeSchedules] = useState<ScheduleResponse[]>([]);
   const [runtimeTasks, setRuntimeTasks] = useState<TaskItem[]>([]);
   const [runtimeWorkspaceReady, setRuntimeWorkspaceReady] = useState(false);
+  const [runtimeWorkspaceProbeKey, setRuntimeWorkspaceProbeKey] = useState(0);
+  const runtimeWorkspaceSourceRef = useRef<string>();
+  const runtimeWorkspaceAccountRef = useRef<string>();
   const [threadLoadError, setThreadLoadError] = useState<string>();
   const [projectLoadError, setProjectLoadError] = useState<string>();
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
@@ -406,13 +444,24 @@ export function AppController(props: AppControllerProps) {
     status: 'signed_out',
     transportSecurity: 'secure_https'
   });
+  const [agentPromptPolicyStatus, setAgentPromptPolicyStatus] = useState<AgentPromptPolicyStatus>();
+  const [agentPromptPolicyUpdateVersion, setAgentPromptPolicyUpdateVersion] = useState<number>();
   const [enterpriseCheckingTimedOut, setEnterpriseCheckingTimedOut] = useState(false);
   const [enterpriseSessionInitialized, setEnterpriseSessionInitialized] = useState(false);
   const [enterpriseSessionProbeKey, setEnterpriseSessionProbeKey] = useState(0);
+  const workflowSessionKey = JSON.stringify([enterpriseSession.status, enterpriseSession.account?.subjectId, enterpriseSession.agentId, enterpriseSessionProbeKey]);
+  const [workflowGatewayIdentity, setWorkflowGatewayIdentity] = useState<{ connection: ConnectionConfig | null; sessionKey: string; origin?: string; failed: boolean }>();
+  const workflowGatewayResolved = enterpriseSessionInitialized && workflowGatewayIdentity?.connection === connectionConfig && workflowGatewayIdentity?.sessionKey === workflowSessionKey;
+  const workflowGatewayOrigin = workflowGatewayResolved ? workflowGatewayIdentity?.origin : undefined;
+  const workflowIdentityStatus = !enterpriseSession.account?.subjectId || !enterpriseSession.agentId || workflowGatewayResolved && workflowGatewayIdentity?.failed
+    ? 'unavailable' : workflowGatewayOrigin === undefined ? 'confirming' : 'ready';
   const [platformBrandingUrls, setPlatformBrandingUrls] = useState<PlatformBrandingUrls>({});
   const [adminUrl, setAdminUrl] = useState<string>();
+  const [brandAccentColor, setBrandAccentColor] = useState<string>();
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'model'>('general');
   const [sidebarMenuLabels, setSidebarMenuLabels] = useState<EnterpriseSidebarMenuLabels>({});
   const [enterpriseSkills, setEnterpriseSkills] = useState<EnterpriseSkillResponse[]>();
+  const [enterpriseSkillUsage, setEnterpriseSkillUsage] = useState<Record<string, number>>();
   const [enterpriseSkillsLoading, setEnterpriseSkillsLoading] = useState(false);
   const [enterpriseSkillsLoadError, setEnterpriseSkillsLoadError] = useState<string>();
   const [enterpriseSkillOperation, setEnterpriseSkillOperation] =
@@ -422,6 +471,10 @@ export function AppController(props: AppControllerProps) {
   const [enterpriseSkillsReloadKey, setEnterpriseSkillsReloadKey] = useState(0);
   const [enterpriseSkillUploadOpen, setEnterpriseSkillUploadOpen] = useState(false);
   const [enterpriseSkillUploadTarget, setEnterpriseSkillUploadTarget] = useState<EnterpriseSkillResponse>();
+  const [cloudSkills, setCloudSkills] = useState<EnterpriseCloudSkillListResponse>();
+  const [cloudSkillsLoading, setCloudSkillsLoading] = useState(false);
+  const [cloudSkillsLoadError, setCloudSkillsLoadError] = useState<string>();
+  const [cloudSkillUseError, setCloudSkillUseError] = useState<EnterpriseSkillUseError>();
   const [enterpriseKnowledgeBases, setEnterpriseKnowledgeBases] =
     useState<EnterpriseKnowledgeBaseResponse[]>();
   const [enterpriseKnowledgeBasesLoading, setEnterpriseKnowledgeBasesLoading] =
@@ -475,9 +528,19 @@ export function AppController(props: AppControllerProps) {
   const [pendingMemorySuggestion, setPendingMemorySuggestion] = useState<{ id: number; content: string }>();
   const [composerRunConfig, setComposerRunConfig] = useState<ComposerRunConfig | null>(null);
   const [composerPromptByScope, setComposerPromptByScope] =
-    useState<Record<string, string>>({});
+    useState<Record<string, string>>(() => {
+      const drafts = readJsonFromStorage<unknown>('clawee.composer-drafts.v1');
+      return drafts && typeof drafts === 'object' && !Array.isArray(drafts)
+        && Object.values(drafts).every(value => typeof value === 'string') ? drafts as Record<string, string> : {};
+    });
+  const [updateDraftStorageFailed, setUpdateDraftStorageFailed] = useState(false);
+  useEffect(() => {
+    try { writeJsonToStorage('clawee.composer-drafts.v1', composerPromptByScope); setUpdateDraftStorageFailed(false); }
+    catch { setUpdateDraftStorageFailed(true); }
+  }, [composerPromptByScope]);
   const [recentComposerModelConfig, setRecentComposerModelConfig] =
     useState<RecentModelConfig | null>(readRecentModelConfig);
+  const [modelReasoningPreferences, setModelReasoningPreferences] = useState(readModelReasoningPreferences);
   const [codexModels, setCodexModels] = useState<CodexModelListResponse | undefined>(
     readCachedModelCatalog
   );
@@ -500,18 +563,24 @@ export function AppController(props: AppControllerProps) {
   const [workflowDraft, setWorkflowDraft] = useState<{
     taskId: string; threadId: string; instruction: string; input: string; firstNode: boolean;
   }>();
-  useEffect(() => { setWorkflowDraft(undefined); }, [enterpriseSession.account?.subjectId]);
+  const [workflowExecution, setWorkflowExecution] = useState<{ taskId: string; threadId: string; data: EnterpriseWorkflowExecution }>();
+  const workflowNavigationRef = useRef<{ owner: string; state: WorkflowNavigationState }>();
+  const approvalNavigationRef = useRef<{ owner: string; state: ApprovalNavigationState }>();
+  const [workflowTaskContext, setWorkflowTaskContext] = useState<(WorkflowTaskContext & { threadId: string })>();
+  const workflowDeliveryRequestRef = useRef(0);
+  useEffect(() => { setWorkflowDraft(undefined); setWorkflowExecution(undefined); setWorkflowTaskContext(undefined); workflowDeliveryRequestRef.current += 1; }, [enterpriseSession.account?.subjectId, enterpriseSession.agentId, workflowGatewayOrigin]);
   const [pendingComposerSkill, setPendingComposerSkill] = useState<{
     projectId: string | undefined;
     threadId: string | undefined;
     request: ComposerSkillRequest;
   }>();
-  const [starterSkillBusyName, setStarterSkillBusyName] = useState<string>();
-  const [starterSkillError, setStarterSkillError] = useState<string>();
   const [pendingComposerFocusRequestId, setPendingComposerFocusRequestId] = useState<number>();
+  const requestedPluginSource = props.route.view === 'plugins' ? props.route.source : undefined;
   const activePluginSource =
-    props.route.view === 'plugins' && props.route.source === 'public'
+    requestedPluginSource === 'public'
       ? 'public'
+      : requestedPluginSource === 'cloud' && cloudSkills !== undefined
+        ? 'cloud'
       : 'enterprise';
 
   useEffect(() => {
@@ -534,6 +603,7 @@ export function AppController(props: AppControllerProps) {
   const [savingFilePaths, setSavingFilePaths] = useState<Set<string>>(() => new Set());
   const [conversationPaneWidth, setConversationPaneWidth] = useState<number>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [workbenchModuleOpen, setWorkbenchModuleOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [defaultPermission, setDefaultPermission] = useState(readDefaultPermissionPreference);
   const [defaultPermissionSyncError, setDefaultPermissionSyncError] = useState<string>();
@@ -563,6 +633,7 @@ export function AppController(props: AppControllerProps) {
   const timelineIdSequenceRef = useRef(0);
   const timelineItemsRef = useRef<TimelineItem[]>([]);
   const timelineRef = useRef<TimelineHandle>(null);
+  const composerWheelCleanupRef = useRef<() => void>();
   const timelineItemsByThreadIdRef = useRef<Record<string, TimelineItem[] | undefined>>({});
   const timelineThreadIdRef = useRef<string | undefined>(initialState.selectedThreadId);
   const mountedRef = useRef(true);
@@ -573,8 +644,8 @@ export function AppController(props: AppControllerProps) {
   const fileRevisionByPathRef = useRef<Record<string, number>>({});
   const savingFilePathsRef = useRef(new Set<string>());
   const connectionConfigRef = useRef<ConnectionConfig | null>(null);
-  const connectionConfigVersionRef = useRef(0);
   const runEventControllersRef = useRef(new Map<string, ActiveRunEventController>());
+  const runRecoveriesRef = useRef(new Map<string, Promise<void>>());
   const replayedTargetRunKeyRef = useRef<string>();
   const timelineEventBatchersByThreadIdRef = useRef(new Map<string, FrameBatcher<TimelineItem>>());
   const runRegistryRef = useRef(runRegistry);
@@ -589,8 +660,8 @@ export function AppController(props: AppControllerProps) {
     applyColorMode(colorMode);
   }, [colorMode]);
   useEffect(() => {
-    applyAccentColor(accentColor, customAccentColor);
-  }, [accentColor, customAccentColor]);
+    applyAccentColor(accentColor, customAccentColor, brandAccentColor);
+  }, [accentColor, customAccentColor, brandAccentColor]);
   const navigationPersistenceReadyRef = useRef(
     persistedNavigation !== null || props.route.view !== 'home'
   );
@@ -605,11 +676,12 @@ export function AppController(props: AppControllerProps) {
   const enterpriseHubGenerationRef = useRef(0);
   const enterpriseKnowledgeGenerationRef = useRef(0);
   const enterpriseSharedDriveGenerationRef = useRef(0);
+  const runtimeResumeRecoveryRef = useRef<Promise<void>>();
+  const runtimeResumeRecoveryStartedAtRef = useRef(0);
   const capabilityLoadGenerationRef = useRef<number>();
   const profileLoadGenerationRef = useRef<number>();
   const skillMarketLoadGenerationRef = useRef<number>();
   const enterpriseSkillMutationInFlightRef = useRef(false);
-  const starterSkillInFlightRef = useRef(false);
   const codexHomeConfirmationResolverRef = useRef<((confirmed: boolean) => void)>();
   const enterpriseKnowledgeUploadInFlightRef = useRef(false);
   const enterpriseSharedSpacesLoadInFlightRef = useRef(false);
@@ -626,7 +698,9 @@ export function AppController(props: AppControllerProps) {
   const skillMarketServiceRef = useRef<SkillMarketService | null>(null);
   const enterpriseServiceRef = useRef<EnterpriseService | null>(null);
   const platformBrandingObjectUrlsRef = useRef<string[]>([]);
+  const brandAccentContextRef = useRef<{ baseUrl: string; subjectId?: string }>();
   const enterpriseSessionRef = useRef(enterpriseSession);
+  const agentPromptPolicyNoticedRef = useRef(new Map<string, number>());
   const enterpriseReturnRouteRef = useRef<AppRoute>();
   const threadServiceRef = useRef<ThreadService | null>(null);
   const scheduleServiceRef = useRef<ScheduleService | null>(null);
@@ -657,10 +731,36 @@ export function AppController(props: AppControllerProps) {
     () => connectionConfig === null ? null : new RuntimeClient({ ...connectionConfig, fetchImpl: runtimeFetch }),
     [connectionConfig, runtimeFetch]
   );
+  const updateEditorBusy = updateDraftStorageFailed || savingFilePaths.size > 0 || Object.entries(draftContentByPath).some(([path, draft]) => draft !== savedFileByPath[path]?.content);
+  useEffect(() => {
+    if (desktopUpdates.state?.status === 'installing') {
+      const busy = updateEditorBusy;
+      if (!busy) { updateRequestGate.pause(); document.body.inert = true; }
+      if (desktopUpdates.state.attemptId) void hostBridge.acknowledgeUpdateQuiescence?.(desktopUpdates.state.attemptId, busy);
+    } else if (!desktopUpdates.state?.nativePending) updateRequestGate.resume();
+    return () => { document.body.inert = false; };
+  }, [desktopUpdates.state?.status, desktopUpdates.state?.attemptId, desktopUpdates.state?.nativePending, updateEditorBusy, updateRequestGate, hostBridge]);
+  useEffect(() => {
+    if (hostBridge.kind !== 'desktop' || runtimeClient === null) return;
+    const report = () => { void runtimeClient.post('/desktop-update/activity', { busy: updateEditorBusy }).catch(() => undefined); };
+    report();
+    const timer = window.setInterval(report, 10_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hostBridge.kind, runtimeClient, updateEditorBusy]);
+  useEffect(() => {
+    if (hostBridge.kind !== 'desktop' || enterpriseSession.status !== 'signed_in') return;
+    void hostBridge.checkForUpdates?.().catch(() => undefined);
+  }, [hostBridge, enterpriseSession.status, enterpriseSession.account?.subjectId]);
   const connectionService = useMemo(
     () => runtimeClient === null ? null : createConnectionService(runtimeClient),
     [runtimeClient]
   );
+  useEffect(() => {
+    connectionService?.activate();
+    return () => connectionService?.dispose();
+  }, [connectionService]);
   const runService = useMemo(() => runtimeClient === null ? null : createRunService(runtimeClient), [runtimeClient]);
   const attachmentService = useMemo(
     () => runtimeClient === null ? null : createAttachmentService(runtimeClient),
@@ -728,8 +828,33 @@ export function AppController(props: AppControllerProps) {
     () => runtimeClient === null ? null : createEnterpriseService(runtimeClient),
     [runtimeClient]
   );
+  useEnterpriseSessionRenewal({ service: enterpriseService, session: enterpriseSession, onSession: setEnterpriseSession });
+  const checkAgentPromptPolicyUpdate = useCallback(() => {
+    if (enterpriseService === null || !runtimeSupportsEnterpriseSession(connectionState)) {
+      setAgentPromptPolicyStatus(undefined);
+      setAgentPromptPolicyUpdateVersion(undefined);
+      return;
+    }
+    const gateway = connectionConfig?.baseUrl ?? '';
+    void enterpriseService.getAgentPromptPolicyStatus().then(status => {
+      setAgentPromptPolicyStatus(status);
+      if (status.updated === undefined) return;
+      if (agentPromptPolicyNoticedRef.current.get(gateway) === status.updated) return;
+      agentPromptPolicyNoticedRef.current.set(gateway, status.updated);
+      setAgentPromptPolicyUpdateVersion(status.updated);
+    }).catch(() => undefined);
+  }, [connectionConfig?.baseUrl, connectionState.status, enterpriseService, enterpriseSession.status, enterpriseSession.account?.subjectId]);
+  useEffect(() => {
+    checkAgentPromptPolicyUpdate();
+  }, [checkAgentPromptPolicyUpdate, runtimeWorkspaceProbeKey]);
+  const contributionIdentityKey = JSON.stringify([connectionConfig?.baseUrl, enterpriseSession.status, enterpriseSession.account?.subjectId, enterpriseSession.agentId]);
+  const contributionAccess = useContributionAccess(enterpriseService, enterpriseSession.status === 'signed_in', contributionIdentityKey);
   const workflowService = useMemo(
     () => runtimeClient === null ? null : createWorkflowService(runtimeClient),
+    [runtimeClient]
+  );
+  const enterpriseApprovalService = useMemo(
+    () => runtimeClient === null ? null : createEnterpriseApprovalService(runtimeClient),
     [runtimeClient]
   );
   const handleEnterpriseSessionExpired = useCallback(() => {
@@ -748,7 +873,7 @@ export function AppController(props: AppControllerProps) {
     );
   };
   const enterpriseActivity = useEnterpriseActivity({
-    connected: connectionState.status === 'connected',
+    connected: runtimeSupportsEnterpriseSession(connectionState),
     session: enterpriseSession,
     service: enterpriseService,
     route: props.route,
@@ -757,7 +882,7 @@ export function AppController(props: AppControllerProps) {
     onUnauthorized: handleEnterpriseSessionExpired
   });
   const enterpriseBilling = useEnterpriseBilling({
-    connected: connectionState.status === 'connected',
+    connected: runtimeSupportsEnterpriseSession(connectionState),
     session: enterpriseSession,
     modelAccess: modelAccessState,
     capability: enterpriseActivity.capability,
@@ -793,6 +918,31 @@ export function AppController(props: AppControllerProps) {
   const [unreadTaskIds, setUnreadTaskIds] = useState<Set<string>>(
     () => notificationService.getUnreadIds()
   );
+  const observedCompletionIdsRef = useRef(new Set<string>());
+  const historyUnreadSnapshotRef = useRef<ReadonlySet<string>>(new Set());
+  const [windowForeground, setWindowForeground] = useState(
+    () => document.visibilityState === 'visible' && document.hasFocus()
+  );
+  const completedThreadByTaskId = useMemo(() => {
+    const threads = new Map<string, string>();
+    for (const task of runtimeTasks) {
+      if (task.threadId !== undefined && (task.status === 'succeeded' || task.status === 'failed')) {
+        threads.set(task.id, task.threadId);
+      }
+    }
+    for (const run of Object.values(runRegistry.runsById)) {
+      if (run?.threadId !== undefined && (run.status === 'succeeded' || run.status === 'failed')) {
+        threads.set(run.id, run.threadId);
+      }
+    }
+    return threads;
+  }, [runtimeTasks, runRegistry.runsById]);
+  const unreadConversationIds = useMemo(() => new Set(
+    [...unreadTaskIds].flatMap(id => {
+      const threadId = completedThreadByTaskId.get(id);
+      return threadId === undefined ? [] : [threadId];
+    })
+  ), [unreadTaskIds, completedThreadByTaskId]);
   const visibleRuntimeThreads = useMemo(
     () => runtimeThreads.filter(shouldShowThreadInSidebar),
     [runtimeThreads]
@@ -847,7 +997,19 @@ export function AppController(props: AppControllerProps) {
     () => [...scheduleDraftSidebarTasks, ...scheduleSidebarTasks],
     [scheduleDraftSidebarTasks, scheduleSidebarTasks]
   );
-  const runningConversationIds = runningThreadIds;
+  const runningConversationIds = useMemo(() => {
+    const ids = new Set(runningThreadIds);
+    for (const task of runtimeTasks) {
+      if (
+        task.threadId === undefined
+        || (task.runStatus !== 'running' && task.runStatus !== 'queued')
+      ) continue;
+      const run = runRegistry.runsById[task.runId];
+      if (run !== undefined && isTerminalRunStatus(run.status)) continue;
+      ids.add(task.threadId);
+    }
+    return ids;
+  }, [runningThreadIds, runtimeTasks, runRegistry.runsById]);
   const selectedThreadExists = state.selectedThreadId !== undefined
     && runtimeThreads.some(thread => thread.id === state.selectedThreadId);
   const selectedThread = runtimeThreads.find(
@@ -940,6 +1102,15 @@ export function AppController(props: AppControllerProps) {
       }
     });
   }, []);
+  const quoteAssistantMessage = useCallback((text: string) => {
+    const threadId = selectedThreadIdRef.current;
+    if (threadId === undefined) return;
+    nextComposerDraftIdRef.current += 1;
+    setPendingComposerDraft({
+      threadId,
+      request: { id: nextComposerDraftIdRef.current, text, quote: true }
+    });
+  }, []);
   const threadHistory = useThreadHistory({
     threadId: state.selectedThreadId,
     targetItemId:
@@ -948,12 +1119,60 @@ export function AppController(props: AppControllerProps) {
         ? searchHistoryTarget.itemId
         : undefined,
     enabled:
-      connectionState.status === 'connected'
+      runtimeSupportsEnterpriseSession(connectionState)
       && selectedThreadExists,
     service: threadService,
     reloadKey: threadHistoryReloadKey,
     consumeSkipInitialLoad: consumeSkipInitialHistoryLoad
   });
+
+  useEffect(() => {
+    const updateForeground = () => setWindowForeground(
+      document.visibilityState === 'visible' && document.hasFocus()
+    );
+    window.addEventListener('focus', updateForeground);
+    window.addEventListener('blur', updateForeground);
+    document.addEventListener('visibilitychange', updateForeground);
+    return () => {
+      window.removeEventListener('focus', updateForeground);
+      window.removeEventListener('blur', updateForeground);
+      document.removeEventListener('visibilitychange', updateForeground);
+    };
+  }, []);
+
+  useEffect(() => {
+    // 只清除请求开始前已有的未读；请求期间的新结果须等对应完成内容展示后再清除。
+    historyUnreadSnapshotRef.current = threadHistory.initialLoading
+      ? new Set([...unreadTaskIds].filter(id => completedThreadByTaskId.has(id)))
+      : historyUnreadSnapshotRef.current;
+  }, [threadHistory.threadId, threadHistory.initialLoading]);
+
+  useEffect(() => {
+    const threadId = state.selectedThreadId;
+    if (!windowForeground || state.activeView !== 'conversation' || threadId === undefined
+      || threadHistory.threadId !== threadId || !threadHistory.loaded
+      || threadHistory.initialLoading || threadHistory.error !== undefined
+      || historyLoadedThreadId !== threadId || searchHistoryTarget !== undefined) return;
+    const displayedCompletionIds = new Set(timelineItems.flatMap(item => (
+      item.kind === 'done' && (item.status === 'succeeded' || item.status === 'failed')
+        && item.runId !== undefined ? [item.runId] : []
+    )));
+    setUnreadTaskIds(current => {
+      const next = new Set(current);
+      for (const id of current) {
+        if (completedThreadByTaskId.get(id) !== threadId) continue;
+        if (!historyUnreadSnapshotRef.current.has(id) && !displayedCompletionIds.has(id)) continue;
+        next.delete(id);
+        observedCompletionIdsRef.current.add(id);
+      }
+      if (next.size === current.size) return current;
+      notificationService.setUnreadIds(next);
+      return next;
+    });
+  }, [windowForeground, state.activeView, state.selectedThreadId, threadHistory.threadId,
+    threadHistory.loaded, threadHistory.initialLoading, threadHistory.error,
+    historyLoadedThreadId, searchHistoryTarget, timelineItems, completedThreadByTaskId,
+    unreadTaskIds, notificationService]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -976,6 +1195,18 @@ export function AppController(props: AppControllerProps) {
   }, []);
 
   useEffect(() => {
+    setWorkflowGatewayIdentity(undefined);
+    if (enterpriseService === null || !enterpriseSessionInitialized || enterpriseSession.status !== 'signed_in' || !enterpriseSession.account?.subjectId || !enterpriseSession.agentId) return;
+    let canceled = false;
+    void enterpriseService.getGateway().then(result => {
+      if (!canceled) setWorkflowGatewayIdentity({ connection: connectionConfig, sessionKey: workflowSessionKey, origin: new URL(result.gateway).origin, failed: false });
+    }).catch(() => {
+      if (!canceled) setWorkflowGatewayIdentity({ connection: connectionConfig, sessionKey: workflowSessionKey, failed: true });
+    });
+    return () => { canceled = true; };
+  }, [enterpriseService, enterpriseSessionInitialized, connectionConfig, workflowSessionKey]);
+
+  useEffect(() => {
     for (const url of platformBrandingObjectUrlsRef.current) {
       URL.revokeObjectURL(url);
     }
@@ -984,15 +1215,30 @@ export function AppController(props: AppControllerProps) {
     setAdminUrl(undefined);
     setSidebarMenuLabels({});
 
-    if (enterpriseService === null || enterpriseSession.status !== 'signed_in') {
+    const previousContext = brandAccentContextRef.current;
+    const baseUrl = connectionConfig?.baseUrl;
+    const subjectId = enterpriseSession.account?.subjectId;
+    const sameContext = previousContext !== undefined
+      && previousContext.baseUrl === baseUrl
+      && (previousContext.subjectId === subjectId
+        || (enterpriseSession.status === 'checking' && subjectId === undefined));
+    if (!sameContext || enterpriseSession.status === 'signed_out') {
+      brandAccentContextRef.current = undefined;
+      setBrandAccentColor(undefined);
+    }
+
+    if (enterpriseService === null || baseUrl === undefined || enterpriseSession.status !== 'signed_in') {
       return;
     }
+
+    const brandingContext = brandAccentContextRef.current ?? { baseUrl, subjectId };
+    brandAccentContextRef.current = brandingContext;
 
     let canceled = false;
     const createdUrls: string[] = [];
     const loadImage = async (
-      configured: boolean,
-      kind: 'sidebar-logo' | 'sidebar-compact-logo'
+      configured: boolean | undefined,
+      kind: EnterprisePlatformBrandingImageKind
     ) => {
       if (!configured) return undefined;
       try {
@@ -1008,19 +1254,22 @@ export function AppController(props: AppControllerProps) {
 
     void enterpriseService.getPlatformBranding()
       .then(async branding => {
-        if (canceled) return;
+        if (canceled || brandAccentContextRef.current !== brandingContext) return;
         setSidebarMenuLabels(branding.sidebarMenuLabels ?? {});
         setAdminUrl(branding.adminUrl);
-        const [sidebarLogoUrl, sidebarCompactLogoUrl] = await Promise.all([
+        setBrandAccentColor(branding.accentColor);
+        const [sidebarLogoUrl, sidebarCompactLogoUrl, sidebarLogoDarkUrl, sidebarCompactLogoDarkUrl] = await Promise.all([
           loadImage(branding.sidebarLogoConfigured, 'sidebar-logo'),
-          loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo')
+          loadImage(branding.sidebarCompactLogoConfigured, 'sidebar-compact-logo'),
+          loadImage(branding.sidebarLogoDarkConfigured, 'sidebar-logo-dark'),
+          loadImage(branding.sidebarCompactLogoDarkConfigured, 'sidebar-compact-logo-dark')
         ]);
         if (canceled) {
           for (const url of createdUrls) URL.revokeObjectURL(url);
           return;
         }
         platformBrandingObjectUrlsRef.current = createdUrls;
-        setPlatformBrandingUrls({ sidebarLogoUrl, sidebarCompactLogoUrl });
+        setPlatformBrandingUrls({ sidebarLogoUrl, sidebarCompactLogoUrl, sidebarLogoDarkUrl, sidebarCompactLogoDarkUrl });
       })
       .catch(() => undefined);
 
@@ -1104,7 +1353,7 @@ export function AppController(props: AppControllerProps) {
   }, [hostBridge]);
 
   useEffect(() => {
-    const connection = connectionState.status === 'connected'
+    const connection = runtimeSupportsEnterpriseSession(connectionState)
       ? connectionConfig
       : null;
     void notificationService.syncBackground(connection);
@@ -1137,23 +1386,32 @@ export function AppController(props: AppControllerProps) {
     taskStatusesRef.current = new Map();
     taskBaselineReadyRef.current = false;
 
-    if (connectionState.status !== 'connected' || taskService === null) {
-      setRuntimeTasks([]);
+    if (!runtimeSupportsEnterpriseSession(connectionState) || taskService === null) {
       return () => {
         canceled = true;
       };
     }
     const activeTaskService = taskService;
+    const observedSince = Date.now();
 
     async function refreshTasks() {
       try {
         const response = await activeTaskService.list({ status: 'all', limit: 50 });
         if (canceled) return;
         setRuntimeTasks(response.tasks);
+        if (threadService !== null && response.tasks.some(task => task.threadId !== undefined
+          && !runtimeThreadsRef.current.some(thread => thread.id === task.threadId))) {
+          const discovered = await threadService.listActiveThreads().catch(() => null);
+          if (canceled) return;
+          if (discovered !== null) {
+            setRuntimeThreads(current => discovered.threads.reduce((threads, thread) => upsertThread(threads, thread), current));
+          }
+        }
         const result = collectTaskTransitions(
           taskStatusesRef.current,
           response.tasks,
-          taskBaselineReadyRef.current
+          taskBaselineReadyRef.current,
+          observedSince
         );
         const transitionedTaskIds = new Set(result.transitions.map(task => task.id));
         const selectedThreadId = selectedThreadIdRef.current;
@@ -1184,7 +1442,10 @@ export function AppController(props: AppControllerProps) {
 
         setUnreadTaskIds(current => {
           const next = new Set(current);
-          for (const task of result.transitions) next.add(task.id);
+          for (const task of result.transitions) {
+            if (task.status === 'canceled' || observedCompletionIdsRef.current.has(task.id)) continue;
+            next.add(task.id);
+          }
           notificationService.setUnreadIds(next);
           return next;
         });
@@ -1210,10 +1471,10 @@ export function AppController(props: AppControllerProps) {
       canceled = true;
       window.clearInterval(interval);
     };
-  }, [connectionState.status, notificationService, taskService]);
+  }, [connectionState.status, notificationService, taskService, threadService]);
 
   useEffect(() => {
-    if (connectionState.status === 'connected') return;
+    if (runtimeSupportsEnterpriseSession(connectionState)) return;
     stopAllRunEventSubscriptions(false);
     dispatchRunRegistry({ type: 'reset' });
     runsLoadedThreadIdsRef.current.clear();
@@ -1234,21 +1495,26 @@ export function AppController(props: AppControllerProps) {
       };
     }
 
+    let requestId = 0;
+    const activeModelService = modelService;
+    const watchAbort = new AbortController();
+    let retryTimer: number | undefined;
     const cachedModels = readCachedModelCatalog();
     if (cachedModels !== undefined) setCodexModels(cachedModels);
     setCodexModelsLoading(true);
     setCodexModelsLoadError(undefined);
     setCodexModelsNotice(undefined);
-    modelService
-      .listModels()
+    const refreshModels = (request: number) => activeModelService.listModels()
       .then(response => {
-        if (!canceled) {
+        if (!canceled && request === requestId) {
+          writeCachedModelCatalog(response);
           setCodexModels(response);
           setCodexModelsNotice(undefined);
         }
+        return response;
       })
       .catch(() => {
-        if (!canceled) {
+        if (!canceled && request === requestId) {
           const fallbackModels = readCachedModelCatalog()
             ?? codexModelsRef.current;
           if (fallbackModels !== undefined && fallbackModels.models.length > 0) {
@@ -1261,33 +1527,122 @@ export function AppController(props: AppControllerProps) {
         }
       })
       .finally(() => {
-        if (!canceled) setCodexModelsLoading(false);
+        if (!canceled && request === requestId) setCodexModelsLoading(false);
       });
 
-    return () => {
-      canceled = true;
-    };
-  }, [connectionState.status, modelService]);
-
-  useEffect(() => {
-    let canceled = false;
-    const loadVersion = connectionConfigVersionRef.current;
-
-    readHostRuntimeConfig(loadVersion, () => canceled);
-    const unsubscribe = hostBridge.subscribeConnectionConfig?.(config => {
+    function startWatching() {
       if (canceled) return;
-      connectionConfigVersionRef.current += 1;
-      setConnectionConfig(config);
-      if (config === null) {
-        setConnectionState({ status: 'disconnected', message: '正在恢复本地服务连接' });
-      }
+      void activeModelService.watchCatalog(() => { void loadModels(); }, watchAbort.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (!canceled) retryTimer = window.setTimeout(startWatching, 2_000);
+        });
+    }
+
+    function loadModels() {
+      const request = ++requestId;
+      return refreshModels(request);
+    }
+
+    void loadModels().then(response => {
+      if (!canceled && response?.updatesAvailable) startWatching();
     });
 
     return () => {
       canceled = true;
-      unsubscribe?.();
+      watchAbort.abort();
+      window.clearTimeout(retryTimer);
     };
-  }, [hostBridge]);
+  }, [connectionState.status, modelService]);
+
+  const reconnectRuntime = useRuntimeConnection({
+    hostBridge,
+    config: connectionConfig,
+    service: connectionService,
+    onConfig: setConnectionConfig,
+    onState: setConnectionState,
+    onResume: recoverAfterRuntimeResume
+  });
+  async function retryRuntimeConnection() {
+    await reconnectRuntime();
+    setRuntimeWorkspaceProbeKey(current => current + 1);
+    setEnterpriseSessionProbeKey(current => current + 1);
+  }
+
+  async function recoverAfterRuntimeResume(): Promise<void> {
+    if (runtimeResumeRecoveryRef.current !== undefined) {
+      return runtimeResumeRecoveryRef.current;
+    }
+    const now = Date.now();
+    if (now - runtimeResumeRecoveryStartedAtRef.current < 5_000) return;
+    runtimeResumeRecoveryStartedAtRef.current = now;
+
+    const waitBeforeRetry = () => new Promise<void>(resolve => {
+      window.setTimeout(resolve, 1_500);
+    });
+    const work = (async () => {
+      const enterpriseSessionStatus = enterpriseSessionRef.current.status;
+      const enterpriseNeedsRecovery = (
+        enterpriseSessionStatus === 'service_unavailable'
+        || (enterpriseSessionStatus === 'signed_in' && enterpriseSkillsLoadError !== undefined)
+      ) && enterpriseService !== null && runtimeSupportsEnterpriseSession(connectionState);
+      if (enterpriseNeedsRecovery) {
+        try {
+          await refreshEnterpriseSession();
+        } catch {
+          await waitBeforeRetry();
+          try {
+            await refreshEnterpriseSession();
+          } catch {
+            // 网络恢复仍未完成，保留现有状态等待下一次唤醒或用户操作。
+          }
+        }
+      }
+
+      if (
+        connectionService === null
+        || modelServiceConfigurationService === null
+        || availabilityProbeStatusRef.current !== 'failed'
+      ) return;
+
+      setConnectionState(previous => previous.status === 'connected' ? {
+        ...previous,
+        codexStatus: {
+          ...previous.codexStatus,
+          availabilityProbe: { status: 'pending' }
+        }
+      } : previous);
+
+      let probe: Awaited<ReturnType<typeof modelServiceConfigurationService.checkRuntime>> | undefined;
+      try {
+        probe = await modelServiceConfigurationService.checkRuntime();
+      } catch {
+        probe = undefined;
+      }
+      if (probe === undefined || probe.status === 'failed') {
+        await waitBeforeRetry();
+        try {
+          await modelServiceConfigurationService.checkRuntime();
+        } catch {
+          // 失败状态由后续连接检查继续展示，避免唤醒时请求风暴。
+        }
+      }
+      try {
+        const nextState = await connectionService.check();
+        if (mountedRef.current) setConnectionState(nextState);
+      } catch {
+        // 本地 Runtime 仍不可达时保留连接服务自己的错误状态。
+      }
+    })();
+    runtimeResumeRecoveryRef.current = work;
+    try {
+      await work;
+    } finally {
+      if (runtimeResumeRecoveryRef.current === work) {
+        runtimeResumeRecoveryRef.current = undefined;
+      }
+    }
+  }
 
   useEffect(() => {
     let canceled = false;
@@ -1309,35 +1664,12 @@ export function AppController(props: AppControllerProps) {
     };
   }, [fileService]);
 
-  useEffect(() => {
-    let canceled = false;
-
-    if (connectionService === null) {
-      setConnectionState({ status: 'disconnected', message: '正在等待本地服务' });
-      return () => {
-        canceled = true;
-      };
-    }
-
-    connectionService
-      .check()
-      .then(nextState => {
-        if (canceled) return;
-        setConnectionState(nextState);
-      })
-      .catch(() => {
-        if (canceled) return;
-        setConnectionState({ status: 'disconnected', message: '本地服务连接失败' });
-      });
-
-    return () => {
-      canceled = true;
-    };
-  }, [connectionService]);
 
   const availabilityProbeStatus = connectionState.status === 'connected'
     ? connectionState.codexStatus.availabilityProbe?.status
     : undefined;
+  const availabilityProbeStatusRef = useRef(availabilityProbeStatus);
+  availabilityProbeStatusRef.current = availabilityProbeStatus;
   const modelAccessStatus = connectionState.status === 'configuration_required'
     ? connectionState.configuration.status
     : undefined;
@@ -1445,19 +1777,46 @@ export function AppController(props: AppControllerProps) {
   ]);
 
   useEffect(() => {
+    const source = connectionConfig?.baseUrl;
+    const account = enterpriseSessionInitialized && enterpriseSession.status === 'signed_in'
+      ? enterpriseSession.account?.subjectId
+      : undefined;
+    const sourceChanged = source !== undefined && runtimeWorkspaceSourceRef.current !== undefined
+      && source !== runtimeWorkspaceSourceRef.current;
+    const accountChanged = account !== undefined && runtimeWorkspaceAccountRef.current !== undefined
+      && account !== runtimeWorkspaceAccountRef.current;
+    const signedOut = enterpriseSessionInitialized && enterpriseSession.status === 'signed_out'
+      && runtimeWorkspaceAccountRef.current !== undefined;
+    if (source !== undefined) runtimeWorkspaceSourceRef.current = source;
+    if (account !== undefined) runtimeWorkspaceAccountRef.current = account;
+    if (!sourceChanged && !accountChanged && !signedOut) return;
+    if (signedOut) runtimeWorkspaceAccountRef.current = undefined;
+    setProjects([]);
+    setArchivedProjects([]);
+    setRuntimeThreads([]);
+    setRuntimeTasks([]);
+    setRuntimeSchedules([]);
+    stopAllRunEventSubscriptions(false);
+    dispatchRunRegistry({ type: 'reset' });
+    runsLoadedThreadIdsRef.current.clear();
+    timelineItemsByThreadIdRef.current = {};
+    setTimelineItemsState([]);
+    setHistoryLoadedThreadId(undefined);
+    dispatch({ type: 'reset_workspace' });
+  }, [connectionConfig?.baseUrl, enterpriseSessionInitialized, enterpriseSession.status, enterpriseSession.account?.subjectId]);
+
+  const workspaceSessionReady = props.requireEnterpriseLogin === false
+    || enterpriseSessionInitialized && enterpriseSession.status === 'signed_in';
+  useEffect(() => {
     let canceled = false;
 
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
+      || !workspaceSessionReady
       || projectService === null
       || threadService === null
     ) {
       setRuntimeWorkspaceReady(false);
-      if (connectionState.status !== 'connected') {
-        setProjects([]);
-        setArchivedProjects([]);
-        setRuntimeThreads([]);
-      }
       return () => {
         canceled = true;
       };
@@ -1545,11 +1904,7 @@ export function AppController(props: AppControllerProps) {
         }
       } catch {
         if (canceled) return;
-        setProjects([]);
-        setArchivedProjects([]);
-        setRuntimeThreads([]);
-        dispatch({ type: 'set_current_project', projectId: undefined });
-        setProjectLoadError('无法迁移或加载项目，请稍后重试');
+        setProjectLoadError('无法加载项目或会话，请重试连接');
         setThreadLoadError(undefined);
       } finally {
         if (!canceled) setRuntimeWorkspaceReady(true);
@@ -1561,13 +1916,12 @@ export function AppController(props: AppControllerProps) {
     return () => {
       canceled = true;
     };
-  }, [connectionState.status, hostBridge, projectService, threadService]);
+  }, [connectionState.status, hostBridge, projectService, threadService, runtimeWorkspaceProbeKey, workspaceSessionReady, enterpriseSession.account?.subjectId]);
 
   useEffect(() => {
     let canceled = false;
 
-    if (connectionState.status !== 'connected' || scheduleService === null) {
-      if (connectionState.status !== 'connected') setRuntimeSchedules([]);
+    if (!runtimeSupportsEnterpriseSession(connectionState) || scheduleService === null) {
       return () => {
         canceled = true;
       };
@@ -1576,7 +1930,7 @@ export function AppController(props: AppControllerProps) {
     scheduleService
       .listSchedules()
       .then(response => {
-        if (!canceled) setRuntimeSchedules(response.schedules);
+        if (!canceled) setRuntimeSchedules(response.schedules.filter(schedule => schedule.action !== 'workflow_start'));
       })
       .catch(() => {
         if (!canceled) setRuntimeSchedules([]);
@@ -1702,13 +2056,18 @@ export function AppController(props: AppControllerProps) {
     setEnterpriseSharedNotice(undefined);
 
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
       setEnterpriseSkills(undefined);
+      setEnterpriseSkillUsage(undefined);
       setEnterpriseSkillsLoading(false);
       setEnterpriseSkillsLoadError(undefined);
+      setCloudSkills(undefined);
+      setCloudSkillsLoading(false);
+      setCloudSkillsLoadError(undefined);
+      setCloudSkillUseError(undefined);
       setEnterpriseKnowledgeBases(undefined);
       setEnterpriseKnowledgeBasesLoading(false);
       setEnterpriseKnowledgeBasesError(undefined);
@@ -1734,7 +2093,7 @@ export function AppController(props: AppControllerProps) {
     if (
       state.activeView !== 'plugins'
       || activePluginSource !== 'enterprise'
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
@@ -1745,12 +2104,30 @@ export function AppController(props: AppControllerProps) {
     const activeEnterpriseService = enterpriseService;
     setEnterpriseSkillsLoading(true);
     setEnterpriseSkills(undefined);
+    setEnterpriseSkillUsage(undefined);
     setEnterpriseSkillsLoadError(undefined);
+
+    void activeEnterpriseService.getActivityStatistics('7d')
+      .then(response => {
+        if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+        const usage: Record<string, number> = {};
+        for (const item of response.organization.skillUsage ?? []) {
+          if (item.source !== 'enterprise') continue;
+          usage[item.skillId] = Math.max(usage[item.skillId] ?? 0, item.observedRuns);
+        }
+        setEnterpriseSkillUsage(usage);
+      })
+      .catch(() => {
+        if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
+          setEnterpriseSkillUsage({});
+        }
+      });
 
     void activeEnterpriseService.listSkills()
       .then(response => {
         if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
         setEnterpriseSkills(response.skills);
+        setEnterpriseSkillsLoadError(undefined);
       })
       .catch(error => {
         if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
@@ -1784,8 +2161,42 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
+      state.activeView !== 'plugins'
+      || !runtimeSupportsEnterpriseSession(connectionState)
+      || enterpriseService === null
+      || enterpriseSession.status !== 'signed_in'
+    ) {
+      return;
+    }
+
+    const generation = enterpriseHubGenerationRef.current;
+    const activeEnterpriseService = enterpriseService;
+    setCloudSkillsLoading(true);
+    setCloudSkills(undefined);
+    setCloudSkillUseError(undefined);
+    setCloudSkillsLoadError(undefined);
+    void activeEnterpriseService.listCloudSkills()
+      .then(response => {
+        if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+        setCloudSkills(response);
+      })
+      .catch(error => {
+        if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) return;
+        if (isEnterpriseUnauthorized(error)) {
+          handleEnterpriseSessionExpired();
+        } else {
+          setCloudSkillsLoadError(formatEnterpriseSkillError(error, '云 Skill 目录加载失败'));
+        }
+      })
+      .finally(() => {
+        if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) setCloudSkillsLoading(false);
+      });
+  }, [connectionState.status, enterpriseService, enterpriseSession.status, handleEnterpriseSessionExpired, state.activeView]);
+
+  useEffect(() => {
+    if (
       state.activeView !== 'knowledge'
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
@@ -1873,7 +2284,7 @@ export function AppController(props: AppControllerProps) {
   useEffect(() => {
     if (
       state.activeView !== 'drive'
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
@@ -1945,7 +2356,7 @@ export function AppController(props: AppControllerProps) {
   useEffect(() => {
     if (
       state.activeView !== 'drive'
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
@@ -2023,7 +2434,7 @@ export function AppController(props: AppControllerProps) {
   useEffect(() => {
     if (
       state.activeView !== 'knowledge'
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
       || selectedEnterpriseKnowledgeBaseId === undefined
@@ -2120,7 +2531,7 @@ export function AppController(props: AppControllerProps) {
     if (
       defaultPermission === 'follow-project'
       || !defaultPermissionSyncEnabledRef.current
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || threadService === null
     ) {
       defaultPermissionAppliedByThreadRef.current.clear();
@@ -2178,7 +2589,7 @@ export function AppController(props: AppControllerProps) {
   ]);
 
   useEffect(() => {
-    if (connectionState.status !== 'connected' || capabilityService === null || skillMarketService === null) {
+    if (!runtimeSupportsEnterpriseSession(connectionState) || capabilityService === null || skillMarketService === null) {
       skillMarketMutationInFlightRef.current = false;
       skillMarketUseInFlightRef.current = false;
       capabilityLoadGenerationRef.current = undefined;
@@ -2199,7 +2610,7 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || capabilityService === null
       || state.activeView !== 'conversation'
     ) {
@@ -2247,7 +2658,7 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || enterpriseService === null
       || enterpriseSession.status !== 'signed_in'
     ) {
@@ -2291,7 +2702,7 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || capabilityService === null
       || state.activeView !== 'conversation'
     ) {
@@ -2335,7 +2746,7 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || capabilityService === null
       || (state.activeView !== 'conversation' && state.activeView !== 'schedules')
     ) {
@@ -2366,7 +2777,7 @@ export function AppController(props: AppControllerProps) {
 
   useEffect(() => {
     if (
-      connectionState.status !== 'connected'
+      !runtimeSupportsEnterpriseSession(connectionState)
       || capabilityService === null
       || skillMarketService === null
       || state.activeView !== 'plugins'
@@ -2427,9 +2838,9 @@ export function AppController(props: AppControllerProps) {
     if (state.activeView !== 'conversation' || state.selectedThreadId !== undefined) return;
     if (conversations.length === 0) return;
 
-    const firstRuntimeProjectId = conversations[0]?.projectId;
+    const firstRuntimeProjectId = conversations.find(conversation => conversation.projectId !== null)?.projectId;
     allowInitialRuntimeProjectFocusRef.current = false;
-    if (firstRuntimeProjectId === undefined) return;
+    if (firstRuntimeProjectId == null) return;
 
     navigationPersistenceReadyRef.current = true;
     if (firstRuntimeProjectId === state.currentProjectId) {
@@ -2512,46 +2923,47 @@ export function AppController(props: AppControllerProps) {
     threadHistory.threadId
   ]);
 
-  const workflowPendingRunIds = timelineItems.filter(item => item.kind === 'workflow_start'
-    && !timelineItems.some(status =>
-      status.kind === 'workflow_status' && status.runId === item.runId
-      && ['completed', 'failed', 'sync_failed', 'conflict'].includes(status.status)
-    )).map(item => item.runId).join(',');
+  const currentWorkflowTaskId = workflowDraft && workflowDraft.threadId === state.selectedThreadId ? workflowDraft.taskId
+    : workflowExecution && workflowExecution.threadId === state.selectedThreadId ? workflowExecution.taskId
+    : timelineItems.find(item => item.kind === 'workflow_start')?.taskId;
+
+  function applyWorkflowExecution(threadId: string, taskId: string, result: EnterpriseWorkflowExecution) {
+    if (selectedThreadIdRef.current !== threadId || (result.threadId && result.threadId !== threadId)) return;
+    setWorkflowExecution({ threadId, taskId, data: result });
+    if (!result.runId || result.status === 'idle') return;
+    const runId = result.runId;
+    const status = result.status === 'pending'
+      ? result.runStatus === 'succeeded' ? 'awaiting_confirmation'
+        : ['failed', 'canceled', 'orphaned'].includes(result.runStatus ?? '') ? 'failed' : 'pending'
+      : result.status;
+    updateTimelineItemsForThread(threadId, items => {
+      const previous = items.find(item => item.kind === 'workflow_status' && item.taskId === taskId && item.runId === runId);
+      if (previous?.kind === 'workflow_status' && previous.status === status
+        && previous.completion?.handledBy === result.completion?.handledBy
+        && previous.completion?.handledByName === result.completion?.handledByName
+        && !items.some(item => item.kind === 'workflow_status' && item.taskId === taskId && item.runId !== runId)) return items;
+      return [...items.filter(item => item.kind !== 'workflow_status' || item.taskId !== taskId), {
+        kind: 'workflow_status', id: `workflow-status:${runId}`, runId,
+        taskId, status, completion: result.completion, timestamp: new Date().toISOString(), source: 'runtime'
+      }];
+    });
+  }
+
   useEffect(() => {
     const threadId = state.selectedThreadId;
-    const starts = timelineItemsRef.current.filter(item => item.kind === 'workflow_start');
-    const active = starts.filter(start => !timelineItemsRef.current.some(item =>
-      item.kind === 'workflow_status' && item.runId === start.runId
-      && ['completed', 'failed', 'sync_failed', 'conflict'].includes(item.status)
-    ));
-    if (!threadId || !workflowService || connectionState.status !== 'connected' || active.length === 0) return;
+    if (!threadId || !workflowService || !runtimeSupportsEnterpriseSession(connectionState) || !currentWorkflowTaskId) return;
     let canceled = false;
     const check = async () => {
-      for (const start of active) {
+        const epoch = workflowDeliveryRequestRef.current;
         try {
-          const result = await workflowService.execution(start.taskId);
-          if (canceled || selectedThreadIdRef.current !== threadId || result.runId !== start.runId) continue;
-          const status = result.status === 'pending'
-            ? result.runStatus === 'succeeded' ? 'syncing'
-              : ['failed', 'canceled', 'orphaned'].includes(result.runStatus ?? '') ? 'failed' : undefined
-            : result.status === 'failed' && result.runStatus === 'succeeded' ? 'sync_failed' : result.status;
-          if (!status || status === 'idle') continue;
-          updateTimelineItemsForThread(threadId, items => {
-            const id = `workflow-status:${start.runId}`;
-            const previous = items.find(item => item.id === id);
-            if (previous?.kind === 'workflow_status' && previous.status === status) return items;
-            return [...items.filter(item => item.id !== id), {
-              kind: 'workflow_status', id, runId: start.runId,
-              taskId: start.taskId, status, timestamp: new Date().toISOString(), source: 'runtime'
-            }];
-          });
+          const result = await workflowService.execution(currentWorkflowTaskId);
+          if (!canceled && epoch === workflowDeliveryRequestRef.current) applyWorkflowExecution(threadId, currentWorkflowTaskId, result);
         } catch { /* Keep the last confirmed status until the next poll. */ }
-      }
     };
     void check();
     const timer = window.setInterval(() => void check(), 3000);
     return () => { canceled = true; window.clearInterval(timer); };
-  }, [state.selectedThreadId, workflowPendingRunIds, workflowService, connectionState.status]);
+  }, [state.selectedThreadId, currentWorkflowTaskId, workflowService, connectionState.status]);
 
   useEffect(() => {
     let canceled = false;
@@ -2561,7 +2973,7 @@ export function AppController(props: AppControllerProps) {
     if (
       selectedThreadId === undefined
       || threadService === null
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || !selectedThreadExists
     ) {
       setRunsLoadingThreadId(undefined);
@@ -2615,16 +3027,17 @@ export function AppController(props: AppControllerProps) {
     if (
       selectedThreadId === undefined
       || connectionConfig === null
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || historyLoadedThreadId !== selectedThreadId
       || runsLoadedThreadId !== selectedThreadId
     ) return;
 
-    const activeRun = getThreadActiveRun(runRegistry, selectedThreadId);
-    if (activeRun === undefined) return;
-    if (runEventControllersRef.current.has(activeRun.id)) return;
-
-    subscribeToRunEvents(activeRun.id, selectedThreadId, connectionConfig);
+    for (const runId of runRegistry.runIdsByThreadId[selectedThreadId] ?? []) {
+      const run = runRegistry.runsById[runId];
+      if (run === undefined || runRegistry.subscriptionStateByRunId[runId] === 'disconnected') continue;
+      if (isTerminalRunStatus(run.status) && (runRegistry.lastSeqByRunId[runId] ?? 0) >= (run.lastEventSeq ?? 0)) continue;
+      subscribeToRunEvents(runId, selectedThreadId, connectionConfig);
+    }
   }, [
     connectionConfig,
     connectionState.status,
@@ -2644,7 +3057,7 @@ export function AppController(props: AppControllerProps) {
     if (
       target.threadId !== state.selectedThreadId
       || connectionConfig === null
-      || connectionState.status !== 'connected'
+      || !runtimeSupportsEnterpriseSession(connectionState)
       || runsLoadedThreadId !== target.threadId
       || runRegistry.runsById[target.runId] === undefined
       || replayedTargetRunKeyRef.current === targetKey
@@ -2663,17 +3076,30 @@ export function AppController(props: AppControllerProps) {
     timelineRunTarget
   ]);
 
-  useEffect(() => {
-    for (const [runId, subscription] of runEventControllersRef.current.entries()) {
-      const run = runRegistry.runsById[runId];
-      if (run === undefined || !isTerminalRunStatus(run.status)) continue;
-      const consumedSeq = runRegistry.lastSeqByRunId[runId] ?? 0;
-      if (consumedSeq < (run.lastEventSeq ?? 0)) continue;
-      runEventControllersRef.current.delete(runId);
-      subscription.controller.stop();
-      timelineEventBatchersByThreadIdRef.current.get(subscription.threadId)?.flush();
+  useRunRecoveryTriggers(() => {
+    for (const [runId, status] of Object.entries(runRegistryRef.current.subscriptionStateByRunId)) {
+      if (status === 'disconnected') void recoverRunSubscription(runId);
     }
-  }, [runRegistry.runsById]);
+  }, runtimeSupportsEnterpriseSession(connectionState));
+
+  useEffect(() => {
+    const runIds = Object.keys(runRegistry.terminalConflictsByRunId);
+    if (runService === null || runIds.length === 0) return;
+    let canceled = false;
+    void Promise.allSettled(runIds.map(runId => runService.getRun(runId))).then(results => {
+      if (canceled || !mountedRef.current) return;
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const run = result.value;
+        dispatchRunRegistry({ type: 'confirm_run', run });
+        if (run.threadId !== undefined) appendTimelineItemsForThread(run.threadId, [{
+          kind: 'diagnostic', id: `terminal_conflict:${run.id}`, runId: run.id, severity: 'warning',
+          message: '运行状态曾出现冲突，已重新核对本地记录。', content: 'RUN_TERMINAL_CONFLICT', source: 'runtime'
+        }]);
+      }
+    });
+    return () => { canceled = true; };
+  }, [runRegistry.terminalConflictsByRunId, runService]);
 
   useEffect(() => {
     const path = state.selectedFilePath;
@@ -2819,13 +3245,14 @@ export function AppController(props: AppControllerProps) {
         ? [{
             runId: item.runId,
             text: item.text,
-            queuePosition: item.queuePosition
+            queuePosition: item.queuePosition,
+            queueReason: item.queueReason
           }]
         : []
     )),
     [runRegistry, timelineItems]
   );
-  const composerAttachmentScope = `${state.currentProjectId}:${state.selectedThreadId ?? 'new'}`;
+  const composerAttachmentScope = JSON.stringify([workflowGatewayOrigin, enterpriseSession.account?.subjectId, enterpriseSession.agentId, state.currentProjectId, state.selectedThreadId ?? 'new']);
   const handleComposerPromptChange = useCallback((prompt: string) => {
     setComposerPromptByScope(current => {
       if (current[composerAttachmentScope] === prompt) return current;
@@ -3083,25 +3510,6 @@ export function AppController(props: AppControllerProps) {
     if (mountedRef.current) setPendingRunStartsById(updated);
   }
 
-  function readHostRuntimeConfig(loadVersion: number, isCanceled: () => boolean) {
-    hostBridge
-      .readConnectionConfig()
-      .then(config => {
-        if (!isCanceled() && connectionConfigVersionRef.current === loadVersion) setConnectionConfig(config);
-      })
-      .catch(() => {
-        if (!isCanceled() && connectionConfigVersionRef.current === loadVersion) setConnectionConfig(null);
-      });
-  }
-
-  function retryRuntimeConnection() {
-    connectionConfigVersionRef.current += 1;
-    const loadVersion = connectionConfigVersionRef.current;
-    setConnectionConfig(null);
-    setConnectionState({ status: 'disconnected', message: '正在等待本地服务' });
-    readHostRuntimeConfig(loadVersion, () => false);
-  }
-
   async function runEnterpriseSessionMutation(
     action: (service: EnterpriseService) => Promise<EnterpriseSessionResponse>
   ): Promise<EnterpriseSessionResponse> {
@@ -3158,10 +3566,22 @@ export function AppController(props: AppControllerProps) {
     return service.getGateway();
   }
 
-  async function saveEnterpriseGateway(gateway: string) {
+  async function readEnterpriseLogin(gateway: string) {
     const service = enterpriseServiceRef.current;
     if (service === null) throw new Error('本地服务未连接');
-    await service.setGateway(gateway);
+    const saved = await service.getLoginPreferences();
+    return saved.gateway === gateway ? saved.login : null;
+  }
+
+  async function saveEnterpriseGateway(gateway: string, gateways?: string[]) {
+    const service = enterpriseServiceRef.current;
+    if (service === null) throw new Error('本地服务未连接');
+    const previous = await service.getGateway();
+    const saved = await service.setGateway(gateway, gateways);
+    if (previous.gateway === saved.gateway) return;
+    brandAccentContextRef.current = undefined;
+    setBrandAccentColor(undefined);
+    setWorkflowGatewayIdentity(undefined);
     setSidebarMenuLabels({});
     setEnterpriseSessionProbeKey(current => current + 1);
     setEnterpriseSession(await service.getSession());
@@ -3243,7 +3663,7 @@ export function AppController(props: AppControllerProps) {
 
   function handleAccentColorChange(color: AccentColor) {
     setAccentColor(color);
-    applyAccentColor(color, customAccentColor);
+    applyAccentColor(color, customAccentColor, brandAccentColor);
     writeAccentColorPreference(color);
   }
 
@@ -3305,23 +3725,47 @@ export function AppController(props: AppControllerProps) {
     attachments: ComposerAttachment[] = [],
     submissionMode?: RunSubmissionMode
   ): Promise<boolean> {
-    if (workflowDraft !== undefined && workflowDraft.threadId === state.selectedThreadId) {
-      const draft = workflowDraft;
-      if (!workflowService || !currentProject || attachments.length > 0 || submissionMode) return false;
+    if (selectedThread?.purpose === 'skill_review') return false;
+    if (currentWorkflowTaskId && state.selectedThreadId
+      && !(workflowExecution?.threadId === state.selectedThreadId && workflowExecution.data.status === 'completed')) {
+      const threadId = state.selectedThreadId;
+      const attachmentIds = attachments.map(item => item.attachment.id);
+      const attachmentDraftId = attachments[0]?.attachment.draftId;
+      if (
+        connectionState.status !== 'connected'
+        || !workflowService
+        || !currentProject
+        || submissionMode
+        || attachments.some(item => item.attachment.draftId !== attachmentDraftId)
+        || attachments.length > 0 && attachmentDraftId === undefined
+      ) return false;
       try {
-        const result = await workflowService.execute(draft.taskId, currentProject.id, draft.threadId, draft.firstNode ? draft.input : prompt, config?.model, config?.reasoning);
+        workflowDeliveryRequestRef.current += 1;
+        const result = await workflowService.execute(
+          currentWorkflowTaskId,
+          currentProject.id,
+          threadId,
+          prompt,
+          config?.model,
+          config?.reasoning,
+          attachmentIds.length === 0
+            ? undefined
+            : { draftId: attachmentDraftId!, attachmentIds }
+        );
         setWorkflowDraft(undefined);
+        composerAttachmentDraftIdsRef.current.delete(composerAttachmentScope);
+        applyWorkflowExecution(threadId, currentWorkflowTaskId, { ...workflowExecution?.data, status: 'pending', runId: result.runId, threadId, runStatus: result.status });
         setThreadHistoryReloadKey(previous => previous + 1);
         if (result.runId && runService && connectionConfigRef.current) {
           void runService.getRun(result.runId).then(run => {
             handleRunStarted(run);
             const connection = connectionConfigRef.current;
-            if (connection) subscribeToRunEvents(run.id, draft.threadId, connection);
-          }).catch(() => void refreshThreadRunState(draft.threadId));
+            if (connection) subscribeToRunEvents(run.id, threadId, connection);
+          }).catch(() => void refreshThreadRunState(threadId));
         }
         return true;
       } catch (error) {
-        appendTimelineItemsForThread(draft.threadId, [{
+        appendTimelineItemsForThread(threadId, [{
           kind: 'diagnostic', id: createTimelineId('workflow_error'), severity: 'error',
           message: getRuntimeErrorMessage(error, '发起任务失败，请重试'),
           content: getRuntimeErrorMessage(error, '发起任务失败，请重试'), source: 'runtime'
@@ -3338,6 +3782,7 @@ export function AppController(props: AppControllerProps) {
       const submittedScope = composerAttachmentScope;
       const submitted = await submitRuntimePrompt(prompt, config, attachments, submissionMode);
       if (submitted) {
+        checkAgentPromptPolicyUpdate();
         setComposerPromptByScope(current => {
           if (!Object.prototype.hasOwnProperty.call(current, submittedScope)) {
             return current;
@@ -3793,14 +4238,18 @@ export function AppController(props: AppControllerProps) {
     const followOpenFileWorkspace = !alreadySelected
       && state.activeView === 'conversation'
       && state.rightPanelMode === 'file';
-    if (conversation !== undefined && conversation.projectId !== state.currentProjectId) {
+    if (conversation !== undefined && conversation.projectId !== null && conversation.projectId !== state.currentProjectId) {
       dispatch({ type: 'select_project', projectId: conversation.projectId });
     }
     if (alreadySelected) {
       if (state.activeView !== 'conversation') {
         dispatch({ type: 'select_thread', threadId: conversationId });
       }
-      if (timelineItems.length === 0) {
+      if (
+        timelineItems.length === 0
+        && !threadHistory.initialLoading
+        && (!threadHistory.loaded || threadHistory.error !== undefined)
+      ) {
         setHistoryLoadingThreadId(conversationId);
         setHistoryLoadedThreadId(undefined);
         setThreadHistoryReloadKey(previous => previous + 1);
@@ -3870,6 +4319,7 @@ export function AppController(props: AppControllerProps) {
       case 'schedules':
       case 'tasks':
       case 'dashboard':
+      case 'skill-contributions':
       case 'activity':
       case 'activity-agent':
       case 'activity-recharge-records':
@@ -3877,6 +4327,7 @@ export function AppController(props: AppControllerProps) {
       case 'connections':
       case 'knowledge':
       case 'workflow':
+      case 'enterprise-approvals':
       case 'drive':
       case 'account':
       case 'settings':
@@ -3918,128 +4369,6 @@ export function AppController(props: AppControllerProps) {
 
     dispatch({ type: 'set_active_view', activeView });
     navigateToRoute(routeForActiveView(activeView, state.selectedThreadId));
-  }
-
-  async function loadStarterSkill(skillName: string) {
-    if (starterSkillInFlightRef.current) return;
-
-    const activeCapabilityService = capabilityServiceRef.current;
-    const targetProjectId = currentProjectIdRef.current;
-    const targetThreadId = selectedThreadIdRef.current;
-    if (
-      activeCapabilityService === null
-      || connectionStatusRef.current !== 'connected'
-    ) {
-      setStarterSkillError('本地服务暂不可用，无法加载 Skill');
-      return;
-    }
-
-    const capabilityGeneration = skillMarketRuntimeGenerationRef.current;
-    starterSkillInFlightRef.current = true;
-    setStarterSkillBusyName(skillName);
-    setStarterSkillError(undefined);
-
-    const targetComposerIsCurrent = () => (
-      mountedRef.current
-      && activeViewRef.current === 'conversation'
-      && currentProjectIdRef.current === targetProjectId
-      && selectedThreadIdRef.current === targetThreadId
-    );
-    const selectSkill = (skillId: string) => {
-      if (!targetComposerIsCurrent()) return;
-      nextComposerSkillIdRef.current += 1;
-      setPendingComposerSkill({
-        projectId: targetProjectId,
-        threadId: targetThreadId,
-        request: {
-          id: nextComposerSkillIdRef.current,
-          skillId
-        }
-      });
-    };
-
-    try {
-      let localSkills = codexSkills;
-      let localSkillId = findValidCodexSkillId(localSkills, skillName);
-      if (localSkills === undefined) {
-        localSkills = await activeCapabilityService.listSkills();
-        if (!isCurrentCapabilityRuntime(capabilityGeneration, activeCapabilityService)) return;
-        setCodexSkills(localSkills);
-        localSkillId = findValidCodexSkillId(localSkills, skillName);
-      }
-      if (localSkillId !== undefined) {
-        selectSkill(localSkillId);
-        return;
-      }
-
-      const activeEnterpriseService = enterpriseServiceRef.current;
-      if (
-        activeEnterpriseService === null
-        || enterpriseSessionRef.current.status !== 'signed_in'
-      ) {
-        throw new Error('请先登录企业账号，再加载该 Skill');
-      }
-
-      const enterpriseGeneration = enterpriseHubGenerationRef.current;
-      const catalog = await activeEnterpriseService.listSkills();
-      if (!isCurrentEnterpriseHubRuntime(enterpriseGeneration, activeEnterpriseService)) return;
-      setEnterpriseSkills(catalog.skills);
-      setEnterpriseSkillsLoadError(undefined);
-      const enterpriseSkill = catalog.skills.find(skill => (
-        skill.name === skillName || skill.skillId === skillName
-      ));
-      if (enterpriseSkill === undefined) {
-        throw new Error('企业 Skill 目录中未找到该能力');
-      }
-
-      if (!enterpriseSkill.actions.includes('use')) {
-        if (!enterpriseSkill.actions.includes('install')) {
-          throw new Error('该企业 Skill 当前无法安装');
-        }
-        const mutation = await activeEnterpriseService.installSkill(
-          enterpriseSkill.skillId
-        );
-        if (!isCurrentEnterpriseHubRuntime(enterpriseGeneration, activeEnterpriseService)) return;
-        setEnterpriseSkills(current => upsertEnterpriseSkill(
-          current ?? catalog.skills,
-          mutation.skill
-        ));
-        try {
-          await refreshEnterpriseSkillListOnce(
-            enterpriseGeneration,
-            activeEnterpriseService
-          );
-        } catch {
-          // Installation succeeded. The local capability refresh below is authoritative here.
-        }
-      }
-
-      const refreshedLocalSkills = await activeCapabilityService.listSkills();
-      if (!isCurrentCapabilityRuntime(capabilityGeneration, activeCapabilityService)) return;
-      setCodexSkills(refreshedLocalSkills);
-      setCapabilitiesLoadError(undefined);
-      localSkillId = findValidCodexSkillId(refreshedLocalSkills, skillName);
-      if (localSkillId === undefined) {
-        throw new Error('Skill 已安装，但本机能力状态刷新失败');
-      }
-      selectSkill(localSkillId);
-    } catch (error) {
-      if (!targetComposerIsCurrent()) return;
-      if (isEnterpriseUnauthorized(error)) {
-        setEnterpriseSession({
-          status: 'signed_out',
-          reason: 'session_expired',
-          transportSecurity: enterpriseSessionRef.current.transportSecurity
-        });
-      }
-      setStarterSkillError(formatEnterpriseSkillError(
-        error,
-        'Skill 加载失败，请重试'
-      ));
-    } finally {
-      starterSkillInFlightRef.current = false;
-      if (mountedRef.current) setStarterSkillBusyName(undefined);
-    }
   }
 
   function closeFileWorkspace() {
@@ -4166,7 +4495,7 @@ export function AppController(props: AppControllerProps) {
   ) {
     return mountedRef.current
       && skillMarketRuntimeGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && capabilityServiceRef.current === activeCapabilityService
       && skillMarketServiceRef.current === activeSkillMarketService;
   }
@@ -4177,14 +4506,14 @@ export function AppController(props: AppControllerProps) {
   ) {
     return mountedRef.current
       && skillMarketRuntimeGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && capabilityServiceRef.current === activeCapabilityService;
   }
 
   function isCurrentThreadRuntime(generation: number, activeThreadService: ThreadService) {
     return mountedRef.current
       && skillMarketRuntimeGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && threadServiceRef.current === activeThreadService;
   }
 
@@ -4194,7 +4523,7 @@ export function AppController(props: AppControllerProps) {
   ) {
     return mountedRef.current
       && enterpriseHubGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && enterpriseSessionRef.current.status === 'signed_in'
       && enterpriseServiceRef.current === activeEnterpriseService;
   }
@@ -4205,7 +4534,7 @@ export function AppController(props: AppControllerProps) {
   ) {
     return mountedRef.current
       && enterpriseKnowledgeGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && enterpriseSessionRef.current.status === 'signed_in'
       && enterpriseServiceRef.current === activeEnterpriseService;
   }
@@ -4216,7 +4545,7 @@ export function AppController(props: AppControllerProps) {
   ) {
     return mountedRef.current
       && enterpriseSharedDriveGenerationRef.current === generation
-      && connectionStatusRef.current === 'connected'
+      && runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       && enterpriseSessionRef.current.status === 'signed_in'
       && enterpriseServiceRef.current === activeEnterpriseService;
   }
@@ -4362,9 +4691,9 @@ export function AppController(props: AppControllerProps) {
     }
   }
 
-  async function uploadEnterpriseSharedFile(spaceId: string, file: File) {
+  async function uploadEnterpriseSharedFile(spaceId: string | undefined, file: File) {
     const space = enterpriseSharedSpaces?.find(item => item.spaceId === spaceId);
-    if (space?.permissions.write !== true) return;
+    if (spaceId !== undefined && space?.permissions.write !== true) return;
     await mutateEnterpriseSharedFile({
       kind: 'upload',
       spaceId,
@@ -4391,7 +4720,7 @@ export function AppController(props: AppControllerProps) {
 
   async function mutateEnterpriseSharedFile(request: {
     kind: 'upload' | 'replace';
-    spaceId: string;
+    spaceId?: string;
     logicalPath: string;
     expectedRevision?: number;
     file: File;
@@ -4432,6 +4761,7 @@ export function AppController(props: AppControllerProps) {
             : `${response.logicalPath} 已替换为 revision ${response.revision}`
       );
       setEnterpriseSharedFilesReloadKey(current => current + 1);
+      setEnterpriseSharedSpacesReloadKey(current => current + 1);
     } catch (error) {
       if (!isCurrentEnterpriseSharedDriveRuntime(generation, activeEnterpriseService)) return;
       if (isEnterpriseUnauthorized(error)) {
@@ -4573,7 +4903,7 @@ export function AppController(props: AppControllerProps) {
     );
     if (
       activeEnterpriseService === null
-      || connectionStatusRef.current !== 'connected'
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       || enterpriseSessionRef.current.status !== 'signed_in'
       || knowledgeBase === undefined
       || knowledgeBase.permissions.read !== true
@@ -4668,7 +4998,7 @@ export function AppController(props: AppControllerProps) {
     const activeEnterpriseService = enterpriseServiceRef.current;
     if (
       activeEnterpriseService === null
-      || connectionStatusRef.current !== 'connected'
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       || enterpriseSessionRef.current.status !== 'signed_in'
     ) {
       throw new Error('企业Skills暂不可用');
@@ -4706,7 +5036,7 @@ export function AppController(props: AppControllerProps) {
     const activeEnterpriseService = enterpriseServiceRef.current;
     if (
       activeEnterpriseService === null
-      || connectionStatusRef.current !== 'connected'
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current)
       || enterpriseSessionRef.current.status !== 'signed_in'
       || enterpriseSkillMutationInFlightRef.current
     ) {
@@ -4716,6 +5046,7 @@ export function AppController(props: AppControllerProps) {
     const generation = enterpriseHubGenerationRef.current;
     const capabilityGeneration = skillMarketRuntimeGenerationRef.current;
     const activeCapabilityService = capabilityServiceRef.current;
+    const activeSkillMarketService = skillMarketServiceRef.current;
     enterpriseSkillMutationInFlightRef.current = true;
     setEnterpriseSkillOperation({ skillId, kind });
     try {
@@ -4737,6 +5068,16 @@ export function AppController(props: AppControllerProps) {
           }
         } catch {
           // The enterprise mutation succeeded; capability refresh can retry later.
+        }
+        if (activeSkillMarketService !== null) {
+          try {
+            const response = await activeSkillMarketService.listInstallRecords();
+            if (isCurrentSkillMarketRuntime(capabilityGeneration, activeCapabilityService, activeSkillMarketService)) {
+              setSkillMarketInstallRecords(response.records);
+            }
+          } catch {
+            // The enterprise mutation succeeded; market records can refresh later.
+          }
         }
       }
       if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) {
@@ -4907,23 +5248,57 @@ export function AppController(props: AppControllerProps) {
     });
   }
 
+  async function useCloudSkill(
+    skill: import('@clawee/protocol').EnterpriseCloudSkillResponse,
+    projectId: string
+  ) {
+    setCloudSkillUseError(undefined);
+    const agentName = cloudSkills?.agentName ?? '云端 Agent';
+    const promptTemplate = cloudSkills?.promptTemplate ?? '请让 {agent_name} 使用「{skill_name}」技能完成以下任务：';
+    const prompt = promptTemplate
+      .replaceAll('{agent_name}', agentName)
+      .replaceAll('{skill_name}', skill.name);
+    await useSkillByName({
+      skillName: skill.name,
+      title: skill.name,
+      projectId,
+      initialDraft: prompt,
+      onError: error => setCloudSkillUseError(
+        error === undefined ? undefined : { skillId: skill.skillId, error }
+      )
+    });
+  }
+
+  async function trialApprovalSkill(requestId: string, projectId: string): Promise<void> {
+    if (enterpriseApprovalService === null) throw new Error('本地服务暂不可用，无法试用 Skill');
+    const trial = await enterpriseApprovalService.trial(requestId, projectId);
+    const opened = await useSkillByName({
+      skillName: trial.skillName,
+      title: `${trial.skillName}（试用）`,
+      projectId,
+      onError: () => undefined
+    });
+    if (!opened) throw new Error('无法打开 Skill 试用会话');
+  }
+
   async function useSkillByName(input: {
     skillName: string;
     title: string;
     projectId: string;
+    initialDraft?: string;
     onError(error?: string): void;
-  }) {
-    if (skillMarketUseInFlightRef.current) return;
+  }): Promise<boolean> {
+    if (skillMarketUseInFlightRef.current) return false;
     input.onError(undefined);
     const activeThreadService = threadService;
     if (activeThreadService === null) {
       input.onError('本地服务暂不可用，无法创建对话');
-      return;
+      return false;
     }
     const project = findProjectById(projects, input.projectId);
     if (project === undefined) {
       input.onError('未找到所选项目');
-      return;
+      return false;
     }
     const config = defaultComposerRunConfig(
       project,
@@ -4936,7 +5311,7 @@ export function AppController(props: AppControllerProps) {
     try {
       const request = buildThreadRequest(input.title, project, config);
       const created = await activeThreadService.createThread(request);
-      if (!isCurrentThreadRuntime(generation, activeThreadService)) return;
+      if (!isCurrentThreadRuntime(generation, activeThreadService)) return false;
 
       setRuntimeThreads(previous => upsertThread(previous, created.thread));
       showTimelineForThread(created.thread.id, [], true);
@@ -4957,13 +5332,15 @@ export function AppController(props: AppControllerProps) {
         threadId: created.thread.id,
         request: {
           id: nextComposerDraftIdRef.current,
-          text: `$${input.skillName} `
+          text: input.initialDraft ?? `$${input.skillName} `
         }
       });
+      return true;
     } catch (error) {
       if (isCurrentThreadRuntime(generation, activeThreadService)) {
         input.onError(getRuntimeErrorMessage(error, '创建对话失败，请重试'));
       }
+      return false;
     } finally {
       if (isCurrentThreadRuntime(generation, activeThreadService)) {
         skillMarketUseInFlightRef.current = false;
@@ -4988,9 +5365,10 @@ export function AppController(props: AppControllerProps) {
     if (activeEnterpriseService === null) throw new Error('本地服务暂不可用');
     const generation = enterpriseHubGenerationRef.current;
     try {
-      await activeEnterpriseService.uploadSkill(input);
+      const result = await activeEnterpriseService.uploadSkill(input);
       if (!isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService)) throw new Error('企业会话已变化，请重新登录后检查上传结果');
       setEnterpriseSkillsReloadKey(key => key + 1);
+      return result;
     } catch (error) {
       if (isCurrentEnterpriseHubRuntime(generation, activeEnterpriseService) && isEnterpriseUnauthorized(error)) handleEnterpriseSessionExpired();
       if (error instanceof ApiClientError) {
@@ -5001,7 +5379,7 @@ export function AppController(props: AppControllerProps) {
           throw new Error('技能空间已不可访问或没有写权限，请刷新空间列表');
         }
         if (error.code === 'ENTERPRISE_SKILL_SOURCE_CONFLICT') {
-          throw new Error('技能名称或版本冲突，请检查已有技能的空间和版本');
+          throw new Error(error.message.trim() || '技能名称或版本冲突，请检查已有技能的空间和版本');
         }
       }
       throw new Error(formatEnterpriseSkillError(error, '企业 Skill 上传失败'));
@@ -5028,13 +5406,17 @@ export function AppController(props: AppControllerProps) {
       )
     ) return false;
 
-    const effectiveConfig = config
+    const requestedConfig = config
       ?? composerRunConfig
       ?? defaultComposerRunConfig(
         currentProject,
         defaultPermission,
         recentComposerModelConfig
       );
+    const model = requestedConfig.model === null
+      ? codexModels?.models.find(option => option.isDefault) ?? codexModels?.models[0]
+      : codexModels?.models.find(option => option.model === requestedConfig.model);
+    const effectiveConfig = { ...requestedConfig, reasoning: resolveModelReasoning(model, modelReasoningPreferences) };
     setComposerRunConfig(effectiveConfig);
     const pendingRunStartId = createTimelineId('pending_start');
     updatePendingRunStart({
@@ -5129,6 +5511,7 @@ export function AppController(props: AppControllerProps) {
               runStatus: run.status,
               submissionMode: run.submissionMode ?? submissionMode ?? 'enqueue',
               queuePosition: run.queuePosition,
+              queueReason: run.queueReason,
               wasQueued: run.status === 'queued' || item.wasQueued === true
             }
           : item
@@ -5335,7 +5718,8 @@ export function AppController(props: AppControllerProps) {
           ...item,
           runStatus: run.status,
           submissionMode: run.submissionMode,
-          queuePosition: run.queuePosition
+          queuePosition: run.queuePosition,
+          queueReason: run.queueReason
         };
       }));
     } catch {
@@ -5364,7 +5748,7 @@ export function AppController(props: AppControllerProps) {
         return;
       }
       setRuntimeThreads(previous => upsertThread(previous, threadResponse.thread));
-      setRuntimeSchedules(scheduleResponse.schedules);
+      setRuntimeSchedules(scheduleResponse.schedules.filter(schedule => schedule.action !== 'workflow_start'));
     } catch {
       // The draft stays usable when terminal-state reconciliation is unavailable.
     }
@@ -5401,8 +5785,9 @@ export function AppController(props: AppControllerProps) {
     const cachedTimelineItems = timelineItemsByThreadIdRef.current[threadId]
       ?? (timelineThreadIdRef.current === threadId ? timelineItemsRef.current : []);
     const replayDeduper = replayUntilSeq > fromSeq
-      ? createRunReplayDeduper(cachedTimelineItems)
+      ? createRunReplayDeduper(cachedTimelineItems, runId)
       : undefined;
+    let modelAvailabilityRefreshRequested = false;
     const controller = createRunEventController({
       subscribe: subscribeRunEvents
     });
@@ -5417,6 +5802,22 @@ export function AppController(props: AppControllerProps) {
       runId,
       fromSeq,
       fetchImpl: runtimeFetch,
+      async onStreamEnd(lastSeq) {
+        const service = runService;
+        if (service === null || threadService === null) return false;
+        const run = await service.getRun(runId);
+        if (!isCurrentSubscription()) return false;
+        dispatchRunRegistry({ type: 'upsert_run', run });
+        if (!isTerminalRunStatus(run.status)) return false;
+        if (run.lastEventSeq !== undefined && lastSeq < run.lastEventSeq) return false;
+        const history = await threadService.getThreadHistory(threadId);
+        if (!isCurrentSubscription()) return false;
+        getTimelineEventBatcher(threadId).flush();
+        updateTimelineItemsForThread(threadId, cached => mergeTimelineHistoryWithCache(mapHistoryItemsToTimelineItems(history.items), cached, 'latest'));
+        runEventControllersRef.current.delete(runId);
+        dispatchRunRegistry({ type: 'set_subscription_state', runId, state: 'idle' });
+        return true;
+      },
       onStateChange(state) {
         if (!isCurrentSubscription()) return;
         dispatchRunRegistry({
@@ -5427,6 +5828,14 @@ export function AppController(props: AppControllerProps) {
       },
       onEvent(event) {
         if (!isCurrentSubscription()) return;
+        if (!modelAvailabilityRefreshRequested && connectionService !== null
+          && event.seq > replayUntilSeq && isModelResponseEvent(event)
+          && (availabilityProbeStatusRef.current === 'failed' || availabilityProbeStatusRef.current === 'pending')) {
+          modelAvailabilityRefreshRequested = true;
+          void connectionService.check().then(nextState => {
+            if (mountedRef.current && connectionConfigRef.current === config) setConnectionState(nextState);
+          }).catch(() => undefined);
+        }
         dispatchRunRegistry({ type: 'record_event', event });
         if (event.type === 'status') {
           updateTimelineItemsForThread(threadId, items => items.map(item =>
@@ -5435,7 +5844,7 @@ export function AppController(props: AppControllerProps) {
                   ...item,
                   runStatus: event.payload.label === 'queued' ? 'queued' : 'running',
                   wasQueued: event.payload.label === 'queued' || item.wasQueued === true,
-                  ...(event.payload.label === 'queued' ? {} : { queuePosition: undefined })
+                  ...(event.payload.label === 'queued' ? {} : { queuePosition: undefined, queueReason: undefined })
                 }
               : item
           ));
@@ -5445,7 +5854,8 @@ export function AppController(props: AppControllerProps) {
               ? {
                   ...item,
                   runStatus: event.payload.status,
-                  queuePosition: undefined
+                  queuePosition: undefined,
+                  queueReason: undefined
                 }
               : item
           ));
@@ -5454,18 +5864,29 @@ export function AppController(props: AppControllerProps) {
         if (
           item !== null
           && (
-            event.seq > replayUntilSeq
+            event.type === 'assistant_message'
+            || event.type === 'reasoning_summary'
+            || event.seq > replayUntilSeq
             || replayDeduper === undefined
             || replayDeduper.shouldAppend(item)
           )
         ) {
           const timelineBatcher = getTimelineEventBatcher(threadId);
           timelineBatcher.push(item);
-          if (event.type === 'approval') {
+          if (event.type === 'approval' || event.type === 'done' || event.type === 'error') {
             timelineBatcher.flush();
           }
         }
         if (event.type === 'done') {
+          if (event.seq > replayUntilSeq
+            && (event.payload.status === 'succeeded' || event.payload.status === 'failed')) {
+            observedCompletionIdsRef.current.add(event.runId);
+            setUnreadTaskIds(current => {
+              const next = new Set(current).add(event.runId);
+              notificationService.setUnreadIds(next);
+              return next;
+            });
+          }
           runEventControllersRef.current.delete(runId);
           controller.stop();
           getTimelineEventBatcher(threadId).flush();
@@ -5476,6 +5897,9 @@ export function AppController(props: AppControllerProps) {
       },
       onError(error) {
         if (!isCurrentSubscription()) return;
+        getTimelineEventBatcher(threadId).flush();
+        runEventControllersRef.current.delete(runId);
+        controller.stop();
         dispatchRunRegistry({
           type: 'set_subscription_state',
           runId,
@@ -5483,7 +5907,7 @@ export function AppController(props: AppControllerProps) {
         });
         getTimelineEventBatcher(threadId).push({
           kind: 'diagnostic',
-          id: createTimelineId('sse_error'),
+          id: `sse_error:${runId}`,
           runId,
           severity: 'error',
           message: error.message,
@@ -5493,6 +5917,35 @@ export function AppController(props: AppControllerProps) {
         getTimelineEventBatcher(threadId).flush();
       }
     });
+  }
+
+  async function recoverRunSubscription(runId: string): Promise<void> {
+    const pending = runRecoveriesRef.current.get(runId);
+    if (pending !== undefined) return pending;
+    const config = connectionConfigRef.current;
+    const service = runService;
+    const historyService = threadServiceRef.current;
+    const threadId = runRegistryRef.current.runsById[runId]?.threadId;
+    if (config === null || service === null || historyService === null || threadId === undefined
+      || !runtimeStatusSupportsEnterpriseSession(connectionStatusRef.current) || runEventControllersRef.current.has(runId)) return;
+    const current = () => mountedRef.current && connectionConfigRef.current === config && threadServiceRef.current === historyService;
+    const request = (async () => {
+      try {
+        const [run, history] = await Promise.all([service.getRun(runId), historyService.getThreadHistory(threadId)]);
+        if (!current()) return;
+        getTimelineEventBatcher(threadId).flush();
+        dispatchRunRegistry({ type: 'upsert_run', run });
+        updateTimelineItemsForThread(threadId, cached => mergeTimelineHistoryWithCache(mapHistoryItemsToTimelineItems(history.items),
+          cached.filter(item => item.id !== `sse_error:${runId}`), 'latest'));
+        subscribeToRunEvents(runId, threadId, config);
+      } catch {
+        // 保留 disconnected，下一次用户操作或外部恢复信号再尝试。
+      }
+    })();
+    runRecoveriesRef.current.set(runId, request);
+    try { await request; } finally {
+      if (runRecoveriesRef.current.get(runId) === request) runRecoveriesRef.current.delete(runId);
+    }
   }
 
   async function loadRunDiagnostics(runId: string) {
@@ -5608,6 +6061,9 @@ export function AppController(props: AppControllerProps) {
   }
 
   async function runScheduleNow(schedule: ScheduleResponse) {
+    if (schedule.action === 'workflow_start' || !schedule.threadId) {
+      throw new Error('此计划不属于普通 Agent 任务，请在工作流页面管理');
+    }
     const alreadyOpen =
       state.activeView === 'conversation'
       && state.selectedThreadId === schedule.threadId;
@@ -5804,6 +6260,34 @@ export function AppController(props: AppControllerProps) {
     setNotificationSettings(notificationService.disable());
   }
 
+  const canOpenTimelineFile = useCallback((path: string) => isOpenableWorkspacePath(path, selectedThread), [selectedThread]);
+  const resolveTimelineFilePath = useCallback((path: string) => toWorkspaceRelativePath(path, selectedThread), [selectedThread]);
+
+  const documentActions = useMemo(() => {
+    const openFile = hostBridge.openFile;
+    const thread = selectedThread;
+    const service = workspaceFileService;
+    if (hostBridge.kind !== 'desktop' || !openFile || !thread || !service
+      || (hostBridge.platform !== 'darwin' && hostBridge.platform !== 'win32')) return undefined;
+    const nativePath = async (path: string) => {
+      const meta = await service.getMeta(thread.id, toWorkspaceRelativePath(path, thread))
+        .catch(() => { throw new Error('文件不存在或无法访问'); });
+      if (!meta.absolutePath) throw new Error('当前运行内核不支持原生文件操作，请更新后重试');
+      return meta.absolutePath;
+    };
+    return {
+      async open(path: string) {
+        const result = await openFile(await nativePath(path));
+        if (!result.ok) throw new Error(result.message);
+      },
+      async reveal(path: string) {
+        const result = await hostBridge.revealPath(await nativePath(path));
+        if (!result.ok) throw new Error(result.message);
+      },
+      revealLabel: hostBridge.platform === 'darwin' ? '在 Finder 中显示' : '在文件资源管理器中显示'
+    };
+  }, [hostBridge, selectedThread, workspaceFileService]);
+
   function openTimelineFile(path: string) {
     const workspacePath = toWorkspaceRelativePath(path, selectedThread);
     dispatch({ type: 'select_workspace_file', path: workspacePath });
@@ -5917,14 +6401,17 @@ export function AppController(props: AppControllerProps) {
     && runsLoadingThreadId === state.selectedThreadId;
   const conversationNeedsProject =
     selectedThread === undefined || selectedThread.purpose === 'conversation';
+  const selectedWorkflowExecution = workflowExecution?.threadId === state.selectedThreadId ? workflowExecution : undefined;
+  const workflowSubmissionLocked = selectedWorkflowExecution && (selectedWorkflowExecution.data.delivery?.locked || ['submitting', 'conflict'].includes(selectedWorkflowExecution.data.status)) && selectedWorkflowExecution.data.status !== 'completed';
   const composerDisabled = (
     conversationNeedsProject && currentProject === undefined
   )
     || selectedPendingRunStart !== undefined
     || selectedRunsLoading
+    || Boolean(workflowSubmissionLocked)
     || connectionState.status !== 'connected';
-  const composerDisabledReason = connectionState.status !== 'connected'
-    ? '正在连接本地运行内核'
+  const composerDisabledReason = workflowSubmissionLocked ? '节点结果已锁定，请先确认提交状态' : connectionState.status !== 'connected'
+    ? connectionState.status === 'configuration_required' ? '模型服务未就绪，请前往模型设置' : '正在连接本地运行内核'
     : projectLoadError !== undefined
       ? projectLoadError
       : conversationNeedsProject && currentProject === undefined
@@ -5976,11 +6463,18 @@ export function AppController(props: AppControllerProps) {
   const showHistoryLoadingOverlay =
     historyLoadingOverlayThreadId !== undefined
     && historyLoadingOverlayThreadId === state.selectedThreadId;
-  function handleComposerWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (canScrollVertically(event.target, event.currentTarget, event.deltaY)) return;
-    if (timelineRef.current?.scrollBy(event.deltaY) !== true) return;
-    event.preventDefault();
-  }
+  const setComposerWheelRef = useCallback((node: HTMLDivElement | null) => {
+    composerWheelCleanupRef.current?.();
+    composerWheelCleanupRef.current = undefined;
+    if (node === null) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (canScrollVertically(event.target, node, event.deltaY)) return;
+      if (timelineRef.current?.scrollBy(event.deltaY) !== true) return;
+      event.preventDefault();
+    };
+    node.addEventListener('wheel', handleWheel, { passive: false });
+    composerWheelCleanupRef.current = () => node.removeEventListener('wheel', handleWheel);
+  }, []);
   const conversationEmpty = timelineItems.length === 0;
   const conversationHistoryPending =
     state.selectedThreadId !== undefined
@@ -5989,10 +6483,20 @@ export function AppController(props: AppControllerProps) {
   const activeWorkflowDraft = workflowDraft !== undefined
     && workflowDraft.threadId === state.selectedThreadId;
   const conversationFilePaths = useMemo(() => (
-    collectConversationFilePaths(timelineItems)
+    [...collectConversationFilePaths(timelineItems), ...Object.values(runRegistry.runsById).flatMap(run => run && run.threadId === selectedThread?.id ? run.sharedDriveState?.downloads.flatMap(item => item.status === 'downloaded' && item.relativePath ? [item.relativePath] : []) ?? [] : [])]
+      .filter(canOpenTimelineFile)
       .map(path => toWorkspaceRelativePath(path, selectedThread))
       .filter(path => path.length > 0)
-  ), [selectedThread, timelineItems]);
+  ), [selectedThread, timelineItems, canOpenTimelineFile, runRegistry.runsById]);
+  const readableFilePaths = useReadableFilePaths({
+    threadId: selectedThread?.id,
+    paths: conversationFilePaths,
+    service: workspaceFileService,
+    refreshKey: JSON.stringify([currentRunBusy, timelineItems.filter(item => item.kind === 'done').map(item => item.id)])
+  });
+  const canReadTimelineFile = useCallback((path: string) => (
+    canOpenTimelineFile(path) && readableFilePaths.has(toWorkspaceRelativePath(path, selectedThread))
+  ), [canOpenTimelineFile, readableFilePaths, selectedThread]);
   const showConversationEmptyState = conversationConfirmedEmpty
     && (
       selectedThread === undefined
@@ -6006,7 +6510,34 @@ export function AppController(props: AppControllerProps) {
     ?? selectedScheduleTask?.name
     ?? selectedThread?.title
     ?? '新对话';
-  const conversationTaskToolbar =
+  const workflowHistoryContext = timelineItems.find(item => item.kind === 'workflow_start');
+  const selectedWorkflowContext = workflowTaskContext?.threadId === state.selectedThreadId ? workflowTaskContext
+    : workflowHistoryContext?.kind === 'workflow_start' ? workflowHistoryContext : undefined;
+  const workflowNavigationOwner = JSON.stringify([connectionConfig?.baseUrl, workflowGatewayOrigin, enterpriseSession.agentId, enterpriseSession.account?.subjectId]);
+  const workflowModelConfig = defaultComposerRunConfig(currentProject, defaultPermission, recentComposerModelConfig);
+  const conversationTaskToolbar = selectedThread?.purpose === 'skill_review' ? (
+    <section className="workflow-conversation-context" aria-label="AI 审核执行记录">
+      <div><strong>AI 审核 · 只读</strong><span>{selectedThread.skillReview?.skillName} · {selectedThread.skillReview?.version ?? selectedThread.skillReview?.versionId}</span></div>
+      <small>每次审核独立执行。运行完成后，请在审批详情确认 AI 结论；重试也从审批页面发起。</small>
+      {selectedThread.skillReview?.approvalURL ? <button className="inline-action" type="button" onClick={() => {
+        void hostBridge.openExternal(selectedThread.skillReview!.approvalURL!);
+      }}>查看审批详情</button> : null}
+    </section>
+  ) : selectedWorkflowContext ? (
+    <section className="workflow-conversation-context workflow-conversation-context--compact" aria-label="所属流程任务">
+      <button className="inline-action" type="button" onClick={() => {
+        const previous = workflowNavigationRef.current?.owner === workflowNavigationOwner ? workflowNavigationRef.current.state : undefined;
+        workflowNavigationRef.current = { owner: workflowNavigationOwner, state: {
+          tab: previous?.tab === 'tasks' || previous?.tab === 'instances' ? previous.tab : 'instances',
+          status: previous?.status ?? 'all', taskFilter: previous?.taskFilter ?? 'all',
+          cursors: previous?.cursors ?? { templates: '', instances: '', tasks: '' },
+          history: previous?.history ?? { templates: [], instances: [], tasks: [] },
+          instanceId: selectedWorkflowContext.instanceId
+        } };
+        openPrimaryView('workflow');
+      }}>返回流程任务</button>
+    </section>
+  ) :
     selectedScheduleTask?.bindingStatus === 'ready'
     && selectedSchedule !== undefined
     && selectedSidebarTask !== undefined
@@ -6033,7 +6564,7 @@ export function AppController(props: AppControllerProps) {
       title={conversationTitle}
       feedback={selectedThread ? <FeedbackButton client={runtimeClient} threadId={selectedThread.id} /> : undefined}
       taskToolbar={
-        useIntegratedConversationTitleBar ? undefined : conversationTaskToolbar
+        useIntegratedConversationTitleBar || selectedWorkflowContext ? undefined : conversationTaskToolbar
       }
       fileWorkspaceOpen={fileWorkspaceOpen}
       onOpenLocation={() => {
@@ -6057,17 +6588,18 @@ export function AppController(props: AppControllerProps) {
           ? 'has-header'
           : undefined,
         useIntegratedConversationTitleBar ? 'has-integrated-header' : undefined,
-        useIntegratedConversationTitleBar && conversationTaskToolbar !== undefined
+        useIntegratedConversationTitleBar && selectedWorkflowContext === undefined && conversationTaskToolbar !== undefined
           ? 'has-task-strip'
           : undefined
       ].filter(Boolean).join(' ')}
     >
       {useIntegratedConversationTitleBar ? null : conversationHeader}
-      {useIntegratedConversationTitleBar && conversationTaskToolbar !== undefined ? (
+      {useIntegratedConversationTitleBar && selectedWorkflowContext === undefined && conversationTaskToolbar !== undefined ? (
         <div className="conversation-task-strip conversation-task-strip--standalone">
           {conversationTaskToolbar}
         </div>
       ) : null}
+      {selectedWorkflowContext ? conversationTaskToolbar : null}
       <div className="conversation-body">
         {treeLoadError ? <p className="inline-error">{treeLoadError}</p> : null}
         {projectLoadError ? <p className="inline-error">{projectLoadError}</p> : null}
@@ -6081,8 +6613,8 @@ export function AppController(props: AppControllerProps) {
         {showConversationEmptyState ? (
           <ConversationEmptyState
             nickname={
-              enterpriseSession.status === 'signed_in'
-                ? enterpriseSession.account?.name
+              enterpriseSession.status === 'signed_in' && enterpriseSession.account !== undefined
+                ? getEnterpriseAccountDisplayName(enterpriseSession.account.name)
                 : undefined
             }
           />
@@ -6091,6 +6623,22 @@ export function AppController(props: AppControllerProps) {
             ref={timelineRef}
             key={state.selectedThreadId ?? 'draft'}
             items={timelineItems}
+            conversationKey={state.selectedThreadId}
+            outputSyncing={(runRegistry.runIdsByThreadId[state.selectedThreadId ?? ''] ?? []).some(runId => {
+              const run = runRegistry.runsById[runId];
+              return run !== undefined && isTerminalRunStatus(run.status) && run.lastEventSeq !== undefined
+                && (runRegistry.lastSeqByRunId[runId] ?? 0) < run.lastEventSeq
+                && runRegistry.subscriptionStateByRunId[runId] !== 'disconnected';
+            })}
+            runs={Object.values(runRegistry.runsById).filter((run): run is RunResponse => run !== undefined)}
+            disconnectedRunIds={(runRegistry.runIdsByThreadId[state.selectedThreadId ?? ''] ?? []).filter(runId => runRegistry.subscriptionStateByRunId[runId] === 'disconnected')}
+            onRetryConnection={runId => void recoverRunSubscription(runId)}
+            onRetryDriveDownload={async runId => {
+              if (!runService) throw new Error('本地运行内核未连接');
+              await runService.retryDriveDownload(runId);
+              const run = await runService.getRun(runId);
+              dispatchRunRegistry({ type: 'upsert_run', run });
+            }}
             hasMore={threadHistory.hasMore}
             loadingOlder={threadHistory.loadingOlder}
             targetItemId={
@@ -6113,12 +6661,47 @@ export function AppController(props: AppControllerProps) {
             }
             onLoadOlder={threadHistory.loadOlder}
             onOpenFile={openTimelineFile}
+            documentActions={documentActions}
+            canOpenFile={canReadTimelineFile}
+            resolveFilePath={resolveTimelineFilePath}
             onPreviewImage={selectedThread && workspaceFileService ? previewTimelineImage : undefined}
-            onEditUserMessage={editUserMessage}
+            onEditUserMessage={selectedThread?.purpose === 'skill_review' ? undefined : editUserMessage}
+            onQuote={composerDisabled || selectedThread?.purpose === 'skill_review' || activeWorkflowDraft && workflowDraft?.firstNode
+              ? undefined : quoteAssistantMessage}
             resolvingApprovalIds={resolvingApprovalIds}
             approvalErrors={approvalErrors}
             onApproveApproval={(id) => void resolveApproval(id, 'approve')}
             onRejectApproval={(id) => void resolveApproval(id, 'reject')}
+            workflowDelivery={selectedWorkflowExecution?.data.delivery && selectedWorkflowExecution.data.status !== 'completed' ? {
+              taskId: selectedWorkflowExecution.taskId,
+              content: <WorkflowDeliveryPanel
+                key={JSON.stringify([state.selectedThreadId, enterpriseSession.account?.subjectId, enterpriseSession.agentId, workflowGatewayOrigin])}
+                execution={selectedWorkflowExecution.data}
+                online={runtimeSupportsEnterpriseSession(connectionState)}
+                running={currentRunBusy}
+                onSave={async update => {
+                  if (!workflowService) throw new Error('工作流服务不可用');
+                  workflowDeliveryRequestRef.current += 1;
+                  const result = await workflowService.saveDraft(selectedWorkflowExecution.taskId, update);
+                  applyWorkflowExecution(selectedWorkflowExecution.threadId, selectedWorkflowExecution.taskId, result);
+                }}
+                onSubmit={async version => {
+                  if (!workflowService) throw new Error('工作流服务不可用');
+                  workflowDeliveryRequestRef.current += 1;
+                  applyWorkflowExecution(selectedWorkflowExecution.threadId, selectedWorkflowExecution.taskId, { ...selectedWorkflowExecution.data, status: 'submitting' });
+                  try {
+                    const result = await workflowService.submit(selectedWorkflowExecution.taskId, version);
+                    applyWorkflowExecution(selectedWorkflowExecution.threadId, selectedWorkflowExecution.taskId, result);
+                  } catch (error) {
+                    try {
+                      const result = await workflowService.execution(selectedWorkflowExecution.taskId);
+                      applyWorkflowExecution(selectedWorkflowExecution.threadId, selectedWorkflowExecution.taskId, result);
+                    } catch {}
+                    throw error;
+                  }
+                }}
+              />
+            } : undefined}
           />
         )}
         {showHistoryLoadingOverlay ? (
@@ -6127,7 +6710,7 @@ export function AppController(props: AppControllerProps) {
           </div>
         ) : null}
       </div>
-      <div className="composer-wrap" onWheel={handleComposerWheel}>
+      {selectedThread?.purpose === 'skill_review' ? null : <div className="composer-wrap" ref={setComposerWheelRef}>
         {pendingComposerApproval?.kind === 'approval' ? (
           <div
             className="composer-approval-overlay"
@@ -6168,7 +6751,7 @@ export function AppController(props: AppControllerProps) {
           permission={effectiveComposerConfig.permission}
           profile={effectiveComposerConfig.profile}
           model={effectiveComposerConfig.model}
-          reasoning={effectiveComposerConfig.reasoning}
+          modelReasoningPreferences={modelReasoningPreferences}
           models={codexModels?.models}
           modelsLoading={codexModelsLoading}
           modelsError={codexModelsLoadError}
@@ -6235,7 +6818,7 @@ export function AppController(props: AppControllerProps) {
           onCancel={() => void cancelActiveRun()}
           onCancelQueuedRun={(runId) => void cancelQueuedRun(runId)}
           onSteerQueuedRun={(runId) => void steerQueuedRun(runId)}
-          onUploadAttachment={activeWorkflowDraft ? undefined : async file => {
+          onUploadAttachment={async file => {
             if (attachmentService === null) throw new Error('附件服务暂不可用');
             const response = await attachmentService.upload({
               file,
@@ -6243,7 +6826,8 @@ export function AppController(props: AppControllerProps) {
             });
             return response.attachment;
           }}
-          onDeleteAttachment={activeWorkflowDraft ? undefined : async attachment => {
+          onSelectContextDirectory={activeWorkflowDraft ? undefined : hostBridge.selectContextDirectory}
+          onDeleteAttachment={async attachment => {
             if (attachmentService === null || attachment.draftId === undefined) return;
             await attachmentService.delete({
               id: attachment.id,
@@ -6253,17 +6837,9 @@ export function AppController(props: AppControllerProps) {
           onSubmit={submitPrompt}
         />
         {conversationConfirmedEmpty ? (
-          <ConversationStarterTags
-            busySkillName={starterSkillBusyName}
-            error={starterSkillError}
-            onOpenDashboard={() => {
-              setStarterSkillError(undefined);
-              openPrimaryView('dashboard');
-            }}
-            onLoadSkill={(skillName) => void loadStarterSkill(skillName)}
-          />
+          <ConversationStarterTags onOpenView={openPrimaryView} />
         ) : null}
-      </div>
+      </div>}
     </section>
   );
   const conversationWorkspace = fileWorkspaceOpen ? (
@@ -6289,6 +6865,7 @@ export function AppController(props: AppControllerProps) {
         selectedPath={state.workspaceTargetPath}
         conversationPaths={conversationFilePaths}
         workspaceFileService={workspaceFileService}
+        canOpenFile={hostBridge.kind === 'desktop'}
         onClose={closeFileWorkspace}
         onSelectPath={selectWorkspaceFile}
         onOpenExternal={(url) => void hostBridge.openExternal(url)}
@@ -6299,7 +6876,7 @@ export function AppController(props: AppControllerProps) {
     <CapabilitiesPage {...props.capabilitiesView} />
   ) : state.activeView === 'search' ? (
     <SearchPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       service={searchService}
       projects={projects}
       recentThreads={visibleRuntimeThreads.filter(thread => (
@@ -6309,7 +6886,7 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'schedules' ? (
     <SchedulesPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       service={scheduleService}
       projects={projects}
       currentProjectId={state.currentProjectId ?? ''}
@@ -6346,11 +6923,39 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'dashboard' ? (
     <DashboardPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       enterpriseSignedIn={enterpriseSession.status === 'signed_in'}
       service={enterpriseService}
       onSessionExpired={handleEnterpriseSessionExpired}
+      onModuleOpenChange={setWorkbenchModuleOpen}
+      activityAllowed={enterpriseActivity.capability === 'allowed'}
+      onOpenActivity={() => openPrimaryView('activity')}
+      contributionsAllowed={contributionAccess.allowed}
+      onOpenContributions={() => openPrimaryView('skill-contributions')}
+      conversationRuntime={{
+        client: runtimeClient, connection: connectionConfig, connected: connectionState.status === 'connected',
+        project: currentProject, subjectId: enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined,
+        config: defaultComposerRunConfig(currentProject, defaultPermission, recentComposerModelConfig),
+        models: codexModels?.models, modelsLoading: codexModelsLoading, modelsError: codexModelsLoadError,
+        modelReasoningPreferences,
+        onOpenExternal: url => { void hostBridge.openExternal(url); },
+        onUseDefaultProject: async () => {
+          if (projectService === null) throw new Error('本地运行内核未连接');
+          const response = await projectService.ensureDefaultProject();
+          setProjects(previous => upsertProject(previous, response.project));
+          dispatch({ type: 'set_current_project', projectId: response.project.id });
+        },
+        fetchImpl: runtimeFetch, subscribeRunEvents
+      }}
+      onConversationCreated={thread => setRuntimeThreads(previous => upsertThread(previous, thread))}
     />
+  ) : state.activeView === 'skill-contributions' ? (
+    contributionAccess.allowed && enterpriseService && runtimeClient && connectionConfig ? <SkillContributionsPage
+      key={contributionIdentityKey}
+      service={enterpriseService} client={runtimeClient} connection={connectionConfig} subscribe={subscribeRunEvents}
+      modelReady={connectionState.status === 'connected'} onDenied={contributionAccess.revoke}
+      onBack={() => openPrimaryView('dashboard')}
+    /> : <section className="contribution-gate" role="status"><button type="button" onClick={() => openPrimaryView('dashboard')}><ArrowLeft size={16} aria-hidden="true" />返回工作台</button><p>{contributionAccess.checking ? '正在验证 Skill 贡献授权' : contributionAccess.error ?? '无权查看 Skill 贡献'}</p></section>
   ) : state.activeView === 'activity' ? (
     enterpriseActivity.capability === 'allowed' ? (
       props.route.view === 'activity-recharge-records' ? (
@@ -6375,10 +6980,30 @@ export function AppController(props: AppControllerProps) {
         />
       ) : (
         <ActivityPage
+          conversationRuntime={{
+            client: runtimeClient, connection: connectionConfig, connected: connectionState.status === 'connected',
+            project: currentProject, subjectId: enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined,
+            config: defaultComposerRunConfig(currentProject, defaultPermission, recentComposerModelConfig),
+            models: codexModels?.models, modelsLoading: codexModelsLoading, modelsError: codexModelsLoadError,
+            modelReasoningPreferences,
+            onOpenExternal: url => { void hostBridge.openExternal(url); },
+            onUseDefaultProject: async () => {
+              if (projectService === null) throw new Error('本地运行内核未连接');
+              const response = await projectService.ensureDefaultProject();
+              setProjects(previous => upsertProject(previous, response.project));
+              dispatch({ type: 'set_current_project', projectId: response.project.id });
+            },
+            fetchImpl: runtimeFetch, subscribeRunEvents
+          }}
+          onConversationCreated={thread => setRuntimeThreads(previous => upsertThread(previous, thread))}
           route={props.route.view === 'activity' || props.route.view === 'activity-agent'
             ? props.route
             : { view: 'activity', range: '7d' }}
           statistics={enterpriseActivity.statistics}
+          runtime={enterpriseActivity.runtime}
+          runtimeLoading={enterpriseActivity.runtimeLoading}
+          runtimeError={enterpriseActivity.runtimeError}
+          onRetryRuntime={enterpriseActivity.retryRuntime}
           statisticsLoading={enterpriseActivity.statisticsLoading}
           statisticsError={enterpriseActivity.statisticsError}
           detail={enterpriseActivity.detail}
@@ -6396,13 +7021,14 @@ export function AppController(props: AppControllerProps) {
           )}
           onRetryStatistics={enterpriseActivity.retryStatistics}
           onRetryDetail={enterpriseActivity.retryDetail}
+          onBack={() => openPrimaryView('dashboard')}
           onNavigate={navigateToRoute}
         />
       )
     ) : <PageLoading />
   ) : state.activeView === 'knowledge' ? (
     <KnowledgePage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       session={enterpriseSession}
       knowledgeBases={enterpriseKnowledgeBases}
       knowledgeBasesLoading={enterpriseKnowledgeBasesLoading}
@@ -6423,18 +7049,53 @@ export function AppController(props: AppControllerProps) {
       onSelectKnowledgeBase={selectEnterpriseKnowledgeBase}
       onUpload={file => void uploadEnterpriseKnowledgeDocument(file)}
     />
+  ) : state.activeView === 'enterprise-approvals' ? (
+    <EnterpriseApprovalsPage
+      key={`${workflowNavigationOwner}:${enterpriseSession.status}`}
+      service={enterpriseApprovalService}
+      signedIn={enterpriseSession.status === 'signed_in'}
+      online={runtimeSupportsEnterpriseSession(connectionState) && workflowIdentityStatus === 'ready'}
+      identityKey={workflowNavigationOwner}
+      navigationState={approvalNavigationRef.current?.owner === workflowNavigationOwner ? approvalNavigationRef.current.state : undefined}
+      onNavigationChange={navigation => { approvalNavigationRef.current = { owner: workflowNavigationOwner, state: navigation }; }}
+      projects={projects}
+      currentProjectId={state.currentProjectId}
+      onTrial={trialApprovalSkill}
+      onOpenAccount={() => {
+        enterpriseReturnRouteRef.current = { view: 'enterprise-approvals' };
+        openPrimaryView('account');
+      }}
+    />
   ) : state.activeView === 'workflow' ? (
     <WorkflowPage
       key={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : 'signed-out'}
       service={workflowService}
+      scheduleService={workflowGatewayOrigin === undefined ? null : scheduleService}
+      identityKey={JSON.stringify([connectionConfig?.baseUrl, workflowGatewayOrigin, enterpriseSession.agentId])}
+      identityStatus={workflowIdentityStatus}
       signedIn={enterpriseSession.status === 'signed_in'}
-      online={connectionState.status === 'connected'}
+      online={runtimeSupportsEnterpriseSession(connectionState)}
+      modelReady={connectionState.status === 'connected'}
+      onOpenModelSettings={connectionState.status === 'configuration_required' ? () => {
+        setSettingsInitialTab('model');
+        openPrimaryView('settings');
+      } : undefined}
       userId={enterpriseSession.status === 'signed_in' ? enterpriseSession.account?.subjectId : undefined}
       projectId={currentProject?.id}
+      projects={projects}
+      modelLabel={workflowModelConfig.model ?? '默认模型'}
+      onSelectProject={projectId => {
+        setComposerRunConfig(null);
+        dispatch({ type: 'set_current_project', projectId });
+      }}
+      navigationState={workflowNavigationRef.current?.owner === workflowNavigationOwner ? workflowNavigationRef.current.state : undefined}
+      onNavigationChange={navigation => { workflowNavigationRef.current = { owner: workflowNavigationOwner, state: navigation }; }}
       onTaskPrepared={(taskId, draft) => {
-        setWorkflowDraft({ taskId, threadId: draft.threadId, instruction: draft.instruction, input: draft.input, firstNode: draft.firstNode });
+        setWorkflowTaskContext(draft.context ? { ...draft.context, threadId: draft.threadId } : undefined);
+        setWorkflowDraft(draft.resuming ? undefined : { taskId, threadId: draft.threadId, instruction: draft.instruction, input: draft.input, firstNode: draft.firstNode });
+        setWorkflowExecution({ taskId, threadId: draft.threadId, data: { status: 'idle', threadId: draft.threadId } });
         nextComposerDraftIdRef.current += 1;
-        setPendingComposerDraft({ threadId: draft.threadId, request: { id: nextComposerDraftIdRef.current, text: draft.customInput } });
+        if (!draft.resuming) setPendingComposerDraft({ threadId: draft.threadId, request: { id: nextComposerDraftIdRef.current, text: draft.customInput } });
         selectConversation(draft.threadId);
         if (threadService === null) return;
         void threadService.getThread(draft.threadId).then(response => {
@@ -6445,7 +7106,7 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'drive' ? (
     <SharedDrivePage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       session={enterpriseSession}
       spaces={enterpriseSharedSpaces}
       spacesLoading={enterpriseSharedSpacesLoading}
@@ -6481,7 +7142,7 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'connections' ? (
     <ConnectionsPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       session={enterpriseSession}
       service={enterpriseService}
       mcpService={mcpService}
@@ -6500,8 +7161,13 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'settings' ? (
     <SettingsPage
+      desktopUpdates={desktopUpdates}
+      installationDirectory={hostBridge.installationDirectory}
+      agentPromptPolicyStatus={agentPromptPolicyStatus}
       runtimeStatus={runtimeStatus}
       agentId={enterpriseSession.agentId}
+      onReadGateway={enterpriseService === null ? undefined : readEnterpriseGateway}
+      onSaveGateway={enterpriseService === null ? undefined : saveEnterpriseGateway}
       defaultPermission={defaultPermission}
       defaultPermissionError={defaultPermissionSyncError}
       onDefaultPermissionChange={handleDefaultPermissionChange}
@@ -6510,6 +7176,8 @@ export function AppController(props: AppControllerProps) {
       accentColor={accentColor}
       onAccentColorChange={handleAccentColorChange}
       customAccentColor={customAccentColor}
+      brandAccentColor={brandAccentColor}
+      initialTab={settingsInitialTab}
       onCustomAccentColorChange={handleCustomAccentColorChange}
       desktopCloseBehavior={desktopCloseBehavior}
       onDesktopCloseBehaviorChange={behavior => {
@@ -6534,14 +7202,39 @@ export function AppController(props: AppControllerProps) {
           ? modelAccessState.configuration
           : null
       }
+      modelServiceStatus={modelAccessState.status}
+      modelServiceMode={'mode' in modelAccessState ? modelAccessState.mode : undefined}
+      models={codexModels?.models}
+      modelsLoading={codexModelsLoading}
+      modelsError={codexModelsLoadError}
+      modelReasoningPreferences={modelReasoningPreferences}
+      onModelReasoningChange={(model, effort) => {
+        const preferences = { ...modelReasoningPreferences, [model]: effort };
+        writeModelReasoningPreferences(preferences);
+        setModelReasoningPreferences(preferences);
+      }}
+      onModelServiceReadApiKey={modelServiceConfigurationService?.readApiKey}
+      onModelServiceCheck={modelServiceConfigurationService?.check}
+      onModelServiceCheckRuntime={modelServiceConfigurationService === null
+        ? undefined
+        : async () => {
+            const result = await modelServiceConfigurationService.checkRuntime();
+            if (connectionService !== null) {
+              void connectionService.check().then(nextState => {
+                if (mountedRef.current) setConnectionState(nextState);
+              }).catch(() => undefined);
+            }
+            return result;
+          }}
       onModelServiceConfigure={
         modelServiceConfigurationService === null
           ? undefined
           : async (input: ConfigureModelServiceRequest) => {
               const response = await modelServiceConfigurationService.configure(input);
+              if (connectionService !== null) setConnectionState(await connectionService.check());
               setModelAccessState(previous => ({
                 status: 'ready',
-                mode: previous.status === 'ready' ? previous.mode : 'platform_managed',
+                mode: previous.status === 'ready' ? previous.mode : 'enterprise_managed',
                 configuration: response.configuration
               }));
             }
@@ -6553,11 +7246,12 @@ export function AppController(props: AppControllerProps) {
     />
   ) : state.activeView === 'account' ? (
     <EnterpriseAccountPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       sessionInitialized={enterpriseSessionInitialized}
       session={enterpriseSession}
       checkingTimedOut={enterpriseCheckingTimedOut}
       onLogin={loginEnterprise}
+      onReadLogin={readEnterpriseLogin}
       onReadGateway={readEnterpriseGateway}
       onSaveGateway={saveEnterpriseGateway}
       onRegister={registerEnterprise}
@@ -6570,7 +7264,7 @@ export function AppController(props: AppControllerProps) {
   ) : state.activeView === 'plugins' ? (
     <>
     <PluginsPage
-      connected={connectionState.status === 'connected'}
+      connected={runtimeSupportsEnterpriseSession(connectionState)}
       source={activePluginSource}
       skills={codexSkills}
       installRecords={skillMarketInstallRecords}
@@ -6587,13 +7281,16 @@ export function AppController(props: AppControllerProps) {
         navigateToRoute(
           source === 'public'
             ? { view: 'plugins', source: 'public' }
+            : source === 'cloud'
+              ? { view: 'plugins', source: 'cloud' }
             : { view: 'plugins' }
         );
       }}
       enterprise={{
-        connected: connectionState.status === 'connected',
+        connected: runtimeSupportsEnterpriseSession(connectionState),
         session: enterpriseSession,
         skills: enterpriseSkills,
+        skillUsage: enterpriseSkillUsage,
         loading: enterpriseSkillsLoading,
         loadError: enterpriseSkillsLoadError,
         operation: enterpriseSkillOperation,
@@ -6615,12 +7312,21 @@ export function AppController(props: AppControllerProps) {
         onUpdate: skillId => void updateEnterpriseSkill(skillId),
         onUse: (skill, projectId) => void useEnterpriseSkill(skill, projectId),
         onCreateSkill: () => void useMarketSkill('skill-creator', currentProject?.id ?? ''),
-        onUploadSkill: connectionState.status === 'connected' && enterpriseSession.status === 'signed_in'
+        onUploadSkill: runtimeSupportsEnterpriseSession(connectionState) && enterpriseSession.status === 'signed_in'
           ? () => { setEnterpriseSkillUploadTarget(undefined); setEnterpriseSkillUploadOpen(true); }
           : undefined,
-        onReplaceSkill: connectionState.status === 'connected' && enterpriseSession.status === 'signed_in'
+        onReplaceSkill: runtimeSupportsEnterpriseSession(connectionState) && enterpriseSession.status === 'signed_in'
           ? skill => { setEnterpriseSkillUploadTarget(skill); setEnterpriseSkillUploadOpen(true); }
           : undefined
+      }}
+      cloud={{
+        data: cloudSkills,
+        loading: cloudSkillsLoading,
+        loadError: cloudSkillsLoadError,
+        projects,
+        currentProjectId: currentProject?.id ?? '',
+        useError: cloudSkillUseError,
+        onUse: (skill, projectId) => void useCloudSkill(skill, projectId)
       }}
     />
     {enterpriseSkillUploadOpen && activePluginSource === 'enterprise' ? (
@@ -6641,6 +7347,29 @@ export function AppController(props: AppControllerProps) {
   if (
     props.requireEnterpriseLogin !== false
     && enterpriseSession.status !== 'signed_in'
+    && (!runtimeSupportsEnterpriseSession(connectionState) || !enterpriseSessionInitialized)
+  ) {
+    return (
+      <div className="app-drop-shell enterprise-access-gate" data-integrated-title-bar={integratedTitleBar?.integratedTitleBar === true ? 'true' : undefined} style={appShellStyle}>
+        <DesktopUpdateNotice updates={desktopUpdates} />
+        {integratedTitleBar?.integratedTitleBar === true ? <div className="desktop-titlebar-drag-region" aria-hidden="true" /> : null}
+        <main className="enterprise-account-page">
+          <div className="enterprise-auth-card">
+            <h1>{runtimeSupportsEnterpriseSession(connectionState) ? '正在检查登录状态' : '正在恢复本地服务'}</h1>
+            <RuntimeConnectionNotice
+              hostBridge={hostBridge}
+              checkingSession={runtimeSupportsEnterpriseSession(connectionState)}
+              onRetry={retryRuntimeConnection}
+            />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (
+    props.requireEnterpriseLogin !== false
+    && enterpriseSession.status !== 'signed_in'
   ) {
     return (
       <div
@@ -6650,6 +7379,7 @@ export function AppController(props: AppControllerProps) {
         }
         style={appShellStyle}
       >
+        <DesktopUpdateNotice updates={desktopUpdates} />
         {integratedTitleBar?.integratedTitleBar === true ? (
           <div className="desktop-titlebar-drag-region" aria-hidden="true" />
         ) : null}
@@ -6666,6 +7396,7 @@ export function AppController(props: AppControllerProps) {
             session={enterpriseSession}
             checkingTimedOut={enterpriseCheckingTimedOut}
             onLogin={loginEnterprise}
+            onReadLogin={readEnterpriseLogin}
             onReadGateway={readEnterpriseGateway}
             onSaveGateway={saveEnterpriseGateway}
             onRegister={registerEnterprise}
@@ -6678,61 +7409,6 @@ export function AppController(props: AppControllerProps) {
         </Suspense>
       </div>
     );
-  }
-
-  if (connectionState.status === 'configuration_required') {
-    const modelAccess = connectionState.configuration;
-    if (modelAccess.status === 'configuration_required') {
-      return (
-        <ModelServiceSetupPage
-          status={{
-            status: 'configuration_required',
-            configuration: null,
-            apiKeyConfigured: false
-          }}
-          integratedTitleBar={integratedTitleBar}
-          onConfigure={async input => {
-            if (
-              modelServiceConfigurationService === null
-              || connectionService === null
-            ) {
-              throw new Error('本地服务尚未连接');
-            }
-            await modelServiceConfigurationService.configure(input);
-            const nextState = await connectionService.check();
-            setConnectionState(nextState);
-            if (nextState.status !== 'connected') {
-              throw new Error('模型服务已保存，但 Codex Runtime 尚未就绪');
-            }
-          }}
-        />
-      );
-    }
-    if (modelAccess.status === 'resolving' || modelAccess.status === 'unavailable') {
-      return (
-        <ModelAccessStatusPage
-          status={modelAccess.status}
-          integratedTitleBar={integratedTitleBar}
-          onRetry={() => {
-            if (
-              modelServiceConfigurationService === null
-              || connectionService === null
-            ) {
-              return;
-            }
-            setConnectionState({
-              status: 'configuration_required',
-              configuration: { status: 'resolving' }
-            });
-            void modelServiceConfigurationService.retry()
-              .then(() => connectionService.check())
-              .then(setConnectionState)
-              .catch(() => undefined);
-          }}
-          onLogout={() => void logoutEnterprise()}
-        />
-      );
-    }
   }
 
   return (
@@ -6748,6 +7424,13 @@ export function AppController(props: AppControllerProps) {
       onDragLeave={handleProjectDragLeave}
       onDrop={(event) => void handleProjectDrop(event)}
     >
+      <div className="app-notice-stack">
+        <DesktopUpdateNotice updates={desktopUpdates} />
+        <AgentPromptPolicyUpdateNotice
+          version={agentPromptPolicyUpdateVersion}
+          onClose={() => setAgentPromptPolicyUpdateVersion(undefined)}
+        />
+      </div>
       {integratedTitleBar?.integratedTitleBar === true ? (
         <div className="desktop-titlebar-drag-region" aria-hidden="true" />
       ) : null}
@@ -6766,8 +7449,10 @@ export function AppController(props: AppControllerProps) {
         <ClaweeSidebar
           projects={projects}
           conversations={conversations}
+          workspaceNotice={!runtimeSupportsEnterpriseSession(connectionState) ? '正在连接本地服务' : projectLoadError ?? threadLoadError ?? (!runtimeWorkspaceReady ? '正在加载会话' : undefined)}
           tasks={sidebarTasks}
           runningConversationIds={runningConversationIds}
+          unreadConversationIds={unreadConversationIds}
           currentProjectId={state.currentProjectId}
           selectedConversationId={state.selectedThreadId}
           activeView={state.activeView}
@@ -6777,9 +7462,10 @@ export function AppController(props: AppControllerProps) {
           enterpriseSession={enterpriseSession}
           sidebarLogoUrl={platformBrandingUrls.sidebarLogoUrl}
           sidebarCompactLogoUrl={platformBrandingUrls.sidebarCompactLogoUrl}
+          sidebarLogoDarkUrl={platformBrandingUrls.sidebarLogoDarkUrl}
+          sidebarCompactLogoDarkUrl={platformBrandingUrls.sidebarCompactLogoDarkUrl}
           sidebarMenuLabels={sidebarMenuLabels}
           adminUrl={adminUrl}
-          activityAllowed={enterpriseActivity.capability === 'allowed'}
           onNewConversation={projectId => startNewConversation({ projectId })}
           onSelectProject={selectProject}
           onSelectConversation={selectConversation}
@@ -6828,6 +7514,7 @@ export function AppController(props: AppControllerProps) {
           onDeleteTask={task => deleteSidebarTask(task)}
           onOpenSettings={() => {
             closeMobileSidebar();
+            setSettingsInitialTab('general');
             dispatch({ type: 'open_settings' });
             navigateToRoute({ view: 'settings' });
           }}
@@ -6838,13 +7525,69 @@ export function AppController(props: AppControllerProps) {
         useIntegratedConversationTitleBar ? conversationHeader : undefined
       }
       main={(
-        <Suspense fallback={<PageLoading />}>
-          {main}
-        </Suspense>
+        <div className="model-runtime-main">
+          {!runtimeSupportsEnterpriseSession(connectionState) ? (
+            <RuntimeConnectionNotice hostBridge={hostBridge} onRetry={retryRuntimeConnection} />
+          ) : null}
+          {connectionState.status === 'configuration_required' ? (
+            <div className="model-runtime-notice" role="status">
+              <span>{connectionState.configuration.status === 'resolving'
+                ? '正在准备模型服务，模型相关功能暂不可用'
+                : '模型服务暂时不可用，暂时只能使用无需模型的功能'}</span>
+              {connectionState.configuration.status === 'unavailable' ? <button type="button" onClick={() => {
+                if (!modelServiceConfigurationService || !connectionService) return;
+                setConnectionState({ status: 'configuration_required', configuration: { status: 'resolving' } });
+                void modelServiceConfigurationService.retry().then(() => connectionService.check()).then(setConnectionState).catch(() => {
+                  void connectionService.check().then(setConnectionState).catch(() => undefined);
+                });
+              }}>重新检测</button> : null}
+              <button type="button" onClick={() => {
+                closeMobileSidebar();
+                setSettingsInitialTab('model');
+                dispatch({ type: 'open_settings' });
+                navigateToRoute({ view: 'settings' });
+              }}>模型设置</button>
+            </div>
+          ) : null}
+          {projectLoadError !== undefined || threadLoadError !== undefined ? (
+            <div className="model-runtime-notice" role="alert">
+              <span>{projectLoadError ?? threadLoadError}</span>
+              <button type="button" onClick={() => { void retryRuntimeConnection(); }}>重新加载</button>
+            </div>
+          ) : null}
+          {connectionState.status === 'connected' && connectionState.codexStatus.availabilityProbe?.status === 'failed' ? (
+            <div className="model-runtime-notice" role="alert">
+              <span>Runtime 链路检测失败{connectionState.codexStatus.availabilityProbe.message
+                ? `：${connectionState.codexStatus.availabilityProbe.message}`
+                : '，请检查配置或稍后重试。'}</span>
+              <button type="button" onClick={() => {
+                if (modelServiceConfigurationService === null || connectionService === null) return;
+                setConnectionState(previous => previous.status === 'connected' ? {
+                  ...previous, codexStatus: { ...previous.codexStatus, availabilityProbe: { status: 'pending' } }
+                } : previous);
+                void modelServiceConfigurationService.checkRuntime().then(() => connectionService.check())
+                  .then(setConnectionState).catch(() => {
+                    void connectionService.check().then(setConnectionState).catch(() => undefined);
+                  });
+              }}>重新检测</button>
+              <button type="button" onClick={() => {
+                closeMobileSidebar();
+                setSettingsInitialTab('model');
+                dispatch({ type: 'open_settings' });
+                navigateToRoute({ view: 'settings' });
+              }}>模型设置</button>
+            </div>
+          ) : null}
+          <div className="model-runtime-body">
+            <Suspense fallback={<PageLoading />}>{main}</Suspense>
+          </div>
+        </div>
       )}
       detail={detailPanel}
       detailOpen={detailPanel !== null && state.activeView === 'conversation'}
       sidebarCollapsed={effectiveSidebarCollapsed}
+      sidebarHidden={(state.activeView === 'dashboard' && workbenchModuleOpen)
+        || (state.activeView === 'activity' && enterpriseActivity.capability === 'allowed')}
       mobileSidebarOpen={mobileSidebarOpen}
       onOpenMobileSidebar={openMobileSidebar}
       onCloseMobileSidebar={dismissMobileSidebar}
@@ -6974,24 +7717,7 @@ function mergeTimelineItems(
   previousItems: TimelineItem[],
   incomingItems: TimelineItem[]
 ): TimelineItem[] {
-  let nextItems = previousItems;
-  for (const incoming of incomingItems) {
-    if (incoming.kind !== 'approval') {
-      nextItems = [...nextItems, incoming];
-      continue;
-    }
-    const index = nextItems.findIndex(item => (
-      item.kind === 'approval' && item.approval.id === incoming.approval.id
-    ));
-    if (index < 0) {
-      nextItems = [...nextItems, incoming];
-      continue;
-    }
-    nextItems = nextItems.map((item, itemIndex) => (
-      itemIndex === index ? incoming : item
-    ));
-  }
-  return nextItems;
+  return applyTimelineItems(previousItems, incomingItems);
 }
 
 function createInitialState(
@@ -7017,6 +7743,7 @@ function createInitialState(
     case 'schedules':
     case 'tasks':
     case 'dashboard':
+    case 'skill-contributions':
     case 'activity':
     case 'activity-agent':
     case 'activity-recharge-records':
@@ -7024,6 +7751,7 @@ function createInitialState(
     case 'connections':
     case 'knowledge':
     case 'workflow':
+    case 'enterprise-approvals':
     case 'drive':
     case 'account':
     case 'settings':
@@ -7061,6 +7789,8 @@ function routeForActiveView(activeView: ActiveView, selectedThreadId?: string): 
       return { view: 'tasks' };
     case 'dashboard':
       return { view: 'dashboard' };
+    case 'skill-contributions':
+      return { view: 'skill-contributions' };
     case 'activity':
       return { view: 'activity', range: '7d' };
     case 'plugins':
@@ -7071,6 +7801,8 @@ function routeForActiveView(activeView: ActiveView, selectedThreadId?: string): 
       return { view: 'knowledge' };
     case 'workflow':
       return { view: 'workflow' };
+    case 'enterprise-approvals':
+      return { view: 'enterprise-approvals' };
     case 'drive':
       return { view: 'drive' };
     case 'account':
@@ -7318,6 +8050,7 @@ function getSkillMarketEntry(skillId: string): (typeof skillMarketCatalog)[numbe
 }
 
 function shouldShowThreadInSidebar(thread: ThreadResponse): boolean {
+  if (thread.purpose === 'skill_review') return true;
   if (thread.purpose === 'schedule_draft') return true;
   if (thread.workspaceMode === 'managed') return false;
   if (isRuntimeWorkspacePath(thread.cwd)) return false;
@@ -7335,10 +8068,11 @@ function isRuntimeWorkspacePath(path: string): boolean {
 function mapThreadToConversation(
   thread: ThreadResponse
 ): ClaweeConversation | undefined {
-  if (thread.projectId === null) return undefined;
+  if (thread.projectId === null && thread.purpose !== 'skill_review') return undefined;
   return {
     id: thread.id,
     projectId: thread.projectId,
+    readOnly: thread.purpose === 'skill_review',
     title: thread.title ?? thread.codexThreadId ?? thread.id,
     updatedLabel: formatRelativeTime(thread.updatedAt),
     updatedAt: thread.updatedAt,
@@ -7379,18 +8113,28 @@ function toWorkspaceRelativePath(path: string, thread: ThreadResponse | undefine
     ?? normalizeWorkspacePath(decodedPath).replace(/^\.\//, '');
 }
 
+function isOpenableWorkspacePath(path: string, thread: ThreadResponse | undefined): boolean {
+  if (thread === undefined) return false;
+  const relativePath = toWorkspaceRelativePath(path, thread);
+  return relativePath.length > 0
+    && !relativePath.split('/').includes('..');
+}
+
 function stripWorkspaceRoot(path: string, root: string): string | undefined {
   const normalizedPath = normalizeWorkspacePath(path);
   const normalizedRoot = normalizeWorkspacePath(root).replace(/\/+$/, '');
   if (normalizedRoot.length === 0) return undefined;
-  if (normalizedPath === normalizedRoot) return '';
-  return normalizedPath.startsWith(`${normalizedRoot}/`)
+  const windowsPath = /^[a-z]:\//i.test(normalizedRoot);
+  const comparedPath = windowsPath ? normalizedPath.toLowerCase() : normalizedPath;
+  const comparedRoot = windowsPath ? normalizedRoot.toLowerCase() : normalizedRoot;
+  if (comparedPath === comparedRoot) return '';
+  return comparedPath.startsWith(`${comparedRoot}/`)
     ? normalizedPath.slice(normalizedRoot.length + 1)
     : undefined;
 }
 
 function normalizeWorkspacePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return path.replace(/\\/g, '/').replace(/^\/(?=[a-z]:\/)/i, '').replace(/\/+$/, '');
 }
 
 function normalizePathForCompare(path: string): string {
@@ -7444,10 +8188,13 @@ function formatEnterpriseSkillError(error: unknown, fallback: string): string {
     case 'ENTERPRISE_SKILL_VERSION_CHANGED':
       return '企业 Skill 版本已变化，请刷新后重试';
     case 'ENTERPRISE_SKILL_SOURCE_CONFLICT':
-      return '本地同名 Skill 已由其他来源占用';
+      return '本地 Skill 状态已变化，请刷新后重试';
     case 'ENTERPRISE_SKILL_LOCAL_CHANGED':
-      return '本地 Skill 已被修改，无法自动覆盖';
+      return '本地 Skill 内容已变化，请刷新后确认是否覆盖';
     case 'ENTERPRISE_SKILL_PACKAGE_INVALID':
+      return typeof error.details?.packageValidationMessage === 'string'
+        ? error.details.packageValidationMessage.trim() || '企业 Skill 包校验失败'
+        : '企业 Skill 包校验失败';
     case 'ENTERPRISE_SKILL_PACKAGE_HASH_MISMATCH':
       return '企业 Skill 包校验失败';
     case 'ENTERPRISE_SKILL_PACKAGE_TOO_LARGE':
@@ -7803,16 +8550,6 @@ function upsertEnterpriseSkill(
   return [skill, ...skills.filter(item => item.skillId !== skill.skillId)];
 }
 
-function findValidCodexSkillId(
-  skills: CodexSkillListResponse | undefined,
-  skillName: string
-): string | undefined {
-  return skills?.skills.find(skill => (
-    skill.status === 'valid'
-    && (skill.id === skillName || skill.name === skillName)
-  ))?.id;
-}
-
 function findPendingRunStart(
   pendingRunStartsById: PendingRunStartsById,
   threadId: string | undefined
@@ -7840,185 +8577,12 @@ function isTerminalRunStatus(status: RunResponse['status']): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'canceled';
 }
 
-function mapHistoryItemsToTimelineItems(items: ThreadHistoryItem[]): TimelineItem[] {
-  let currentRunId: string | undefined;
-  let currentRunHasDone = false;
-  let currentRunHasPersistedId = false;
-  const timelineItems: TimelineItem[] = [];
-
-  function closeCurrentRun() {
-    if (currentRunId === undefined || currentRunHasDone) return;
-    timelineItems.push({
-      id: `${currentRunId}_done`,
-      runId: currentRunId,
-      kind: 'done',
-      status: 'succeeded',
-      content: JSON.stringify({ type: 'done', status: 'succeeded' }),
-      source: 'runtime'
-    });
-    currentRunHasDone = true;
-  }
-
-  for (const item of items) {
-    if (item.type === 'user_message' || item.type === 'schedule_trigger') {
-      closeCurrentRun();
-      currentRunId = item.runId !== undefined
-        ? item.runId
-        : item.turnId === undefined
-          ? `history_item_${item.id}`
-          : `history_${item.turnId}`;
-      currentRunHasDone = false;
-      currentRunHasPersistedId = item.runId !== undefined;
-      timelineItems.push(mapHistoryItemToTimelineItem(item, currentRunId));
-      continue;
-    }
-
-    if (item.type === 'done') {
-      timelineItems.push(mapHistoryItemToTimelineItem(item, currentRunId));
-      currentRunHasDone = true;
-      currentRunId = undefined;
-      currentRunHasPersistedId = false;
-      continue;
-    }
-
-    timelineItems.push(mapHistoryItemToTimelineItem(
-      item,
-      item.turnId === undefined || currentRunHasPersistedId ? currentRunId : undefined
-    ));
-  }
-
-  closeCurrentRun();
-  return timelineItems;
-}
-
-function mapHistoryItemToTimelineItem(item: ThreadHistoryItem, fallbackRunId?: string): TimelineItem {
-  const runId = (
-    item.type === 'user_message'
-    || item.type === 'schedule_trigger'
-  ) && item.runId !== undefined
-    ? item.runId
-    : fallbackRunId
-      ?? (item.turnId === undefined ? undefined : `history_${item.turnId}`);
-  const base = {
-    id: item.id,
-    timestamp: item.createdAt,
-    ...(runId === undefined ? {} : { runId })
-  };
-
-  switch (item.type) {
-    case 'workflow_start':
-      return {
-        ...base, kind: 'workflow_start', runId: item.runId, taskId: item.taskId,
-        instanceId: item.instanceId, workflowName: item.workflowName,
-        nodeTitle: item.nodeTitle, nodeOrder: item.nodeOrder,
-        instruction: item.instruction, input: item.input,
-        customInput: item.customInput, source: 'runtime'
-      };
-    case 'workflow_status':
-      return {
-        ...base, kind: 'workflow_status', runId: item.runId, taskId: item.taskId,
-        status: item.status, source: 'runtime'
-      };
-    case 'user_message':
-      return {
-        ...base,
-        kind: 'user_message',
-        text: item.text,
-        ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
-        source: 'runtime'
-      };
-    case 'schedule_trigger':
-      return {
-        ...base,
-        kind: 'schedule_trigger',
-        runId: item.runId ?? runId ?? `history_item_${item.id}`,
-        prompt: item.prompt,
-        triggeredAt: item.triggeredAt,
-        source: 'runtime'
-      };
-    case 'assistant_message':
-      return {
-        ...base,
-        kind: 'assistant_message',
-        text: item.text,
-        content: JSON.stringify(item),
-        source: 'runtime'
-      };
-    case 'reasoning_summary':
-      return {
-        ...base,
-        kind: 'reasoning_summary',
-        text: item.text,
-        content: JSON.stringify(item),
-        source: 'runtime'
-      };
-    case 'tool_use':
-      return {
-        ...base,
-        kind: 'tool_step',
-        name: item.name,
-        content: JSON.stringify({ type: 'tool_use', name: item.name, input: item.input }),
-        source: 'runtime'
-      };
-    case 'tool_result':
-      return {
-        ...base,
-        kind: 'tool_step',
-        name: item.name,
-        content: JSON.stringify({ type: 'tool_result', name: item.name, output: item.output, isError: item.isError }),
-        source: 'runtime'
-      };
-    case 'file_change':
-      return {
-        ...base,
-        kind: 'change_card',
-        title: formatHistoryFileChangeTitle(item.changes),
-        path: item.changes.find(change => change.path.length > 0)?.path ?? '文件变更',
-        delta: `${item.changes.length} 项变更`,
-        source: 'runtime'
-      };
-    case 'done':
-      return {
-        ...base,
-        kind: 'done',
-        status: item.status,
-        content: JSON.stringify(item),
-        source: 'runtime'
-      };
-    default: {
-      const _exhaustive: never = item;
-      return _exhaustive;
-    }
-  }
-}
-
-function formatHistoryFileChangeTitle(
-  changes: Array<{ kind: 'add' | 'modify' | 'delete' | 'unknown' }>
-): string {
-  if (changes.length === 0) return '文件变更';
-
-  const counts = new Map<'add' | 'modify' | 'delete' | 'unknown', number>();
-  for (const change of changes) counts.set(change.kind, (counts.get(change.kind) ?? 0) + 1);
-
-  return (['add', 'modify', 'delete', 'unknown'] as const)
-    .map(kind => {
-      const count = counts.get(kind) ?? 0;
-      if (count === 0) return undefined;
-      if (kind === 'add') return `新增 ${count} 个文件`;
-      if (kind === 'modify') return `修改 ${count} 个文件`;
-      if (kind === 'delete') return `删除 ${count} 个文件`;
-      return `变更 ${count} 个文件`;
-    })
-    .filter((part): part is string => part !== undefined)
-    .join('，');
-}
-
 function clampPaneWidth(value: number, min: number, max: number): number {
   return Math.round(Math.min(Math.max(value, min), max));
 }
 
 function mapRuntimeStatus(connectionState: ConnectionState): RuntimeStatus {
-  if (connectionState.status !== 'connected') {
+  if (!runtimeSupportsEnterpriseSession(connectionState)) {
     return {
       connected: false,
       runtimeVersion: '0.1.0',
@@ -8029,9 +8593,11 @@ function mapRuntimeStatus(connectionState: ConnectionState): RuntimeStatus {
   return {
     connected: true,
     runtimeVersion: '0.1.0',
-    codexVersion: connectionState.codexStatus.codexVersion,
-    codexPath: connectionState.codexStatus.codexBin,
-    codexHome: connectionState.codexStatus.codexHome,
+    ...(connectionState.status === 'connected' ? {
+      codexVersion: connectionState.codexStatus.codexVersion,
+      codexPath: connectionState.codexStatus.codexBin,
+      codexHome: connectionState.codexStatus.codexHome
+    } : {}),
     lastCheckedAt: '2026-07-07 10:00'
   };
 }

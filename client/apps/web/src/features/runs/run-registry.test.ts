@@ -10,6 +10,22 @@ import {
 } from './run-registry.js';
 
 describe('run registry', () => {
+  it('确认 done 后迟到的 running 不回退，水位仍区分已知与已应用', () => {
+    let state = runRegistryReducer(initialRunRegistryState, { type: 'upsert_run', run: createRun({ status: 'succeeded', lastEventSeq: 10 }) });
+    state = runRegistryReducer(state, { type: 'upsert_run', run: createRun({ status: 'running', lastEventSeq: 4 }) });
+    expect(state.runsById.run_1?.status).toBe('succeeded');
+    expect(state.lastSeqByRunId.run_1).toBeUndefined();
+  });
+
+  it('终态冲突需显式核对，不能按状态名或到达顺序覆盖', () => {
+    let state = runRegistryReducer(initialRunRegistryState, { type: 'upsert_run', run: createRun({ status: 'failed' }) });
+    state = runRegistryReducer(state, { type: 'upsert_run', run: createRun({ status: 'succeeded' }) });
+    expect(state.runsById.run_1?.status).toBe('failed');
+    expect(state.terminalConflictsByRunId.run_1).toBe(true);
+    state = runRegistryReducer(state, { type: 'confirm_run', run: createRun({ status: 'succeeded' }) });
+    expect(state.runsById.run_1?.status).toBe('succeeded');
+    expect(state.terminalConflictsByRunId.run_1).toBeUndefined();
+  });
   it('merges thread runs and selects the running run ahead of queued runs', () => {
     const running = createRun({ id: 'run_running', status: 'running' });
     const queued = createRun({ id: 'run_queued', status: 'queued' });
