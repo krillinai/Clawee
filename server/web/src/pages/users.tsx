@@ -256,7 +256,7 @@ export function UsersPage() {
               <FieldContent><FieldLabel htmlFor={`account-role-${role.roleId}`}>{role.name}</FieldLabel><FieldDescription>{role.code} · 手工授权{role.isSystem ? " · 系统内置" : ""}{assignedRolesQuery.data?.find((item) => item.roleId === role.roleId)?.sources?.includes("rose_department") ? " · 部门自动授权仍有效，取消勾选仅移除手工来源" : ""}</FieldDescription></FieldContent>
             </Field>
           ))}
-          {(assignedRolesQuery.data ?? []).filter((role) => role.departmentRoleType === "manager").map((role) => <Field key={role.roleId}><FieldContent><FieldLabel>{role.roleName}</FieldLabel><FieldDescription>部门管理员 · {role.departmentName} · 只读自动授权，成员由 ROSE 同步管理</FieldDescription></FieldContent></Field>)}
+          {(assignedRolesQuery.data ?? []).filter((role) => role.departmentRoleType === "manager").map((role) => <Field key={role.roleId}><FieldContent><FieldLabel>{role.roleName}</FieldLabel><FieldDescription>部门管理员 · {role.departmentName} · 只读自动授权，成员由外部组织同步管理</FieldDescription></FieldContent></Field>)}
           {roleMutation.isError ? <ErrorAlert>{roleMutation.error.message}</ErrorAlert> : null}
           <Field className="justify-end" orientation="horizontal"><Button onClick={() => setRoleAccount(null)} variant="outline">取消</Button><Button disabled={roleMutation.isPending || assignedRolesQuery.isPending || rolesQuery.isPending || assignedRolesQuery.isError || rolesQuery.isError} onClick={() => roleMutation.mutate()}>保存角色</Button></Field>
         </FieldGroup>
