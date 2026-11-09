@@ -1,444 +1,113 @@
-name: Release Preflight
-
-run-name: Release Preflight · ${{ inputs.ref || github.ref_name }}
-
+name: Gateway Release Preflight
 on:
   workflow_call:
     inputs:
       ref:
-        description: 要验证的分支、Tag 或 Commit SHA
-        required: false
         type: string
+        required: false
       version:
-        description: 构建使用的 Clawee 产品版本；正式发布传入 v<version> Tag
-        required: false
         type: string
-      build_candidates:
-        description: 构建内部候选包并验证容器、Runtime 和 COS；正式发布不重复构建
         required: false
+      build_candidates:
         type: boolean
         default: false
-      test_ref:
-        description: 恢复不可变 Tag 时使用的测试修复提交；只覆盖预检工作区中的测试文件
-        required: false
-        type: string
-    secrets:
-      TENCENT_CLOUD_SECRET_ID:
-        required: false
-      TENCENT_CLOUD_SECRET_KEY:
-        required: false
   workflow_dispatch:
     inputs:
       ref:
         description: 要验证的分支、Tag 或 Commit SHA
-        required: false
         type: string
+        required: false
       version:
-        description: 构建使用的 Clawee 产品版本
-        required: false
+        description: Gateway 版本
         type: string
-      build_candidates:
-        description: 按需构建内部候选包并验证容器、Runtime 和 COS
         required: false
+      build_candidates:
+        description: 构建服务端包并验证隔离容器
         type: boolean
         default: false
-      test_ref:
-        description: 恢复不可变 Tag 时使用的测试修复提交；只覆盖预检工作区中的测试文件
-        required: false
-        type: string
-
 permissions:
   contents: read
-
 concurrency:
-  group: release-preflight-${{ inputs.ref || github.ref }}
+  group: gateway-preflight-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
-
 jobs:
-  client:
-    permissions:
-      contents: read
-      statuses: write
-    # 固定预检环境，避免 ubuntu-latest 升级影响大帧子进程测试的时限。
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    env:
-      CLAWEE_VERSION: ${{ inputs.version }}
+  target:
+    runs-on: ubuntu-latest
     outputs:
-      target-sha: ${{ steps.target.outputs.sha }}
+      sha: ${{ steps.target.outputs.sha }}
+      tag: ${{ steps.target.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
-      - name: 检出预检测试修复引用
-        if: inputs.test_ref != '' && inputs.test_ref != inputs.ref
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.test_ref }}
-          path: .test-fix
-          sparse-checkout: client/apps/daemon/test/unit/codex-app-server-client.test.ts
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - name: 恢复预检测试修复
-        if: inputs.test_ref != '' && inputs.test_ref != inputs.ref
-        shell: bash
-        run: |
-          cp ../.test-fix/client/apps/daemon/test/unit/codex-app-server-client.test.ts \
-            apps/daemon/test/unit/codex-app-server-client.test.ts
-          echo "已将预检测试文件恢复到提交：${{ inputs.test_ref }}"
-      - id: target
-        name: 解析候选提交
-        shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: 标记 Preflight 运行中
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ steps.target.outputs.sha }}
-        shell: bash
-        run: |
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            -f state=pending \
-            -f context=release-preflight \
-            -f description='Clawee 发布预检运行中' \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: client/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - name: 解析产品版本
-        if: inputs.version != ''
+      - id: target
         env:
           CLAWEE_VERSION: ${{ inputs.version }}
-        run: node scripts/release-version.mjs check
-        working-directory: ${{ github.workspace }}
-      - run: node scripts/release-version.mjs check
-        if: inputs.version == ''
-        working-directory: ${{ github.workspace }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm codex:runtime:verify
-      - name: 客户端依赖安全审计（非阻断）
-        run: pnpm audit --audit-level high
-        continue-on-error: true
-      - run: pnpm test
-        env:
-          # 大帧测试会启动子进程，避免并行工作区和测试 worker 争抢 CI CPU。
-          npm_config_workspace_concurrency: '1'
-          VITEST_MAX_FORKS: '1'
-          VITEST_MIN_FORKS: '1'
-      - run: pnpm typecheck
-      - run: pnpm build
-    defaults:
-      run:
-        working-directory: client
-
-  server:
-    needs: client
+        run: |
+          node scripts/release-version.mjs check --github-output "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: target
+    uses: ./.github/workflows/server-ci.yml
+    with:
+      ref: ${{ needs.target.outputs.sha }}
+  packages:
+    needs: [target, verify]
     if: inputs.build_candidates
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: claw_gateway_test
-          POSTGRES_USER: claw_gateway
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: --health-cmd "pg_isready -U claw_gateway -d claw_gateway_test" --health-interval 5s --health-timeout 3s --health-retries 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.client.outputs.target-sha }}
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: server/web/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: server/web/pnpm-lock.yaml
-      - run: pnpm --dir web install --frozen-lockfile
-      - run: pnpm --dir web test
-      - run: pnpm --dir web build
-      - run: go test -p 1 ./...
-        env:
-          CLAW_GATEWAY_TEST_DATABASE_URL: postgres://claw_gateway@127.0.0.1:5432/claw_gateway_test?sslmode=disable
-      - run: go vet ./...
-      - name: 服务端依赖安全审计（非阻断）
-        run: pnpm --dir web audit --audit-level high
-        continue-on-error: true
-    defaults:
-      run:
-        working-directory: server
-
-  desktop:
-    needs: [client, server]
-    if: inputs.build_candidates
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos-x64
-            os: macos-15-intel
-            platform: mac
-            arch: x64
-          - name: macos-arm64
-            os: macos-15
-            platform: mac
-            arch: arm64
-          - name: windows-x64-unsigned
-            os: windows-latest
-            platform: win
-            arch: x64
-    runs-on: ${{ matrix.os }}
-    env:
-      CLAWEE_VERSION: ${{ inputs.version }}
-      CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
-      CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
-      CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
-      CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.client.outputs.target-sha }}
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: client/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@v4
-        with:
-          path: |
-            client/apps/desktop/.cache/electron
-            client/apps/desktop/.cache/electron-builder
-            client/apps/desktop/.cache/node-gyp
-            client/apps/desktop/.cache/npm
-            client/apps/desktop/.cache/codex-runtime
-          key: desktop-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('client/pnpm-lock.yaml', 'client/apps/desktop/package.json', 'client/config/codex-runtime.json') }}
-          restore-keys: |
-            desktop-build-${{ runner.os }}-${{ matrix.arch }}-
-      - name: 生成内部测试安装包
-        run: pnpm desktop:dist
-      - name: 验证包内 Codex Runtime E2E
-        if: matrix.platform != 'win'
-        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
-      - name: 验证包内 Codex 真实会话
-        if: matrix.platform != 'win'
-        env:
-          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
-        run: pnpm --filter @clawee/desktop e2e:real-codex
-      - name: 上传内部测试安装包
-        uses: actions/upload-artifact@v4
-        with:
-          name: clawee-desktop-preflight-${{ matrix.name }}
-          path: |
-            client/apps/desktop/release/*.dmg
-            client/apps/desktop/release/*.exe
-            client/apps/desktop/release/clawee-desktop-build-manifest-*.json
-            client/apps/desktop/release/*.zip
-            client/apps/desktop/release/*.blockmap
-            client/apps/desktop/release/latest*.yml
-          if-no-files-found: error
-          retention-days: 14
-      - name: 上传 Runtime E2E 证据
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: clawee-desktop-preflight-e2e-${{ matrix.name }}
-          path: |
-            client/test-results/clawee-desktop-embedded-runtime-e2e.json
-            client/test-results/clawee-desktop-runtime-tool-loop-e2e.json
-            client/test-results/clawee-desktop-real-codex-smoke.json
-            client/test-results/desktop-embedded-runtime-playwright
-            client/test-results/desktop-embedded-runtime-playwright-report
-            client/test-results/desktop-real-codex-playwright
-          if-no-files-found: warn
-          retention-days: 14
-    defaults:
-      run:
-        working-directory: client
-
-  server-package:
-    needs: [client, server]
-    if: inputs.build_candidates
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.client.outputs.target-sha }}
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: server/web/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: server/web/pnpm-lock.yaml
-      - run: pnpm --dir server/web install --frozen-lockfile
-      - name: 构建服务端预检包
-        working-directory: server
-        env:
-          TARGET_GOARCH: ${{ matrix.arch }}
-          CLAW_GATEWAY_COMMIT: ${{ needs.client.outputs.target-sha }}
-          PACKAGE_NAME: clawee-server-preflight-linux-${{ matrix.arch }}.tar.gz
-        run: ./scripts/package-release.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clawee-server-preflight-linux-${{ matrix.arch }}
-          path: server/release/*.tar.gz
-          if-no-files-found: error
-          retention-days: 14
-
+    uses: ./.github/workflows/server-release.yml
+    with:
+      ref: ${{ needs.target.outputs.sha }}
+      tag: ${{ needs.target.outputs.tag }}
   container:
-    needs: [client, server]
+    needs: [target, verify]
     if: inputs.build_candidates
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.client.outputs.target-sha }}
+          ref: ${{ needs.target.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: client/package.json
+          package_json_file: package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm --dir client install --frozen-lockfile
-      - run: docker build -f server/Dockerfile -t clawee-server:preflight .
-      - run: CLAWEE_TEST_IMAGE=clawee-server:preflight node scripts/container-smoke.mjs
-
-  cos-preflight-upload:
-    needs: [client, server, desktop, server-package, container]
-    if: inputs.build_candidates
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    environment: release
-    env:
-      TARGET_SHA: ${{ needs.client.outputs.target-sha }}
-      COS_BUCKET: ${{ vars.COS_BUCKET }}
-      COS_REGION: ${{ vars.COS_REGION }}
-      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
-      COS_PREFIX: ${{ vars.COS_PREFIX }}
-      COS_UPLOAD_ENDPOINT: ${{ vars.COS_UPLOAD_ENDPOINT }}
-      TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
-      TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: clawee-desktop-preflight-macos-*
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: clawee-desktop-preflight-windows-*
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: clawee-server-preflight-linux-*
-          merge-multiple: true
-      - name: 检出受保护分支的发布器
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          path: publisher
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: publisher/client/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: publisher/client/pnpm-lock.yaml
-      - run: pnpm --dir publisher/client install --frozen-lockfile --ignore-scripts
-      - name: 上传并验证 COS Preflight 清单
-        run: >-
-          node publisher/scripts/cos-publish.mjs preflight
-          --artifacts artifacts
-          --target-sha "$TARGET_SHA"
-          --run-id "$GITHUB_RUN_ID"
-
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -f server/Dockerfile -t aigateway:preflight .
+      - run: CLAWEE_TEST_IMAGE=aigateway:preflight node scripts/container-smoke.mjs
   record:
-    if: always() && needs.client.outputs.target-sha != ''
-    needs:
-      - client
-      - server
-      - desktop
-      - server-package
-      - container
-      - cos-preflight-upload
+    if: always() && needs.target.outputs.sha != ''
+    needs: [target, verify, packages, container]
     runs-on: ubuntu-latest
     permissions:
       statuses: write
     steps:
-      - name: 记录 Preflight 结果
+      - name: 记录 Gateway 发布预检结果
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ needs.client.outputs.target-sha }}
-          CLIENT_RESULT: ${{ needs.client.result }}
-          SERVER_RESULT: ${{ needs.server.result }}
-          DESKTOP_RESULT: ${{ needs.desktop.result }}
-          SERVER_PACKAGE_RESULT: ${{ needs.server-package.result }}
+          TARGET_SHA: ${{ needs.target.outputs.sha }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PACKAGE_RESULT: ${{ needs.packages.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
-          COS_PREFLIGHT_RESULT: ${{ needs.cos-preflight-upload.result }}
           BUILD_CANDIDATES: ${{ inputs.build_candidates }}
         shell: bash
         run: |
+          expected=skipped
+          [[ "$BUILD_CANDIDATES" != 'true' ]] || expected=success
           state=failure
-          description='Clawee 发布预检失败'
-          expected_candidate_result=skipped
-          if [[ "$BUILD_CANDIDATES" == 'true' ]]; then
-            expected_candidate_result=success
-          fi
-          if [[ "$CLIENT_RESULT" == 'success' \
-            && "$SERVER_RESULT" == "$expected_candidate_result" \
-            && "$DESKTOP_RESULT" == "$expected_candidate_result" \
-            && "$SERVER_PACKAGE_RESULT" == "$expected_candidate_result" \
-            && "$CONTAINER_RESULT" == "$expected_candidate_result" \
-            && "$COS_PREFLIGHT_RESULT" == "$expected_candidate_result" ]]; then
+          if [[ "$VERIFY_RESULT" == success && "$PACKAGE_RESULT" == "$expected" && "$CONTAINER_RESULT" == "$expected" ]]; then
             state=success
-            description='Clawee 发布预检通过'
           fi
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            -f state="$state" \
-            -f context=release-preflight \
-            -f description="$description" \
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
+            -f state="$state" -f context=gateway-release-preflight \
+            -f description="Gateway 发布预检：$state" \
             -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          [[ "$state" == 'success' ]]
+          [[ "$state" == success ]]

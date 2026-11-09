@@ -74,4 +74,4 @@ GROUP BY s.space_id ORDER BY s.space_id;
 
 `execution_failed`、`timeout`、`report_invalid` 可由当前上传者或有空间管理权限的管理员重试，生成新尝试并保留旧记录。`materials_unsupported`、业务需修改和人工驳回必须调整材料后上传新版本；没有转人工或原版本重新送审入口，旧客户端重提请求也会被拒绝。Worker 每约 30 秒串行轮询，运行上限 12 分钟，Gateway 15 分钟兜底；回传最多尝试 3 次，迟到或不同结果不能覆盖已保存结果。
 
-本地验证入口：`pnpm server:test`、管理台 `pnpm test && pnpm build`、根目录 `pnpm desktop:preflight:local`。服务端测试仅使用隔离测试库 `CLAW_GATEWAY_TEST_DATABASE_URL`，数据库名称必须以 `_test` 结尾。
+本地验证入口：`pnpm server:test`、管理台 `pnpm test && pnpm build`、ClaweeAgent 仓库的 `pnpm desktop:preflight:local`。服务端测试仅使用隔离测试库 `CLAW_GATEWAY_TEST_DATABASE_URL`，数据库名称必须以 `_test` 结尾。

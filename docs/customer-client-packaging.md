@@ -2,7 +2,7 @@
 
 ## 客户更新发布
 
-客户更新由客户 Gateway 管理员批准，不自动跟随上游全部版本。当前通用客户端使用本机保存的当前 HTTPS Gateway 作为更新来源，不依赖登录或模型状态；只有明确更换服务器才切换来源。运行规则以 [客户端更新说明](../client/apps/desktop/docs/customer-update.md) 为准；下述专用客户包标记和清单为历史打包流程，当前分发包不注入客户渠道。
+客户更新由客户 Gateway 管理员批准，不自动跟随上游全部版本。当前通用客户端使用本机保存的当前 HTTPS Gateway 作为更新来源，不依赖登录或模型状态；只有明确更换服务器才切换来源。运行规则以 [客户端更新说明](https://github.com/krillinai/ClaweeAgent/blob/main/client/apps/desktop/docs/customer-update.md) 为准；下述专用客户包标记和清单为历史打包流程，当前分发包不注入客户渠道。
 
 1. 使用 `CLAWEE_DESKTOP_GATEWAY_CONFIG_PATH` 明确注入客户 HTTPS Gateway，保持 `CLAWEE_OFFICIAL_RELEASE=0`。客户包内包含 `deployment/customer-update.json`；通用包和官方包不生成此标记。
 2. 生成客户安装包时保留 macOS ZIP、Windows NSIS EXE 及更新元数据。设置 `CLAWEE_CUSTOMER_UPDATE_DOWNLOAD_BASE` 后输出当前平台的 `customer-update-manifest.json`；未设置则输出不可直接发布的 `customer-update-manifest.template.json`，须先补齐包地址。静态下载地址必须是客户独立目录中的版本化 HTTPS 地址，不能指向官方最新版本。三平台交付时将同一客户、同一版本的 `packages` 合并到一份清单，不能混入其他客户产物。
@@ -52,7 +52,7 @@ CLAWEE_DESKTOP_GATEWAY_CONFIG_PATH=/绝对路径/config.toml CLAWEE_OFFICIAL_REL
 client_downloads:
   gateway: "https://gateway.demo.example.com"
   standard:
-    url: "https://github.com/krillinai/Clawee/releases/latest"
+    url: "https://github.com/krillinai/aigateway/releases/latest"
   packages:
     - platform: "macos"
       arch: "arm64"

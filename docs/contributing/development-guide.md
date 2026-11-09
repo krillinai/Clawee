@@ -1,6 +1,6 @@
 # 开发指南
 
-本文面向希望参与 Clawee 开发、测试、文档维护或发布工作的贡献者。建议先按“快速启动”运行一套隔离的本地环境，再根据改动范围阅读客户端、Gateway、管理台或共享协议章节。
+本文面向 aigateway 的 Gateway、管理台、测试与发布贡献者。Clawee 客户端已迁至 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent)，以下命令默认在 aigateway 中执行。
 
 本文只描述当前仓库已经提供的开发能力。服务端配置字段、HTTP API、MCP 接入和生产部署细节见 [服务端文档](../../server/docs/README.md)。
 
@@ -31,6 +31,8 @@
 - **企业治理层**：Go Gateway 和管理台，负责账号、Agent 身份、RBAC、MCP 上游、能力授权、门禁、审计和共享资源。
 
 ### 1.2 组件职责
+
+本仓库维护企业治理层；下表的客户端组件在 ClaweeAgent 维护。
 
 | 组件 | 主要职责 |
 | --- | --- |
@@ -70,7 +72,7 @@ go version
 docker compose version
 ```
 
-客户端和 `server/web` 使用独立依赖工作区和锁文件。修改依赖时只更新所属工作区，不跨目录重建锁文件。
+根目录工具和 `server/web` 使用独立锁文件。客户端依赖与构建均在 ClaweeAgent 中维护。
 
 ## 3. 快速启动
 
@@ -108,7 +110,7 @@ node scripts/clawee.mjs server dev
 
 默认地址为 Gateway `http://127.0.0.1:1904`、管理台 `http://127.0.0.1:5904`。也可以分别运行 `pnpm run server:dev` 和 `pnpm run admin:dev`。
 
-另开终端启动 Electron：
+以下客户端命令须在独立的 ClaweeAgent 仓库根目录执行：
 
 ```bash
 pnpm run client:dev
@@ -154,14 +156,11 @@ docker compose -f server/deploy/docker-compose.yaml down
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm run setup` | 安装客户端和管理台依赖 |
+| `pnpm run setup` | 安装根目录工具和管理台依赖 |
 | `pnpm run init --ops-dir <目录>` | 初始化仓库外配置 |
-| `pnpm run client:dev` | Electron 桌面开发 |
-| `pnpm run web:dev` | 共享 Web 开发 |
 | `pnpm run server:dev` | Gateway 后端开发 |
 | `pnpm run admin:dev` | 管理台开发 |
 | `pnpm run db:migrate` | 执行数据库迁移 |
-| `pnpm run client:test` | 客户端测试 |
 | `pnpm run server:test` | 服务端和管理台测试 |
 
 组件目录内仍保留原命令。进入子目录后，应使用该目录声明的 pnpm 版本和锁文件。
@@ -195,23 +194,7 @@ API Key、JWT 密钥、Agent Token 密钥、OAuth Secret、数据库密码和上
 
 ## 7. 客户端开发
 
-### 7.1 共享 Web
-
-通用任务、会话、模型、文件、Skill、定时任务和企业能力界面位于 `client/apps/web`。桌面端与浏览器端的通用流程只实现一次，平台差异通过能力检测和 Bridge 处理。
-
-### 7.2 daemon
-
-本地执行、SQLite、工作区文件、模型配置、Runtime 会话和任务调度属于 `client/apps/daemon`。Web 通过现有 API 调用 daemon，不复制执行或持久化逻辑。
-
-### 7.3 Electron
-
-主进程、preload 和渲染进程保持权限隔离。新增原生能力时沿用现有 Bridge/IPC 边界，只暴露完成任务所需的最小接口。
-
-修改客户端可执行代码、依赖、构建或发布配置后，提交前必须运行：
-
-```bash
-pnpm run desktop:preflight:local
-```
+共享 Web、daemon、Electron 和客户端协议包在 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 维护。客户端可连接本机 Gateway Origin，不需要读取本仓库源码。跨端变更按[仓库边界与维护](../repository-maintenance.md)使用互相链接的 PR 和固定 SHA 验证。
 
 ## 8. Gateway 与管理台开发
 
@@ -253,7 +236,6 @@ Gateway 管理后台的页面设计与交互遵循 [前端设计指南](../desig
 
 ```bash
 pnpm run test
-pnpm run client:test
 pnpm run server:test
 ```
 
@@ -269,7 +251,6 @@ docker compose -f server/deploy/docker-compose.test.yaml down
 ### 11.2 构建和容器验收
 
 ```bash
-pnpm run client:build
 pnpm run server:build
 docker build -f server/Dockerfile -t clawee-server:oss-local .
 node scripts/container-smoke.mjs
@@ -306,14 +287,9 @@ PR 至少说明解决的问题、用户可见变化、测试/构建/预检命令
 
 ## 15. 构建与发布
 
-客户端、Gateway 和管理台按同一版本组合交付。发布前检查版本号、构建产物、内嵌 Web、Runtime 契约、第三方许可和发布清单。
+Gateway 与管理台同版本交付，客户端独立发布。Gateway 使用本仓库 VERSION 和 vX.Y.Z 标签，由 Gateway Release Preflight 验证测试、Linux 包与隔离容器，再发布压缩包和多架构镜像。
 
-```bash
-pnpm run desktop:preflight:local
-pnpm run desktop:preflight:release
-```
-
-正式发布还需要在目标干净提交上完成远端 Release Preflight、签名/公证和 Tag 检查，顺序见[正式发布前待处理事项](../pre-release-checklist.md)。发布镜像、安装包和压缩包不得包含生产配置、`.env`、数据库数据、私有凭据或模型 Key。
+本仓库不执行 Apple 签名、公证或客户端 COS 更新发布。两边发布候选记录实际联调的版本或完整 SHA，具体职责见[仓库边界与维护](../repository-maintenance.md)。发布产物不得包含真实配置、数据库数据或凭据。
 
 ## 16. 附录
 

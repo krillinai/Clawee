@@ -1,50 +1,27 @@
-name: Release
-
+name: Gateway Release
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 要补发的既有版本标签（不会移动或重建标签）
+        description: 要发布的既有版本标签，不创建或移动标签
+        type: string
         required: true
-        type: string
-      artifacts_run_id:
-        description: 复用已通过预检和签名打包的 Release 任务 ID（留空时重新构建）
-        required: false
-        type: string
-      notary_run_id:
-        description: 恢复既有 Release 的 macOS 公证收尾（原任务必须留有检查点和完整产物；不能与 artifacts_run_id 同用）
-        required: false
-        type: string
-
 permissions:
   contents: read
-
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: gateway-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
-
 jobs:
   target:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     outputs:
-      tag: ${{ steps.target.outputs.tag }}
       sha: ${{ steps.target.outputs.sha }}
-      generated-at: ${{ steps.target.outputs.generated-at }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
-      - name: 验证目标标签格式
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-          ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
-          NOTARY_RUN_ID: ${{ inputs.notary_run_id }}
-        shell: bash
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
-          [[ -z "$ARTIFACTS_RUN_ID" || -z "$NOTARY_RUN_ID" ]] || exit 1
-          [[ -z "$NOTARY_RUN_ID" || "$NOTARY_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
       - uses: actions/checkout@v5
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
@@ -52,20 +29,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - id: target
-        name: 固定既有标签的源码提交
+      - id: version
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        shell: bash
-        run: |
-          node scripts/release-version.mjs check --tag "$RELEASE_TAG"
-          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "generated-at=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
-
+        run: node scripts/release-version.mjs check --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+      - id: target
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   preflight:
     needs: target
-    if: inputs.artifacts_run_id == ''
     permissions:
       contents: read
       statuses: write
@@ -73,334 +44,32 @@ jobs:
     with:
       ref: ${{ needs.target.outputs.sha }}
       version: ${{ needs.target.outputs.tag }}
-      build_candidates: false
-      test_ref: ${{ github.sha }}
-
-  reuse:
-    needs: target
-    if: inputs.artifacts_run_id != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: read
-      statuses: read
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: 验证既有预检、签名打包和产物证据
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACTS_RUN_ID: ${{ inputs.artifacts_run_id }}
-          SOURCE_SHA: ${{ needs.target.outputs.sha }}
-        run: >-
-          node scripts/verify-release-reuse.mjs run
-          --run-id "$ARTIFACTS_RUN_ID"
-          --repository "$GITHUB_REPOSITORY"
-          --sha "$SOURCE_SHA" --desktop-only
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: clawee-desktop-release-*
-          merge-multiple: true
-          run-id: ${{ inputs.artifacts_run_id }}
-          github-token: ${{ github.token }}
-      - name: 验证复用安装包的版本、源码和签名构建身份
-        env:
-          TAG: ${{ needs.target.outputs.tag }}
-          SOURCE_SHA: ${{ needs.target.outputs.sha }}
-        run: >-
-          node scripts/verify-release-reuse.mjs artifacts
-          --directory artifacts --tag "$TAG" --sha "$SOURCE_SHA" --desktop-only
-
-  gate:
-    needs: [target, preflight, reuse]
-    if: >-
-      always() && needs.target.result == 'success' &&
-      (
-        (inputs.artifacts_run_id == '' && needs.preflight.result == 'success') ||
-        (inputs.artifacts_run_id != '' && needs.reuse.result == 'success')
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: release
-    outputs:
-      tag: ${{ needs.target.outputs.tag }}
-      sha: ${{ needs.target.outputs.sha }}
-      generated-at: ${{ needs.target.outputs.generated-at }}
-      version: ${{ steps.release.outputs.version }}
-      prerelease: ${{ steps.release.outputs.prerelease }}
-      release_published: ${{ steps.release_state.outputs.published }}
-    env:
-      RELEASE_TAG: ${{ needs.target.outputs.tag }}
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      NOTARY_RUN_ID: ${{ inputs.notary_run_id }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.target.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - id: release
-        name: 验证统一版本和标签
-        run: >-
-          node scripts/release-version.mjs check
-          --tag "$RELEASE_TAG"
-          --github-output "$GITHUB_OUTPUT"
-      - id: release_state
-        name: 检查 GitHub Release 状态
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          published=false
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
-            if [[ "$is_draft" != 'true' ]]; then
-              published=true
-            fi
-          fi
-          echo "published=${published}" >> "$GITHUB_OUTPUT"
-      - name: 验证 macOS 正式签名凭据
-        if: steps.release_state.outputs.published != 'true'
-        shell: bash
-        run: |
-          missing=()
-          required=(APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID)
-          if [[ -z "$NOTARY_RUN_ID" ]]; then
-            required+=(MACOS_CERTIFICATE MACOS_CERTIFICATE_PASSWORD)
-          fi
-          for name in "${required[@]}"
-          do
-            if [[ -z "${!name}" ]]; then
-              missing+=("$name")
-            fi
-          done
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error::release Environment 缺少 macOS 签名 Secret：${missing[*]}"
-            exit 1
-          fi
-
-  desktop:
-    needs: gate
-    if: >-
-      !cancelled() && needs.gate.result == 'success' &&
-      needs.gate.outputs.release_published != 'true' && inputs.artifacts_run_id == ''
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos-x64
-            os: macos-15-intel
-            platform: mac
-            arch: x64
-          - name: macos-arm64
-            os: macos-15
-            platform: mac
-            arch: arm64
-          - name: windows-x64-unsigned
-            os: windows-latest
-            platform: win
-            arch: x64
-    runs-on: ${{ matrix.os }}
-    environment: release
-    env:
-      CLAWEE_DESKTOP_CACHE_DIR: ${{ github.workspace }}/client/apps/desktop/.cache
-      CLAWEE_DESKTOP_TARGET_PLATFORM: ${{ matrix.platform }}
-      CLAWEE_DESKTOP_TARGET_ARCH: ${{ matrix.arch }}
-      CLAWEE_DESKTOP_BUILD_MANIFEST: ${{ github.workspace }}/client/apps/desktop/release/clawee-desktop-build-manifest-${{ matrix.platform }}-${{ matrix.arch }}.json
-      CLAWEE_VERSION: ${{ needs.gate.outputs.version }}
-      CSC_LINK: ${{ matrix.platform == 'mac' && inputs.notary_run_id == '' && secrets.MACOS_CERTIFICATE || '' }}
-      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && inputs.notary_run_id == '' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
-      APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-      APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-      CLAWEE_APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-      CLAWEE_OFFICIAL_RELEASE: ${{ needs.gate.outputs.prerelease == 'false' && '1' || '0' }}
-      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
-      COS_PREFIX: ${{ vars.COS_PREFIX }}
-      SOURCE_SHA: ${{ needs.gate.outputs.sha }}
-      RELEASE_TAG: ${{ needs.gate.outputs.tag }}
-      CLAWEE_NOTARY_SOURCE_RUN_ID: ${{ inputs.notary_run_id }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.gate.outputs.sha }}
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: client/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/cache@v4
-        with:
-          path: |
-            client/apps/desktop/.cache/electron
-            client/apps/desktop/.cache/electron-builder
-            client/apps/desktop/.cache/node-gyp
-            client/apps/desktop/.cache/npm
-            client/apps/desktop/.cache/codex-runtime
-          key: desktop-build-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('client/pnpm-lock.yaml', 'client/apps/desktop/package.json', 'client/config/codex-runtime.json') }}
-          restore-keys: |
-            desktop-build-${{ runner.os }}-${{ matrix.arch }}-
-      - id: notary_source
-        name: 验证公证恢复来源工作流
-        if: inputs.notary_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          node ../scripts/verify-notary-recovery-run.mjs
-          --run-id "$CLAWEE_NOTARY_SOURCE_RUN_ID"
-          --repository "$GITHUB_REPOSITORY"
-          --github-output "$GITHUB_OUTPUT"
-      - name: 下载原 macOS 公证检查点和验证上下文
-        if: matrix.platform == 'mac' && inputs.notary_run_id != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: clawee-desktop-notary-${{ matrix.name }}
-          path: client/apps/desktop/release/notary-recovery
-          run-id: ${{ inputs.notary_run_id }}
-          github-token: ${{ github.token }}
-      - name: 恢复 macOS 公证收尾并重新验证安装包
-        if: matrix.platform == 'mac' && inputs.notary_run_id != ''
-        env:
-          CLAWEE_NOTARY_SOURCE_RUN_ATTEMPT: ${{ steps.notary_source.outputs.run-attempt }}
-        run: pnpm desktop:notary:resume
-      - name: 下载原 Windows 已验证安装包
-        if: matrix.platform == 'win' && inputs.notary_run_id != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: clawee-desktop-release-windows-x64-unsigned
-          path: client/apps/desktop/release
-          run-id: ${{ inputs.notary_run_id }}
-          github-token: ${{ github.token }}
-      - name: 验证复用 Windows 安装包的标签和源码身份
-        if: matrix.platform == 'win' && inputs.notary_run_id != ''
-        shell: bash
-        run: >-
-          node ../scripts/verify-release-reuse.mjs artifacts
-          --directory apps/desktop/release
-          --tag "$RELEASE_TAG" --sha "$SOURCE_SHA"
-          --target win-x64 --desktop-only
-      - name: 生成 macOS 正式签名安装包
-        if: matrix.platform == 'mac' && inputs.notary_run_id == ''
-        run: pnpm desktop:release
-      - name: 生成 Windows 未签名安装包
-        if: matrix.platform == 'win' && inputs.notary_run_id == ''
-        run: pnpm desktop:dist
-      - name: 验证包内 Codex Runtime E2E
-        if: ${{ false }}
-        run: pnpm --filter @clawee/desktop e2e:embedded-runtime
-      - name: 验证包内 Codex 真实会话
-        if: ${{ false }}
-        env:
-          CLAWEE_RUN_REAL_CODEX_SMOKE: '1'
-        run: pnpm --filter @clawee/desktop e2e:real-codex
-      - name: 上传 Runtime E2E 证据
-        if: ${{ false }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: clawee-desktop-runtime-e2e-${{ matrix.name }}
-          path: |
-            client/test-results/clawee-desktop-embedded-runtime-e2e.json
-            client/test-results/clawee-desktop-runtime-tool-loop-e2e.json
-            client/test-results/clawee-desktop-real-codex-smoke.json
-            client/test-results/desktop-embedded-runtime-playwright
-            client/test-results/desktop-embedded-runtime-playwright-report
-            client/test-results/desktop-real-codex-playwright
-          if-no-files-found: warn
-          retention-days: 14
-      - name: 保存 macOS 公证诊断
-        if: always() && matrix.platform == 'mac'
-        run: node apps/desktop/scripts/notary-recovery.mjs diagnose
-      - name: 留存 macOS 公证恢复产物（不是正式发布附件）
-        if: always() && matrix.platform == 'mac'
-        uses: actions/upload-artifact@v4
-        with:
-          name: clawee-desktop-notary-${{ matrix.name }}
-          path: client/apps/desktop/release/notary-recovery
-          if-no-files-found: error
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clawee-desktop-release-${{ matrix.name }}
-          path: |
-            client/apps/desktop/release/*.dmg
-            client/apps/desktop/release/*.exe
-            client/apps/desktop/release/clawee-desktop-build-manifest-*.json
-            client/apps/desktop/release/*.zip
-            client/apps/desktop/release/*.blockmap
-            client/apps/desktop/release/latest*.yml
-          if-no-files-found: error
-          retention-days: 14
-    defaults:
-      run:
-        working-directory: client
-
-  server:
-    needs: gate
-    if: ${{ false }}
-    uses: ./.github/workflows/server-release.yml
-    with:
-      ref: ${{ needs.gate.outputs.sha }}
-      tag: ${{ needs.gate.outputs.tag }}
-    permissions:
-      contents: read
-
+      build_candidates: true
   image:
-    needs: gate
-    if: ${{ false }}
+    needs: [target, preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
       name: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.gate.outputs.sha }}
+          ref: ${{ needs.target.outputs.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: client/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm --dir client install --frozen-lockfile
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - id: image
-        name: 解析当前仓库专属镜像名
-        shell: bash
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
+      - id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -411,218 +80,69 @@ jobs:
           provenance: true
           sbom: true
           build-args: |
-            CLAW_GATEWAY_VERSION=${{ needs.gate.outputs.version }}
-            CLAW_GATEWAY_COMMIT=${{ needs.gate.outputs.sha }}
+            CLAW_GATEWAY_VERSION=${{ needs.target.outputs.version }}
+            CLAW_GATEWAY_COMMIT=${{ needs.target.outputs.sha }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          tags: ${{ steps.image.outputs.name }}:sha-${{ needs.gate.outputs.sha }}
-      - name: 验证最终镜像的隔离部署
-        env:
-          CLAWEE_TEST_IMAGE: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
-        run: node scripts/container-smoke.mjs
-
+          tags: ${{ steps.image.outputs.name }}:sha-${{ needs.target.outputs.sha }}
   publish:
-    needs: [gate, desktop]
-    if: >-
-      always() &&
-      needs.gate.result == 'success' &&
-      (
-        needs.gate.outputs.release_published == 'true' ||
-        inputs.artifacts_run_id != '' ||
-        needs.desktop.result == 'success'
-      )
+    needs: [target, preflight, image]
     runs-on: ubuntu-latest
     environment: release
-    concurrency:
-      group: cos-production-release
-      cancel-in-progress: false
     permissions:
       contents: write
-      actions: read
+      packages: write
     env:
-      VERSION: ${{ needs.gate.outputs.version }}
-      PRERELEASE: ${{ needs.gate.outputs.prerelease }}
-      TAG: ${{ needs.gate.outputs.tag }}
-      SOURCE_SHA: ${{ needs.gate.outputs.sha }}
-      GENERATED_AT: ${{ needs.gate.outputs.generated-at }}
-      COS_BUCKET: ${{ vars.COS_BUCKET }}
-      COS_REGION: ${{ vars.COS_REGION }}
-      COS_PUBLIC_BASE_URL: ${{ vars.COS_PUBLIC_BASE_URL }}
-      COS_PREFIX: ${{ vars.COS_PREFIX }}
-      COS_UPLOAD_ENDPOINT: ${{ vars.COS_UPLOAD_ENDPOINT }}
-      TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
-      TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
-      RELEASE_ALREADY_PUBLISHED: ${{ needs.gate.outputs.release_published }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.target.outputs.tag }}
+      VERSION: ${{ needs.target.outputs.version }}
+      PRERELEASE: ${{ needs.target.outputs.prerelease }}
+      IMAGE: ${{ needs.image.outputs.name }}
+      IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
+      SOURCE_SHA: ${{ needs.target.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: client/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: client/pnpm-lock.yaml
-      - run: pnpm --dir client install --frozen-lockfile --ignore-scripts
-      - name: 创建草稿 Release 并提取发布说明
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
-            if [[ "$is_draft" != 'true' ]]; then
-              echo 'RELEASE_ALREADY_PUBLISHED=true' >> "$GITHUB_ENV"
-            fi
-          else
-            args=(--generate-notes --draft --verify-tag)
-            if [[ "$PRERELEASE" == 'true' ]]; then
-              args+=(--prerelease)
-            fi
-            gh release create "$TAG" "${args[@]}"
-          fi
-          mkdir -p artifacts
-          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
-          gh release view "$TAG" --json createdAt --jq .createdAt \
-            | sed 's/^/PUBLISHED_AT=/' >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
         with:
           path: artifacts
-          pattern: clawee-desktop-release-*
+          pattern: clawee-server-release-linux-*
           merge-multiple: true
-          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
-          github-token: ${{ github.token }}
-      - name: 检出当前工作流的产物校验器
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-          path: release-tools
-          sparse-checkout: scripts/verify-release-reuse.mjs
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - name: 验证安装包版本、源码提交和签名构建身份
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        run: >-
-          node release-tools/scripts/verify-release-reuse.mjs artifacts
-          --directory artifacts --tag "$TAG" --sha "$SOURCE_SHA" --desktop-only
-      - name: 生成统一发布清单
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        run: |
-          node scripts/build-release-manifest.mjs \
-            --artifacts artifacts \
-            --output artifacts \
-            --version "$VERSION" \
-            --tag "$TAG" \
-            --commit "$SOURCE_SHA" \
-            --desktop-only \
-            --generated-at "$GENERATED_AT"
-      - name: 生成平台下载说明
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        run: |
-          node scripts/generate-release-notes.mjs \
-            --manifest artifacts/release-manifest.json \
-            --generated "$RUNNER_TEMP/release-notes.md" \
-            --output "$RUNNER_TEMP/release-notes-rendered.md" \
-            --repository "$GITHUB_REPOSITORY"
-      - name: 生成 COS 版本目录和官网目录文件
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
+      - name: 记录镜像和源码身份
         shell: bash
         run: |
-          node scripts/cos-publish.mjs prepare-release \
-            --artifacts artifacts \
-            --stage cos-stage \
-            --manifest artifacts/release-manifest.json \
-            --release-notes "$RUNNER_TEMP/release-notes-rendered.md" \
-            --version "$VERSION" \
-            --tag "$TAG" \
-            --commit "$SOURCE_SHA" \
-            --published-at "$PUBLISHED_AT"
-      - name: 上传并验证 COS 不可变版本目录
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        run: |
-          node scripts/cos-publish.mjs release-immutable \
-            --stage cos-stage \
-            --tag "$TAG" \
-            --version "$VERSION" \
-            --commit "$SOURCE_SHA"
-      - name: 恢复已公开 Release 的 COS 晋级输入
-        if: env.RELEASE_ALREADY_PUBLISHED == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          cd artifacts
+          sha256sum --check server-linux-amd64-SHA256SUMS
+          sha256sum --check server-linux-arm64-SHA256SUMS
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const { TAG, VERSION, SOURCE_SHA, IMAGE, IMAGE_DIGEST } = process.env;
+          if (!/^sha256:[0-9a-f]{64}$/.test(IMAGE_DIGEST)) throw new Error('镜像摘要无效');
+          writeFileSync('gateway-release.json', JSON.stringify({schemaVersion: 1, product: 'aigateway', tag: TAG, version: VERSION, commit: SOURCE_SHA, image: {name: IMAGE, digest: IMAGE_DIGEST}}, null, 2) + '\n');
+          NODE
+      - name: 创建并公开 Gateway Release
         shell: bash
         run: |
-          version_root="cos-stage/releases/${TAG}"
-          mkdir -p "${version_root}/updates"
-          gh release download "$TAG" --pattern 'release.json' --dir "$version_root"
-          gh release download "$TAG" --pattern 'latest*.yml' --dir "${version_root}/updates"
-      - name: 上传 GitHub 草稿 Release 产物
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          gh release edit "$TAG" \
-            --notes-file "cos-stage/releases/${TAG}/release-notes.md"
-          while IFS= read -r -d '' file; do
-            gh release upload "$TAG" "$file" --clobber
-          done < <(find "cos-stage/releases/${TAG}" -type f -print0)
-      - uses: docker/setup-buildx-action@v3
-        if: ${{ false }}
-      - uses: docker/login-action@v3
-        if: ${{ false }}
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: 发布版本镜像标签
-        if: ${{ false }}
-        shell: bash
-        run: |
-          tags=(--tag "${IMAGE}:${VERSION}")
-          if [[ "$PRERELEASE" == 'false' ]]; then
-            tags+=(--tag "${IMAGE}:latest")
+          args=(--draft --verify-tag --generate-notes)
+          [[ "$PRERELEASE" != true ]] || args+=(--prerelease)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == true ]] || { echo '已公开版本不覆盖'; exit 1; }
+          else
+            gh release create "$TAG" "${args[@]}"
           fi
-          docker buildx imagetools create \
-            "${tags[@]}" \
-            "${IMAGE}@${IMAGE_DIGEST}"
-      - name: 首次初始化 COS 渠道
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        run: |
-          node scripts/cos-publish.mjs release-bootstrap \
-            --stage cos-stage \
-            --tag "$TAG" \
-            --version "$VERSION" \
-            --commit "$SOURCE_SHA"
-      - name: 公开 GitHub Release
-        if: env.RELEASE_ALREADY_PUBLISHED != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          if [[ "$PRERELEASE" == 'true' ]]; then
+          gh release upload "$TAG" artifacts/* --clobber
+          if [[ "$PRERELEASE" == true ]]; then
             gh release edit "$TAG" --draft=false --prerelease
           else
             gh release edit "$TAG" --draft=false --latest
           fi
-      - name: 晋级 COS 更新源和官网目录
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: 晋级已验证镜像
         shell: bash
         run: |
-          args=(
-            release-promote
-            --stage cos-stage
-            --tag "$TAG"
-            --version "$VERSION"
-            --commit "$SOURCE_SHA"
-          )
-          if [[ "$RELEASE_ALREADY_PUBLISHED" == 'true' ]]; then
-            args+=(--verify-immutable)
-          fi
-          node scripts/cos-publish.mjs "${args[@]}"
+          tags=(--tag "${IMAGE}:${VERSION}")
+          [[ "$PRERELEASE" != false ]] || tags+=(--tag "${IMAGE}:latest")
+          docker buildx imagetools create "${tags[@]}" "${IMAGE}@${IMAGE_DIGEST}"

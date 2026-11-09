@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 
-const require = createRequire(new URL('../client/apps/daemon/package.json', import.meta.url));
+const require = createRequire(import.meta.url);
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');

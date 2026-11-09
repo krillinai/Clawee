@@ -55,13 +55,13 @@ function save(group, entries) {
     if (entry.license && entry.license !== 'UNKNOWN') component.licenses = [{ expression: entry.license }];
     return component;
   });
-  writeFileSync(join(output, `${group}-NOTICES.txt`), notices.join(''));
+  writeFileSync(join(output, `${group}-NOTICES.txt`), notices.join('').replace(/\r\n/g, '\n'));
   writeFileSync(join(output, `${group}.cdx.json`), JSON.stringify({ bomFormat: 'CycloneDX', specVersion: '1.5', version: 1, components }, null, 2) + '\n');
   console.log(`${group}: ${entries.length} 个组件，${unresolved.length} 个未找到顶层许可文本`);
   return unresolved;
 }
 const review = {};
-for (const [group, directory] of [['client', 'client'], ['admin', 'server/web']]) {
+for (const [group, directory] of [['tools', '.'], ['admin', 'server/web']]) {
   const licenses = JSON.parse(run('corepack', ['pnpm', 'licenses', 'list', '--json'], join(root, directory)));
   review[group] = save(group, Object.values(licenses).flat().flatMap(entry => entry.versions.map(version => ({
     name: entry.name, version, license: entry.license,
@@ -87,5 +87,5 @@ writeFileSync(join(output, 'go-runtime-NOTICES.txt'), [
   'Go 标准库许可；实际编译器版本以可执行文件构建信息为准。\n',
   ...goRuntimeLicenses.map(file => `\n--- ${file.name} ---\n${file.text}\n`)
 ].join(''));
-review.inputs = Object.fromEntries(['client/pnpm-lock.yaml', 'server/web/pnpm-lock.yaml', 'server/go.sum'].map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
+review.inputs = Object.fromEntries(['pnpm-lock.yaml', 'server/web/pnpm-lock.yaml', 'server/go.sum'].map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
 writeFileSync(join(output, 'review.json'), JSON.stringify(review, null, 2) + '\n');

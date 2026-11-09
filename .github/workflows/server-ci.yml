@@ -1,5 +1,13 @@
 name: Server CI
 on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v6
         with:
@@ -36,6 +45,8 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: server/web/pnpm-lock.yaml
+      - run: pnpm --dir .. install --frozen-lockfile
+      - run: pnpm --dir .. test
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web test
       - run: pnpm --dir web build

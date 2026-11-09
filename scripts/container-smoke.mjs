@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyMcpPermissions } from './mcp-smoke.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const yaml = createRequire(join(root, 'client/apps/daemon/package.json'))('yaml');
+const yaml = createRequire(import.meta.url)('yaml');
 const directory = mkdtempSync(join(tmpdir(), 'clawee-container-smoke-'));
 const project = `clawee-smoke-${randomBytes(5).toString('hex')}`;
 const configFile = join(directory, 'compose.json');
@@ -66,16 +66,6 @@ try {
   await verifyMcpPermissions(origin, admin.cookies, me.data.account.user_id, 'clawee_550e8400-e29b-41d4-a716-446655440000');
   const mode = await request('/api/v1/app/model-configuration', {}, token);
   assert.equal(mode.data.mode, 'enterprise_managed');
-  if (process.env.CLAWEE_EXTERNAL_MODEL_CONFIG) {
-    const stackPath = join(directory, 'external-stack.json');
-    writeFileSync(stackPath, JSON.stringify({ gateway: origin, email: account.email, password: account.password }), { mode: 0o600 });
-    run(process.execPath, ['scripts/clawee.mjs', 'client', '--filter', '@clawee/desktop', 'exec', 'playwright', 'test', '--config', 'playwright.external.config.ts'], {
-      CLAWEE_EXTERNAL_MODEL_CONFIG: resolve(process.env.CLAWEE_EXTERNAL_MODEL_CONFIG),
-      CLAWEE_EXTERNAL_STACK_CONFIG: stackPath,
-      CLAWEE_E2E_RUNTIME_ROOT: directory
-    }, 360000);
-    console.log('真实模型验证通过：隔离桌面登录、自带模型配置、包内 Runtime 任务与页面回复。');
-  }
   compose('restart', 'gateway');
   origin = readOrigin();
   await waitReady();

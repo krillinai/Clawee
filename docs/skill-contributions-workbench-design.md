@@ -3,7 +3,7 @@
 > 日期：2026-10-16。
 > 状态：导航与模型门禁已实现；自动验证与人工验收结果见文末实施记录，不代表已发布。
 > 适用范围：Clawee 共享 Web，桌面端与浏览器端共用。
-> 关联文档：[Skill 贡献面板方案设计](skill-contribution-panel-design.md)、[客户端工作台](workbench.md)。本文定义贡献入口的导航调整，贡献数据口径和服务端权限继续遵循原面板方案及现有实现。
+> 关联文档：[Skill 贡献面板方案设计](skill-contribution-panel-design.md)、[客户端工作台](https://github.com/krillinai/ClaweeAgent/blob/main/docs/workbench.md)。本文定义贡献入口的导航调整，贡献数据口径和服务端权限继续遵循原面板方案及现有实现。
 
 ## 1. 目标与最终决策
 

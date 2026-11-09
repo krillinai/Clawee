@@ -1,48 +1,30 @@
 # AGENTS.md
 
-本文件是本仓库的长期协作上下文。若本文件与用户当前任务的明确要求冲突，以用户要求为准。
+默认使用中文回复与编写文档。禁止自动创建开发分支、使用 git worktree 或使用 Superpowers。
 
-## 1. 项目定位与边界
+## 项目职责
 
-Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企业治理能力共同组成。
+aigateway 维护 Go Gateway、server/web 管理台、数据库迁移、MCP 治理、授权审计、Skill Hub、知识库和共享资源。
 
-- 本地执行层由共享 Web、本地 daemon、Electron 桌面端和内嵌 Codex Runtime 组成，负责模型配置、任务与会话执行、工作区文件、Skill、定时任务和系统原生能力。
-- 企业治理层由 Go Gateway 和管理台组成，负责账号与会话、Agent 身份、MCP 上游与能力目录、授权与门禁、审计、Skill Hub、知识库和共享文件等能力。
-- 桌面端和浏览器端是同一工作台的不同运行入口；桌面端额外提供内嵌 Runtime、文件系统、通知、更新等原生能力。
-- Gateway 既服务 Clawee 客户端，也可作为其他 MCP Client 或 Agent Runtime 接入企业能力的统一治理入口。
-- 模型服务、钉钉、百炼及其他外部集成均按需配置；未配置时不应影响本地工作台和 Gateway 核心能力。
-- 本项目不替代企业现有 OA、ERP、CRM 等业务系统，而是通过 MCP 上游、知识库和明确配置的连接器接入已有能力。
-- 本地任务、Runtime 会话和模型凭据默认保存在用户设备；账号、授权、审计及共享资源由自托管 Gateway 管理。不得模糊两类数据的存储与信任边界。
+Clawee 客户端在 https://github.com/krillinai/ClaweeAgent 独立维护。本仓库不包含 Electron、Codex Runtime 和本地任务工作台。server/cmd/clawee-collector* 首轮仍属于服务端治理体系。
 
-## 2. 目录职责
+## 工程约束
 
-- `client/apps/web`：桌面端与浏览器端共用的 React 任务界面。通用页面和交互只在此实现一次。
-- `client/apps/daemon`：本地执行服务，负责任务、模型、会话、工作区文件、Skill、定时任务、本地 SQLite 数据和 Codex Runtime 调用。
-- `client/apps/desktop`：Electron 外壳，负责启动并嵌入 daemon、Web 和 Codex Runtime，以及系统菜单、文件选择、通知、更新等原生能力。Desktop Bridge 只承载必须由桌面环境提供的能力。
-- `client/apps/harness`：客户端开发与受控验证使用的运行环境，不承载生产业务实现。
-- `client/packages/protocol`、`client/packages/skill-market`：客户端工作区内的共享协议与 Skill 市场能力；跨应用契约优先在这些包中维护。
-- `server`：Go Gateway、HTTP/MCP API、账号与 RBAC、权限审计、知识库、Skill Hub、共享文件及可选企业集成。
-- `server/web`：Gateway 的 React 管理台和用户端管理界面，构建产物可嵌入 Go 服务端。
-- `server/db`：数据库迁移与种子数据。数据库结构变更必须通过迁移表达，不得依赖手工修改运行库。
-- `scripts`：根目录安装、初始化、构建、测试和验收入口；优先使用根 `package.json` 已提供的命令。
-- `docs`、`server/docs`：分别保存整合项目文档和服务端专项文档；服务端文档中的 Gateway 定位不代表整个仓库不包含 Agent Runtime。
-- `third_party`：第三方许可、声明和再分发材料，不得在无专项依据时删除或改写。
+- 使用 Go 1.25、Node.js 24、Corepack 与 pnpm 10.33.3。根目录工具依赖和 server/web 独立锁定，不跨目录重建锁文件。
+- server/web 使用 React 19、Vite、Tailwind、Radix UI 和既有 components/ui，遵守 docs/design/design.md 与 docs/frontend/frontend-development-guidelines.md。
+- 服务端使用现有 Go/Gin/PostgreSQL 边界；数据库结构通过迁移表达。本次拆分保留 Go module 路径。
+- 账户关联字段优先显示名称，其次邮箱、手机号、ID。
+- 服务端集成测试只使用隔离数据库。运维配置通过仓库外 CLAWEE_OPS_DIR 或环境变量提供，不操作旧生产实例和用户数据。
+- 提交前运行根目录脚本测试、管理台测试与构建、Go 测试与 vet；发布前完成包和容器验收。正式发布以 Gateway Release Preflight 为门禁。
+- Gateway 发布不得写入 ClaweeAgent 的桌面更新渠道，不需要 Apple 签名、公证或客户端 COS 凭据。
 
-客户端与 `server/web` 使用独立依赖工作区和锁文件。修改依赖时只更新所属工作区，不得跨目录重建锁文件。跨组件交互应沿用现有 HTTP、MCP、IPC 或共享协议边界，不要复制业务实现绕过接口。
+## 仓库协作与兼容性
 
-## 3. 技术与界面约束
-
-- 基础工具链为 Node.js 24、Corepack、pnpm 10.33.3 和 Go 1.25；使用各目录声明并锁定的版本，不依赖未声明的全局工具版本。
-- `client/apps/web` 使用 TypeScript、React 18 和 Vite，界面基于现有 CSS、设计令牌和 Lucide 图标体系。优先复用现有组件与样式，不为局部需求引入 Tailwind 或整体迁移到 shadcn/ui。
-- `client/apps/daemon` 使用 Node.js、TypeScript、Fastify 和 SQLite。业务逻辑应留在 daemon，Web 层不直接承担本地执行与持久化职责。
-- `client/apps/desktop` 使用 Electron。主进程、preload 与渲染进程保持权限隔离，新增原生能力必须通过已有 Bridge/IPC 边界暴露。
-- `server` 使用 Go、Gin 和 PostgreSQL。遵循现有包边界与依赖风格，优先使用标准库和仓库已有依赖，不为单一需求引入新的基础设施。
-- `server/web` 使用 TypeScript、React 19、Vite、Tailwind CSS、Radix UI 和现有 `components/ui` 组件体系。管理台组件优先复用现有 shadcn/ui 风格实现，Tailwind 主要用于布局、间距、尺寸和状态微调。
-- 开发 `server/web` 的 Gateway 管理后台页面前，遵循 `docs/design/design.md` 中的组件、布局、状态、文案和验收规范；该指南不适用于 `client/apps/web` 的本地任务工作台。
-- 开发 `server/web` 页面时同时遵循 `docs/frontend/frontend-development-guidelines.md` 的工程边界、API、路由、可访问性和验证要求；以仓库现有代码及服务端契约为准。
-- 客户端工作台与管理台是两套独立前端，不强行统一 React 版本、构建配置或样式实现，但应保持各自已有的视觉与交互一致性。
-- 前端整体保持克制、清晰、稳定和高信息密度。桌面端与浏览器端的共享流程应使用同一份 Web 实现；能力不可用时不得展示无效入口。
-- 后台面向管理员的账户关联字段（负责人、创建人、更新人、成员等）优先显示账户名称；名称为空时依次回退到邮箱、手机号和账户 ID。账户 ID 仍用于 URL、API、权限、关联和筛选值，并可作为次级信息保留。
+- 业务变更在所属仓库维护，通过互相链接的 PR 处理跨端功能。不得依赖相邻源码目录、符号链接或未锁定的另一仓库分支。
+- Gateway 先提供向后兼容的 HTTP/MCP 能力，客户端再使用新能力；删除字段与改变语义需先提供兼容期。
+- API 路径、`client_id: clawee-agent`、Agent 身份和数据边界不因拆仓改变。
+- 两边各自维护 VERSION 与 vX.Y.Z 标签，不要求版本号相同。发布候选记录实际验证的双方版本或完整 SHA。
+- 普通 PR 验证不得读取签名、生产或分发凭据。源码和产物扫描报告放在仓库外并脱敏。
 
 ## 4. 协作原则
 
@@ -92,12 +74,3 @@ Clawee 是可自托管的 Agent 工作台，由本地 Agent 执行能力和企�
   2. `[步骤]` -> 验证：`[检查方式]`
   3. `[步骤]` -> 验证：`[检查方式]`
 - 成功标准必须具体、可验证；不要用“改好它”“让它工作”这种模糊表述代替。
-
-## 5. 验证与发布约束
-
-- 修改客户端可执行代码、依赖、构建或发布配置后，提交前运行客户端 `desktop:preflight:local`，验证测试、类型检查、实际打包 App 和内嵌 Web 哈希。未通过不得宣称可发布。
-- 正式发布前必须在本地干净提交上运行 `node scripts/release-version.mjs check --tag v<version>`，并保留 `desktop:preflight:local` 的结果。`desktop:preflight:release` 依赖本机签名及公证凭据，凭据可用时运行并记录结果；凭据仅存在于 GitHub release 环境时，本地可跳过该步骤，不得把本地缺少生产凭据误判为代码验证失败。
-- 正式发布以已推送 SHA 的 GitHub Release Preflight 为唯一发布门禁；Tag workflow 必须先通过远端预检，再继续签名、打包和发布，随后运行 `desktop:tag:check`。不得将远端打包用于反复试错，不移动或重建正式 Tag。
-- 运行远端发布前，报告本地结果、目标 SHA 和 workflow 次数。公开 PR 不使用维护者签名或生产凭据。
-- 服务端集成测试使用隔离测试数据库。配置通过仓库外的 `CLAWEE_OPS_DIR` 或环境变量提供；不得操作旧生产实例或用户数据。
-- 公开前扫描源码和产物，第三方许可按实际再分发内容保留。扫描报告留在仓库外，输出必须脱敏。

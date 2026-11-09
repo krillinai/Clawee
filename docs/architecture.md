@@ -1,19 +1,9 @@
-# 架构与数据边界
+# aigateway 架构
 
-桌面壳嵌入共享 Web，连接本机 daemon。daemon 管理本地任务、模型配置与内嵌 Codex Runtime；Go Gateway 负责账号会话、MCP 权限、企业资源与审计，两者用途不同。
+Go Gateway 和 server/web 管理台维护账号、Agent 身份、HTTP/MCP 接口、授权门禁、审计、Skill Hub、知识库与共享文件。数据存储使用 PostgreSQL，结构由 server/db/migrations 管理。可选企业集成按部署配置启用。
 
-| 数据 | 默认位置与流向 |
-| --- | --- |
-| 本地任务、工作区文件、Runtime 会话 | 用户设备；模型执行时必要内容会发送给用户选择的模型服务 |
-| 模型 API Key | 本机配置/凭据存储，调用所配置模型服务时使用；不要随诊断包公开 |
-| 账号与认证会话 | 自托管 Gateway 及 PostgreSQL；本地持有对应网关凭据 |
-| MCP 请求 | Gateway 根据账号权限转发至部署者配置的上游，并记录审计 |
-| 共享文件与 Skill 包 | 显式上传或安装后保存在 Gateway 的配置数据目录及本机 |
-| Agent 活动 | 默认关闭直报；显式启用后发送给配置的 Gateway |
-| 可选商业集成 | 仅显式配置后联系对应外部服务，适用其数据政策 |
+管理台构建到 server/internal/server/webdist/dist，随 Go 二进制或容器分发。管理台与服务端保留同一仓库和发布版本。
 
-Gateway 地址修改后会清除会话，并隔离旧地址凭据。已登录或任务运行中禁止切换地址，避免把同一任务的请求发送到不同部署。
+ClaweeAgent 在独立仓库维护本地执行能力，通过 Gateway Origin 调用 HTTP/MCP 接口；本地任务、Runtime 会话与模型凭据在用户设备。Gateway 保存账号、授权、审计和共享资源，不直接读取客户端 SQLite。
 
-删除本地任务不代表外部模型服务或 Gateway 的审计记录同步删除。部署者应规定数据库、共享文件、Skill 和审计数据的留存期，备份与恢复时保持数据库、文件和加密密钥的一致性。
-
-开源仓库只保存源码、示例和测试夹具。运行配置、真实数据、私有旧历史和扫描报告均保存在仓库之外。
+server/cmd/clawee-collector* 与企业治理 API 有现有 Go 依赖，首轮保持在本仓库。详见 server/docs/architecture/overview.md 和 server/docs/integration/clawee-agent.md。

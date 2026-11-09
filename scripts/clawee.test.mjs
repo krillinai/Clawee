@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
-const require = createRequire(resolve('client/apps/daemon/package.json'));
+const require = createRequire(import.meta.url);
 const yaml = require('yaml');
 const run = (...args) => spawnSync(process.execPath, ['scripts/clawee.mjs', 'init', ...args], { encoding: 'utf8' });
 

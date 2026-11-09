@@ -83,6 +83,19 @@
     },
     {
       "type": "library",
+      "name": "github.com/aliyun/alibabacloud-oss-go-sdk-v2",
+      "version": "v1.6.0",
+      "purl": "pkg:golang/github.com/aliyun/alibabacloud-oss-go-sdk-v2@v1.6.0",
+      "bom-ref": "pkg:golang/github.com/aliyun/alibabacloud-oss-go-sdk-v2@v1.6.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "github.com/aliyun/credentials-go",
       "version": "v1.4.5",
       "purl": "pkg:golang/github.com/aliyun/credentials-go@v1.4.5",
@@ -126,6 +139,19 @@
       "version": "v2.7.0",
       "purl": "pkg:golang/github.com/clbanning/mxj/v2@v2.7.0",
       "bom-ref": "pkg:golang/github.com/clbanning/mxj/v2@v2.7.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "github.com/cyberphone/json-canonicalization",
+      "version": "v0.0.0-20241213102144-19d51d7fe467",
+      "purl": "pkg:golang/github.com/cyberphone/json-canonicalization@v0.0.0-20241213102144-19d51d7fe467",
+      "bom-ref": "pkg:golang/github.com/cyberphone/json-canonicalization@v0.0.0-20241213102144-19d51d7fe467",
       "properties": [
         {
           "name": "clawee:license-texts",
@@ -824,6 +850,19 @@
     },
     {
       "type": "library",
+      "name": "golang.org/x/image",
+      "version": "v0.32.0",
+      "purl": "pkg:golang/golang.org/x/image@v0.32.0",
+      "bom-ref": "pkg:golang/golang.org/x/image@v0.32.0",
+      "properties": [
+        {
+          "name": "clawee:license-texts",
+          "value": "LICENSE"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "golang.org/x/net",
       "version": "v0.43.0",
       "purl": "pkg:golang/golang.org/x/net@v0.43.0",
@@ -877,9 +916,9 @@
     {
       "type": "library",
       "name": "golang.org/x/text",
-      "version": "v0.29.0",
-      "purl": "pkg:golang/golang.org/x/text@v0.29.0",
-      "bom-ref": "pkg:golang/golang.org/x/text@v0.29.0",
+      "version": "v0.30.0",
+      "purl": "pkg:golang/golang.org/x/text@v0.30.0",
+      "bom-ref": "pkg:golang/golang.org/x/text@v0.30.0",
       "properties": [
         {
           "name": "clawee:license-texts",

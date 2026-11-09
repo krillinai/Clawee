@@ -9,39 +9,8 @@ import {
 
 export { parseReleaseVersion, resolveProductVersion } from './version.mjs';
 
-export function assertReleaseSupportsBundledRuntime(releaseVersion, minimumClaweeVersion) {
-  parseReleaseVersion(releaseVersion);
-  parseReleaseVersion(minimumClaweeVersion);
-  if (compareSemanticVersions(releaseVersion, minimumClaweeVersion) < 0) {
-    throw new Error(
-      `Release version ${releaseVersion} is below bundled Runtime minimum `
-      + `Clawee version ${minimumClaweeVersion}`
-    );
-  }
-}
-
 export function inspectReleaseVersion(root = repositoryRoot, options = {}) {
-  const release = resolveProductVersion({
-    root,
-    env: options.env ?? process.env,
-    tag: options.tag
-  });
-  const runtimeManifestPath = 'client/config/codex-runtime.json';
-  const runtimeManifest = JSON.parse(
-    readFileSync(resolve(root, runtimeManifestPath), 'utf8')
-  );
-  try {
-    assertReleaseSupportsBundledRuntime(
-      release.version,
-      runtimeManifest.minimumClaweeVersion
-    );
-  } catch (error) {
-    throw new Error(
-      `Release version ${release.version} is inconsistent:\n`
-      + `${runtimeManifestPath}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-  return release;
+  return resolveProductVersion({ root, env: options.env ?? process.env, tag: options.tag });
 }
 
 export function setReleaseVersion(version, root = repositoryRoot) {
@@ -52,44 +21,6 @@ export function setReleaseVersion(version, root = repositoryRoot) {
   if (current === version) return [];
   writeFileSync(path, `${version}\n`);
   return ['VERSION'];
-}
-
-function compareSemanticVersions(left, right) {
-  const leftParts = splitSemanticVersion(left);
-  const rightParts = splitSemanticVersion(right);
-  for (let index = 0; index < 3; index += 1) {
-    const difference = leftParts.core[index] - rightParts.core[index];
-    if (difference !== 0) return Math.sign(difference);
-  }
-  if (leftParts.prerelease.length === 0) {
-    return rightParts.prerelease.length === 0 ? 0 : 1;
-  }
-  if (rightParts.prerelease.length === 0) return -1;
-  const length = Math.max(leftParts.prerelease.length, rightParts.prerelease.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftIdentifier = leftParts.prerelease[index];
-    const rightIdentifier = rightParts.prerelease[index];
-    if (leftIdentifier === undefined) return -1;
-    if (rightIdentifier === undefined) return 1;
-    if (leftIdentifier === rightIdentifier) continue;
-    const leftNumeric = /^\d+$/.test(leftIdentifier);
-    const rightNumeric = /^\d+$/.test(rightIdentifier);
-    if (leftNumeric && rightNumeric) return Math.sign(Number(leftIdentifier) - Number(rightIdentifier));
-    if (leftNumeric) return -1;
-    if (rightNumeric) return 1;
-    return leftIdentifier < rightIdentifier ? -1 : 1;
-  }
-  return 0;
-}
-
-function splitSemanticVersion(version) {
-  const separatorIndex = version.indexOf('-');
-  const core = separatorIndex === -1 ? version : version.slice(0, separatorIndex);
-  const prerelease = separatorIndex === -1 ? '' : version.slice(separatorIndex + 1);
-  return {
-    core: core.split('.').map(Number),
-    prerelease: prerelease === '' ? [] : prerelease.split('.')
-  };
 }
 
 function readOption(args, name) {

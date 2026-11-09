@@ -95,7 +95,7 @@ Worker 每次领取前优先读取 Skill Hub 中名称严格为 `skill-review` �
 
 只对提供的文本、脚本源码与文件清单作静态判断，不声称已验证实际运行效果。二进制、未读取材料和其他覆盖限制必须写进报告；缺失内容影响安全或结构结论时判为需修改。
 
-审核规则 `1.1.0` 已吸收公开 Skill 的适用检查方法，来源与取舍记录在 [规则维护说明](../../client/apps/daemon/resources/skills/skill-review/README.md)。所有运行所需规则保留在 `SKILL.md`，不引入上游扫描脚本、AST/YARA 工具或联网核验。须结合用途、数据流和宿主判断风险，区分攻击行为与安全教学、检测示例；不能仅凭命令名、外部链接、可选字段缺失或写作风格阻断。需补充关键证据或修复结构的问题用 `needs_attention`，已确认的严重安全风险用 `recommend_reject`；两者均为需修改，阻断问题统一使用 `error`。
+审核规则 `1.1.0` 已吸收公开 Skill 的适用检查方法，来源与取舍记录在 [规则维护说明](https://github.com/krillinai/ClaweeAgent/blob/main/client/apps/daemon/resources/skills/skill-review/README.md)。所有运行所需规则保留在 `SKILL.md`，不引入上游扫描脚本、AST/YARA 工具或联网核验。须结合用途、数据流和宿主判断风险，区分攻击行为与安全教学、检测示例；不能仅凭命令名、外部链接、可选字段缺失或写作风格阻断。需补充关键证据或修复结构的问题用 `needs_attention`，已确认的严重安全风险用 `recommend_reject`；两者均为需修改，阻断问题统一使用 `error`。
 
 ### 4.3 输出格式
 

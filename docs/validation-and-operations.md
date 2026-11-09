@@ -1,28 +1,22 @@
 # 功能验证与操作指南
 
-更新日期：2026-09-09。本阶段在当前仓库验证启动、业务功能和部署，保持当前依赖、锁文件与 Runtime 不变。远端 CI、Release Preflight 和分支保护安排见[正式发布前待处理事项](pre-release-checklist.md)。
+更新日期：2026-11-09。本仓库验证 Gateway、管理台和服务端部署；客户端与实际 App 验收在 ClaweeAgent 中执行，跨端联调记录双方完整 SHA。发布职责见[仓库边界与维护](repository-maintenance.md)。
 
 本文是可执行的验收清单，不表示各项已经重新验证通过。每次验收应记录实际 SHA、环境与结果，测试记录保存在仓库外。
 
 ## 1. 组件命令入口
 
-客户端代码位于 `client/`，Gateway 与管理台代码位于 `server/`。子目录内的常用命令保留，根入口只是选择工作目录与工具链。
+Gateway 与管理台代码位于本仓库 `server/`。客户端代码在独立的 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 仓库中，其 `client/` 内部路径保留。
 
 | 操作 | 在组件目录执行，延续原操作方式 | 在当前仓库根目录执行 |
 | --- | --- | --- |
-| 客户端安装 | `cd client` 后 `pnpm install --frozen-lockfile` | `pnpm run setup` 同时安装两端 |
-| 管理台安装 | `cd server/web` 后 `pnpm install --frozen-lockfile` | 同上 |
-| 桌面开发 | `client/`：`pnpm desktop:dev` | `pnpm run client:dev` |
-| 客户端 Web 开发 | `client/`：`pnpm web:dev` | `pnpm run web:dev` |
+| 根工具和管理台安装 | 各自执行 `pnpm install --frozen-lockfile` | `pnpm run setup` |
 | Gateway 与管理台联合开发 | `server/`：`make dev` | `node scripts/clawee.mjs server dev` |
 | Gateway 单独开发 | `server/`：`make dev-backend` | `pnpm run server:dev` |
 | 管理台单独开发 | `server/`：`make dev-web` | `pnpm run admin:dev` |
 | 数据库迁移 | `server/`：`make db-migrate-up` | `pnpm run db:migrate` |
-| 客户端测试 | `client/`：`pnpm test` | `pnpm run client:test` |
 | 服务端测试 | `server/`：`make test` | `pnpm run server:test` |
-| 客户端全量构建 | `client/`：`pnpm build` | `pnpm run client:build` |
 | 服务端构建 | `server/`：`make build` | `pnpm run server:build` |
-| 本机桌面完整预检 | `client/`：`pnpm desktop:preflight:local` | `pnpm run desktop:preflight:local` |
 | Linux 服务端包 | `server/`：`make release-linux-amd64` / `make release-linux-arm64` | `node scripts/clawee.mjs server release-linux-amd64` 等 |
 | SSH 服务端部署 | `server/`：`./scripts/deploy-release.sh staging` | 进入 `server/` 后执行 |
 
@@ -31,7 +25,7 @@
 当前需要注意的差异：
 
 - 私有运维配置通过仓库外的 `CLAWEE_OPS_DIR` 提供，不复制旧仓库真实配置。
-- 根目录、客户端和管理台统一使用 pnpm `10.33.3`。各组件仍保留独立的 `packageManager` 声明和锁文件，由 Corepack 选择相同版本；直接执行原命令时需先启用 Corepack。
+- 两个仓库的根目录和所属组件统一使用 pnpm `10.33.3`。各组件仍保留独立的 `packageManager` 声明和锁文件，由 Corepack 选择相同版本；直接执行原命令时需先启用 Corepack。
 - 根目录脚本统一使用 `pnpm run`，尤其不要省略 `setup`、`init` 前的 `run`。根入口会给子进程准备 Corepack，管理台命令仍进入 `server/web/` 运行。
 - Gateway 默认 `http://127.0.0.1:1904`，模型使用自带服务模式，模型凭据由验收者在界面填写。
 - 不回退整合阶段已提交的依赖调整；从当前锁文件继续验证，不执行依赖升级。
@@ -56,7 +50,7 @@ corepack enable pnpm
 pnpm run setup
 ```
 
-在仓库根目录、`client/` 和 `server/web/` 执行 `pnpm --version` 均应为 `10.33.3`。若系统目录不允许启用 Corepack，使用表中的根入口，不用更换依赖来绕过工具链问题。
+在本仓库根目录、`server/web/` 及 ClaweeAgent 的 `client/` 执行 `pnpm --version` 均应为 `10.33.3`。若系统目录不允许启用 Corepack，使用表中的根入口，不用更换依赖来绕过工具链问题。
 
 准备独立环境：
 
@@ -111,7 +105,7 @@ curl --fail http://127.0.0.1:1904/version
 
 ### 3.3 启动桌面
 
-在专用操作系统测试用户的终端、仓库根目录执行：
+在专用操作系统测试用户的终端、**ClaweeAgent 仓库根目录**执行：
 
 ```bash
 pnpm run client:dev
@@ -126,7 +120,7 @@ pnpm run client:dev
 
 ### 3.4 验证共享 Web
 
-先关闭桌面并停止其开发命令，释放 `19860`，再从根目录运行：
+先关闭桌面并停止其开发命令，释放 `19860`，再从 **ClaweeAgent 仓库根目录**运行：
 
 ```bash
 export CLAWEE_DATA_DIR="$HOME/clawee-validation-web-data"
@@ -194,7 +188,7 @@ unset COMPOSE_PROJECT_NAME
 
 ### 5.2 客户端与本机 App
 
-根目录执行：
+在 **ClaweeAgent 仓库根目录**执行：
 
 ```bash
 pnpm run desktop:preflight:local
@@ -204,7 +198,7 @@ pnpm run desktop:preflight:local
 
 本步骤使用本地模式，不要求正式 Apple 签名、公证凭据。本机通过只代表当前平台，不能推断其他桌面平台或正式安装包已通过。手工验收还需对实际打包 App 重做 F01、F02、F05、F20；使用专用系统测试用户，避免访问旧桌面配置。
 
-### 5.3 隔离容器与真实模型联合验收
+### 5.3 隔离 Gateway 容器验收
 
 先在根目录构建镜像，再运行已有隔离脚本：
 
@@ -215,14 +209,7 @@ node scripts/container-smoke.mjs
 
 脚本使用随机项目名、宿主机随机端口、空数据库和新卷，覆盖迁移、首个管理员、Agent 登录、自带模型模式、MCP 授权及撤销和重启持久化，结束后自动清理自身容器与卷。
 
-真实模型联调在桌面本地预检通过后执行。仓库外 JSON 包含 `base_url`、`model`、`api_key` 三个字段，填写自己的实际值，文件权限设为 `0600`：
-
-```bash
-chmod 600 "$HOME/clawee-validation-model.json"
-CLAWEE_EXTERNAL_MODEL_CONFIG="$HOME/clawee-validation-model.json" node scripts/container-smoke.mjs
-```
-
-此命令会产生真实模型请求，自动运行隔离打包桌面并验证页面回复。不要把凭据写入本文或源码。该自动测试不替代第 4 节所有手工功能验收。
+客户端真实模型与实际 App 验收在 ClaweeAgent 中执行。本仓库的容器冒烟不启动桌面端，也不读取模型凭据。跨仓库 HTTP 适配器冒烟使用 ClaweeAgent 的 `gateway:smoke`，配置要求和验证边界见[仓库边界与维护](repository-maintenance.md)。
 
 ## 6. 部署操作验证
 
@@ -330,4 +317,4 @@ sudo systemctl status claw-gateway.service --no-pager
 
 本阶段完成标准：所选环境中完成启动、通用功能、自动检查、实际 App 和至少一种全新部署路径；其他路径与可选功能逐项列出结果或待环境原因。真实模型、备份恢复、跨平台验证不得用 mock、进程启动或单平台结果代替。
 
-复测时只重跑修复影响的功能及约定门禁；修改客户端可执行代码、依赖、构建或发布配置后，提交前必须重新通过完整 `desktop:preflight:local`。完成后检查 `git status --short`，确保配置、日志、截图、数据库和模型凭据没有加入提交。
+复测时只重跑修复影响的功能及约定门禁；在 ClaweeAgent 修改客户端可执行代码、依赖、构建或发布配置后，提交前必须重新通过完整 `desktop:preflight:local`。完成后检查 `git status --short`，确保配置、日志、截图、数据库和模型凭据没有加入提交。

@@ -50,10 +50,10 @@ function run(program, argv, directory) {
 }
 
 if (command === 'setup') {
-  run('corepack', ['pnpm', 'install', '--frozen-lockfile'], 'client');
+  run('corepack', ['pnpm', 'install', '--frozen-lockfile'], '.');
   run('corepack', ['pnpm', 'install', '--frozen-lockfile'], 'server/web');
-} else if (command === 'client' || command === 'admin') {
-  run('corepack', ['pnpm', ...args], command === 'client' ? 'client' : 'server/web');
+} else if (command === 'admin') {
+  run('corepack', ['pnpm', ...args], 'server/web');
 } else if (command === 'server') {
   run('make', args, 'server');
 } else if (command === 'init') {
@@ -67,7 +67,7 @@ if (command === 'setup') {
   if (!['https:', 'http:'].includes(gateway.protocol) || gateway.username || gateway.password || gateway.pathname !== '/' || gateway.search || gateway.hash) {
     throw new Error('Gateway 必须是无路径、凭据或查询参数的 HTTP(S) Origin');
   }
-  const require = createRequire(resolve(root, 'client/apps/daemon/package.json'));
+  const require = createRequire(import.meta.url);
   const yaml = require('yaml');
   const config = yaml.parse(readFileSync(resolve(root, 'server/configs/config.example.yaml'), 'utf8'));
   const directory = resolve(opsDir, 'configs');
@@ -108,6 +108,6 @@ if (command === 'setup') {
   }
   console.log('启动服务端前设置 CLAWEE_OPS_DIR 为上述运维目录。');
 } else {
-  console.error('用法：node scripts/clawee.mjs setup | init --ops-dir <目录> | client <命令> | admin <命令> | server <make目标>');
+  console.error('用法：node scripts/clawee.mjs setup | init --ops-dir <目录> | admin <命令> | server <make目标>');
   process.exitCode = 1;
 }

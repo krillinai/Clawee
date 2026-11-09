@@ -1,6 +1,8 @@
 name: Source Security
 on:
+  pull_request:
   push:
+    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:

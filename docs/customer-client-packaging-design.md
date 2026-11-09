@@ -12,7 +12,7 @@
 
 ## 2. 已核实的构建基础
 
-- 公共仓库 `krillinai/Clawee` 的 `v0.1.7` Release 已成功，源码 SHA 为 `268e493a76782a2856504850170860e2f2004a27`。其三个桌面预检任务、三个桌面发布任务及最终发布任务均成功。证据：https://github.com/krillinai/Clawee/actions/runs/34622536741 。
+- 公共仓库 `krillinai/Clawee` 的 `v0.1.7` Release 已成功，源码 SHA 为 `268e493a76782a2856504850170860e2f2004a27`。其三个桌面预检任务、三个桌面发布任务及最终发布任务均成功。证据：https://github.com/krillinai/aigateway/actions/runs/34622536741 。
 - `.github/workflows/release.yml` 使用 Node.js 24、客户端锁定的 pnpm、三个原生 runner，以及现有缓存、Runtime E2E 和产物上传步骤。macOS 运行 `pnpm desktop:release`，Windows 运行 `pnpm desktop:dist`，当前 Windows 交付明确为未签名。
 - `client/apps/desktop/scripts/package-release.mjs` 已读取 `client/config/config.toml`，通过 `enterprise-package-contract.mjs` 校验并序列化，将配置写入 `.pack/deployment/config.toml`。`electron-builder.yml` 再把它放入包内 `Resources/deployment/config.toml`；此过程发生在签名和安装包生成之前。
 - 当前标准配置为 `gateway = "http://127.0.0.1:1904"`。账户页面已有“服务端地址”和“保存地址”，daemon 已提供地址校验、配置持久化和切换时的会话清理。
@@ -119,7 +119,7 @@ Gateway 对外地址优先采用明确部署配置；同域部署未配置时，
 
 - 当前 Gateway 地址和复制按钮。
 - 已配置的 macOS Apple Silicon、macOS Intel、Windows x64 客户包下载项，展示版本、校验值和实际签名状态。
-- 始终可见的开源标准包入口，默认链接到 `https://github.com/krillinai/Clawee/releases/latest`；客户配置缺失时依然提供完整兜底。
+- 始终可见的开源标准包入口，默认链接到 `https://github.com/krillinai/aigateway/releases/latest`；客户配置缺失时依然提供完整兜底。
 - 简短手动配置指南：下载并安装标准包；打开账户页面；在“服务端地址”粘贴当前 Gateway；点击“保存地址”；再登录企业账号。
 - 无法连接时，检查 HTTPS 地址和企业网络；有旧配置时通过账户页修改。切换 Gateway 前结束正在执行的任务，已登录时先退出账户。
 
