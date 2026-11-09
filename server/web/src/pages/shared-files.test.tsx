@@ -123,6 +123,29 @@ describe("SharedFilesPage", () => {
     await waitFor(() => expect(removeSharedSpaceMember).toHaveBeenCalledWith({ spaceId: "space_1", userId: "usr_1" }));
   });
 
+  it("grants file delete permission through the member authorization drawer", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "管理季度空间成员授权" }));
+    const drawer = await screen.findByRole("dialog", { name: "季度空间" });
+    expect(await within(drawer).findByText("zhang@example.com")).toBeInTheDocument();
+
+    fireEvent.click(await within(drawer).findByRole("button", { name: "添加成员授权" }));
+    const addDialog = await screen.findByRole("dialog", { name: "添加成员授权" });
+    fireEvent.click(within(addDialog).getByRole("button", { name: "选择授权成员" }));
+    fireEvent.click(await screen.findByRole("option", { name: /李四.*lisi@example.com/ }));
+    const addDeleteCheckbox = within(addDialog).getByRole("checkbox", { name: "删除空间文件" });
+    expect(addDeleteCheckbox).not.toBeChecked();
+    fireEvent.click(addDeleteCheckbox);
+    fireEvent.click(within(addDialog).getByRole("button", { name: "添加 1 位成员" }));
+    await waitFor(() => expect(addSharedSpaceMember).toHaveBeenCalledWith({ spaceId: "space_1", userId: "usr_2", actions: ["read", "write", "delete"] }));
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "编辑张三成员授权" }));
+    const editDialog = await screen.findByRole("dialog", { name: "编辑成员授权" });
+    fireEvent.click(within(editDialog).getByRole("checkbox", { name: "删除空间文件" }));
+    fireEvent.click(within(editDialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateSharedSpaceMember).toHaveBeenCalledWith({ spaceId: "space_1", userId: "usr_1", actions: ["read", "write", "delete"] }));
+  });
+
   it("shows candidate query errors in the add-member dialog", async () => {
     vi.mocked(listSharedSpaceCandidates).mockRejectedValue(new Error("候选账号加载失败"));
     renderPage();

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -134,30 +135,35 @@ func TestSharedSpacesReturnCurrentAccountPermissions(t *testing.T) {
 	service, spaceID := newSharedFileHTTPService(t)
 	router := sharedFileHandlerRouter(service)
 	router.(*gin.Engine).GET("/spaces", handleAppSharedSpaces(service))
-	assertPermissions := func(wantWrite bool) {
+	assertPermissions := func(wantWrite, wantDelete bool) {
 		t.Helper()
 		recorder := sharedFileRequest(router, http.MethodGet, "/spaces", nil, 0, "")
 		var response struct {
 			Data []struct {
 				SpaceID     string `json:"space_id"`
 				Permissions struct {
-					Read  bool `json:"read"`
-					Write bool `json:"write"`
+					Read   bool `json:"read"`
+					Write  bool `json:"write"`
+					Delete bool `json:"delete"`
 				} `json:"permissions"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if recorder.Code != http.StatusOK || len(response.Data) != 1 || response.Data[0].SpaceID != spaceID || !response.Data[0].Permissions.Read || response.Data[0].Permissions.Write != wantWrite {
+		if recorder.Code != http.StatusOK || len(response.Data) != 1 || response.Data[0].SpaceID != spaceID || !response.Data[0].Permissions.Read || response.Data[0].Permissions.Write != wantWrite || response.Data[0].Permissions.Delete != wantDelete {
 			t.Fatalf("spaces status=%d body=%s", recorder.Code, recorder.Body.String())
 		}
 	}
-	assertPermissions(true)
+	assertPermissions(true, false)
 	if _, err := service.UpdateMember(context.Background(), spaceID, "user_1", []string{sharedfiles.ActionRead}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	assertPermissions(false)
+	assertPermissions(false, false)
+	if _, err := service.UpdateMember(context.Background(), spaceID, "user_1", []string{sharedfiles.ActionRead, sharedfiles.ActionDelete}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	assertPermissions(false, true)
 	if err := service.RemoveMember(context.Background(), spaceID, "user_1"); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +214,7 @@ func TestSharedFileStableErrorMapping(t *testing.T) {
 		{sharedfiles.ErrSpaceNameConflict, 409, "space_name_conflict"},
 		{sharedfiles.ErrMemberAlreadyExists, 409, "member_already_exists"},
 		{sharedfiles.ErrFileAlreadyExists, 409, "file_already_exists"},
+		{sharedfiles.ErrFileInUse, 409, "file_in_use"},
 		{&sharedfiles.RevisionConflictError{CurrentRevision: 3}, 409, "revision_conflict"},
 		{sharedfiles.ErrFileTooLarge, 413, "file_too_large"},
 		{sharedfiles.ErrContentLengthMismatch, 422, "content_length_mismatch"},
@@ -427,6 +434,171 @@ func TestSharedFileMemberMutationPermissionsAreIndependent(t *testing.T) {
 				t.Fatalf("%s %s status=%d for %s, want %d", route.method, route.path, recorder.Code, user, http.StatusForbidden)
 			}
 		}
+	}
+}
+
+func TestSharedFileAdminRemoveRequiresDeletePermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	accountService := accounts.NewService(accounts.Config{Store: accounts.NewMemoryStore()})
+	rbacService := rbac.NewService(rbac.Config{Store: rbac.NewMemoryStore(), Accounts: accountService})
+	users := map[string]accounts.Account{}
+	for user, permission := range map[string]string{
+		"reader":  rbac.PermissionSharedFilesRead,
+		"deleter": rbac.PermissionSharedFilesDelete,
+		"manager": rbac.PermissionSharedFilesManage,
+	} {
+		registered, err := accountService.Register(ctx, accounts.RegisterRequest{Email: user + "@example.com", Name: user, Password: "passw0rd!"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		users[user] = registered.Account
+		role, err := rbacService.CreateRole(ctx, "admin", rbac.CreateRoleInput{Code: "shared_remove_" + user, Name: user, Permissions: []string{permission}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rbacService.AssignAccountRole(ctx, "admin", registered.Account.UserID, role.RoleID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storage, err := sharedfiles.NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedStore := sharedfiles.NewMemoryStore()
+	for _, account := range users {
+		sharedStore.SetAccount(account.UserID, account.Name, account.Email, account.Status)
+	}
+	service := sharedfiles.NewService(sharedStore, storage, nil)
+	space, err := service.CreateSpace(ctx, "管理台删除空间", "", users["manager"].UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.UploadAdmin(ctx, users["manager"].UserID, space.SpaceID, "docs/admin.txt", "text/plain", 5, nil, strings.NewReader("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		if account, ok := users[c.GetHeader("X-Test-User")]; ok {
+			c.Set(accountContextKey, account)
+		}
+		c.Next()
+	})
+	router.POST("/remove", requirePermission(rbacService, rbac.PermissionSharedFilesDelete), handleAdminSharedFileRemove(service))
+	request := func(method, path, user, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if user != "" {
+			req.Header.Set("X-Test-User", user)
+		}
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+	removeBody := func(fileID string, revision int64) string {
+		return `{"file_id":"` + fileID + `","expected_revision":` + strconv.FormatInt(revision, 10) + `}`
+	}
+	if recorder := request(http.MethodPost, "/remove", "", removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodPost, "/remove", "reader", removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"error"`) {
+		t.Fatalf("reader status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodPost, "/remove", "deleter", removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusNoContent {
+		t.Fatalf("deleter status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := service.GetAdminFile(ctx, created.FileID); !errors.Is(err, sharedfiles.ErrSharedFileNotFound) {
+		t.Fatalf("deleted file still visible: %v", err)
+	}
+	second, err := service.UploadAdmin(ctx, users["manager"].UserID, space.SpaceID, "docs/second.txt", "text/plain", 6, nil, strings.NewReader("second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorder := request(http.MethodPost, "/remove", "deleter", removeBody(second.FileID, second.Revision+1)); recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"revision_conflict"`) {
+		t.Fatalf("stale revision status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodPost, "/remove", "manager", removeBody(second.FileID, second.Revision)); recorder.Code != http.StatusNoContent {
+		t.Fatalf("manage permission status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodPost, "/remove", "deleter", `{"file_id":"file_missing","expected_revision":1}`); recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"shared_file_not_found"`) {
+		t.Fatalf("missing file status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(http.MethodPost, "/remove", "deleter", `{"file_id":"","expected_revision":1}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid body status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestSharedFileAppRemoveRequiresAgentAndDeleteGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+	store := sharedfiles.NewMemoryStore()
+	store.SetAccount("creator", "创建者", "creator@example.com", "active")
+	store.SetAccount("user_1", "员工", "user@example.com", "active")
+	storage, err := sharedfiles.NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := sharedfiles.NewService(store, storage, nil)
+	space, err := service.CreateSpace(ctx, "客户端删除空间", "", "creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AddMember(ctx, space.SpaceID, "user_1", "creator"); err != nil {
+		t.Fatal(err)
+	}
+	upload := func(contents string) sharedfiles.UploadResult {
+		t.Helper()
+		result, err := service.Upload(ctx, "user_1", "agent_1", space.SpaceID, "docs/remove.txt", "text/plain", int64(len(contents)), sharedFileDigest(contents), nil, strings.NewReader(contents))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	created := upload("first")
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(accountContextKey, accounts.Account{UserID: "user_1"})
+		c.Set(principalContextKey, accounts.Principal{UserID: "user_1", AgentID: "agent_1", ClientID: accounts.ClientClaweeAgent})
+		c.Set(claweeAgentContextKey, mcpgateway.AgentRegistration{AgentID: "agent_1"})
+		c.Next()
+	})
+	router.Use(requireClaweeFileCaller())
+	router.POST("/remove", handleAppSharedFileRemove(service))
+	request := func(bearer bool, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/remove", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if bearer {
+			req.Header.Set("Authorization", "Bearer token")
+		}
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+	removeBody := func(fileID string, revision int64) string {
+		return `{"file_id":"` + fileID + `","expected_revision":` + strconv.FormatInt(revision, 10) + `}`
+	}
+	if recorder := request(false, removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusForbidden {
+		t.Fatalf("missing bearer status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(true, removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"shared_file_not_found"`) {
+		t.Fatalf("write-only member status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := service.UpdateMember(ctx, space.SpaceID, "user_1", []string{sharedfiles.ActionRead, sharedfiles.ActionWrite, sharedfiles.ActionDelete}, "creator"); err != nil {
+		t.Fatal(err)
+	}
+	if recorder := request(true, removeBody(created.FileID, created.Revision)); recorder.Code != http.StatusNoContent {
+		t.Fatalf("authorized delete status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	second := upload("second")
+	if recorder := request(true, removeBody(second.FileID, second.Revision+1)); recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"revision_conflict"`) {
+		t.Fatalf("stale revision status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(true, removeBody(second.FileID, second.Revision)); recorder.Code != http.StatusNoContent {
+		t.Fatalf("final delete status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := request(true, `{"file_id":"file_1","expected_revision":0}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid revision status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

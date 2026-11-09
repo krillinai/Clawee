@@ -17,13 +17,15 @@ export type SharedSpace = {
   updatedAt: string;
 };
 
+export type SharedSpaceAction = "read" | "write" | "delete";
+
 export type SharedSpaceMember = {
   userId: string;
   name: string;
   email: string;
   accountStatus: string;
   grantStatus: "complete" | "incomplete";
-  actions: Array<"read" | "write">;
+  actions: SharedSpaceAction[];
   joinedAt: string;
   updatedAt: string;
 };
@@ -80,7 +82,7 @@ type MemberResponse = {
   email: string;
   account_status: string;
   grant_status: "complete" | "incomplete";
-  actions: Array<"read" | "write">;
+  actions: SharedSpaceAction[];
   joined_at: string;
   updated_at: string;
 };
@@ -155,7 +157,7 @@ export async function listSharedSpaceCandidates(input: { spaceId: string; query?
   return { items: response.data.map((item) => ({ userId: item.user_id, name: item.name, email: item.email })), meta: response.meta };
 }
 
-export async function addSharedSpaceMember(input: { spaceId: string; userId: string; actions: Array<"read" | "write"> }) {
+export async function addSharedSpaceMember(input: { spaceId: string; userId: string; actions: SharedSpaceAction[] }) {
   return mapMember(await adminApi.post<MemberResponse>("/shared-spaces/account-grants", {
     space_id: input.spaceId,
     user_id: input.userId,
@@ -163,7 +165,7 @@ export async function addSharedSpaceMember(input: { spaceId: string; userId: str
   }));
 }
 
-export async function updateSharedSpaceMember(input: { spaceId: string; userId: string; actions: Array<"read" | "write"> }) {
+export async function updateSharedSpaceMember(input: { spaceId: string; userId: string; actions: SharedSpaceAction[] }) {
   return mapMember(await adminApi.put<MemberResponse>("/shared-spaces/account-grants", {
     space_id: input.spaceId,
     user_id: input.userId,
@@ -215,6 +217,13 @@ export async function uploadSharedFile(input: { spaceId: string; logicalPath: st
     sha256: body.data.sha256,
     updatedAt: body.data.updated_at
   };
+}
+
+export function deleteSharedFile(input: { spaceId: string; fileId: string; expectedRevision: number }) {
+  return adminApi.post<void>("/shared-files/remove", {
+    file_id: input.fileId,
+    expected_revision: input.expectedRevision
+  });
 }
 
 export function sharedFileDownloadURL(fileId: string) {

@@ -40,7 +40,8 @@ import {
   removeSharedSpaceMember,
   updateSharedSpaceMember,
   updateSharedSpace,
-  type SharedSpace
+  type SharedSpace,
+  type SharedSpaceAction
 } from "@/lib/shared-files-api";
 
 type SpaceForm = { mode: "create" | "edit"; spaceId: string; name: string; description: string };
@@ -96,8 +97,8 @@ export function SharedFilesPage() {
     queryKey: "shared-space-member-authorizations",
     listMembers: ({ query, cursor }) => listSharedSpaceMembers({ spaceId: authorizationId ?? "", query, cursor }),
     listCandidates: ({ query, cursor }) => listSharedSpaceCandidates({ spaceId: authorizationId ?? "", query, cursor }),
-    addMember: ({ userId, actions }) => addSharedSpaceMember({ spaceId: authorizationId ?? "", userId, actions: actions as Array<"read" | "write"> }),
-    updateMember: ({ userId, actions }) => updateSharedSpaceMember({ spaceId: authorizationId ?? "", userId, actions: actions as Array<"read" | "write"> }),
+    addMember: ({ userId, actions }) => addSharedSpaceMember({ spaceId: authorizationId ?? "", userId, actions: actions as SharedSpaceAction[] }),
+    updateMember: ({ userId, actions }) => updateSharedSpaceMember({ spaceId: authorizationId ?? "", userId, actions: actions as SharedSpaceAction[] }),
     removeMember: (userId) => removeSharedSpaceMember({ spaceId: authorizationId ?? "", userId })
   }), [authorizationId]);
 
@@ -210,7 +211,8 @@ export function SharedFilesPage() {
         open={Boolean(authorizationTarget)}
         permissions={[
           { value: "read", label: "查看空间与文件", required: true },
-          { value: "write", label: "上传及修改文件", defaultChecked: true }
+          { value: "write", label: "上传及修改文件", defaultChecked: true },
+          { value: "delete", label: "删除空间文件", description: "允许删除该空间中的文件，删除后不可恢复。" }
         ]}
         resourceId={authorizationTarget?.spaceId ?? ""}
         resourceLabel="共享空间"

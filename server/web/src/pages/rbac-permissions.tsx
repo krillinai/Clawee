@@ -102,5 +102,6 @@ function permissionActionLabel(action: string) {
   if (action === "merge") return "合并";
   if (action === "transfer") return "迁移";
   if (action === "read") return "查看";
+  if (action === "delete") return "删除";
   return "操作";
 }

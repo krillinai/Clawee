@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, Eye, FileUp, Upload } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { ArrowLeft, Download, Eye, FileUp, Trash2, Upload } from "lucide-react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useAdminPermission } from "@/components/admin-permissions";
 import {
+  ConfirmDialog,
   DataTableShell,
   EmptyState,
   ErrorAlert,
@@ -22,10 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { APIError } from "@/lib/api";
 import { formatDateTime } from "@/lib/mcp-admin-ui";
 import { permissions } from "@/lib/rbac-api";
 import { SharedFilePreview } from "./shared-file-preview";
 import {
+  deleteSharedFile,
   getSharedSpace,
   listSharedFiles,
   sharedFileDownloadURL,
@@ -38,12 +41,25 @@ type UploadForm = {
   mode: "create" | "replace";
   logicalPath: string;
   expectedRevision?: number;
-  file: File | null;
+  files: File[];
 };
+
+type UploadItemResult = {
+  fileName: string;
+  success: boolean;
+  created?: boolean;
+  revision?: number;
+  errorMessage?: string;
+};
+
+type UploadOutcome =
+  | { mode: "replace"; result: Awaited<ReturnType<typeof uploadSharedFile>> }
+  | { mode: "create"; items: UploadItemResult[] };
 
 export function SharedSpaceFilesPage() {
   const canDownload = useAdminPermission(permissions.sharedFilesDownload);
   const canUpload = useAdminPermission(permissions.sharedFilesUpload);
+  const canDelete = useAdminPermission(permissions.sharedFilesDelete);
   const [searchParams] = useSearchParams();
   const spaceId = searchParams.get("space_id") ?? "";
   const queryClient = useQueryClient();
@@ -52,8 +68,10 @@ export function SharedSpaceFilesPage() {
   const [cursor, setCursor] = useState("");
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [uploadForm, setUploadForm] = useState<UploadForm | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<SharedFile | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<SharedFile | null>(null);
 
   useEffect(() => { setPreviewFile(null); }, [spaceId, canDownload]);
 
@@ -72,48 +90,144 @@ export function SharedSpaceFilesPage() {
   const files = filesQuery.data?.items ?? [];
 
   const uploadMutation = useMutation({
-    mutationFn: (value: UploadForm) => uploadSharedFile({
-      spaceId,
-      logicalPath: value.logicalPath,
-      file: value.file as File,
-      expectedRevision: value.expectedRevision
-    }),
-    onSuccess: (result) => {
-      setUploadForm(null);
-      setNotice(result.created ? `文件“${result.fileName}”已上传` : `文件“${result.fileName}”已更新至 revision ${result.revision}`);
+    mutationFn: async (value: UploadForm): Promise<UploadOutcome> => {
+      if (value.mode === "replace") {
+        return {
+          mode: "replace",
+          result: await uploadSharedFile({
+            spaceId,
+            logicalPath: value.logicalPath,
+            file: value.files[0] as File,
+            expectedRevision: value.expectedRevision
+          })
+        };
+      }
+      const items: UploadItemResult[] = [];
+      for (const [index, file] of value.files.entries()) {
+        setUploadProgress({ current: index + 1, total: value.files.length });
+        const logicalPath = value.files.length === 1 ? value.logicalPath : file.name;
+        try {
+          const result = await uploadSharedFile({
+            spaceId,
+            logicalPath,
+            file,
+            expectedRevision: value.expectedRevision
+          });
+          items.push({ fileName: result.fileName, success: true, created: result.created, revision: result.revision });
+        } catch (error) {
+          items.push({ fileName: file.name, success: false, errorMessage: error instanceof Error ? error.message : "上传失败" });
+        }
+      }
+      return { mode: "create", items };
+    },
+    onSuccess: (outcome) => {
+      if (outcome.mode === "replace") {
+        setUploadForm(null);
+        setNotice(outcome.result.created ? `文件“${outcome.result.fileName}”已上传` : `文件“${outcome.result.fileName}”已更新至 revision ${outcome.result.revision}`);
+      } else {
+        const successCount = outcome.items.filter((item) => item.success).length;
+        if (successCount === outcome.items.length) {
+          setUploadForm(null);
+          if (outcome.items.length === 1) {
+            const [item] = outcome.items;
+            setNotice(item.created ? `文件“${item.fileName}”已上传` : `文件“${item.fileName}”已更新至 revision ${item.revision}`);
+          } else {
+            setNotice(`已上传 ${successCount} 个文件`);
+          }
+        } else {
+          setNotice(successCount > 0 ? `已上传 ${successCount} 个文件` : null);
+        }
+      }
+      if (outcome.mode === "replace" || outcome.items.some((item) => item.success)) {
+        void queryClient.invalidateQueries({ queryKey: ["shared-space-files", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["shared-space", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["shared-spaces"] });
+      }
+    },
+    onError: (error) => {
+      if (error instanceof SharedFileAPIError && error.code === "revision_conflict") {
+        void queryClient.invalidateQueries({ queryKey: ["shared-space-files", spaceId] });
+      }
+    },
+    onSettled: () => { setUploadProgress(null); }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (file: SharedFile) => deleteSharedFile({ spaceId, fileId: file.fileId, expectedRevision: file.revision }),
+    onSuccess: (_result, file) => {
+      setFileToDelete(null);
+      setNotice(`文件“${file.fileName}”已永久删除`);
       void queryClient.invalidateQueries({ queryKey: ["shared-space-files", spaceId] });
       void queryClient.invalidateQueries({ queryKey: ["shared-space", spaceId] });
       void queryClient.invalidateQueries({ queryKey: ["shared-spaces"] });
     },
     onError: (error) => {
-      if (error instanceof SharedFileAPIError && error.code === "revision_conflict") {
+      if (error instanceof APIError && error.code === "revision_conflict") {
         void queryClient.invalidateQueries({ queryKey: ["shared-space-files", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["shared-space", spaceId] });
+        void queryClient.invalidateQueries({ queryKey: ["shared-spaces"] });
       }
     }
   });
 
   function openUpload() {
     uploadMutation.reset();
+    setUploadProgress(null);
     setNotice(null);
-    setUploadForm({ mode: "create", logicalPath: "", file: null });
+    setUploadForm({ mode: "create", logicalPath: "", files: [] });
   }
 
   function openReplace(file: SharedFile) {
     uploadMutation.reset();
+    setUploadProgress(null);
     setNotice(null);
-    setUploadForm({ mode: "replace", logicalPath: file.logicalPath, expectedRevision: file.revision, file: null });
+    setUploadForm({ mode: "replace", logicalPath: file.logicalPath, expectedRevision: file.revision, files: [] });
+  }
+
+  function openDelete(file: SharedFile) {
+    deleteMutation.reset();
+    setNotice(null);
+    setFileToDelete(file);
+  }
+
+  function closeDelete() {
+    if (deleteMutation.isPending) return;
+    deleteMutation.reset();
+    setFileToDelete(null);
   }
 
   function submitUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!uploadForm?.file || !uploadForm.logicalPath.trim() || uploadMutation.isPending) return;
+    if (!uploadForm || uploadMutation.isPending || uploadMutation.data?.mode === "create") return;
+    if (uploadForm.files.length === 0) return;
+    if (uploadForm.mode === "replace" && uploadForm.files.length !== 1) return;
+    if (uploadForm.mode === "create" && uploadForm.files.length === 1 && !uploadForm.logicalPath.trim()) return;
     uploadMutation.mutate(uploadForm);
+  }
+
+  function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    setUploadForm((value) => {
+      if (!value) return value;
+      if (value.mode === "replace") return { ...value, files: files.slice(0, 1) };
+      return { ...value, files, logicalPath: files.length === 1 && !value.logicalPath ? files[0]?.name ?? "" : value.logicalPath };
+    });
   }
 
   function resetFilePage() {
     setCursor("");
     setCursorHistory([]);
   }
+
+  const uploadFiles = uploadForm?.files ?? [];
+  const isMultiUpload = uploadForm?.mode === "create" && uploadFiles.length > 1;
+  const uploadResults = uploadMutation.data?.mode === "create" ? uploadMutation.data.items : null;
+  const showUploadResults = Boolean(uploadResults?.some((item) => !item.success));
+  const canSubmitUpload = uploadForm !== null && !uploadMutation.isPending && !showUploadResults && (
+    uploadForm.mode === "replace"
+      ? uploadForm.files.length === 1 && Boolean(uploadForm.logicalPath.trim())
+      : uploadForm.files.length > 1 || Boolean(uploadForm.logicalPath.trim())
+  );
 
   return (
     <PageShell>
@@ -211,7 +325,7 @@ export function SharedSpaceFilesPage() {
                       <div className="font-mono text-xs text-muted-foreground">{formatDateTime(file.updatedAt)}</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {canDownload || canUpload ? <div className="flex justify-end gap-1">
+                      {canDownload || canUpload || canDelete ? <div className="flex justify-end gap-1">
                         {canDownload ? <Button aria-label={`预览文件 ${file.fileName}`} title="预览" size="icon" variant="ghost" onClick={() => setPreviewFile(file)}><Eye aria-hidden="true" /></Button> : null}
                         {canDownload ? <Button asChild size="sm" variant="ghost">
                           <a aria-label={`下载文件 ${file.fileName}`} href={sharedFileDownloadURL(file.fileId)}>
@@ -222,6 +336,9 @@ export function SharedSpaceFilesPage() {
                         {canUpload ? <Button aria-label={`上传新版本 ${file.fileName}`} size="sm" variant="outline" onClick={() => openReplace(file)}>
                           <FileUp data-icon="inline-start" aria-hidden="true" />
                           新版本
+                        </Button> : null}
+                        {canDelete ? <Button aria-label={`删除文件 ${file.fileName}`} title="删除" size="icon" variant="ghost" onClick={() => openDelete(file)}>
+                          <Trash2 aria-hidden="true" />
                         </Button> : null}
                       </div> : null}
                     </TableCell>
@@ -247,32 +364,83 @@ export function SharedSpaceFilesPage() {
       >
         <form className="flex flex-col gap-4" onSubmit={submitUpload}>
           {uploadMutation.isError ? <ErrorAlert>{uploadMutation.error.message}</ErrorAlert> : null}
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="shared-file-input">本地文件</FieldLabel>
-              <Input id="shared-file-input" required type="file" onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                setUploadForm((value) => value ? { ...value, file, logicalPath: value.mode === "create" && !value.logicalPath ? file?.name ?? "" : value.logicalPath } : value);
-              }} />
-              <FieldDescription>单文件最大 1 GiB。</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="shared-file-logical-path">逻辑路径</FieldLabel>
-              <Input id="shared-file-logical-path" maxLength={512} readOnly={uploadForm?.mode === "replace"} required value={uploadForm?.logicalPath ?? ""} onChange={(event) => setUploadForm((value) => value ? { ...value, logicalPath: event.target.value } : value)} />
-              <FieldDescription>{uploadForm?.mode === "replace" ? "上传新版本时不改变原逻辑路径。" : "使用 / 组织层级，例如 docs/design.md。"}</FieldDescription>
-            </Field>
-          </FieldGroup>
+          {showUploadResults && uploadResults ? (
+            <ul aria-label="上传结果" className="grid gap-2">
+              {uploadResults.map((item, index) => (
+                <li className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm" key={`${item.fileName}-${index}`}>
+                  <span className="min-w-0 break-all font-medium">{item.fileName}</span>
+                  {item.success ? <Badge variant="success">成功</Badge> : <span className="min-w-0 break-all text-destructive">失败：{item.errorMessage}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="shared-file-input">本地文件</FieldLabel>
+                <Input id="shared-file-input" multiple={uploadForm?.mode === "create"} required type="file" onChange={chooseFiles} />
+                <FieldDescription>单文件最大 1 GiB。</FieldDescription>
+              </Field>
+              {isMultiUpload ? (
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">已选文件</p>
+                    <span className="text-xs text-muted-foreground">{uploadFiles.length} 个文件</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">多选时按各自文件名保存到当前空间根目录。</p>
+                  <ul className="grid gap-1">
+                    {uploadFiles.map((file, index) => (
+                      <li className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm" key={`${file.name}-${index}`}>
+                        <span className="min-w-0 break-all">{file.name}</span>
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">{formatBytes(file.size)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <Field>
+                  <FieldLabel htmlFor="shared-file-logical-path">逻辑路径</FieldLabel>
+                  <Input id="shared-file-logical-path" maxLength={512} readOnly={uploadForm?.mode === "replace"} required value={uploadForm?.logicalPath ?? ""} onChange={(event) => setUploadForm((value) => value ? { ...value, logicalPath: event.target.value } : value)} />
+                  <FieldDescription>{uploadForm?.mode === "replace" ? "上传新版本时不改变原逻辑路径。" : "使用 / 组织层级，例如 docs/design.md。"}</FieldDescription>
+                </Field>
+              )}
+            </FieldGroup>
+          )}
+          {uploadMutation.isPending && uploadProgress && uploadProgress.total > 1 ? <p className="text-sm text-muted-foreground" role="status">正在上传 {uploadProgress.current}/{uploadProgress.total}</p> : null}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setUploadForm(null)} disabled={uploadMutation.isPending}>取消</Button>
-            <Button type="submit" disabled={uploadMutation.isPending || !uploadForm?.file || !uploadForm.logicalPath.trim()}>
-              <Upload data-icon="inline-start" aria-hidden="true" />
-              {uploadMutation.isPending ? "上传中..." : "上传"}
-            </Button>
+            {showUploadResults ? (
+              <Button type="button" onClick={() => setUploadForm(null)}>关闭</Button>
+            ) : (
+              <>
+                <Button type="button" variant="outline" onClick={() => setUploadForm(null)} disabled={uploadMutation.isPending}>取消</Button>
+                <Button type="submit" disabled={!canSubmitUpload}>
+                  <Upload data-icon="inline-start" aria-hidden="true" />
+                  {uploadMutation.isPending ? "上传中..." : "上传"}
+                </Button>
+              </>
+            )}
           </div>
         </form>
       </ModalShell>
+      <ConfirmDialog
+        confirmLabel={deleteMutation.isPending ? "删除中..." : "永久删除"}
+        description={fileToDelete ? `将永久删除文件“${fileToDelete.fileName}”（${fileToDelete.logicalPath}，revision ${fileToDelete.revision}）。文件删除后不可恢复，提交前请确认 revision 与文件列表一致。` : ""}
+        error={deleteMutation.isError ? deleteFailureMessage(deleteMutation.error) : undefined}
+        onClose={closeDelete}
+        onConfirm={() => fileToDelete && deleteMutation.mutate(fileToDelete)}
+        open={Boolean(fileToDelete)}
+        pending={deleteMutation.isPending}
+        title="删除文件"
+        variant="destructive"
+      />
     </PageShell>
   );
+}
+
+function deleteFailureMessage(error: Error) {
+  if (error instanceof APIError && error.code === "revision_conflict") {
+    return "文件版本已变化，已刷新文件列表；请确认最新 revision 后重试。";
+  }
+  return error.message;
 }
 
 function formatBytes(value: number) {

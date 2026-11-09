@@ -40,7 +40,7 @@ func TestSummarizeDataResourceGrantsUsesGrantDimensions(t *testing.T) {
 		},
 	}
 	types := summarizeDataResourceTypes(grants, resourceNames)
-	if len(types) != 5 || types[1].ResourceType != dataaccess.ResourceSharedSpace || types[1].ResourceCount != 2 || types[1].ActionCount != 2 || types[1].UserCount != 2 {
+	if len(types) != 5 || types[1].ResourceType != dataaccess.ResourceSharedSpace || types[1].ResourceCount != 2 || types[1].ActionCount != 3 || types[1].UserCount != 2 {
 		t.Fatalf("resource types = %#v", types)
 	}
 	if types[4].ResourceType != dataaccess.ResourceDataView || types[4].ResourceCount != 4 || types[4].ActionCount != 4 || types[4].UserCount != 0 {
@@ -55,7 +55,7 @@ func TestSummarizeDataResourceGrantsUsesGrantDimensions(t *testing.T) {
 		t.Fatalf("data views = %#v", dataViews)
 	}
 	actions := summarizeDataResourceActions(dataaccess.ResourceSharedSpace, "space_1", grants[:2])
-	if len(actions) != 2 || actions[0].Action != dataaccess.ActionRead || actions[1].Action != dataaccess.ActionWrite {
+	if len(actions) != 3 || actions[0].Action != dataaccess.ActionRead || actions[1].Action != dataaccess.ActionWrite || actions[2].Action != dataaccess.ActionDelete || actions[2].UserCount != 0 {
 		t.Fatalf("actions = %#v", actions)
 	}
 	dataViewActions := summarizeDataResourceActions(dataaccess.ResourceDataView, dataaccess.ViewBilibiliOperation, nil)

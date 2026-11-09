@@ -30,6 +30,11 @@ type sharedMemberRequest struct {
 	Actions []string `json:"actions"`
 }
 
+type sharedFileRemoveRequest struct {
+	FileID           string `json:"file_id"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
 type adminSharedFileResponse struct {
 	sharedfiles.File
 	UpdatedByUserName string `json:"updated_by_user_name"`
@@ -51,6 +56,7 @@ func mountSharedFileRoutes(app, admin *gin.RouterGroup, opts Options) {
 	appFiles.GET("/shared-files/detail", handleAppSharedFileDetail(opts.SharedFilesService))
 	appFiles.GET("/shared-files/content", handleAppSharedFileDownload(opts.SharedFilesService))
 	appFiles.POST("/shared-files/content", sharedFileOperationLog(opts.Logger, "upload"), handleAppSharedFileUpload(opts.SharedFilesService, opts.RBACService))
+	appFiles.POST("/shared-files/remove", sharedFileOperationLog(opts.Logger, "delete"), handleAppSharedFileRemove(opts.SharedFilesService))
 
 	read := requirePermission(opts.RBACService, rbac.PermissionSharedFilesRead)
 	admin.GET("/shared-spaces", read, handleAdminSharedSpaces(opts.SharedFilesService))
@@ -65,6 +71,7 @@ func mountSharedFileRoutes(app, admin *gin.RouterGroup, opts Options) {
 	admin.GET("/shared-files", read, handleAdminSharedFiles(opts.SharedFilesService, opts.AccountService))
 	admin.GET("/shared-files/content", sharedFileOperationLog(opts.Logger, "download"), requirePermission(opts.RBACService, rbac.PermissionSharedFilesDownload), handleAdminSharedFileDownload(opts.SharedFilesService))
 	admin.POST("/shared-files/content", sharedFileOperationLog(opts.Logger, "upload"), requirePermission(opts.RBACService, rbac.PermissionSharedFilesUpload), handleAdminSharedFileUpload(opts.SharedFilesService))
+	admin.POST("/shared-files/remove", sharedFileOperationLog(opts.Logger, "delete"), requirePermission(opts.RBACService, rbac.PermissionSharedFilesDelete), handleAdminSharedFileRemove(opts.SharedFilesService))
 }
 
 func requireClaweeFileCaller() gin.HandlerFunc {
@@ -292,6 +299,56 @@ func parseSharedFileUpload(c *gin.Context) (*int64, bool) {
 		return &value, true
 	}
 	return nil, true
+}
+
+func handleAppSharedFileRemove(service *sharedfiles.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		request, ok := parseSharedFileRemove(c)
+		if !ok {
+			return
+		}
+		account, _ := currentAccount(c)
+		item, err := service.DeleteFile(c.Request.Context(), account.UserID, request.FileID, request.ExpectedRevision)
+		if err != nil {
+			writeSharedFileError(c, err)
+			return
+		}
+		c.Set(sharedFileLogFileIDKey, item.FileID)
+		c.Set(sharedFileLogSpaceIDKey, item.SpaceID)
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func handleAdminSharedFileRemove(service *sharedfiles.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		request, ok := parseSharedFileRemove(c)
+		if !ok {
+			return
+		}
+		account, _ := currentAccount(c)
+		item, err := service.DeleteAdminFile(c.Request.Context(), account.UserID, request.FileID, request.ExpectedRevision)
+		if err != nil {
+			writeSharedFileError(c, err)
+			return
+		}
+		c.Set(sharedFileLogFileIDKey, item.FileID)
+		c.Set(sharedFileLogSpaceIDKey, item.SpaceID)
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func parseSharedFileRemove(c *gin.Context) (sharedFileRemoveRequest, bool) {
+	var request sharedFileRemoveRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeSharedFileError(c, sharedfiles.ErrInvalidRequest)
+		return sharedFileRemoveRequest{}, false
+	}
+	request.FileID = strings.TrimSpace(request.FileID)
+	if request.FileID == "" || request.ExpectedRevision < 1 {
+		writeSharedFileError(c, sharedfiles.ErrInvalidRequest)
+		return sharedFileRemoveRequest{}, false
+	}
+	return request, true
 }
 
 func writeSharedFileContent(c *gin.Context, item sharedfiles.File, reader io.ReadCloser) {
@@ -523,6 +580,8 @@ func writeSharedFileError(c *gin.Context, err error) {
 		status, code, message = 409, "member_already_exists", "账号已经是空间成员"
 	case errors.Is(err, sharedfiles.ErrFileAlreadyExists):
 		status, code, message = 409, "file_already_exists", "网盘文件已存在"
+	case errors.Is(err, sharedfiles.ErrFileInUse):
+		status, code, message = 409, "file_in_use", "文件已被流程任务引用，不能删除"
 	case errors.Is(err, sharedfiles.ErrRevisionConflict):
 		var conflict *sharedfiles.RevisionConflictError
 		details := []any{}

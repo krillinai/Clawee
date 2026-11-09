@@ -213,7 +213,7 @@ func normalizeMemberActions(actions []string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, action := range actions {
 		action = strings.TrimSpace(action)
-		if action != ActionRead && action != ActionWrite {
+		if action != ActionRead && action != ActionWrite && action != ActionDelete {
 			return nil, ErrInvalidRequest
 		}
 		seen[action] = true
@@ -224,6 +224,9 @@ func normalizeMemberActions(actions []string) ([]string, error) {
 	normalized := []string{ActionRead}
 	if seen[ActionWrite] {
 		normalized = append(normalized, ActionWrite)
+	}
+	if seen[ActionDelete] {
+		normalized = append(normalized, ActionDelete)
 	}
 	return normalized, nil
 }
@@ -323,6 +326,30 @@ func (s *Service) Upload(ctx context.Context, userID, agentID, spaceID, logicalP
 		return UploadResult{}, ErrInvalidRequest
 	}
 	return s.UploadForUser(ctx, userID, agentID, userID, spaceID, logicalPath, contentType, declaredSize, declaredDigest, expectedRevision, src)
+}
+
+func (s *Service) DeleteFile(ctx context.Context, userID, fileID string, expectedRevision int64) (File, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(fileID) == "" || expectedRevision < 1 {
+		return File{}, ErrInvalidRequest
+	}
+	file, err := s.store.DeleteAuthorizedFile(ctx, userID, fileID, expectedRevision)
+	if err != nil {
+		return File{}, err
+	}
+	s.cleanupObject(context.WithoutCancel(ctx), ObjectRef{StorageProfileID: file.StorageProfileID, StorageKey: file.StorageKey}, "file_delete", file.FileID, "")
+	return file, nil
+}
+
+func (s *Service) DeleteAdminFile(ctx context.Context, operatorUserID, fileID string, expectedRevision int64) (File, error) {
+	if strings.TrimSpace(operatorUserID) == "" || strings.TrimSpace(fileID) == "" || expectedRevision < 1 {
+		return File{}, ErrInvalidRequest
+	}
+	file, err := s.store.DeleteAdminFile(ctx, fileID, expectedRevision)
+	if err != nil {
+		return File{}, err
+	}
+	s.cleanupObject(context.WithoutCancel(ctx), ObjectRef{StorageProfileID: file.StorageProfileID, StorageKey: file.StorageKey}, "file_delete", file.FileID, "")
+	return file, nil
 }
 
 // 调用方负责校验跨用户上传管理权限；文件审计始终记录实际操作者。

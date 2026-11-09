@@ -23,6 +23,7 @@ const (
 	ActionUpload      = "upload"
 	ActionMCP         = "mcp"
 	ActionWrite       = "write"
+	ActionDelete      = "delete"
 	ActionConnect     = "connect"
 	ActionManage      = "manage"
 	ActionReadContent = "read_content"
@@ -50,6 +51,7 @@ var resourceCatalog = []ResourceDefinition{
 		Actions: []ActionDefinition{
 			{Action: ActionRead, Name: "查看空间与文件", Required: true},
 			{Action: ActionWrite, Name: "上传及修改文件", DefaultChecked: true},
+			{Action: ActionDelete, Name: "删除空间文件", Description: "允许删除该空间内的文件。"},
 		},
 	},
 	{

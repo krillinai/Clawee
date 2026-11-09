@@ -150,7 +150,9 @@ func normalizeActions(resourceType, resourceID string, actions []string) ([]stri
 		}
 	}
 	if resourceType == ResourceSharedSpace {
-		if _, write := seen[ActionWrite]; write {
+		_, write := seen[ActionWrite]
+		_, deleteAction := seen[ActionDelete]
+		if write || deleteAction {
 			if _, read := seen[ActionRead]; !read {
 				return nil, ErrInvalidRequest
 			}
