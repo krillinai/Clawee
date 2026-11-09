@@ -107,7 +107,7 @@ describe("UsersPage", () => {
     const cell = await screen.findByText("user@example.com");
     fireEvent.click(within(cell.closest("tr")!).getByRole("button",{name:"角色"}));
     const dialog = await screen.findByRole("dialog",{name:"管理后台角色"});
-    await within(dialog).findByText(/只读自动授权，成员由 ROSE 同步管理/);
+    await within(dialog).findByText(/只读自动授权，成员由外部组织同步管理/);
     expect(within(dialog).queryByRole("checkbox",{name:manager.name})).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("checkbox",{name:"安全审计员"}));
     fireEvent.click(within(dialog).getByRole("button",{name:"保存角色"}));
