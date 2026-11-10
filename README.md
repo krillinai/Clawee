@@ -6,7 +6,7 @@
 
 统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。**支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
 
-[官网](https://www.clawee.work/) · [核心能力](#核心能力) · [快速开始](#快速开始) · [客户端接入](#客户端接入) · [文档](#文档导航)
+[官网](https://www.clawee.work/) · [核心能力](#核心能力) · [快速开始](#快速开始) · [客户端接入](#客户端接入) · [文档](#文档导航) · [English](./docs/en/README.md)
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
@@ -50,20 +50,24 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 
 | 产品 | 定位 |
 | --- | --- |
-| <img src="./docs/assets/agents/clawee-agent.png" alt="Clawee Agent Logo" width="20" height="20" /> [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | 自研企业 Agent，专门用于承接企业的定制化业务模块 |
-| <img src="./docs/assets/agents/opencreator.png" alt="OpenCreator Logo" width="20" height="20" /> [OpenCreator](https://github.com/krillinai/OpenCreator) | 自研内容创作 Agent，可用于企业内容创作 |
+| <img src="./docs/assets/agents/clawee-agent.png" alt="Clawee Agent Logo" width="20" height="20" align="absmiddle" /> [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | 自研企业 Agent，专门用于承接企业的定制化业务模块 |
+| <img src="./docs/assets/agents/opencreator.png" alt="OpenCreator Logo" width="20" height="20" align="absmiddle" /> [OpenCreator](https://github.com/krillinai/OpenCreator) | 自研内容创作 Agent，可用于企业内容创作 |
 
 ### 主流 Agent 与平台
 
 | | | |
 | --- | --- | --- |
-| <img src="./docs/assets/agents/kimi.svg" alt="Kimi Logo" width="20" height="20" /> Kimi | <img src="./docs/assets/agents/deepseek.svg" alt="DeepSeek Harness Logo" width="20" height="20" /> DeepSeek Harness | <img src="./docs/assets/agents/cursor.svg" alt="Cursor Logo" width="20" height="20" /> [Cursor](https://www.cursor.com/) |
-| <img src="./docs/assets/agents/opencode.svg" alt="OpenCode Logo" width="20" height="20" /> [OpenCode](https://opencode.ai/) | <img src="./docs/assets/agents/gemini.svg" alt="Gemini CLI Logo" width="20" height="20" /> [Gemini CLI](https://github.com/google-gemini/gemini-cli) | <img src="./docs/assets/agents/copilot.svg" alt="GitHub Copilot CLI Logo" width="20" height="20" /> [GitHub Copilot CLI](https://github.com/features/copilot/cli) |
-| <img src="./docs/assets/agents/workbuddy.png" alt="WorkBuddy Logo" width="20" height="20" /> WorkBuddy | <img src="./docs/assets/agents/qwen-work.png" alt="千问办公 Logo" width="20" height="20" /> 千问办公 | <img src="./docs/assets/agents/doubao-work.png" alt="豆包工作 Logo" width="20" height="20" /> 豆包工作 |
-| <img src="./docs/assets/agents/codex.svg" alt="Codex Logo" width="20" height="20" /> [Codex](https://github.com/openai/codex) | <img src="./docs/assets/agents/openclaw.png" alt="OpenClaw Logo" width="20" height="20" /> [OpenClaw](https://github.com/openclaw/openclaw) | <img src="./docs/assets/agents/hermes.svg" alt="Hermes Logo" width="20" height="20" /> [Hermes](https://github.com/NousResearch/hermes-agent) |
-| <img src="./docs/assets/agents/pi.svg" alt="Pi Logo" width="20" height="20" /> [Pi](https://github.com/badlogic/pi-mono) | <img src="./docs/assets/agents/kiro.svg" alt="Kiro Logo" width="20" height="20" /> [Kiro](https://kiro.dev/) | <img src="./docs/assets/agents/claude.svg" alt="Claude Code Logo" width="20" height="20" /> [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
-| <img src="./docs/assets/agents/qwen.svg" alt="Qwen Code Logo" width="20" height="20" /> Qwen Code | <img src="./docs/assets/agents/aider.png" alt="Aider Logo" width="20" height="20" /> [Aider](https://github.com/Aider-AI/aider) | <img src="./docs/assets/agents/kilo.svg" alt="Kilo Logo" width="20" height="20" /> [Kilo](https://github.com/Kilo-Org/kilocode) |
-| <img src="./docs/assets/agents/trae.png" alt="Trae Logo" width="20" height="20" /> [Trae](https://www.trae.ai/) | <img src="./docs/assets/agents/qoder.svg" alt="Qoder Logo" width="20" height="20" /> [Qoder](https://qoder.com/) | |
+| <img src="./docs/assets/agents/kimi.svg" alt="Kimi Logo" width="20" height="20" align="absmiddle" /> Kimi | <img src="./docs/assets/agents/deepseek.svg" alt="DeepSeek Harness Logo" width="20" height="20" align="absmiddle" /> DeepSeek Harness | <img src="./docs/assets/agents/cursor.svg" alt="Cursor Logo" width="20" height="20" align="absmiddle" /> [Cursor](https://www.cursor.com/) |
+| <img src="./docs/assets/agents/opencode.svg" alt="OpenCode Logo" width="20" height="20" align="absmiddle" /> [OpenCode](https://opencode.ai/) | <img src="./docs/assets/agents/gemini.svg" alt="Gemini CLI Logo" width="20" height="20" align="absmiddle" /> [Gemini CLI](https://github.com/google-gemini/gemini-cli) | <img src="./docs/assets/agents/copilot.svg" alt="GitHub Copilot CLI Logo" width="20" height="20" align="absmiddle" /> [GitHub Copilot CLI](https://github.com/features/copilot/cli) |
+| <img src="./docs/assets/agents/workbuddy.png" alt="WorkBuddy Logo" width="20" height="20" align="absmiddle" /> WorkBuddy | <img src="./docs/assets/agents/qwen-work.png" alt="千问办公 Logo" width="20" height="20" align="absmiddle" /> 千问办公 | <img src="./docs/assets/agents/doubao-work.png" alt="豆包工作 Logo" width="20" height="20" align="absmiddle" /> 豆包工作 |
+| <img src="./docs/assets/agents/codex.svg" alt="Codex Logo" width="20" height="20" align="absmiddle" /> [Codex](https://github.com/openai/codex) | <img src="./docs/assets/agents/openclaw.png" alt="OpenClaw Logo" width="20" height="20" align="absmiddle" /> [OpenClaw](https://github.com/openclaw/openclaw) | <img src="./docs/assets/agents/hermes.svg" alt="Hermes Logo" width="20" height="20" align="absmiddle" /> [Hermes](https://github.com/NousResearch/hermes-agent) |
+| <img src="./docs/assets/agents/pi.svg" alt="Pi Logo" width="20" height="20" align="absmiddle" /> [Pi](https://github.com/badlogic/pi-mono) | <img src="./docs/assets/agents/kiro.svg" alt="Kiro Logo" width="20" height="20" align="absmiddle" /> [Kiro](https://kiro.dev/) | <img src="./docs/assets/agents/claude.svg" alt="Claude Code Logo" width="20" height="20" align="absmiddle" /> [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
+| <img src="./docs/assets/agents/qwen.svg" alt="Qwen Code Logo" width="20" height="20" align="absmiddle" /> Qwen Code | <img src="./docs/assets/agents/aider.png" alt="Aider Logo" width="20" height="20" align="absmiddle" /> [Aider](https://github.com/Aider-AI/aider) | <img src="./docs/assets/agents/kilo.svg" alt="Kilo Logo" width="20" height="20" align="absmiddle" /> [Kilo](https://github.com/Kilo-Org/kilocode) |
+| <img src="./docs/assets/agents/trae.png" alt="Trae Logo" width="20" height="20" align="absmiddle" /> [Trae](https://www.trae.ai/) | <img src="./docs/assets/agents/qoder.svg" alt="Qoder Logo" width="20" height="20" align="absmiddle" /> [Qoder](https://qoder.com/) | |
+
+<div align="center">
+  <img src="./docs/assets/supported-agents.png" alt="AI Gateway 支持的 22 个主流 Agent 与平台" width="100%" />
+</div>
 
 ## 系统架构
 
