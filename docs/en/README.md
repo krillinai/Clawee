@@ -43,7 +43,16 @@ Model and MCP audits are redacted and do not store plaintext API keys, cookies, 
 
 ## Enterprise Extensions
 
-Optional integrations include workflows and approvals, Agent activity, DingTalk, Bilibili, external model configuration, and billing. Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
+The following optional integrations are available:
+
+- Workflows and approvals
+- Agent activity
+- DingTalk
+- Bilibili
+- External model configuration
+- Billing
+
+Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
 
 ## Supported Agents
 
@@ -51,7 +60,7 @@ AI Gateway supports all mainstream Agents. Configure your Agent to use the Gatew
 
 | Agent / Platform | Status | Quick Start |
 | --- | :---: | --- |
-| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ Supported | [Integration guide](#client-integration) |
+| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ Native companion | [One-click integration](#claweeagent) |
 | Kimi | ✅ Supported | [Integration guide](#client-integration) |
 | DeepSeek Harness | ✅ Supported | [Integration guide](#client-integration) |
 | [Cursor](https://www.cursor.com/) | ✅ Supported | [Integration guide](#client-integration) |

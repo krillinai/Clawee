@@ -44,7 +44,16 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 
 ## 企业扩展
 
-提供工作流与审批、Agent 活动、钉钉、Bilibili、外部模型配置和计费等可选集成。可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
+支持以下可选集成：
+
+- 工作流与审批
+- Agent 活动
+- 钉钉
+- Bilibili
+- 外部模型配置
+- 计费
+
+可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
 
 ## 支持的 Agent
 
@@ -52,7 +61,7 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 
 | Agent / 平台 | 状态 | 快速接入 |
 | --- | :---: | --- |
-| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ 原生配套 | [支持一键接入](#claweeagent) |
 | Kimi | ✅ 支持 | [接入指南](#客户端接入) |
 | DeepSeek Harness | ✅ 支持 | [接入指南](#客户端接入) |
 | [Cursor](https://www.cursor.com/) | ✅ 支持 | [接入指南](#客户端接入) |
