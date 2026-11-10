@@ -6,7 +6,7 @@
 
 Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics. **Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
 
-[Website](https://www.clawee.work/) · [Core Capabilities](#core-capabilities) · [Quick Start](#quick-start) · [Client Integration](#client-integration) · [Documentation](#documentation) · [简体中文](../../README.md)
+[中文](../../README.md) · [English](./README.md)
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)

@@ -4,9 +4,10 @@
 
 **面向FDE、企业CTO、CIO和IT团队 · 由KrillinAI 团队打造**
 
-统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。**支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
+统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。<br />
+**支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
 
-[官网](https://www.clawee.work/) · [核心能力](#核心能力) · [快速开始](#快速开始) · [客户端接入](#客户端接入) · [文档](#文档导航) · [English](./docs/en/README.md)
+[中文](./README.md) · [English](./docs/en/README.md)
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
