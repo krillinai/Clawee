@@ -6,13 +6,17 @@
 
 Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics. **Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
 
-[中文](../../README.md) · [English](./README.md)
+[简体中文](../../README.md) · [English](./README.md)
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](../../server/go.mod)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](../../server/web/package.json)
 
+</div>
+
+<div align="center">
+  <img src="../assets/aigateway-overview.png" alt="AI Gateway connecting Agents, models, tools, data, and business systems" width="100%" />
 </div>
 
 ## Project Overview
@@ -22,10 +26,6 @@ As organizations adopt more Agents, models, and tools, scattered credentials, pe
 This repository includes the **Go Gateway, React management console, PostgreSQL migrations, and deployment tooling**. It can run independently or serve as the backend for [ClaweeAgent](https://github.com/krillinai/ClaweeAgent).
 
 AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise business system. It exposes an OpenAI-compatible HTTP API for models and MCP over Streamable HTTP for tools.
-
-<div align="center">
-  <img src="../assets/aigateway-overview.png" alt="AI Gateway connecting Agents, models, tools, data, and business systems" width="100%" />
-</div>
 
 ## Core Capabilities
 
@@ -38,35 +38,43 @@ AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise
 | Auditing and Usage | Track callers, routes, status, latency, errors, and token usage with personal history and administrator analytics |
 | Skill Hub | Skill packages, versions, spaces, Git sources, review and publishing workflows, and client downloads |
 | Knowledge and Files | Bailian knowledge base integration, shared spaces, file upload and download, and local or Alibaba Cloud OSS storage |
-| Enterprise Extensions | Workflows and approvals, Agent activity, DingTalk, Bilibili, external model configuration, billing, and other optional integrations |
 
-Model and MCP audits are redacted and do not store plaintext API keys, cookies, or upstream credentials. Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
+Model and MCP audits are redacted and do not store plaintext API keys, cookies, or upstream credentials.
+
+## Enterprise Extensions
+
+Optional integrations include workflows and approvals, Agent activity, DingTalk, Bilibili, external model configuration, and billing. Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
 
 ## Supported Agents
 
 AI Gateway supports all mainstream Agents. Configure your Agent to use the Gateway's OpenAI-compatible API or MCP endpoint to access centralized identity, access control, routing, approvals, and auditing.
 
-### Our Products
-
-| Product | Purpose |
-| --- | --- |
-| <img src="../assets/agents/clawee-agent.png" alt="Clawee Agent Logo" width="20" height="20" align="absmiddle" /> [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | Our enterprise Agent for custom business modules |
-| <img src="../assets/agents/opencreator.png" alt="OpenCreator Logo" width="20" height="20" align="absmiddle" /> [OpenCreator](https://github.com/krillinai/OpenCreator) | Our content creation Agent for enterprise content workflows |
-
-### Mainstream Agents and Platforms
-
-| | | |
-| --- | --- | --- |
-| <img src="../assets/agents/kimi.svg" alt="Kimi Logo" width="20" height="20" align="absmiddle" /> Kimi | <img src="../assets/agents/deepseek.svg" alt="DeepSeek Harness Logo" width="20" height="20" align="absmiddle" /> DeepSeek Harness | <img src="../assets/agents/cursor.svg" alt="Cursor Logo" width="20" height="20" align="absmiddle" /> [Cursor](https://www.cursor.com/) |
-| <img src="../assets/agents/opencode.svg" alt="OpenCode Logo" width="20" height="20" align="absmiddle" /> [OpenCode](https://opencode.ai/) | <img src="../assets/agents/gemini.svg" alt="Gemini CLI Logo" width="20" height="20" align="absmiddle" /> [Gemini CLI](https://github.com/google-gemini/gemini-cli) | <img src="../assets/agents/copilot.svg" alt="GitHub Copilot CLI Logo" width="20" height="20" align="absmiddle" /> [GitHub Copilot CLI](https://github.com/features/copilot/cli) |
-| <img src="../assets/agents/workbuddy.png" alt="WorkBuddy Logo" width="20" height="20" align="absmiddle" /> WorkBuddy | <img src="../assets/agents/qwen-work.png" alt="Qwen Workspace Logo" width="20" height="20" align="absmiddle" /> Qwen Workspace (千问办公) | <img src="../assets/agents/doubao-work.png" alt="Doubao Workspace Logo" width="20" height="20" align="absmiddle" /> Doubao Workspace (豆包工作) |
-| <img src="../assets/agents/codex.svg" alt="Codex Logo" width="20" height="20" align="absmiddle" /> [Codex](https://github.com/openai/codex) | <img src="../assets/agents/openclaw.png" alt="OpenClaw Logo" width="20" height="20" align="absmiddle" /> [OpenClaw](https://github.com/openclaw/openclaw) | <img src="../assets/agents/hermes.svg" alt="Hermes Logo" width="20" height="20" align="absmiddle" /> [Hermes](https://github.com/NousResearch/hermes-agent) |
-| <img src="../assets/agents/pi.svg" alt="Pi Logo" width="20" height="20" align="absmiddle" /> [Pi](https://github.com/badlogic/pi-mono) | <img src="../assets/agents/kiro.svg" alt="Kiro Logo" width="20" height="20" align="absmiddle" /> [Kiro](https://kiro.dev/) | <img src="../assets/agents/claude.svg" alt="Claude Code Logo" width="20" height="20" align="absmiddle" /> [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
-| <img src="../assets/agents/qwen.svg" alt="Qwen Code Logo" width="20" height="20" align="absmiddle" /> Qwen Code | <img src="../assets/agents/aider.png" alt="Aider Logo" width="20" height="20" align="absmiddle" /> [Aider](https://github.com/Aider-AI/aider) | <img src="../assets/agents/kilo.svg" alt="Kilo Logo" width="20" height="20" align="absmiddle" /> [Kilo](https://github.com/Kilo-Org/kilocode) |
-| <img src="../assets/agents/trae.png" alt="Trae Logo" width="20" height="20" align="absmiddle" /> [Trae](https://www.trae.ai/) | <img src="../assets/agents/qoder.svg" alt="Qoder Logo" width="20" height="20" align="absmiddle" /> [Qoder](https://qoder.com/) | |
+| Agent / Platform | Status | Quick Start |
+| --- | :---: | --- |
+| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ Supported | [Integration guide](#client-integration) |
+| Kimi | ✅ Supported | [Integration guide](#client-integration) |
+| DeepSeek Harness | ✅ Supported | [Integration guide](#client-integration) |
+| [Cursor](https://www.cursor.com/) | ✅ Supported | [Integration guide](#client-integration) |
+| [OpenCode](https://opencode.ai/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ Supported | [Integration guide](#client-integration) |
+| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ Supported | [Integration guide](#client-integration) |
+| WorkBuddy | ✅ Supported | [Integration guide](#client-integration) |
+| Qwen Workspace (千问办公) | ✅ Supported | [Integration guide](#client-integration) |
+| Doubao Workspace (豆包工作) | ✅ Supported | [Integration guide](#client-integration) |
+| [Codex](https://github.com/openai/codex) | ✅ Supported | [Integration guide](#client-integration) |
+| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ Supported | [Integration guide](#client-integration) |
+| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ Supported | [Integration guide](#client-integration) |
+| [Pi](https://github.com/badlogic/pi-mono) | ✅ Supported | [Integration guide](#client-integration) |
+| [Kiro](https://kiro.dev/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ Supported | [Integration guide](#client-integration) |
+| Qwen Code | ✅ Supported | [Integration guide](#client-integration) |
+| [Aider](https://github.com/Aider-AI/aider) | ✅ Supported | [Integration guide](#client-integration) |
+| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ Supported | [Integration guide](#client-integration) |
+| [Trae](https://www.trae.ai/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Qoder](https://qoder.com/) | ✅ Supported | [Integration guide](#client-integration) |
 
 <div align="center">
-  <img src="../assets/supported-agents.png" alt="22 mainstream Agents and platforms supported by AI Gateway" width="100%" />
+  <img src="../assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
 </div>
 
 ## System Architecture

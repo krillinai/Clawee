@@ -7,13 +7,17 @@
 统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。<br />
 **支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
 
-[中文](./README.md) · [English](./docs/en/README.md)
+[简体中文](./README.md) · [English](./docs/en/README.md)
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](./server/go.mod)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](./server/web/package.json)
 
+</div>
+
+<div align="center">
+  <img src="./docs/assets/aigateway-overview.png" alt="AI Gateway 统一连接 Agent、模型、工具、数据与业务系统" width="100%" />
 </div>
 
 ## 项目概览
@@ -23,10 +27,6 @@
 本仓库包含 **Go Gateway、React 管理台、PostgreSQL 迁移和部署工具**，既可独立使用，也可作为 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 的服务端。
 
 AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
-
-<div align="center">
-  <img src="./docs/assets/aigateway-overview.png" alt="AI Gateway 统一连接 Agent、模型、工具、数据与业务系统" width="100%" />
-</div>
 
 ## 核心能力
 
@@ -39,35 +39,43 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 | 审计与用量 | 记录调用主体、路由、状态、耗时、错误和 Token 用量，提供个人记录与管理端分析 |
 | Skill Hub | Skill 包、版本、空间、Git 来源、审核发布与客户端下载 |
 | 知识与文件 | 百炼知识库接入、共享空间、文件上传下载、本地或阿里云 OSS 存储 |
-| 企业扩展 | 工作流与审批、Agent 活动、钉钉、Bilibili、外部模型配置和计费等可选集成 |
 
-模型与 MCP 审计会脱敏，不保存明文 API Key、Cookie 或上游凭据。可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
+模型与 MCP 审计会脱敏，不保存明文 API Key、Cookie 或上游凭据。
+
+## 企业扩展
+
+提供工作流与审批、Agent 活动、钉钉、Bilibili、外部模型配置和计费等可选集成。可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
 
 ## 支持的 Agent
 
 支持所有主流 Agent。Agent 可通过自身支持的 OpenAI 兼容 API 或 MCP 配置能力接入 AI Gateway，复用统一的身份、权限、路由、审批和审计能力。
 
-### 自研产品
-
-| 产品 | 定位 |
-| --- | --- |
-| <img src="./docs/assets/agents/clawee-agent.png" alt="Clawee Agent Logo" width="20" height="20" align="absmiddle" /> [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | 自研企业 Agent，专门用于承接企业的定制化业务模块 |
-| <img src="./docs/assets/agents/opencreator.png" alt="OpenCreator Logo" width="20" height="20" align="absmiddle" /> [OpenCreator](https://github.com/krillinai/OpenCreator) | 自研内容创作 Agent，可用于企业内容创作 |
-
-### 主流 Agent 与平台
-
-| | | |
-| --- | --- | --- |
-| <img src="./docs/assets/agents/kimi.svg" alt="Kimi Logo" width="20" height="20" align="absmiddle" /> Kimi | <img src="./docs/assets/agents/deepseek.svg" alt="DeepSeek Harness Logo" width="20" height="20" align="absmiddle" /> DeepSeek Harness | <img src="./docs/assets/agents/cursor.svg" alt="Cursor Logo" width="20" height="20" align="absmiddle" /> [Cursor](https://www.cursor.com/) |
-| <img src="./docs/assets/agents/opencode.svg" alt="OpenCode Logo" width="20" height="20" align="absmiddle" /> [OpenCode](https://opencode.ai/) | <img src="./docs/assets/agents/gemini.svg" alt="Gemini CLI Logo" width="20" height="20" align="absmiddle" /> [Gemini CLI](https://github.com/google-gemini/gemini-cli) | <img src="./docs/assets/agents/copilot.svg" alt="GitHub Copilot CLI Logo" width="20" height="20" align="absmiddle" /> [GitHub Copilot CLI](https://github.com/features/copilot/cli) |
-| <img src="./docs/assets/agents/workbuddy.png" alt="WorkBuddy Logo" width="20" height="20" align="absmiddle" /> WorkBuddy | <img src="./docs/assets/agents/qwen-work.png" alt="千问办公 Logo" width="20" height="20" align="absmiddle" /> 千问办公 | <img src="./docs/assets/agents/doubao-work.png" alt="豆包工作 Logo" width="20" height="20" align="absmiddle" /> 豆包工作 |
-| <img src="./docs/assets/agents/codex.svg" alt="Codex Logo" width="20" height="20" align="absmiddle" /> [Codex](https://github.com/openai/codex) | <img src="./docs/assets/agents/openclaw.png" alt="OpenClaw Logo" width="20" height="20" align="absmiddle" /> [OpenClaw](https://github.com/openclaw/openclaw) | <img src="./docs/assets/agents/hermes.svg" alt="Hermes Logo" width="20" height="20" align="absmiddle" /> [Hermes](https://github.com/NousResearch/hermes-agent) |
-| <img src="./docs/assets/agents/pi.svg" alt="Pi Logo" width="20" height="20" align="absmiddle" /> [Pi](https://github.com/badlogic/pi-mono) | <img src="./docs/assets/agents/kiro.svg" alt="Kiro Logo" width="20" height="20" align="absmiddle" /> [Kiro](https://kiro.dev/) | <img src="./docs/assets/agents/claude.svg" alt="Claude Code Logo" width="20" height="20" align="absmiddle" /> [Claude Code](https://docs.anthropic.com/en/docs/claude-code) |
-| <img src="./docs/assets/agents/qwen.svg" alt="Qwen Code Logo" width="20" height="20" align="absmiddle" /> Qwen Code | <img src="./docs/assets/agents/aider.png" alt="Aider Logo" width="20" height="20" align="absmiddle" /> [Aider](https://github.com/Aider-AI/aider) | <img src="./docs/assets/agents/kilo.svg" alt="Kilo Logo" width="20" height="20" align="absmiddle" /> [Kilo](https://github.com/Kilo-Org/kilocode) |
-| <img src="./docs/assets/agents/trae.png" alt="Trae Logo" width="20" height="20" align="absmiddle" /> [Trae](https://www.trae.ai/) | <img src="./docs/assets/agents/qoder.svg" alt="Qoder Logo" width="20" height="20" align="absmiddle" /> [Qoder](https://qoder.com/) | |
+| Agent / 平台 | 状态 | 快速接入 |
+| --- | :---: | --- |
+| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ 支持 | [接入指南](#客户端接入) |
+| Kimi | ✅ 支持 | [接入指南](#客户端接入) |
+| DeepSeek Harness | ✅ 支持 | [接入指南](#客户端接入) |
+| [Cursor](https://www.cursor.com/) | ✅ 支持 | [接入指南](#客户端接入) |
+| [OpenCode](https://opencode.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ 支持 | [接入指南](#客户端接入) |
+| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ 支持 | [接入指南](#客户端接入) |
+| WorkBuddy | ✅ 支持 | [接入指南](#客户端接入) |
+| 千问办公 | ✅ 支持 | [接入指南](#客户端接入) |
+| 豆包工作 | ✅ 支持 | [接入指南](#客户端接入) |
+| [Codex](https://github.com/openai/codex) | ✅ 支持 | [接入指南](#客户端接入) |
+| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Pi](https://github.com/badlogic/pi-mono) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Kiro](https://kiro.dev/) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ 支持 | [接入指南](#客户端接入) |
+| Qwen Code | ✅ 支持 | [接入指南](#客户端接入) |
+| [Aider](https://github.com/Aider-AI/aider) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Trae](https://www.trae.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Qoder](https://qoder.com/) | ✅ 支持 | [接入指南](#客户端接入) |
 
 <div align="center">
-  <img src="./docs/assets/supported-agents.png" alt="AI Gateway 支持的 22 个主流 Agent 与平台" width="100%" />
+  <img src="./docs/assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
 </div>
 
 ## 系统架构
