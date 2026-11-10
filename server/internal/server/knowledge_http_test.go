@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/krillinai/Clawee/server/internal/accounts"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
@@ -19,12 +20,105 @@ import (
 	"github.com/krillinai/Clawee/server/internal/server"
 )
 
+type refreshingKnowledgeHTTPProvider struct {
+	successfulKnowledgeHTTPProvider
+	calls  int
+	failed bool
+}
+
+func (p *refreshingKnowledgeHTTPProvider) ListDocuments(ctx context.Context, _ string) ([]provider.ProviderDocument, error) {
+	p.calls++
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > knowledge.DocumentListRefreshTimeout {
+		return nil, &provider.ProviderError{Code: provider.ErrorInternal}
+	}
+	if p.failed {
+		return nil, &provider.ProviderError{Code: provider.ErrorUnauthorized}
+	}
+	return []provider.ProviderDocument{{ExternalID: "provider-doc", Status: provider.DocumentReady}}, nil
+}
+
+func TestRAGFlowHTTPRefreshChecksPermissionsAndPreservesContract(t *testing.T) {
+	ctx := context.Background()
+	p := &refreshingKnowledgeHTTPProvider{}
+	store := knowledge.NewMemoryStore()
+	svc := knowledge.NewService(store, p, knowledge.ProviderRAGFlow)
+	kb, err := svc.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "合成库"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload := func() knowledge.Document {
+		doc, err := svc.UploadDocument(ctx, knowledge.UploadDocumentInput{KnowledgeBaseID: kb.KnowledgeBaseID, Name: "fixture.txt", SizeBytes: 1, Reader: strings.NewReader("x")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	doc := upload()
+	accountSvc := newTestAccountService(accounts.NewMemoryStore())
+	access := dataaccess.NewService(dataaccess.NewMemoryStore())
+	router := newTestRouter(t, server.Options{AccountService: accountSvc, ProxyGateway: testProxyGateway(newClaweeOwnedAgentStore(accountSvc)), KnowledgeService: svc, DataAccessService: access})
+	adminCookies := register(t, router, `{"email":"ragflow-fixture@example.com","name":"合成管理员","password":"passw0rd!"}`)
+	login := loginClawee(t, router, "ragflow-fixture@example.com", "passw0rd!", "ragflow-fixture-agent")
+	if login.Status != http.StatusOK {
+		t.Fatalf("登录失败=%d", login.Status)
+	}
+	request := func(admin bool) *httptest.ResponseRecorder {
+		path := "/api/v1/app/knowledge-bases/documents?knowledge_base_id=" + kb.KnowledgeBaseID
+		if admin {
+			path = "/api/v1/admin/knowledge-bases/documents?knowledge_base_id=" + kb.KnowledgeBaseID
+		}
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		if admin {
+			r.AddCookie(adminCookie(t, adminCookies))
+		} else {
+			r.Header.Set("Authorization", "Bearer "+login.AccessToken)
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		return w
+	}
+	denied := request(false)
+	if denied.Code != http.StatusNotFound || p.calls != 0 {
+		t.Fatalf("无read不能请求上游: status=%d calls=%d", denied.Code, p.calls)
+	}
+	account, err := accountSvc.AccountForAgent(ctx, "ragflow-fixture-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := access.Create(ctx, dataaccess.SetInput{UserID: account.UserID, ResourceType: dataaccess.ResourceKnowledgeBase, ResourceID: kb.KnowledgeBaseID, Actions: []string{dataaccess.ActionRead}, CreatedBy: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	p.failed = true
+	w := request(false)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "knowledge_provider_error") {
+		t.Fatalf("上游鉴权错误不能清除用户登录: status=%d body=%s", w.Code, w.Body)
+	}
+	stored, _ := store.GetDocument(ctx, kb.KnowledgeBaseID, doc.DocumentID)
+	if stored.Status != knowledge.DocumentProcessing {
+		t.Fatal("失败修改本地状态")
+	}
+	p.failed = false
+	w = request(false)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"meta"`) || !strings.Contains(w.Body.String(), `"status":"ready"`) || strings.Contains(w.Body.String(), "provider-doc") {
+		t.Fatalf("App响应契约改变: status=%d body=%s", w.Code, w.Body)
+	}
+	// 管理台读取沿用同一刷新链路。
+	doc.Status = knowledge.DocumentProcessing
+	if _, err := store.UpdateDocument(ctx, doc, knowledge.DocumentReady); err != nil {
+		t.Fatal(err)
+	}
+	w = request(true)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"ready"`) || strings.Contains(w.Body.String(), "provider-doc") {
+		t.Fatalf("Admin刷新失败: status=%d body=%s", w.Code, w.Body)
+	}
+}
+
 func TestClaweeKnowledgeRoutesUseCurrentAccountGrants(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	proxyStore := newClaweeOwnedAgentStore(accountService)
 	dataAccessService := dataaccess.NewService(dataaccess.NewMemoryStore())
-	knowledgeService := knowledge.NewService(knowledge.NewMemoryStore(), successfulKnowledgeHTTPProvider{})
+	knowledgeService := knowledge.NewService(knowledge.NewMemoryStore(), successfulKnowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	allowed, err := knowledgeService.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +221,7 @@ func TestKnowledgeAccountGrantAdminLifecycleAndValidation(t *testing.T) {
 	ctx := context.Background()
 	accountService := newTestAccountService(accounts.NewMemoryStore())
 	dataAccessService := dataaccess.NewService(dataaccess.NewMemoryStore())
-	knowledgeService := knowledge.NewService(knowledge.NewMemoryStore(), successfulKnowledgeHTTPProvider{})
+	knowledgeService := knowledge.NewService(knowledge.NewMemoryStore(), successfulKnowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := knowledgeService.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +404,7 @@ func TestKnowledgeGrantRouteUsesAccountManagedScope(t *testing.T) {
 
 func TestKnowledgeBaseCreateStoresCreatorNameSnapshot(t *testing.T) {
 	accountService := newTestAccountService(accounts.NewMemoryStore())
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	router := newTestRouter(t, server.Options{
 		ProxyGateway: testProxyGateway(mcpgateway.NewMemoryStore()), AccountService: accountService, KnowledgeService: service,
 	})
@@ -332,7 +426,7 @@ func TestKnowledgeBaseCreateStoresCreatorNameSnapshot(t *testing.T) {
 
 func TestKnowledgeUploadReturnsBadGatewayForEmptyProviderMapping(t *testing.T) {
 	ctx := context.Background()
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := service.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +456,7 @@ func TestKnowledgeUploadReturnsBadGatewayForEmptyProviderMapping(t *testing.T) {
 
 func TestKnowledgeSyncRejectsQueryOnlyKnowledgeBaseID(t *testing.T) {
 	ctx := context.Background()
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := service.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +475,7 @@ func TestKnowledgeSyncRejectsQueryOnlyKnowledgeBaseID(t *testing.T) {
 
 func TestKnowledgeUploadRejectsQueryOnlyKnowledgeBaseID(t *testing.T) {
 	ctx := context.Background()
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := service.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +504,7 @@ func TestKnowledgeUploadRejectsQueryOnlyKnowledgeBaseID(t *testing.T) {
 
 func TestKnowledgeBasePatchUpdatesMetadata(t *testing.T) {
 	ctx := context.Background()
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := service.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", Description: "旧描述", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +539,7 @@ func TestKnowledgeBasePatchUpdatesMetadata(t *testing.T) {
 
 func TestKnowledgeBasePatchRejectsEmptyUpdate(t *testing.T) {
 	ctx := context.Background()
-	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{})
+	service := knowledge.NewService(knowledge.NewMemoryStore(), knowledgeHTTPProvider{}, knowledge.ProviderBailian)
 	kb, err := service.CreateKnowledgeBase(ctx, knowledge.CreateKnowledgeBaseInput{Name: "公司制度", CreatedBy: "admin"})
 	if err != nil {
 		t.Fatal(err)

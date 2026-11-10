@@ -1678,7 +1678,7 @@ func TestLegacyAdminDynamicRoutesNotFound(t *testing.T) {
 	proxyStore := mcpgateway.NewMemoryStore()
 	proxy := testProxyGateway(proxyStore)
 	knowledgeStore := knowledge.NewMemoryStore()
-	knowledgeService := knowledge.NewService(knowledgeStore, nil)
+	knowledgeService := knowledge.NewService(knowledgeStore, nil, knowledge.ProviderBailian)
 	if _, err := knowledgeStore.CreateKnowledgeBase(ctx, knowledge.KnowledgeBase{KnowledgeBaseID: "kb_legacy", Name: "Legacy Contract", Status: knowledge.KnowledgeBaseActive}); err != nil {
 		t.Fatal(err)
 	}

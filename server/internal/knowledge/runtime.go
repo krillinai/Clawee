@@ -12,15 +12,32 @@ import (
 )
 
 type Runtime struct {
-	Provider provider.KnowledgeProvider
+	Provider     provider.KnowledgeProvider
+	ProviderType string
 }
 
 func NewRuntime(cfg config.KnowledgeConfig, loggers ...*zap.Logger) (Runtime, error) {
 	if !cfg.Enabled {
 		return Runtime{}, fmt.Errorf("knowledge is disabled")
 	}
-	if strings.TrimSpace(cfg.ProviderType) != ProviderBailian {
-		return Runtime{}, fmt.Errorf("unsupported knowledge provider %q", cfg.ProviderType)
+	cfg.ProviderType = strings.ToLower(strings.TrimSpace(cfg.ProviderType))
+	if err := cfg.Validate(); err != nil {
+		return Runtime{}, err
+	}
+	if cfg.ProviderType == ProviderRAGFlow {
+		key, err := ResolveCredential(cfg.RAGFlow.APIKeyRef)
+		if err != nil {
+			return Runtime{}, fmt.Errorf("解析 RAGFlow 凭据: %w", err)
+		}
+		p, err := provider.NewRAGFlowProvider(provider.RAGFlowConfig{
+			BaseURL: cfg.RAGFlow.BaseURL, APIKey: key,
+			EmbeddingModel: cfg.RAGFlow.EmbeddingModel, RerankID: cfg.RAGFlow.RerankID,
+			Logger: firstLogger(loggers),
+		})
+		if err != nil {
+			return Runtime{}, err
+		}
+		return Runtime{Provider: p, ProviderType: cfg.ProviderType}, nil
 	}
 	accessKeyID, err := resolveConfiguredSecret(cfg.Bailian.AccessKeyID, cfg.Bailian.AccessKeyIDRef)
 	if err != nil {
@@ -40,7 +57,7 @@ func NewRuntime(cfg config.KnowledgeConfig, loggers ...*zap.Logger) (Runtime, er
 	if err != nil {
 		return Runtime{}, err
 	}
-	return Runtime{Provider: p}, nil
+	return Runtime{Provider: p, ProviderType: cfg.ProviderType}, nil
 }
 
 func firstLogger(loggers []*zap.Logger) *zap.Logger {

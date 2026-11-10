@@ -9,6 +9,7 @@ import (
 
 const (
 	ProviderBailian    = "bailian"
+	ProviderRAGFlow    = "ragflow"
 	AdapterServerID    = "knowledge-adapter"
 	SearchUpstreamName = "search"
 
@@ -27,10 +28,11 @@ const (
 	DocumentDeleteFailed = "delete_failed"
 	DocumentDeleted      = "deleted"
 
-	MaxDocumentSize           = 50 << 20
-	KnowledgeOperationTimeout = 30 * time.Second
-	DocumentUploadTimeout     = 5 * time.Minute
-	MaxConcurrentSearches     = 5
+	MaxDocumentSize            = 50 << 20
+	KnowledgeOperationTimeout  = 30 * time.Second
+	DocumentUploadTimeout      = 5 * time.Minute
+	DocumentListRefreshTimeout = 10 * time.Second
+	MaxConcurrentSearches      = 5
 )
 
 var (

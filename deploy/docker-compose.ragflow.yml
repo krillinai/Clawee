@@ -1,0 +1,8 @@
+# 与 docker-compose.yml 合并使用；仅连接独立 RAGFlow，不部署其依赖栈。
+services:
+  gateway:
+    environment:
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:?请在外部环境配置RAGFlow专用Key}
+      CLAW_GATEWAY_KNOWLEDGE_RAGFLOW_BASE_URL: http://host.docker.internal:18080
+    extra_hosts:
+      - host.docker.internal:host-gateway

@@ -46,6 +46,13 @@ knowledge:
     workspace_id: ""
     access_key_id: ""
     access_key_secret: ""
+  # 启用 RAGFlow 时设置 provider_type: ragflow；宿主机直连可用 http://127.0.0.1:18080。
+  # 真实 Key 只放在仓库外 .env 或环境变量中。
+  ragflow:
+    base_url: ""
+    api_key_ref: "RAGFLOW_API_KEY"
+    embedding_model: ""
+    rerank_id: ""
 
 skillhub:
   enabled: false

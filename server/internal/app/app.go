@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -166,22 +167,26 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	routingClient := mcpgateway.NewRoutingUpstreamClient(transportClient, nil)
 	upstreamClient := mcpgateway.UpstreamClient(routingClient)
 	if cfg.Knowledge.Enabled {
+		knowledgeStore := knowledge.Store(knowledge.NewMemoryStore())
+		if pool != nil {
+			knowledgeStore = knowledge.NewPostgresStore(pool)
+		}
+		providerType := strings.ToLower(strings.TrimSpace(cfg.Knowledge.ProviderType))
+		if err := validateKnowledgeProviderBindings(ctx, knowledgeStore, providerType); err != nil {
+			return nil, err
+		}
 		runtime, err := knowledge.NewRuntime(cfg.Knowledge, log)
 		if err != nil {
 			return nil, err
 		}
-		builtinClient, err := knowledgeBuiltin.NewClient(runtime.Provider, cfg.Knowledge.ProviderType)
+		builtinClient, err := knowledgeBuiltin.NewClient(runtime.Provider, runtime.ProviderType)
 		if err != nil {
 			return nil, err
 		}
 		if err := routingClient.Register(knowledge.AdapterServerID, builtinClient); err != nil {
 			return nil, err
 		}
-		knowledgeStore := knowledge.Store(knowledge.NewMemoryStore())
-		if pool != nil {
-			knowledgeStore = knowledge.NewPostgresStore(pool)
-		}
-		knowledgeSvc = knowledge.NewService(knowledgeStore, runtime.Provider, log)
+		knowledgeSvc = knowledge.NewService(knowledgeStore, runtime.Provider, runtime.ProviderType, log)
 		knowledgeResolver = knowledgeBindingResolver{store: knowledgeStore}
 		credentialResolver = knowledge.ResolveCredential
 	}
@@ -559,6 +564,32 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		}()
 	}
 	return application, nil
+}
+
+func validateKnowledgeProviderBindings(ctx context.Context, store knowledge.Store, providerType string) error {
+	items, err := store.ListKnowledgeBases(ctx)
+	if err != nil {
+		return err
+	}
+	counts := map[string]int{}
+	for _, item := range items {
+		if item.DeletedAt == nil && item.Status != knowledge.KnowledgeBaseDeleted && strings.TrimSpace(item.ExternalKnowledgeBaseID) != "" && item.ProviderType != providerType {
+			counts[item.ProviderType]++
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	types := make([]string, 0, len(counts))
+	for kind := range counts {
+		types = append(types, kind)
+	}
+	sort.Strings(types)
+	conflicts := make([]string, 0, len(types))
+	for _, kind := range types {
+		conflicts = append(conflicts, fmt.Sprintf("%s=%d", kind, counts[kind]))
+	}
+	return fmt.Errorf("知识库 Provider %s 与存量绑定冲突（%s）", providerType, strings.Join(conflicts, ", "))
 }
 func resolvedFeedbackStoragePath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {

@@ -122,7 +122,7 @@ func TestLegacyTopLevelRoutesNotFound(t *testing.T) {
 		OfficeManagementAPI:     httpapi.NewManagementAPI(fakeManagementStoreForRouteTest{}, func() time.Time { return time.Now().UTC() }),
 		OfficeUserDashboardAPI:  http.NotFoundHandler(),
 		OfficeUserCollectorsAPI: http.NotFoundHandler(),
-		KnowledgeService:        knowledge.NewService(knowledge.NewMemoryStore(), nil),
+		KnowledgeService:        knowledge.NewService(knowledge.NewMemoryStore(), nil, knowledge.ProviderBailian),
 		SkillHubService:         skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()}),
 	})
 
@@ -160,7 +160,7 @@ func TestSkillHubSourceRoutesRequireSourceService(t *testing.T) {
 func TestTargetAppAgentRoutesShareAuthenticationBoundary(t *testing.T) {
 	router := server.NewRouter(server.Options{
 		AccountService:    newTestAccountService(accounts.NewMemoryStore()),
-		KnowledgeService:  knowledge.NewService(knowledge.NewMemoryStore(), nil),
+		KnowledgeService:  knowledge.NewService(knowledge.NewMemoryStore(), nil, knowledge.ProviderBailian),
 		DataAccessService: dataaccess.NewService(dataaccess.NewMemoryStore()),
 	})
 
@@ -271,7 +271,7 @@ func TestTargetHumanAPIRoutesShareApplicationAuthenticationBoundaries(t *testing
 		OfficeUserDashboardAPI:  http.NotFoundHandler(),
 		OfficeManagementAPI:     httpapi.NewManagementAPI(fakeManagementStoreForRouteTest{}, func() time.Time { return time.Now().UTC() }),
 		OfficeUserCollectorsAPI: http.NotFoundHandler(),
-		KnowledgeService:        knowledge.NewService(knowledge.NewMemoryStore(), nil),
+		KnowledgeService:        knowledge.NewService(knowledge.NewMemoryStore(), nil, knowledge.ProviderBailian),
 		SkillHubService:         skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()}),
 	})
 

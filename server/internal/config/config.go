@@ -231,6 +231,44 @@ type KnowledgeConfig struct {
 	Enabled      bool          `mapstructure:"enabled"`
 	ProviderType string        `mapstructure:"provider_type"`
 	Bailian      BailianConfig `mapstructure:"bailian"`
+	RAGFlow      RAGFlowConfig `mapstructure:"ragflow"`
+}
+
+type RAGFlowConfig struct {
+	BaseURL        string `mapstructure:"base_url"`
+	APIKeyRef      string `mapstructure:"api_key_ref"`
+	EmbeddingModel string `mapstructure:"embedding_model"`
+	RerankID       string `mapstructure:"rerank_id"`
+}
+
+func NormalizeRAGFlowBaseURL(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(value, "#") || parsed.Opaque != "" {
+		return "", errors.New("knowledge.ragflow.base_url 必须是无用户信息、路径、查询串和片段的 HTTP(S) 根地址")
+	}
+	parsed.Path = ""
+	parsed.RawPath = ""
+	return parsed.String(), nil
+}
+
+func (cfg KnowledgeConfig) Validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.ProviderType)) {
+	case "bailian":
+		// 保留百炼原有的运行时校验，不改变配置加载行为。
+	case "ragflow":
+		if _, err := NormalizeRAGFlowBaseURL(cfg.RAGFlow.BaseURL); err != nil {
+			return err
+		}
+		if strings.TrimSpace(cfg.RAGFlow.APIKeyRef) == "" {
+			return errors.New("knowledge.ragflow.api_key_ref 不能为空")
+		}
+	default:
+		return errors.New("knowledge.provider_type 只支持 bailian 或 ragflow")
+	}
+	return nil
 }
 
 type SkillHubConfig struct {
@@ -336,6 +374,9 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.Bilibili.Validate(); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.Knowledge.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -456,6 +497,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("knowledge.bailian.access_key_secret", "")
 	v.SetDefault("knowledge.bailian.access_key_id_ref", "ALIBABA_CLOUD_ACCESS_KEY_ID")
 	v.SetDefault("knowledge.bailian.access_key_secret_ref", "ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+	v.SetDefault("knowledge.ragflow.base_url", "")
+	v.SetDefault("knowledge.ragflow.api_key_ref", "RAGFLOW_API_KEY")
+	v.SetDefault("knowledge.ragflow.embedding_model", "")
+	v.SetDefault("knowledge.ragflow.rerank_id", "")
 	v.SetDefault("skillhub.enabled", false)
 	_ = v.BindEnv("skillhub.review_agent_id", "CLAW_GATEWAY_SKILL_REVIEW_AGENT_ID")
 	v.SetDefault("skillhub.package_root", "data/skillhub/packages")
@@ -524,6 +569,10 @@ func bindEnv(v *viper.Viper) {
 		"knowledge.bailian.access_key_secret",
 		"knowledge.bailian.access_key_id_ref",
 		"knowledge.bailian.access_key_secret_ref",
+		"knowledge.ragflow.base_url",
+		"knowledge.ragflow.api_key_ref",
+		"knowledge.ragflow.embedding_model",
+		"knowledge.ragflow.rerank_id",
 		"skillhub.enabled",
 		"skillhub.package_root",
 		"shared_files.storage_root",

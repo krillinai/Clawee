@@ -21,6 +21,7 @@
     "release:check": "node scripts/release-version.mjs check",
     "release:version": "node scripts/release-version.mjs set",
     "container:smoke": "node scripts/container-smoke.mjs",
+    "ragflow:smoke": "node scripts/ragflow-smoke.mjs",
     "licenses": "node scripts/license-inventory.mjs"
   },
   "devDependencies": {

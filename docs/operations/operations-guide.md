@@ -662,3 +662,45 @@ docker compose -f server/deploy/docker-compose.yaml logs --tail 200 postgres
 5. 登录管理台确认访问正常。
 
 不要在 Gateway 运行期间直接删除或覆盖正在使用的数据库、配置和持久化数据目录。
+
+## 10. RAGFlow 知识库验收与回滚
+
+RAGFlow 独立运行，配置方式见 [配置说明](../../server/docs/getting-started/configuration.md#ragflow-10-知识库)。保留 RAGFlow 已有资料，验收只使用专用测试服务账号、隔离 Gateway 数据库和合成文件。
+
+### 10.1 显式隔离业务 smoke
+
+在仓库外创建权限受限的 JSON 配置，并将专用 Key 导出到 `api_key_ref` 指向的环境变量：
+
+```json
+{
+  "disposable": true,
+  "ragflow_base_url": "http://127.0.0.1:18080",
+  "api_key_ref": "RAGFLOW_API_KEY",
+  "embedding_model": ""
+}
+```
+
+`disposable: true` 表示部署者已确认目标与服务账号适合隔离测试。脚本不会读取运行环境的 Gateway 数据库配置，也不会自动读取外部 `.env`；凭据必须由运行环境提供。执行：
+
+```bash
+CLAWEE_RAGFLOW_SMOKE_CONFIG=/仓库外目录/ragflow-smoke.json \
+  corepack pnpm ragflow:smoke
+```
+
+脚本创建带随机后缀的数据集，上传合成 TXT、显式启动解析，每 2 秒查询，最多等待 180 秒；检索断言合成期限及文档来源。成功和失败均仅按本次返回的数据集 ID 清理。清理失败会非零退出并报告待核对 ID，不输出 Key、原文或完整上游响应。未取得创建 ID 时无法安全补偿，按“结果待核对”处理，不能按名称批量删除。
+
+该脚本只验证 RAGFlow 契约。Gateway 授权验收仍需两个测试账号：A 获得 read/upload/mcp 及工具权限，B 只获得 read；验证 A 浏览、上传、刷新到 ready、检索及来源，验证 B 无法检索、撤销 mcp 后立即受限。页面选择不改变当前多库检索范围。记录实际 Gateway/ClaweeAgent SHA、RAGFlow 镜像及清理结果；详细步骤见 [P1 设计](../v2/P1-RAGFlow知识库接入方案设计.md#104-gateway-与-claweeagent-手动验收)。
+
+### 10.2 状态同步与孤立资源核对
+
+解析状态以 RAGFlow 的 `run` 为准；失败、取消和未知值展示固定中文说明。刷新只更新已登记文档，不导入其他资料。完整快照中缺失的本地 processing 文档会标记 failed，并提示“外部文档不存在”。读取或同步失败时保留原状态，恢复网络后可重试。
+
+上传成功但解析启动失败会精确补偿新文档，补偿使用独立的 30 秒 context。若日志出现 `compensation_failed: true`，在运维边界内按日志的 `dataset_id`、`document_id` 精确核对：先确认其属于失败的测试/业务操作，检查远端是否仍存在，再按运维流程清理该对象。请求结果未知且没有 ID 时，仅核对日志与 RAGFlow 运维记录，不按文件名或知识库名称删除。原始解析错误应在 RAGFlow 运维日志中排查。
+
+删除前先撤销成员授权，并等待上传结束。权限错误、102 业务码或错误路由均不能直接作为缺失证明；只有精确、鉴权查询确认目标不存在才视为幂等完成。
+
+### 10.3 发布与回滚
+
+完成离线测试、隔离 smoke 和跨端验收后，再执行 Gateway Release Preflight。备份仓库外配置、Gateway 数据库及 RAGFlow 数据卷/元数据，保留实际版本记录。
+
+回滚到不支持 RAGFlow 的旧版本前，先设置 `knowledge.enabled: false`，再部署旧代码。禁用不删除本地记录和远端对象。恢复支持 RAGFlow 的代码及原配置后重新启用，继续使用原外部 ID；不重写 Provider，不执行批量删除或卷清理。

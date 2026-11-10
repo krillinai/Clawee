@@ -79,7 +79,7 @@ func TestAdminStatusReportsSkillOAAvailability(t *testing.T) {
 
 func TestAdminStatusReportsEnabledFeatures(t *testing.T) {
 	router := newTestRouter(t, server.Options{
-		KnowledgeService:   knowledge.NewService(knowledge.NewMemoryStore(), nil),
+		KnowledgeService:   knowledge.NewService(knowledge.NewMemoryStore(), nil, knowledge.ProviderBailian),
 		SkillHubService:    skillhub.NewService(skillhub.Config{Store: skillhub.NewMemoryStore(), PackageRoot: t.TempDir()}),
 		SkillSourceService: &skillhub.GitHubSourceService{},
 	})
