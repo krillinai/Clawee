@@ -30,6 +30,10 @@
 
 AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
 
+<div align="center">
+  <img src="./docs/assets/aigateway-overview.png" alt="AI Gateway 统一连接 Agent、模型、工具、数据与业务系统" width="100%" />
+</div>
+
 ## 核心能力
 
 | 模块 | 能力 |
