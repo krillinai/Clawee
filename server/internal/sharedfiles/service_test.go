@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestUploadCreateReplaceConflictAndMemberIsolation(t *testing.T) {
@@ -82,7 +83,7 @@ func TestUploadCreateReplaceConflictAndMemberIsolation(t *testing.T) {
 	}
 }
 
-func TestCreateSpaceGrantsCreatorReadWrite(t *testing.T) {
+func TestCreateSpaceGrantsCreatorReadWriteDelete(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 	store.SetAccount("creator", "创建者", "creator@example.com", "active")
@@ -92,16 +93,25 @@ func TestCreateSpaceGrantsCreatorReadWrite(t *testing.T) {
 	if err != nil || space.MemberCount != 1 {
 		t.Fatalf("CreateSpace() = %#v, %v", space, err)
 	}
-	for _, action := range []string{ActionRead, ActionWrite} {
+	for _, action := range []string{ActionRead, ActionWrite, ActionDelete} {
 		if err := store.CheckSpaceAccess(ctx, "creator", space.SpaceID, action); err != nil {
 			t.Fatalf("creator %s access: %v", action, err)
 		}
-		if err := store.CheckSpaceAccess(ctx, "other", space.SpaceID, action); !errors.Is(err, ErrSharedSpaceNotFound) {
-			t.Fatalf("other %s access: %v", action, err)
+		if action != ActionDelete {
+			if err := store.CheckSpaceAccess(ctx, "other", space.SpaceID, action); !errors.Is(err, ErrSharedSpaceNotFound) {
+				t.Fatalf("other %s access: %v", action, err)
+			}
 		}
 	}
+	if permissions := store.grants[space.SpaceID]["creator"]; !permissions.Read || !permissions.Write || !permissions.Delete {
+		t.Fatalf("creator grant = %#v", permissions)
+	}
+	page, err := service.ListSpaces(ctx, "creator", 50, "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].Permissions == nil || !page.Items[0].Permissions.Write || !page.Items[0].Permissions.Delete {
+		t.Fatalf("creator spaces = %#v, %v", page.Items, err)
+	}
 	members, err := service.ListMembers(ctx, space.SpaceID, "", 50, "")
-	if err != nil || len(members.Items) != 1 || members.Items[0].UserID != "creator" || members.Items[0].GrantStatus != "complete" {
+	if err != nil || len(members.Items) != 1 || members.Items[0].UserID != "creator" || members.Items[0].GrantStatus != "complete" || len(members.Items[0].Actions) != 3 {
 		t.Fatalf("members = %#v, %v", members, err)
 	}
 	if _, err := service.CreateSpace(ctx, "团队空间", "", "other"); !errors.Is(err, ErrSpaceNameConflict) {
@@ -307,6 +317,172 @@ func TestConcurrentReplaceAllowsOnlyOneRevision(t *testing.T) {
 		t.Fatalf("current = %#v, %v", file, err)
 	}
 }
+
+func TestMemberDeleteActionIsIndependentFromWrite(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	store.SetAccount("member", "成员", "member@example.com", "active")
+	service := NewService(store, nil, nil)
+	space, err := service.CreateSpace(ctx, "独立删除授权空间", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AddMemberWithActions(ctx, space.SpaceID, "member", []string{ActionDelete}, "admin"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("delete without read error = %v", err)
+	}
+	member, err := service.AddMemberWithActions(ctx, space.SpaceID, "member", []string{ActionRead, ActionDelete}, "admin")
+	if err != nil || len(member.Actions) != 2 || member.Actions[0] != ActionRead || member.Actions[1] != ActionDelete || member.GrantStatus != "incomplete" {
+		t.Fatalf("read+delete member = %#v, %v", member, err)
+	}
+	member, err = service.UpdateMember(ctx, space.SpaceID, "member", []string{ActionDelete, ActionRead, ActionWrite}, "admin")
+	if err != nil || len(member.Actions) != 3 || member.Actions[0] != ActionRead || member.Actions[1] != ActionWrite || member.Actions[2] != ActionDelete || member.GrantStatus != "complete" {
+		t.Fatalf("read+write+delete member = %#v, %v", member, err)
+	}
+}
+
+func TestDeleteFileAuthorizationAndPersonalSpace(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	for userID := range map[string]bool{"creator": true, "member_rw": true, "member_rwd": true, "member_read": true, "other": true} {
+		store.SetAccount(userID, userID, userID+"@example.com", "active")
+	}
+	storage, err := NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, storage, nil)
+	space, err := service.CreateSpace(ctx, "删除权限空间", "", "creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for userID, actions := range map[string][]string{
+		"member_rw":  {ActionRead, ActionWrite},
+		"member_rwd": {ActionRead, ActionWrite, ActionDelete},
+		"member_read": {ActionRead},
+	} {
+		if _, err := service.AddMemberWithActions(ctx, space.SpaceID, userID, actions, "creator"); err != nil {
+			t.Fatalf("add %s: %v", userID, err)
+		}
+	}
+	created, err := uploadText(ctx, service, "creator", "agent", space.SpaceID, "docs/remove.txt", "first", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "member_rw", created.FileID, created.Revision); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("write member delete error = %v", err)
+	}
+	if _, err := service.DeleteFile(ctx, "member_read", created.FileID, created.Revision); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("read member delete error = %v", err)
+	}
+	if _, err := service.DeleteFile(ctx, "other", created.FileID, created.Revision); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("non-member delete error = %v", err)
+	}
+	if _, err := service.DeleteFile(ctx, "member_rwd", created.FileID, created.Revision); err != nil {
+		t.Fatalf("authorized member delete error = %v", err)
+	}
+	if _, err := service.GetFile(ctx, "creator", created.FileID); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("deleted file still readable: %v", err)
+	}
+
+	second, err := uploadText(ctx, service, "creator", "agent", space.SpaceID, "docs/second.txt", "second", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "creator", second.FileID, second.Revision+1); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale revision delete error = %v", err)
+	}
+	if _, err := service.DeleteFile(ctx, "creator", second.FileID, second.Revision); err != nil {
+		t.Fatalf("creator delete error = %v", err)
+	}
+	adminFile, err := uploadText(ctx, service, "creator", "agent", space.SpaceID, "docs/admin.txt", "admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteAdminFile(ctx, "admin", adminFile.FileID, adminFile.Revision); err != nil {
+		t.Fatalf("admin delete error = %v", err)
+	}
+	if got, err := service.GetAdminFile(ctx, adminFile.FileID); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("admin-deleted file detail = %#v, %v", got, err)
+	}
+	if _, err := service.DeleteAdminFile(ctx, "admin", "file_missing", 1); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("admin delete missing error = %v", err)
+	}
+
+	for userID, want := range map[string]bool{"creator": true, "member_rwd": true, "member_rw": false, "member_read": false} {
+		page, err := service.ListSpaces(ctx, userID, 50, "")
+		if err != nil {
+			t.Fatalf("%s list spaces: %v", userID, err)
+		}
+		if len(page.Items) != 1 || page.Items[0].Permissions == nil || page.Items[0].Permissions.Delete != want {
+			t.Fatalf("%s space delete permission = %#v, want %v", userID, page.Items, want)
+		}
+	}
+
+	personal, err := service.EnsurePersonalSpace(ctx, "member_rwd", "member_rwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CheckSpaceAccess(ctx, "member_rwd", personal.SpaceID, ActionDelete); err != nil {
+		t.Fatalf("personal owner delete access = %v", err)
+	}
+	personalFile, err := uploadText(ctx, service, "member_rwd", "agent", "", "personal.txt", "mine", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "member_rwd", personalFile.FileID, personalFile.Revision); err != nil {
+		t.Fatalf("personal owner delete error = %v", err)
+	}
+	if _, err := service.GetFile(ctx, "member_rw", personalFile.FileID); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("other user read personal file error = %v", err)
+	}
+}
+
+func TestDeleteFileEnqueuesCleanupTaskWhenStorageDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	store := &cleanupRecordingStore{MemoryStore: NewMemoryStore()}
+	store.SetAccount("creator", "创建者", "creator@example.com", "active")
+	storage, err := NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, deleteFailingStorage{Storage: storage}, nil)
+	space, err := service.CreateSpace(ctx, "清理任务空间", "", "creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := uploadText(ctx, service, "creator", "agent", space.SpaceID, "cleanup.txt", "payload", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "creator", created.FileID, created.Revision); err != nil {
+		t.Fatalf("delete error = %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.tasks) != 1 {
+		t.Fatalf("cleanup tasks = %#v", store.tasks)
+	}
+	if task := store.tasks[0]; task.Source != "file_delete" || task.FileID != created.FileID || task.StorageProfileID != LocalDefaultProfileID || !strings.Contains(task.StorageKey, created.FileID) {
+		t.Fatalf("cleanup task = %#v", task)
+	}
+}
+
+type cleanupRecordingStore struct {
+	*MemoryStore
+	mu    sync.Mutex
+	tasks []CleanupTask
+}
+
+func (s *cleanupRecordingStore) EnqueueCleanup(_ context.Context, ref ObjectRef, source, fileID, migrationID string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tasks = append(s.tasks, CleanupTask{StorageProfileID: ref.StorageProfileID, StorageKey: ref.StorageKey, Source: source, FileID: fileID, MigrationID: migrationID})
+	return nil
+}
+
+type deleteFailingStorage struct{ Storage }
+
+func (deleteFailingStorage) Delete(context.Context, string) error { return errors.New("storage delete failed") }
 
 func uploadText(ctx context.Context, service *Service, userID, agentID, spaceID, logicalPath, contents string, revision *int64) (UploadResult, error) {
 	return service.Upload(ctx, userID, agentID, spaceID, logicalPath, "text/plain", int64(len(contents)), textDigest(contents), revision, strings.NewReader(contents))

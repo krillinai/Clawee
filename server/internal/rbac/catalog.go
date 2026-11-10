@@ -106,6 +106,7 @@ const (
 	PermissionSharedFilesMemberDelete         = "console:shared_files:member_delete"
 	PermissionSharedFilesDownload             = "console:shared_files:download"
 	PermissionSharedFilesUpload               = "console:shared_files:upload"
+	PermissionSharedFilesDelete               = "console:shared_files:delete"
 	PermissionSharedFilesStorageRead          = "console:shared_files:storage_read"
 	PermissionSharedFilesStorageManage        = "console:shared_files:storage_manage"
 	PermissionSharedFilesStorageMigrate       = "console:shared_files:storage_migrate"
@@ -233,6 +234,7 @@ var permissionCatalog = []Permission{
 	{PermissionSharedFilesMemberDelete, "shared_files", "member_delete", "移除共享空间成员", "移除共享空间成员授权"},
 	{PermissionSharedFilesDownload, "shared_files", "download", "下载共享文件", "下载共享空间文件"},
 	{PermissionSharedFilesUpload, "shared_files", "upload", "上传共享文件", "上传文件或新版本"},
+	{PermissionSharedFilesDelete, "shared_files", "delete", "删除共享文件", "删除共享空间中的文件"},
 	{PermissionSharedFilesStorageRead, "shared_files", "storage_read", "网盘存储查看", "查看共享网盘存储配置和状态"},
 	{PermissionSharedFilesStorageManage, "shared_files", "storage_manage", "网盘存储管理", "测试、配置、切换和退役共享网盘存储"},
 	{PermissionSharedFilesStorageMigrate, "shared_files", "storage_migrate", "网盘存储迁移", "创建、取消和重试共享网盘存量迁移"},

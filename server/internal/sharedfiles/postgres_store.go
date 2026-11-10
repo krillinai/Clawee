@@ -95,7 +95,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, space.SpaceID, space.Name, space.Description,
 	if space.PersonalOwnerUserID != "" {
 		owner = space.PersonalOwnerUserID
 	}
-	for _, action := range []string{ActionRead, ActionWrite} {
+	for _, action := range []string{ActionRead, ActionWrite, ActionDelete} {
 		if _, err := tx.Exec(ctx, `INSERT INTO data_resource_grants (grant_id,user_id,resource_type,resource_id,action,created_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$7)`, newID("drg_"), owner, ResourceTypeSharedSpace, space.SpaceID, action, space.CreatedBy, space.CreatedAt); err != nil {
 			return err
@@ -148,12 +148,13 @@ ORDER BY s.updated_at DESC,s.space_id ASC LIMIT $4`, filter.Query, nullableTime(
 
 func (s *PostgresStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilter) ([]Space, error) {
 	rows, err := s.pool.Query(ctx, `SELECT s.space_id,s.name,s.description,s.updated_at,COALESCE(s.personal_owner_user_id,''),
-EXISTS (SELECT 1 FROM data_resource_grants w WHERE w.resource_type=$1 AND w.resource_id=s.space_id AND w.action=$7 AND w.user_id=$3)
+EXISTS (SELECT 1 FROM data_resource_grants w WHERE w.resource_type=$1 AND w.resource_id=s.space_id AND w.action=$7 AND w.user_id=$3),
+EXISTS (SELECT 1 FROM data_resource_grants d WHERE d.resource_type=$1 AND d.resource_id=s.space_id AND d.action=$9 AND d.user_id=$3)
 FROM shared_spaces s
 JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=s.space_id AND g.action=$2 AND g.user_id=$3
 WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND ($4::timestamptz IS NULL OR ($8='personal' AND s.personal_owner_user_id IS NULL) OR ((s.personal_owner_user_id IS NOT NULL)=($8='personal') AND (s.updated_at<$4 OR (s.updated_at=$4 AND s.space_id>$5))))
 ORDER BY (s.personal_owner_user_id IS NOT NULL) DESC,s.updated_at DESC,s.space_id ASC LIMIT $6`, ResourceTypeSharedSpace, ActionRead, filter.UserID,
-		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, ActionWrite, filter.Cursor.Name)
+		nullableTime(filter.Cursor.UpdatedAt), filter.Cursor.ID, filter.Limit, ActionWrite, filter.Cursor.Name, ActionDelete)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +163,7 @@ ORDER BY (s.personal_owner_user_id IS NOT NULL) DESC,s.updated_at DESC,s.space_i
 	for rows.Next() {
 		var item Space
 		permissions := &SpacePermissions{Read: true}
-		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &item.PersonalOwnerUserID, &permissions.Write); err != nil {
+		if err := rows.Scan(&item.SpaceID, &item.Name, &item.Description, &item.UpdatedAt, &item.PersonalOwnerUserID, &permissions.Write, &permissions.Delete); err != nil {
 			return nil, err
 		}
 		item.Permissions = permissions
@@ -174,14 +175,14 @@ ORDER BY (s.personal_owner_user_id IS NOT NULL) DESC,s.updated_at DESC,s.space_i
 func (s *PostgresStore) ListMembers(ctx context.Context, filter MemberFilter) ([]Member, error) {
 	rows, err := s.pool.Query(ctx, `SELECT a.user_id,COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.email,a.status,
 CASE WHEN count(DISTINCT g.action) FILTER (WHERE g.action IN ($2,$3))=2 THEN 'complete' ELSE 'incomplete' END,
-bool_or(g.action=$2),bool_or(g.action=$3),min(g.created_at),max(g.updated_at)
+bool_or(g.action=$2),bool_or(g.action=$3),bool_or(g.action=$9),min(g.created_at),max(g.updated_at)
 FROM data_resource_grants g JOIN accounts a ON a.user_id=g.user_id
-WHERE g.resource_type=$1 AND g.resource_id=$4 AND g.action IN ($2,$3)
+WHERE g.resource_type=$1 AND g.resource_id=$4 AND g.action IN ($2,$3,$9)
   AND ($5='' OR strpos(lower(a.user_id),lower($5))>0 OR strpos(lower(a.name),lower($5))>0 OR strpos(lower(a.email),lower($5))>0)
   AND ($6='' OR COALESCE(NULLIF(a.name,''),a.email,a.user_id)>$6 OR (COALESCE(NULLIF(a.name,''),a.email,a.user_id)=$6 AND a.user_id>$7))
 GROUP BY a.user_id
 ORDER BY COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.user_id LIMIT $8`, ResourceTypeSharedSpace, ActionRead, ActionWrite,
-		filter.SpaceID, filter.Query, filter.Cursor.Name, filter.Cursor.ID, filter.Limit)
+		filter.SpaceID, filter.Query, filter.Cursor.Name, filter.Cursor.ID, filter.Limit, ActionDelete)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +190,8 @@ ORDER BY COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.user_id LIMIT $8`, Reso
 	items := []Member{}
 	for rows.Next() {
 		var item Member
-		var read, write bool
-		if err := rows.Scan(&item.UserID, &item.Name, &item.Email, &item.AccountStatus, &item.GrantStatus, &read, &write, &item.JoinedAt, &item.UpdatedAt); err != nil {
+		var read, write, canDelete bool
+		if err := rows.Scan(&item.UserID, &item.Name, &item.Email, &item.AccountStatus, &item.GrantStatus, &read, &write, &canDelete, &item.JoinedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if read {
@@ -198,6 +199,9 @@ ORDER BY COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.user_id LIMIT $8`, Reso
 		}
 		if write {
 			item.Actions = append(item.Actions, ActionWrite)
+		}
+		if canDelete {
+			item.Actions = append(item.Actions, ActionDelete)
 		}
 		items = append(items, item)
 	}
@@ -208,11 +212,11 @@ func (s *PostgresStore) ListMemberCandidates(ctx context.Context, filter MemberF
 	rows, err := s.pool.Query(ctx, `SELECT a.user_id,COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.email
 FROM accounts a
 WHERE a.status='active'
-  AND NOT EXISTS (SELECT 1 FROM data_resource_grants g WHERE g.user_id=a.user_id AND g.resource_type=$1 AND g.resource_id=$2 AND g.action IN ($3,$4))
+  AND NOT EXISTS (SELECT 1 FROM data_resource_grants g WHERE g.user_id=a.user_id AND g.resource_type=$1 AND g.resource_id=$2 AND g.action IN ($3,$4,$9))
   AND ($5='' OR strpos(lower(a.user_id),lower($5))>0 OR strpos(lower(a.name),lower($5))>0 OR strpos(lower(a.email),lower($5))>0)
   AND ($6='' OR COALESCE(NULLIF(a.name,''),a.email,a.user_id)>$6 OR (COALESCE(NULLIF(a.name,''),a.email,a.user_id)=$6 AND a.user_id>$7))
 ORDER BY COALESCE(NULLIF(a.name,''),a.email,a.user_id),a.user_id LIMIT $8`, ResourceTypeSharedSpace, filter.SpaceID,
-		ActionRead, ActionWrite, filter.Query, filter.Cursor.Name, filter.Cursor.ID, filter.Limit)
+		ActionRead, ActionWrite, filter.Query, filter.Cursor.Name, filter.Cursor.ID, filter.Limit, ActionDelete)
 	if err != nil {
 		return nil, err
 	}
@@ -283,8 +287,8 @@ func (s *PostgresStore) setMember(ctx context.Context, spaceID, userID string, a
 		return Member{}, ErrSharedSpaceNotFound
 	}
 	rows, err := tx.Query(ctx, `SELECT created_at FROM data_resource_grants
-WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5) FOR UPDATE`,
-		userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite)
+WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5,$6) FOR UPDATE`,
+		userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite, ActionDelete)
 	if err != nil {
 		return Member{}, err
 	}
@@ -313,8 +317,8 @@ WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5) F
 		if existingCount == 0 {
 			return Member{}, ErrMemberNotFound
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5)`,
-			userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5,$6)`,
+			userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite, ActionDelete); err != nil {
 			return Member{}, err
 		}
 	}
@@ -346,8 +350,8 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, spaceID, userID string
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5)`,
-		userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite)
+	tag, err := tx.Exec(ctx, `DELETE FROM data_resource_grants WHERE user_id=$1 AND resource_type=$2 AND resource_id=$3 AND action IN ($4,$5,$6)`,
+		userID, ResourceTypeSharedSpace, spaceID, ActionRead, ActionWrite, ActionDelete)
 	if err != nil {
 		return err
 	}
@@ -580,6 +584,102 @@ WHERE space_id=$1 AND logical_path=$2 AND revision=$11`, file.SpaceID, file.Logi
 	file.Revision = expectedRevision + 1
 	file.CreatedByUserID, file.CreatedByAgentID, file.CreatedAt = current.CreatedByUserID, current.CreatedByAgentID, current.CreatedAt
 	return file, ObjectRef{StorageProfileID: current.StorageProfileID, StorageKey: current.StorageKey}, nil
+}
+
+func (s *PostgresStore) DeleteAuthorizedFile(ctx context.Context, userID, fileID string, expectedRevision int64) (File, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return File{}, err
+	}
+	defer tx.Rollback(ctx)
+	var item File
+	err = tx.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
+FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
+JOIN data_resource_grants g ON g.resource_type=$1 AND g.resource_id=f.space_id AND g.action=$2 AND g.user_id=$3
+WHERE (s.personal_owner_user_id IS NULL OR s.personal_owner_user_id=$3) AND f.file_id=$4
+FOR UPDATE OF f,g`, ResourceTypeSharedSpace, ActionDelete, userID, fileID).Scan(fileDest(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return File{}, ErrSharedFileNotFound
+	}
+	if err != nil {
+		return File{}, err
+	}
+	if item.Revision != expectedRevision {
+		return File{}, &RevisionConflictError{CurrentRevision: item.Revision}
+	}
+	if err := ensureFileNotReferencedTx(ctx, tx, fileID); err != nil {
+		return File{}, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM shared_files WHERE file_id=$1 AND revision=$2`, fileID, expectedRevision)
+	if err != nil {
+		return File{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return File{}, &RevisionConflictError{CurrentRevision: item.Revision}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return File{}, err
+	}
+	return item, nil
+}
+
+func (s *PostgresStore) DeleteAdminFile(ctx context.Context, fileID string, expectedRevision int64) (File, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return File{}, err
+	}
+	defer tx.Rollback(ctx)
+	var spaceID string
+	err = tx.QueryRow(ctx, `SELECT space_id FROM shared_files WHERE file_id=$1`, fileID).Scan(&spaceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return File{}, ErrSharedFileNotFound
+	}
+	if err != nil {
+		return File{}, err
+	}
+	if err := lockSharedSpace(ctx, tx, spaceID); err != nil {
+		return File{}, err
+	}
+	var item File
+	err = tx.QueryRow(ctx, `SELECT f.file_id,f.space_id,s.name,f.logical_path,f.file_name,f.storage_profile_id,f.storage_key,f.size_bytes,f.sha256,f.content_type,f.revision,
+f.created_by_user_id,COALESCE(f.created_by_agent_id,''),f.updated_by_user_id,COALESCE(f.updated_by_agent_id,''),f.created_at,f.updated_at
+FROM shared_files f JOIN shared_spaces s ON s.space_id=f.space_id
+WHERE f.file_id=$1 FOR UPDATE OF f`, fileID).Scan(fileDest(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return File{}, ErrSharedFileNotFound
+	}
+	if err != nil {
+		return File{}, err
+	}
+	if item.Revision != expectedRevision {
+		return File{}, &RevisionConflictError{CurrentRevision: item.Revision}
+	}
+	if err := ensureFileNotReferencedTx(ctx, tx, fileID); err != nil {
+		return File{}, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM shared_files WHERE file_id=$1 AND revision=$2`, fileID, expectedRevision)
+	if err != nil {
+		return File{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return File{}, &RevisionConflictError{CurrentRevision: item.Revision}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return File{}, err
+	}
+	return item, nil
+}
+
+func ensureFileNotReferencedTx(ctx context.Context, tx pgx.Tx, fileID string) error {
+	var referenced bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_node_tasks t WHERE t.artifacts_json @> jsonb_build_array(jsonb_build_object('file_id',$1::text)))`, fileID).Scan(&referenced); err != nil {
+		return err
+	}
+	if referenced {
+		return ErrFileInUse
+	}
+	return nil
 }
 
 type RevisionConflictError struct{ CurrentRevision int64 }

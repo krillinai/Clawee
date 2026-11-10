@@ -93,6 +93,7 @@ export const permissions = {
   skillSourceUnbind: "console:skill:source_unbind",
   sharedFilesRead: "console:shared_files:read",
   sharedFilesManage: "console:shared_files:manage",
+  sharedFilesDelete: "console:shared_files:delete",
   sharedFilesSpaceCreate: "console:shared_files:space_create",
   sharedFilesSpaceUpdate: "console:shared_files:space_update",
   sharedFilesMemberCreate: "console:shared_files:member_create",

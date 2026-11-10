@@ -18,6 +18,7 @@ type memoryAccount struct {
 type memoryGrant struct {
 	Read      bool
 	Write     bool
+	Delete    bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -76,7 +77,7 @@ func (s *MemoryStore) EnsurePersonalSpace(ctx context.Context, space Space) (Spa
 		return SpaceSummary{}, ErrSpaceNameConflict
 	}
 	s.spaces[space.SpaceID] = space
-	s.grants[space.SpaceID] = map[string]memoryGrant{space.PersonalOwnerUserID: {Read: true, Write: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}}
+	s.grants[space.SpaceID] = map[string]memoryGrant{space.PersonalOwnerUserID: {Read: true, Write: true, Delete: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}}
 	return s.summaryLocked(space), nil
 }
 
@@ -96,7 +97,7 @@ func (s *MemoryStore) CreateSpace(ctx context.Context, space Space) (SpaceSummar
 		if s.grants[space.SpaceID] == nil {
 			s.grants[space.SpaceID] = map[string]memoryGrant{}
 		}
-		s.grants[space.SpaceID][space.CreatedBy] = memoryGrant{Read: true, Write: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}
+		s.grants[space.SpaceID][space.CreatedBy] = memoryGrant{Read: true, Write: true, Delete: true, CreatedAt: space.CreatedAt, UpdatedAt: space.CreatedAt}
 	}
 	return s.summaryLocked(space), nil
 }
@@ -170,7 +171,7 @@ func (s *MemoryStore) ListAuthorizedSpaces(ctx context.Context, filter SpaceFilt
 		if (space.PersonalOwnerUserID != "" && space.PersonalOwnerUserID != filter.UserID) || !s.grants[id][filter.UserID].Read || !afterPersonalCursor(space, filter.Cursor) {
 			continue
 		}
-		space.Permissions = &SpacePermissions{Read: true, Write: s.grants[id][filter.UserID].Write}
+		space.Permissions = &SpacePermissions{Read: true, Write: s.grants[id][filter.UserID].Write, Delete: s.grants[id][filter.UserID].Delete}
 		items = append(items, space)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -216,7 +217,7 @@ func (s *MemoryStore) ListMemberCandidates(ctx context.Context, filter MemberFil
 	for userID, account := range s.accounts {
 		grant := s.grants[filter.SpaceID][userID]
 		name := displayName(account)
-		if account.Status != "active" || grant.Read || grant.Write || (filter.Query != "" && !containsAny(filter.Query, userID, name, account.Email)) || !afterNameCursor(name, userID, filter.Cursor) {
+		if account.Status != "active" || grant.Read || grant.Write || grant.Delete || (filter.Query != "" && !containsAny(filter.Query, userID, name, account.Email)) || !afterNameCursor(name, userID, filter.Cursor) {
 			continue
 		}
 		items = append(items, MemberCandidate{UserID: userID, Name: name, Email: account.Email})
@@ -263,7 +264,7 @@ func (s *MemoryStore) setMember(ctx context.Context, spaceID, userID string, act
 	if replace {
 		createdAt = current.CreatedAt
 	}
-	grant := memoryGrant{Read: true, Write: containsAction(actions, ActionWrite), CreatedAt: createdAt, UpdatedAt: now}
+	grant := memoryGrant{Read: true, Write: containsAction(actions, ActionWrite), Delete: containsAction(actions, ActionDelete), CreatedAt: createdAt, UpdatedAt: now}
 	s.grants[spaceID][userID] = grant
 	return memoryMember(userID, account, grant), nil
 }
@@ -332,7 +333,7 @@ func (s *MemoryStore) CheckSpaceAccess(ctx context.Context, userID, spaceID, act
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	grant := s.grants[spaceID][userID]
-	if _, ok := s.spaces[spaceID]; !ok || !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if _, ok := s.spaces[spaceID]; !ok || !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) || (action == ActionDelete && !grant.Delete) {
 		return ErrSharedSpaceNotFound
 	}
 	return nil
@@ -346,7 +347,7 @@ func (s *MemoryStore) GetAuthorizedFile(ctx context.Context, userID, fileID, act
 	defer s.mu.RUnlock()
 	file, ok := s.files[fileID]
 	grant := s.grants[file.SpaceID][userID]
-	if !ok || !s.personalAccessLocked(userID, file.SpaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if !ok || !s.personalAccessLocked(userID, file.SpaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) || (action == ActionDelete && !grant.Delete) {
 		return File{}, ErrSharedFileNotFound
 	}
 	file.SpaceName = s.spaces[file.SpaceID].Name
@@ -360,7 +361,7 @@ func (s *MemoryStore) GetAuthorizedFileByPath(ctx context.Context, userID, space
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	grant := s.grants[spaceID][userID]
-	if !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) {
+	if !s.personalAccessLocked(userID, spaceID) || (action == ActionRead && !grant.Read) || (action == ActionWrite && !grant.Write) || (action == ActionDelete && !grant.Delete) {
 		return File{}, ErrSharedFileNotFound
 	}
 	for _, file := range s.files {
@@ -464,6 +465,42 @@ func (s *MemoryStore) ReplaceAdminFile(ctx context.Context, file File, expectedR
 	return s.replaceFileLocked(file, expectedRevision)
 }
 
+func (s *MemoryStore) DeleteAuthorizedFile(ctx context.Context, userID, fileID string, expectedRevision int64) (File, error) {
+	if err := ctx.Err(); err != nil {
+		return File{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.files[fileID]
+	if !ok || !s.personalAccessLocked(userID, file.SpaceID) || !s.grants[file.SpaceID][userID].Delete {
+		return File{}, ErrSharedFileNotFound
+	}
+	if file.Revision != expectedRevision {
+		return File{}, &RevisionConflictError{CurrentRevision: file.Revision}
+	}
+	delete(s.files, fileID)
+	file.SpaceName = s.spaces[file.SpaceID].Name
+	return file, nil
+}
+
+func (s *MemoryStore) DeleteAdminFile(ctx context.Context, fileID string, expectedRevision int64) (File, error) {
+	if err := ctx.Err(); err != nil {
+		return File{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := s.files[fileID]
+	if !ok {
+		return File{}, ErrSharedFileNotFound
+	}
+	if file.Revision != expectedRevision {
+		return File{}, &RevisionConflictError{CurrentRevision: file.Revision}
+	}
+	delete(s.files, fileID)
+	file.SpaceName = s.spaces[file.SpaceID].Name
+	return file, nil
+}
+
 func (s *MemoryStore) replaceFileLocked(file File, expectedRevision int64) (File, ObjectRef, error) {
 	for id, current := range s.files {
 		if current.SpaceID != file.SpaceID || current.LogicalPath != file.LogicalPath {
@@ -524,6 +561,9 @@ func memoryMember(userID string, account memoryAccount, grant memoryGrant) Membe
 	if grant.Write {
 		actions = append(actions, ActionWrite)
 		status = "complete"
+	}
+	if grant.Delete {
+		actions = append(actions, ActionDelete)
 	}
 	updatedAt := grant.UpdatedAt
 	if updatedAt.IsZero() {

@@ -25,4 +25,6 @@ type Store interface {
 	ReplaceFileAuthorized(context.Context, string, File, int64) (File, ObjectRef, error)
 	CreateAdminFile(context.Context, File) (File, error)
 	ReplaceAdminFile(context.Context, File, int64) (File, ObjectRef, error)
+	DeleteAuthorizedFile(context.Context, string, string, int64) (File, error)
+	DeleteAdminFile(context.Context, string, int64) (File, error)
 }

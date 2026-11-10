@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   addSharedSpaceMember,
   createSharedSpace,
+  deleteSharedFile,
   getSharedFilePreview,
   listSharedFiles,
   listSharedSpaceCandidates,
@@ -63,7 +64,7 @@ describe("shared files api", () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(listSharedSpaceMembers({ spaceId: "space/1", query: "张", cursor: "member-next" })).resolves.toMatchObject({ items: [{ userId: "usr_1", grantStatus: "complete" }] });
+    await expect(listSharedSpaceMembers({ spaceId: "space/1", query: "张", cursor: "member-next" })).resolves.toMatchObject({ items: [{ userId: "usr_1", grantStatus: "complete", actions: ["read", "write", "delete"] }] });
     await expect(listSharedSpaceCandidates({ spaceId: "space/1", query: "李", cursor: "candidate-next" })).resolves.toMatchObject({ items: [{ userId: "usr_2", email: "lisi@example.com" }] });
     await addSharedSpaceMember({ spaceId: "space/1", userId: "usr_1", actions: ["read", "write"] });
     await updateSharedSpaceMember({ spaceId: "space/1", userId: "usr_1", actions: ["read"] });
@@ -96,6 +97,23 @@ describe("shared files api", () => {
     const uploaded = new File(["hello"], "guide.txt", { type: "text/plain" });
     await expect(uploadSharedFile({ spaceId: "space_1", logicalPath: "guide.txt", file: uploaded, expectedRevision: 1 })).rejects.toMatchObject({ code: "revision_conflict", message: "文件已被修改" });
   });
+
+  it("deletes a shared file with the expected revision", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteSharedFile({ spaceId: "space/1", fileId: "file/1", expectedRevision: 2 })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/admin/shared-files/remove", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ file_id: "file/1", expected_revision: 2 })
+    }));
+  });
+
+  it("preserves stable delete error codes", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: { code: "file_in_use", message: "文件正在被使用" } }, 409)));
+    await expect(deleteSharedFile({ spaceId: "space_1", fileId: "file_1", expectedRevision: 2 })).rejects.toMatchObject({ code: "file_in_use", message: "文件正在被使用", status: 409 });
+  });
 });
 
 function spaceResponse(space_id = "space_1", name = "季度空间") {
@@ -103,7 +121,7 @@ function spaceResponse(space_id = "space_1", name = "季度空间") {
 }
 
 function memberResponse() {
-  return { user_id: "usr_1", name: "张三", email: "zhang@example.com", account_status: "active", grant_status: "complete", actions: ["read", "write"], joined_at: "2026-08-02T00:00:00Z", updated_at: "2026-08-05T00:00:00Z" };
+  return { user_id: "usr_1", name: "张三", email: "zhang@example.com", account_status: "active", grant_status: "complete", actions: ["read", "write", "delete"], joined_at: "2026-08-02T00:00:00Z", updated_at: "2026-08-05T00:00:00Z" };
 }
 
 function fileResponse() {

@@ -36,7 +36,7 @@ func TestPostgresSharedFilesLifecycleAndUploadAuthorizationRace(t *testing.T) {
 	if space.MemberCount != 1 {
 		t.Fatalf("creator member count = %d", space.MemberCount)
 	}
-	for _, action := range []string{ActionRead, ActionWrite} {
+	for _, action := range []string{ActionRead, ActionWrite, ActionDelete} {
 		if err := store.CheckSpaceAccess(ctx, "admin", space.SpaceID, action); err != nil {
 			t.Fatalf("creator %s access: %v", action, err)
 		}
@@ -131,7 +131,7 @@ func TestPostgresAuthorizedSpacesIncludeCurrentAccountWritePermissions(t *testin
 	pool := openSharedFilesTestPool(t)
 	ctx := context.Background()
 	store := NewPostgresStore(pool)
-	if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,status) VALUES ('admin','admin@test.local','active'),('reader','reader@test.local','active'),('writer','writer@test.local','active')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,status) VALUES ('admin','admin@test.local','active'),('reader','reader@test.local','active'),('writer','writer@test.local','active'),('deleter','deleter@test.local','active')`); err != nil {
 		t.Fatal(err)
 	}
 	storage, err := NewFileSystemStorage(t.TempDir())
@@ -143,12 +143,13 @@ func TestPostgresAuthorizedSpacesIncludeCurrentAccountWritePermissions(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for userID, actions := range map[string][]string{"reader": {ActionRead}, "writer": {ActionRead, ActionWrite}} {
+	for userID, actions := range map[string][]string{"reader": {ActionRead}, "writer": {ActionRead, ActionWrite}, "deleter": {ActionRead, ActionDelete}} {
 		if _, err := service.AddMemberWithActions(ctx, space.SpaceID, userID, actions, "admin"); err != nil {
 			t.Fatal(err)
 		}
 		page, err := service.ListSpaces(ctx, userID, 50, "")
-		if err != nil || len(page.Items) != 1 || page.Items[0].Permissions == nil || !page.Items[0].Permissions.Read || page.Items[0].Permissions.Write != (userID == "writer") {
+		if err != nil || len(page.Items) != 1 || page.Items[0].Permissions == nil || !page.Items[0].Permissions.Read ||
+			page.Items[0].Permissions.Write != (userID == "writer") || page.Items[0].Permissions.Delete != (userID == "deleter") {
 			t.Fatalf("%s spaces=%#v err=%v", userID, page, err)
 		}
 	}
@@ -165,6 +166,88 @@ func TestPostgresAuthorizedSpacesIncludeCurrentAccountWritePermissions(t *testin
 	page, err = service.ListSpaces(ctx, "writer", 50, "")
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("ungranted spaces=%#v err=%v", page, err)
+	}
+}
+
+func TestPostgresFileDeleteAuthorizationRevisionAndWorkflowGuard(t *testing.T) {
+	pool := openSharedFilesTestPool(t)
+	ctx := context.Background()
+	store := NewPostgresStore(pool)
+	for _, userID := range []string{"admin", "user_rw", "user_rwd"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO accounts (user_id,email,name,status) VALUES ($1,$1||'@test.local',$1,'active')`, userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	storage, err := NewFileSystemStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, storage, nil)
+	space, err := service.CreateSpace(ctx, "Postgres 删除空间", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for userID, actions := range map[string][]string{
+		"user_rw":  {ActionRead, ActionWrite},
+		"user_rwd": {ActionRead, ActionWrite, ActionDelete},
+	} {
+		if _, err := service.AddMemberWithActions(ctx, space.SpaceID, userID, actions, "admin"); err != nil {
+			t.Fatalf("add %s: %v", userID, err)
+		}
+	}
+	created, err := uploadText(ctx, service, "admin", "agent_admin", space.SpaceID, "docs/delete.txt", "payload", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "user_rw", created.FileID, created.Revision); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("write member delete error = %v", err)
+	}
+	if _, err := service.DeleteFile(ctx, "admin", created.FileID, created.Revision+1); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale revision delete error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_templates (id,name,status,definition_json,created_by,updated_by) VALUES ('tmpl_del','删除保护模板','enabled','[]','admin','admin')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_instances (id,template_id,template_revision,template_snapshot_json,status,initial_input_json,started_by,start_key,start_digest) VALUES ('inst_del','tmpl_del',1,'{}','running','{}','admin','start_del','digest')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workflow_node_tasks (id,instance_id,node_id,node_order,type,assignee_user_id,input_json,status,artifacts_json) VALUES ('task_del','inst_del','node_1',1,'approval','user_rwd','{}','pending',$1::jsonb)`,
+		`[{"file_id":"`+created.FileID+`","logical_path":"docs/delete.txt","revision":1,"sha256":"payload"}]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "user_rwd", created.FileID, created.Revision); !errors.Is(err, ErrFileInUse) {
+		t.Fatalf("workflow referenced delete error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM workflow_node_tasks WHERE id='task_del'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteFile(ctx, "user_rwd", created.FileID, created.Revision); err != nil {
+		t.Fatalf("authorized delete error = %v", err)
+	}
+	if summary, err := service.GetSpaceSummary(ctx, space.SpaceID); err != nil || summary.FileCount != 0 || summary.SizeBytes != 0 {
+		t.Fatalf("summary after delete = %#v, %v", summary, err)
+	}
+	adminFile, err := uploadText(ctx, service, "admin", "agent_admin", space.SpaceID, "docs/admin-delete.txt", "admin", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DeleteAdminFile(ctx, "admin", adminFile.FileID, adminFile.Revision); err != nil {
+		t.Fatalf("admin delete error = %v", err)
+	}
+	if _, err := service.GetAdminFile(ctx, adminFile.FileID); !errors.Is(err, ErrSharedFileNotFound) {
+		t.Fatalf("admin-deleted file still visible: %v", err)
+	}
+	cleanupService := NewService(store, deleteFailingStorage{Storage: storage}, nil)
+	cleanupFile, err := cleanupService.UploadAdmin(ctx, "admin", space.SpaceID, "docs/cleanup.txt", "text/plain", 3, nil, strings.NewReader("abc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cleanupService.DeleteAdminFile(ctx, "admin", cleanupFile.FileID, cleanupFile.Revision); err != nil {
+		t.Fatalf("cleanup delete error = %v", err)
+	}
+	var cleanupSource string
+	if err := pool.QueryRow(ctx, `SELECT source FROM shared_file_storage_cleanup_tasks WHERE file_id = $1`, cleanupFile.FileID).Scan(&cleanupSource); err != nil || cleanupSource != "file_delete" {
+		t.Fatalf("cleanup task source = %q, %v", cleanupSource, err)
 	}
 }
 
@@ -551,6 +634,9 @@ func openSharedFilesTestPool(t *testing.T) *pgxpool.Pool {
 	applySharedFilesMigration(t, pool, "../../db/migrations/00030_shared_file_admin_actor.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00049_shared_file_storage_profiles.sql")
 	applySharedFilesMigration(t, pool, "../../db/migrations/00079_shared_personal_spaces.sql")
+	applySharedFilesMigration(t, pool, "../../db/migrations/00059_workflow.sql")
+	applySharedFilesMigration(t, pool, "../../db/migrations/00074_workflow_shared_files.sql")
+	applySharedFilesMigration(t, pool, "../../db/migrations/00090_shared_file_delete.sql")
 	return pool
 }
 

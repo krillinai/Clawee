@@ -14,6 +14,7 @@ const (
 	ResourceTypeSharedSpace = "shared_space"
 	ActionRead              = "read"
 	ActionWrite             = "write"
+	ActionDelete            = "delete"
 )
 
 var (
@@ -39,6 +40,7 @@ var (
 	ErrStorageProfileInUse          = errors.New("storage profile in use")
 	ErrStorageMigrationRunning      = errors.New("storage migration running")
 	ErrStorageProfileNotFound       = errors.New("storage profile not found")
+	ErrFileInUse                    = errors.New("file referenced by workflow task")
 )
 
 type Space struct {
@@ -57,8 +59,9 @@ type Space struct {
 }
 
 type SpacePermissions struct {
-	Read  bool `json:"read"`
-	Write bool `json:"write"`
+	Read   bool `json:"read"`
+	Write  bool `json:"write"`
+	Delete bool `json:"delete"`
 }
 
 type SpaceSummary struct {

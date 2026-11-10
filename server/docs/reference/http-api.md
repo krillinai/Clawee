@@ -30,6 +30,8 @@
 - `business-data-sources`、`business-dashboards`；
 - `billing`、`model-configuration`。
 
+共享网盘文件删除沿用动作式接口：应用侧 `POST /api/v1/app/shared-files/remove` 需要文件所在空间的 `delete` 成员授权，管理台侧 `POST /api/v1/admin/shared-files/remove` 需要 `console:shared_files:delete` 权限；请求体为 `file_id` 与 `expected_revision`，成功返回 `204`。
+
 某项可选服务未启用时，相关接口可能返回 `503 Service Unavailable`。
 
 ## 管理 API
