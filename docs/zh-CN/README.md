@@ -36,6 +36,7 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 | MCP 网关 | 纳管 `streamable_http` / `stdio` 上游，同步 tools、resources、prompts，按授权裁剪能力 |
 | A2A 网关 | Agent 间协作接入（规划中） |
 | 身份与权限 | 账户 Session、稳定 Agent ID、账户 Token、控制台 RBAC、数据资源授权 |
+| Agent 管理 | Agent 活动 |
 | 风险门禁 | MCP 用户确认与管理员审批，调用前重新校验授权、能力版本和参数快照 |
 | 审计 | 记录调用主体、路由、状态、耗时和错误，提供个人记录与管理端分析 |
 | Token 用量 | Token 总量、趋势、模型分布、员工排行及缺失用量提示 |
@@ -57,7 +58,8 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 | 类目 | 具体实现 |
 | --- | --- |
 | 企业系统 | ERP、OA、MES、PLM、CRM、HR、SCM、WMS、TMS、OMS 等 |
-| 企业办公 | 钉钉 |
+| 企业IM | 钉钉 |
+| 社媒数据 | Bilibili |
 | 业务流程 | 工作流、审批 |
 
 企业系统扩展未配置时，不影响核心账户、RBAC 与 MCP 治理能力。

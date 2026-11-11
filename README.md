@@ -36,6 +36,7 @@ AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise
 | MCP Gateway | Manage `streamable_http` and `stdio` upstreams, synchronize tools, resources, and prompts, and filter capabilities by authorization |
 | A2A Gateway | Agent-to-agent collaboration (planned) |
 | Identity and Access | Account sessions, stable Agent IDs, account tokens, console RBAC, and data resource grants |
+| Agent Management | Agent activity |
 | Risk Gates | User confirmation and administrator approval for MCP calls, with authorization, capability version, and parameter snapshot checks before execution |
 | Auditing | Track callers, routes, status, latency, and errors with personal history and administrator analytics |
 | Token Usage | Token totals, trends, model distribution, employee rankings, and missing usage indicators |
@@ -57,7 +58,8 @@ Connect enterprise systems and office platforms, and orchestrate business proces
 | Category | Implementation |
 | --- | --- |
 | Enterprise systems | ERP, OA, MES, PLM, CRM, HR, SCM, WMS, TMS, OMS, and more |
-| Enterprise office | DingTalk |
+| Enterprise IM | DingTalk |
+| Social media data | Bilibili |
 | Business processes | Workflows and approvals |
 
 Enterprise system extensions are not required for core account, RBAC, and MCP governance capabilities.
