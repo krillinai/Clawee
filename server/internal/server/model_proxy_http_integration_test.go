@@ -133,17 +133,95 @@ func TestModelProxyForwardsResponsesSSE(t *testing.T) {
 	}
 }
 
+func TestModelProxyRequestsAndRecordsFinalStreamUsage(t *testing.T) {
+	for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
+		t.Run(path, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if path == "/v1/chat/completions" {
+					options, _ := body["stream_options"].(map[string]any)
+					if options["include_usage"] != true || options["other_option"] != "preserve" {
+						t.Errorf("流式用量参数错误: %#v", body)
+					}
+				} else if body["stream_options"] != nil {
+					t.Errorf("Responses 不应添加 Chat 参数: %#v", body)
+				}
+				writer.Header().Set("Content-Type", "text/event-stream")
+				_, _ = writer.Write([]byte("data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n"))
+				writer.(http.Flusher).Flush()
+				if path == "/v1/responses" {
+					_, _ = writer.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":3}}}}\n\n"))
+				} else {
+					_, _ = writer.Write([]byte("data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n\ndata: [DONE]\n\n"))
+				}
+			}))
+			defer upstream.Close()
+			router, store := modelProxyTestRouter(t, fixedModelConfiguration{configuration: clawadmin.ModelConfiguration{
+				BaseURL: upstream.URL + "/v1", APIKey: "upstream-test-key", Model: "default-model", CredentialVersion: 1,
+			}})
+			body := `{"model":"default-model","messages":[],"input":"hello","stream":true}`
+			if path == "/v1/chat/completions" {
+				body = `{"model":"default-model","messages":[],"stream":true,"stream_options":{"include_usage":false,"other_option":"preserve"}}`
+			}
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer model-token")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			page, err := store.ListModelProxyAuditRecords(context.Background(), mcpgateway.ModelProxyAuditFilter{Limit: 10})
+			if err != nil || recorder.Code != 200 || len(page.Items) != 1 {
+				t.Fatalf("调用失败: %d, %#v, %v", recorder.Code, page, err)
+			}
+			usage := page.Items[0]
+			if usage.InputTokens != 7 || usage.OutputTokens != 4 || usage.TotalTokens != 11 || usage.CacheReadTokens != 3 || usage.UsageStatus != mcpgateway.ModelProxyUsageComplete {
+				t.Fatalf("流式最终用量重复累计或缺失: %#v", usage)
+			}
+		})
+	}
+}
+
+func TestModelProxyRecordsUsageBeyondAuditSnapshotLimit(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			body := "{\n\"content\":\"" + strings.Repeat("x", modelProxyAuditSnapshotLimit*3) + "\",\n\"usage\":{\"input_tokens\":7,\"output_tokens\":4,\"total_tokens\":11}}"
+			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(status)
+				_, _ = writer.Write([]byte(body))
+			}))
+			defer upstream.Close()
+			router, store := modelProxyTestRouter(t, fixedModelConfiguration{configuration: clawadmin.ModelConfiguration{
+				BaseURL: upstream.URL + "/v1", APIKey: "upstream-test-key", Model: "default-model", CredentialVersion: 1,
+			}})
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[]}`))
+			request.Header.Set("Authorization", "Bearer model-token")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			page, err := store.ListModelProxyAuditRecords(context.Background(), mcpgateway.ModelProxyAuditFilter{Limit: 10})
+			if err != nil || recorder.Code != status || recorder.Body.String() != body || len(page.Items) != 1 {
+				t.Fatalf("响应转发或记录失败: status=%d, records=%d, err=%v", recorder.Code, len(page.Items), err)
+			}
+			usage := page.Items[0]
+			if !usage.Truncated || usage.TotalTokens != 11 || usage.UsageStatus != mcpgateway.ModelProxyUsageComplete {
+				t.Fatalf("审计快照截断不应影响用量: %#v", usage)
+			}
+		})
+	}
+}
+
 func TestModelProxyFailoverOccursBeforeWritingResponse(t *testing.T) {
 	firstCalls, secondCalls := 0, 0
 	first := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		firstCalls++
-		http.Error(writer, `{"error":{"code":"overloaded"}}`, http.StatusServiceUnavailable)
+		http.Error(writer, `{"error":{"code":"overloaded"},"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, http.StatusServiceUnavailable)
 	}))
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		secondCalls++
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"id":"chatcmpl_failover","object":"chat.completion"}`))
+		_, _ = writer.Write([]byte(`{"id":"chatcmpl_failover","object":"chat.completion","usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}`))
 	}))
 	defer second.Close()
 
@@ -185,6 +263,10 @@ func TestModelProxyFailoverOccursBeforeWritingResponse(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || firstCalls != 1 || secondCalls != 1 || !strings.Contains(recorder.Body.String(), "chatcmpl_failover") {
 		t.Fatalf("failover response = %d first=%d second=%d body=%s", recorder.Code, firstCalls, secondCalls, recorder.Body.String())
+	}
+	page, err := modelStore.ListModelProxyAuditRecords(ctx, mcpgateway.ModelProxyAuditFilter{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].InputTokens != 9 || page.Items[0].OutputTokens != 5 || page.Items[0].TotalTokens != 14 || page.Items[0].UsageStatus != mcpgateway.ModelProxyUsageComplete {
+		t.Fatalf("故障转移丢失已知用量: %#v, %v", page, err)
 	}
 }
 

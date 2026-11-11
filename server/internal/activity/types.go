@@ -189,10 +189,12 @@ type SnapshotRequest struct {
 }
 
 type Snapshot struct {
-	GeneratedAt       time.Time
-	Trend             []TrendPoint
-	Models            []ModelUsage
-	TokenUsageRanking []TokenUsageRank
+	GeneratedAt             time.Time
+	Trend                   []TrendPoint
+	Models                  []ModelUsage
+	TokenUsageRanking       []TokenUsageRank
+	KnownUsageRequests      int64
+	IncompleteUsageRequests int64
 }
 
 type Organization struct {
@@ -209,17 +211,18 @@ type Organization struct {
 }
 
 type Statistics struct {
-	Range             string            `json:"range"`
-	Timezone          string            `json:"timezone"`
-	StartDate         string            `json:"start_date"`
-	EndDate           string            `json:"end_date"`
-	GeneratedAt       time.Time         `json:"generated_at"`
-	Organization      Organization      `json:"organization"`
-	Trend             Trend             `json:"trend"`
-	ModelDistribution []ModelUsage      `json:"model_distribution"`
-	TokenUsageRanking []TokenUsageRank  `json:"token_usage_ranking"`
-	Agents            []Agent           `json:"agents"`
-	DataStatus        map[string]string `json:"data_status"`
+	Range                   string            `json:"range"`
+	Timezone                string            `json:"timezone"`
+	StartDate               string            `json:"start_date"`
+	EndDate                 string            `json:"end_date"`
+	GeneratedAt             time.Time         `json:"generated_at"`
+	Organization            Organization      `json:"organization"`
+	Trend                   Trend             `json:"trend"`
+	ModelDistribution       []ModelUsage      `json:"model_distribution"`
+	TokenUsageRanking       []TokenUsageRank  `json:"token_usage_ranking"`
+	Agents                  []Agent           `json:"agents"`
+	DataStatus              map[string]string `json:"data_status"`
+	IncompleteUsageRequests int64             `json:"incomplete_usage_requests,omitempty"`
 }
 
 type DateRange struct {

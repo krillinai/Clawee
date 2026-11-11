@@ -64,6 +64,39 @@ func TestClientRejectsMissingBinding(t *testing.T) {
 	}
 }
 
+func TestRAGFlowClientUsesOnlyValidatedBindingsAndAggregatesPartialResults(t *testing.T) {
+	p := &concurrentSearchProvider{results: map[string]provider.SearchResult{
+		"dataset-a": {Chunks: []provider.SearchChunk{{Text: "合成A", SourceID: "chunk-a", DocumentName: "a.txt"}}},
+		"dataset-b": {Chunks: []provider.SearchChunk{{Text: "合成B", SourceID: "chunk-b", DocumentName: "b.txt"}}},
+	}, errors: map[string]error{"dataset-failed": &provider.ProviderError{Code: provider.ErrorUnauthorized}}}
+	client, err := NewClient(p, knowledge.ProviderRAGFlow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := mcpgateway.UpstreamCallRequest{Capability: mcpgateway.Capability{UpstreamName: knowledge.SearchUpstreamName}, Arguments: mcpgateway.JSONMap{"query": "合成问题", "top_k": 1}, KnowledgeBindings: []mcpgateway.KnowledgeBinding{
+		{KnowledgeBaseID: "kb-a", ProviderType: knowledge.ProviderRAGFlow, ExternalKnowledgeBaseID: "dataset-a"},
+		{KnowledgeBaseID: "kb-b", ProviderType: knowledge.ProviderRAGFlow, ExternalKnowledgeBaseID: "dataset-b"},
+		{KnowledgeBaseID: "kb-failed", ProviderType: knowledge.ProviderRAGFlow, ExternalKnowledgeBaseID: "dataset-failed"},
+	}}
+	result, err := client.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := result.StructuredContent.(mcpgateway.JSONMap)
+	if body["partial"] != true || body["successful_knowledge_base_count"] != 2 || len(body["chunks"].([]any)) != 1 {
+		t.Fatalf("body=%v", body)
+	}
+	for _, bindings := range [][]mcpgateway.KnowledgeBinding{nil, {{KnowledgeBaseID: "legacy", ProviderType: knowledge.ProviderBailian, ExternalKnowledgeBaseID: "legacy-id"}}, {{KnowledgeBaseID: "unbound", ProviderType: knowledge.ProviderRAGFlow}}} {
+		req.KnowledgeBindings = bindings
+		if _, err := client.CallTool(context.Background(), req); !errors.Is(err, ErrInvalidKnowledgeScope) {
+			t.Fatalf("scope=%+v error=%v", bindings, err)
+		}
+	}
+	if err := mcpgateway.ValidateInput(searchInputSchema(), mcpgateway.JSONMap{"query": "合成问题", "dataset_ids": []string{"outside"}}); err == nil {
+		t.Fatal("客户端不能指定数据集")
+	}
+}
+
 func TestClientSearchesKnowledgeBasesConcurrentlyAndAppliesGlobalTopK(t *testing.T) {
 	highScore, mediumScore, lowScore := 0.95, 0.80, 0.60
 	p := &concurrentSearchProvider{

@@ -106,6 +106,26 @@ type modelProxyUsage struct {
 	responseModel       string
 }
 
+// 同一网关请求发生故障转移时，保留之前响应中已经确认的用量。
+func addModelProxyAuditUsage(record *mcpgateway.ModelProxyAuditRecord, usage modelProxyUsage) {
+	complete := usage.status == mcpgateway.ModelProxyUsageComplete &&
+		(record.UsageStatus == "" || record.UsageStatus == mcpgateway.ModelProxyUsageComplete)
+	record.InputTokens += usage.inputTokens
+	record.OutputTokens += usage.outputTokens
+	record.TotalTokens += usage.totalTokens
+	record.CacheReadTokens += usage.cacheReadTokens
+	record.CacheCreationTokens += usage.cacheCreationTokens
+	record.ReasoningTokens += usage.reasoningTokens
+	record.UsageAvailable = record.UsageAvailable || usage.available
+	record.UsageStatus, record.UsageSource = mcpgateway.ModelProxyUsageUnavailable, mcpgateway.ModelProxyUsageSourceUnavailable
+	if record.UsageAvailable {
+		record.UsageStatus, record.UsageSource = mcpgateway.ModelProxyUsagePartial, mcpgateway.ModelProxyUsageSourceUpstream
+		if complete {
+			record.UsageStatus = mcpgateway.ModelProxyUsageComplete
+		}
+	}
+}
+
 func extractModelProxyUsage(value any) (inputTokens, outputTokens, totalTokens, cacheReadTokens int64, available bool) {
 	usage := extractModelProxyUsageDetailed(value)
 	return usage.inputTokens, usage.outputTokens, usage.totalTokens, usage.cacheReadTokens, usage.available
@@ -120,6 +140,9 @@ func extractModelProxyUsageDetailed(value any) modelProxyUsage {
 	inputTokens, inputFound := firstNumberPresent(usage, "input_tokens", "prompt_tokens")
 	outputTokens, outputFound := firstNumberPresent(usage, "output_tokens", "completion_tokens")
 	totalTokens, totalFound := firstNumberPresent(usage, "total_tokens")
+	if !inputFound && !outputFound && !totalFound {
+		return modelProxyUsage{status: mcpgateway.ModelProxyUsageUnavailable, source: mcpgateway.ModelProxyUsageSourceUnavailable}
+	}
 	cacheReadTokens, _ := firstNumberPresent(usage, "cache_read_input_tokens", "cache_read_tokens", "cached_tokens")
 	cacheCreationTokens, _ := firstNumberPresent(usage, "cache_creation_input_tokens", "cache_creation_tokens", "cache_write_tokens")
 	reasoningTokens, _ := firstNumberPresent(usage, "reasoning_tokens")
@@ -201,12 +224,16 @@ func parseModelProxySSELine(line []byte) (modelProxyUsage, bool) {
 }
 
 type modelProxyUsageAccumulator struct {
-	pending []byte
-	usage   modelProxyUsage
+	pending      []byte
+	usage        modelProxyUsage
+	jsonResponse bool
 }
 
 func (a *modelProxyUsageAccumulator) Consume(raw []byte) {
 	a.pending = append(a.pending, raw...)
+	if a.jsonResponse {
+		return
+	}
 	for {
 		index := bytes.IndexByte(a.pending, '\n')
 		if index < 0 {
@@ -221,6 +248,9 @@ func (a *modelProxyUsageAccumulator) Consume(raw []byte) {
 }
 
 func (a *modelProxyUsageAccumulator) Finalize() modelProxyUsage {
+	if a.jsonResponse {
+		return extractModelProxyUsageBytesDetailed(a.pending)
+	}
 	if len(a.pending) > 0 {
 		if usage, ok := parseModelProxySSELine(a.pending); ok && usage.available {
 			a.usage = usage

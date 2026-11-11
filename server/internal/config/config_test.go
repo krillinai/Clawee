@@ -13,6 +13,60 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestLoadRAGFlowDefaultsAndEnvironment(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Knowledge.Enabled || cfg.Knowledge.ProviderType != "bailian" || cfg.Knowledge.RAGFlow.APIKeyRef != "RAGFLOW_API_KEY" || cfg.Knowledge.RAGFlow.BaseURL != "" {
+		t.Fatalf("默认配置=%+v", cfg.Knowledge)
+	}
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_ENABLED", "true")
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_PROVIDER_TYPE", "ragflow")
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_RAGFLOW_BASE_URL", "http://127.0.0.1:18080/")
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_RAGFLOW_API_KEY_REF", "FIXTURE_RAGFLOW_KEY")
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_RAGFLOW_EMBEDDING_MODEL", "fixture@factory")
+	t.Setenv("CLAW_GATEWAY_KNOWLEDGE_RAGFLOW_RERANK_ID", "fixture-reranker")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Knowledge.RAGFlow.BaseURL != "http://127.0.0.1:18080/" || cfg.Knowledge.RAGFlow.APIKeyRef != "FIXTURE_RAGFLOW_KEY" || cfg.Knowledge.RAGFlow.EmbeddingModel != "fixture@factory" || cfg.Knowledge.RAGFlow.RerankID != "fixture-reranker" {
+		t.Fatalf("环境配置=%+v", cfg.Knowledge.RAGFlow)
+	}
+}
+
+func TestKnowledgeConfigValidatesSelectedProvider(t *testing.T) {
+	for _, base := range []string{"", "ftp://localhost", "http://user:pass@localhost", "http://localhost/api/v1", "http://localhost/?key=x", "http://localhost/?", "http://localhost/#fragment", "http://localhost/#", "/relative"} {
+		cfg := KnowledgeConfig{Enabled: true, ProviderType: "ragflow", RAGFlow: RAGFlowConfig{BaseURL: base, APIKeyRef: "FIXTURE"}}
+		if cfg.Validate() == nil {
+			t.Errorf("应拒绝 base_url=%q", base)
+		}
+		cfg.Enabled = false
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("禁用不应校验: %v", err)
+		}
+	}
+	for _, base := range []string{"http://127.0.0.1:18080/", "https://ragflow.example.com"} {
+		cfg := KnowledgeConfig{Enabled: true, ProviderType: " RAGFlow ", RAGFlow: RAGFlowConfig{BaseURL: base, APIKeyRef: "FIXTURE"}}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := NormalizeRAGFlowBaseURL(base)
+		if err != nil || strings.HasSuffix(normalized, "/") {
+			t.Fatalf("地址未标准化: %s %v", normalized, err)
+		}
+		cfg.RAGFlow.APIKeyRef = ""
+		if cfg.Validate() == nil {
+			t.Fatal("应拒绝空凭据引用")
+		}
+		cfg.ProviderType = "unknown"
+		if cfg.Validate() == nil {
+			t.Fatal("应拒绝未知类型")
+		}
+	}
+}
+
 func TestResolveConfigPathWithoutOpsDir(t *testing.T) {
 	_, _, err := resolveConfigPath("configs/config.yaml")
 	if err == nil || !strings.Contains(err.Error(), opsDirEnv) {

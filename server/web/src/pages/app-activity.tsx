@@ -133,7 +133,7 @@ function ActivityStatisticsView() {
 function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics; onRetry: () => void; retrying: boolean }) {
   const usage = data.organization.usage;
   const modelUsageStatus = data.data_status.model_usage;
-  const modelUsageAvailable = modelUsageStatus === "available";
+  const modelUsageAvailable = modelUsageStatus === "available" || modelUsageStatus === "partial";
   const metrics = [
     { label: "总 Token", value: modelUsageAvailable ? formatTokenCount(usage.total_tokens) : "--", exact: modelUsageAvailable ? formatInteger(usage.total_tokens) : undefined, icon: Database },
     { label: "活跃员工", value: formatInteger(data.organization.active_employees), exact: undefined, icon: Users },
@@ -160,6 +160,10 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
           );
         })}
       </section>
+
+      {(data.incomplete_usage_requests ?? 0) > 0 ? (
+        <p role="status" className="text-sm text-muted-foreground">{data.incomplete_usage_requests} 次调用未返回完整用量，Token 统计仅包含已知用量。</p>
+      ) : null}
 
       {modelUsageAvailable ? <section aria-label="Token 统计" className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.7fr)]">
         <Card className="shadow-none">
@@ -253,7 +257,7 @@ function ActivityContent({ data, onRetry, retrying }: { data: ActivityStatistics
         <div className="flex items-center gap-2"><Clock3 className="size-3.5" aria-hidden="true" />数据生成于 {formatDateTime(data.generated_at, data.timezone)}</div>
         <div className="flex items-center gap-2">
           <Badge variant={modelUsageStatus === "available" ? "success" : modelUsageStatus === "not_configured" ? "muted" : "warning"}>
-            {modelUsageStatus === "available" ? "Token 数据正常" : modelUsageStatus === "not_configured" ? "Token 数据源未配置" : "Token 数据暂不可用"}
+            {modelUsageStatus === "available" ? "Token 数据正常" : modelUsageStatus === "partial" ? "Token 数据不完整" : modelUsageStatus === "not_configured" ? "Token 数据源未配置" : "Token 数据暂不可用"}
           </Badge>
           <Badge variant="success">活动数据正常</Badge>
         </div>

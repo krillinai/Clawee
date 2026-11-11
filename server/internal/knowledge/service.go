@@ -16,18 +16,19 @@ import (
 )
 
 type Service struct {
-	store    Store
-	provider provider.KnowledgeProvider
-	clock    func() time.Time
-	logger   *zap.Logger
+	store        Store
+	provider     provider.KnowledgeProvider
+	providerType string
+	clock        func() time.Time
+	logger       *zap.Logger
 }
 
-func NewService(store Store, p provider.KnowledgeProvider, loggers ...*zap.Logger) *Service {
+func NewService(store Store, p provider.KnowledgeProvider, providerType string, loggers ...*zap.Logger) *Service {
 	logger := zap.NewNop()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
-	return &Service{store: store, provider: p, clock: func() time.Time { return time.Now().UTC() }, logger: logger}
+	return &Service{store: store, provider: p, providerType: strings.ToLower(strings.TrimSpace(providerType)), clock: func() time.Time { return time.Now().UTC() }, logger: logger}
 }
 
 func (s *Service) Store() Store { return s.store }
@@ -35,11 +36,18 @@ func (s *Service) Store() Store { return s.store }
 func (s *Service) CreateKnowledgeBase(ctx context.Context, input CreateKnowledgeBaseInput) (KnowledgeBase, error) {
 	input.Name = textutil.TrimInput(input.Name)
 	input.Description = textutil.TrimInput(input.Description)
-	if input.Name == "" || len([]rune(input.Name)) > 100 || len([]rune(input.Description)) > 1000 || s.provider == nil {
+	if input.Name == "" || len([]rune(input.Name)) > 100 || len([]rune(input.Description)) > 1000 || s.provider == nil || (s.providerType != ProviderBailian && s.providerType != ProviderRAGFlow) {
 		return KnowledgeBase{}, ErrInvalidRequest
 	}
+	if s.providerType == ProviderRAGFlow {
+		for _, char := range input.Name {
+			if char > 0xffff {
+				return KnowledgeBase{}, ErrInvalidRequest
+			}
+		}
+	}
 	now := s.clock()
-	kb := KnowledgeBase{KnowledgeBaseID: newID("kb"), Name: input.Name, Description: input.Description, ProviderType: ProviderBailian, Status: KnowledgeBaseCreating, CreatedBy: input.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	kb := KnowledgeBase{KnowledgeBaseID: newID("kb"), Name: input.Name, Description: input.Description, ProviderType: s.providerType, Status: KnowledgeBaseCreating, CreatedBy: input.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	created, err := s.store.CreateKnowledgeBase(ctx, kb)
 	if err != nil {
 		return KnowledgeBase{}, err
@@ -121,7 +129,7 @@ func (s *Service) UploadDocument(ctx context.Context, input UploadDocumentInput)
 	if err != nil {
 		return Document{}, err
 	}
-	if kb.Status != KnowledgeBaseActive || kb.ExternalKnowledgeBaseID == "" {
+	if kb.ProviderType != s.providerType || kb.Status != KnowledgeBaseActive || kb.ExternalKnowledgeBaseID == "" {
 		return Document{}, ErrConflict
 	}
 	now := s.clock()
@@ -165,10 +173,24 @@ func (s *Service) UploadDocument(ctx context.Context, input UploadDocumentInput)
 }
 
 func (s *Service) ListDocuments(ctx context.Context, kbID string) ([]Document, error) {
-	if _, err := s.store.GetKnowledgeBase(ctx, kbID); err != nil {
+	kb, err := s.store.GetKnowledgeBase(ctx, kbID)
+	if err != nil {
 		return nil, err
 	}
-	return s.store.ListDocuments(ctx, kbID)
+	docs, err := s.store.ListDocuments(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	if s.providerType == ProviderRAGFlow && kb.Status == KnowledgeBaseActive {
+		for _, doc := range docs {
+			if doc.Status == DocumentProcessing {
+				refreshCtx, cancel := context.WithTimeout(ctx, DocumentListRefreshTimeout)
+				defer cancel()
+				return s.SyncDocuments(refreshCtx, kbID)
+			}
+		}
+	}
+	return docs, nil
 }
 
 func (s *Service) SyncDocuments(ctx context.Context, kbID string) ([]Document, error) {
@@ -176,26 +198,47 @@ func (s *Service) SyncDocuments(ctx context.Context, kbID string) ([]Document, e
 	if err != nil {
 		return nil, err
 	}
-	if kb.Status != KnowledgeBaseActive || kb.ExternalKnowledgeBaseID == "" {
+	if kb.ProviderType != s.providerType || s.provider == nil || kb.Status != KnowledgeBaseActive || kb.ExternalKnowledgeBaseID == "" {
 		return nil, ErrConflict
 	}
 	providerCtx, cancel := context.WithTimeout(ctx, KnowledgeOperationTimeout)
 	defer cancel()
+	var localDocs []Document
+	if s.providerType == ProviderRAGFlow {
+		localDocs, err = s.store.ListDocuments(providerCtx, kbID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	items, err := s.provider.ListDocuments(providerCtx, kb.ExternalKnowledgeBaseID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrProvider, providerErrorCode(err))
+	}
+	if s.providerType == ProviderRAGFlow {
+		seen := make(map[string]bool, len(items))
+		for _, item := range items {
+			seen[item.ExternalID] = true
+		}
+		for _, doc := range localDocs {
+			if doc.Status == DocumentProcessing && doc.ExternalDocumentID != "" && !seen[doc.ExternalDocumentID] {
+				items = append(items, provider.ProviderDocument{ExternalID: doc.ExternalDocumentID, Status: provider.DocumentFailed, ErrorMessage: "外部文档不存在"})
+			}
+		}
 	}
 	lifecycle, ok := s.store.(lifecycleStore)
 	if !ok {
 		return nil, errors.New("knowledge lifecycle store is not configured")
 	}
-	if err := lifecycle.SyncDocuments(ctx, kbID, items, s.clock()); err != nil {
+	if err := lifecycle.SyncDocuments(providerCtx, kbID, items, s.clock()); err != nil {
 		return nil, err
 	}
-	return s.store.ListDocuments(ctx, kbID)
+	return s.store.ListDocuments(providerCtx, kbID)
 }
 
 func (s *Service) DeleteKnowledgeBase(ctx context.Context, id string) error {
+	if err := s.checkProviderOwnership(ctx, id); err != nil {
+		return err
+	}
 	lifecycle, ok := s.store.(lifecycleStore)
 	if !ok {
 		return errors.New("knowledge lifecycle store is not configured")
@@ -221,6 +264,9 @@ func (s *Service) DeleteKnowledgeBase(ctx context.Context, id string) error {
 }
 
 func (s *Service) DeleteDocument(ctx context.Context, kbID, id string) error {
+	if err := s.checkProviderOwnership(ctx, kbID); err != nil {
+		return err
+	}
 	lifecycle, ok := s.store.(lifecycleStore)
 	if !ok {
 		return errors.New("knowledge lifecycle store is not configured")
@@ -246,6 +292,21 @@ func (s *Service) DeleteDocument(ctx context.Context, kbID, id string) error {
 		}
 	}
 	return lifecycle.CompleteDocumentDelete(ctx, kbID, id, s.clock())
+}
+
+func (s *Service) checkProviderOwnership(ctx context.Context, kbID string) error {
+	kb, err := s.store.GetKnowledgeBase(ctx, kbID)
+	// 已逻辑删除的对象仍由生命周期 Store 保持幂等语义。
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if kb.ProviderType != s.providerType {
+		return ErrConflict
+	}
+	return nil
 }
 
 func (s *Service) documentDeleteTargetMissing(ctx context.Context, externalKnowledgeBaseID, externalDocumentID string, deleteErr error) bool {

@@ -54,3 +54,22 @@ func testKnowledgeConfig() config.KnowledgeConfig {
 		},
 	}
 }
+
+func TestRAGFlowRuntimeResolvesOnlySelectedCredentialWithoutNetwork(t *testing.T) {
+	t.Setenv("FIXTURE_RAGFLOW_KEY", "fixture-key")
+	t.Setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
+	t.Setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+	cfg := config.KnowledgeConfig{Enabled: true, ProviderType: " RAGFlow ", RAGFlow: config.RAGFlowConfig{BaseURL: "http://127.0.0.1:1", APIKeyRef: "FIXTURE_RAGFLOW_KEY"}}
+	runtime, err := NewRuntime(cfg)
+	if err != nil || runtime.Provider == nil || runtime.ProviderType != ProviderRAGFlow {
+		t.Fatalf("runtime=%+v err=%v", runtime, err)
+	}
+	t.Setenv("FIXTURE_RAGFLOW_KEY", "")
+	if _, err := NewRuntime(cfg); err == nil {
+		t.Fatal("缺失Key必须失败")
+	}
+	cfg.Enabled = false
+	if _, err := NewRuntime(cfg); err == nil || err.Error() != "knowledge is disabled" {
+		t.Fatalf("禁用时不应解析Key: %v", err)
+	}
+}

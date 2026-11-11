@@ -69,6 +69,34 @@ func TestServiceStatisticsReturnsNotConfiguredWithLocalActivity(t *testing.T) {
 	}
 }
 
+func TestServiceStatisticsReportsUsageCoverage(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		known, incomplete int64
+		status            string
+	}{
+		{"完整", 2, 0, "available"},
+		{"部分缺失", 1, 1, "partial"},
+		{"全部缺失", 0, 2, "unavailable"},
+		{"没有调用", 0, 0, "available"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeSnapshotClient{snapshot: &Snapshot{KnownUsageRequests: test.known, IncompleteUsageRequests: test.incomplete}}
+			service, err := NewService(client, fakeActivityStore{}, &fakeMCPUsageStore{}, "Asia/Shanghai")
+			if err != nil {
+				t.Fatal(err)
+			}
+			statistics, err := service.Statistics(context.Background(), RangeToday)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if statistics.DataStatus["model_usage"] != test.status || statistics.IncompleteUsageRequests != test.incomplete {
+				t.Fatalf("用量状态错误: %#v", statistics)
+			}
+		})
+	}
+}
+
 func TestServiceStatisticsReturnsUnavailableWhenProviderFailsOrOverflows(t *testing.T) {
 	tests := []struct {
 		name   string

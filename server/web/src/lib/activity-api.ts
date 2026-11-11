@@ -1,7 +1,7 @@
 import { appApi } from "@/lib/api";
 
 export type ActivityRange = "today" | "7d" | "30d";
-export type ModelUsageStatus = "available" | "not_configured" | "unavailable";
+export type ModelUsageStatus = "available" | "partial" | "not_configured" | "unavailable";
 
 export type ActivityUsage = {
   input_tokens: number;
@@ -99,6 +99,7 @@ export type ActivityAgent = {
 };
 
 export type ActivityStatistics = {
+  incomplete_usage_requests?: number;
   range: ActivityRange;
   timezone: string;
   start_date: string;

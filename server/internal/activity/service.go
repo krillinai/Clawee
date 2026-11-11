@@ -107,12 +107,20 @@ func (s *Service) Statistics(ctx context.Context, requestedRange string) (Statis
 		}
 		snapshot.TokenUsageRanking = filterTokenUsageRanking(snapshot.TokenUsageRanking, accountNames)
 	}
+	modelUsageStatus := "available"
+	if snapshot.IncompleteUsageRequests > 0 {
+		modelUsageStatus = "partial"
+		if snapshot.KnownUsageRequests == 0 {
+			modelUsageStatus = "unavailable"
+		}
+	}
 	return Statistics{
 		Range: r.Range, Timezone: r.Timezone, StartDate: request.StartDate, EndDate: request.EndDate,
 		GeneratedAt:  snapshot.GeneratedAt,
 		Organization: Organization{Usage: usage, ActiveEmployees: activity.ActiveEmployees, ActiveAgents: activity.ActiveAgents, PlatformActivity: activity.PlatformActivity, CompletedTurns: activity.CompletedTurns, MCPDistribution: mcpDistribution, SkillUsage: activity.SkillUsage, EmployeeSkillUsage: activity.EmployeeSkillUsage, SkillContributions: activity.SkillContributions, SkillUsageTotals: activity.SkillUsageTotals},
 		Trend:        Trend{Granularity: r.Granularity, Points: points}, ModelDistribution: snapshot.Models, TokenUsageRanking: snapshot.TokenUsageRanking,
-		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": "available", "activity": "available"},
+		Agents: activity.Agents, DataStatus: map[string]string{"model_usage": modelUsageStatus, "activity": "available"},
+		IncompleteUsageRequests: snapshot.IncompleteUsageRequests,
 	}, nil
 }
 

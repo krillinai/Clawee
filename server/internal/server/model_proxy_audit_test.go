@@ -131,6 +131,33 @@ func TestModelProxyUsageAccumulatorHandlesSplitFinalEvent(t *testing.T) {
 	}
 }
 
+func TestExtractModelProxyUsageDoesNotTreatEmptyUsageAsKnown(t *testing.T) {
+	for _, raw := range []string{`{"usage":{}}`, `{"usage":{"input_tokens":null,"output_tokens":null}}`} {
+		usage := extractModelProxyUsageBytesDetailed([]byte(raw))
+		if usage.available || usage.status != mcpgateway.ModelProxyUsageUnavailable {
+			t.Fatalf("缺失用量被当作已知用量: %#v", usage)
+		}
+	}
+}
+
+func TestModelProxyAuditUsageKeepsMissingFailoverUsagePartial(t *testing.T) {
+	for _, missingFirst := range []bool{false, true} {
+		record := mcpgateway.ModelProxyAuditRecord{}
+		known := modelProxyUsage{inputTokens: 7, outputTokens: 4, totalTokens: 11, available: true, status: mcpgateway.ModelProxyUsageComplete}
+		missing := modelProxyUsage{status: mcpgateway.ModelProxyUsageUnavailable}
+		if missingFirst {
+			addModelProxyAuditUsage(&record, missing)
+			addModelProxyAuditUsage(&record, known)
+		} else {
+			addModelProxyAuditUsage(&record, known)
+			addModelProxyAuditUsage(&record, missing)
+		}
+		if !record.UsageAvailable || record.UsageStatus != mcpgateway.ModelProxyUsagePartial || record.TotalTokens != 11 {
+			t.Fatalf("部分调用缺失不应丢失已知用量或标为完整: %#v", record)
+		}
+	}
+}
+
 func TestSummarizeModelProxyAuditsFiltersErrorsByUserAndModel(t *testing.T) {
 	ctx := context.Background()
 	store := mcpgateway.NewMemoryStore()

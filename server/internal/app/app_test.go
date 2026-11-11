@@ -15,21 +15,47 @@ import (
 	"github.com/krillinai/Clawee/server/internal/agentactivitymcp"
 	"github.com/krillinai/Clawee/server/internal/businessdata"
 	"github.com/krillinai/Clawee/server/internal/businessdatamcp"
-	"github.com/krillinai/Clawee/server/internal/clawadmin"
 	"github.com/krillinai/Clawee/server/internal/config"
 	"github.com/krillinai/Clawee/server/internal/dataaccess"
+	"github.com/krillinai/Clawee/server/internal/knowledge"
 	"github.com/krillinai/Clawee/server/internal/mcpgateway"
+	"github.com/krillinai/Clawee/server/internal/store"
 	"github.com/krillinai/Clawee/server/internal/sub2api"
 )
 
+func TestKnowledgeProviderBindingConflictReportsTypesAndCounts(t *testing.T) {
+	ctx := context.Background()
+	store := knowledge.NewMemoryStore()
+	now := time.Now()
+	for i, item := range []knowledge.KnowledgeBase{
+		{ProviderType: knowledge.ProviderBailian, ExternalKnowledgeBaseID: "legacy-id-1", Status: knowledge.KnowledgeBaseActive},
+		{ProviderType: knowledge.ProviderBailian, ExternalKnowledgeBaseID: "legacy-id-2", Status: knowledge.KnowledgeBaseDeleteFailed},
+		{ProviderType: knowledge.ProviderBailian, ExternalKnowledgeBaseID: "", Status: knowledge.KnowledgeBaseCreateFailed},
+		{ProviderType: knowledge.ProviderBailian, ExternalKnowledgeBaseID: "deleted-id", Status: knowledge.KnowledgeBaseDeleted, DeletedAt: &now},
+	} {
+		item.KnowledgeBaseID = string(rune('a' + i))
+		item.Name = item.KnowledgeBaseID
+		if _, err := store.CreateKnowledgeBase(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := validateKnowledgeProviderBindings(ctx, store, knowledge.ProviderRAGFlow)
+	if err == nil || !strings.Contains(err.Error(), "bailian=2") || strings.Contains(err.Error(), "legacy-id") {
+		t.Fatalf("冲突提示=%v", err)
+	}
+	if err := validateKnowledgeProviderBindings(ctx, store, knowledge.ProviderBailian); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSelectSnapshotClientByModelAccessMode(t *testing.T) {
-	center := clawadmin.NewClient("http://127.0.0.1:8790", "", time.Second)
+	local := store.NewModelUsageSnapshotStore(nil)
 	t.Run("platform ignores sub2api config", func(t *testing.T) {
 		selected, err := selectSnapshotClient(config.Config{
 			ModelAccess: config.ModelAccessConfig{Mode: "platform_managed"},
 			Sub2API:     config.Sub2APIConfig{BaseURL: "/invalid", AdminAPIKey: "partial"},
-		}, center)
-		if err != nil || selected != activity.SnapshotClient(center) {
+		}, local)
+		if err != nil || selected != activity.SnapshotClient(local) {
 			t.Fatalf("selected = %T, err = %v", selected, err)
 		}
 	})
@@ -37,7 +63,7 @@ func TestSelectSnapshotClientByModelAccessMode(t *testing.T) {
 		selected, err := selectSnapshotClient(config.Config{
 			ModelAccess: config.ModelAccessConfig{Mode: "enterprise_managed"},
 			Sub2API:     config.Sub2APIConfig{BaseURL: "http://127.0.0.1:8080", AdminAPIKey: "test-key", OrganizationUserID: 1},
-		}, center)
+		}, local)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +72,7 @@ func TestSelectSnapshotClientByModelAccessMode(t *testing.T) {
 		}
 	})
 	t.Run("enterprise empty", func(t *testing.T) {
-		selected, err := selectSnapshotClient(config.Config{ModelAccess: config.ModelAccessConfig{Mode: "enterprise_managed"}}, center)
+		selected, err := selectSnapshotClient(config.Config{ModelAccess: config.ModelAccessConfig{Mode: "enterprise_managed"}}, local)
 		if err != nil || selected != nil {
 			t.Fatalf("selected = %T, err = %v", selected, err)
 		}
@@ -59,7 +85,7 @@ func TestSelectSnapshotClientByModelAccessMode(t *testing.T) {
 		{BaseURL: "http://127.0.0.1:8080", AdminAPIKey: "test-key", OrganizationUserID: -1},
 	} {
 		t.Run("enterprise partial", func(t *testing.T) {
-			selected, err := selectSnapshotClient(config.Config{ModelAccess: config.ModelAccessConfig{Mode: "enterprise_managed"}, Sub2API: sub2APIConfig}, center)
+			selected, err := selectSnapshotClient(config.Config{ModelAccess: config.ModelAccessConfig{Mode: "enterprise_managed"}, Sub2API: sub2APIConfig}, local)
 			if err == nil || selected != nil {
 				t.Fatalf("selected = %T, err = %v", selected, err)
 			}

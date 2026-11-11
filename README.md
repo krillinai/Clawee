@@ -203,6 +203,8 @@ On Linux hosts, allow container UID/GID `65532` to read the external configurati
 3. Under **Model Gateway → Model Groups**, configure member accounts, a default model, and a `failover` or `round_robin` strategy.
 4. Under **My Agents**, generate a platform access token and use `http://127.0.0.1:1904/v1` as the model Base URL.
 
+In `platform_managed` mode, token totals, trends, model distribution, and employee rankings on **Agent Activity** are calculated directly from Gateway invocation records, aggregated by Beijing time (UTC+8) and user ID. Only known usage returned by upstream providers is counted. Missing or incomplete usage is flagged, and missing historical data is not estimated. Balances and top-ups continue to use the existing billing API.
+
 Verify the model catalog and a request:
 
 ```bash

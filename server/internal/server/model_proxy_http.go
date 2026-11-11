@@ -197,8 +197,22 @@ func handleModelProxy(opts Options, upstreamPath string) gin.HandlerFunc {
 			writeModelError(c, status, code, message)
 			return
 		}
+		bodyChanged := requestedModel == ""
 		if requestedModel == "" {
 			payload["model"] = selectedModel
+		}
+		if stream, _ := payload["stream"].(bool); stream && upstreamPath == "/chat/completions" {
+			options, ok := payload["stream_options"].(map[string]any)
+			if payload["stream_options"] == nil {
+				options, ok = map[string]any{}, true
+			}
+			if ok {
+				options["include_usage"] = true
+				payload["stream_options"] = options
+				bodyChanged = true
+			}
+		}
+		if bodyChanged {
 			raw, err = json.Marshal(payload)
 			if err != nil {
 				finalizeModelAudit(opts, audit, mcpgateway.ModelProxyAuditFailed, http.StatusBadRequest, 0, "invalid_request", "request body is invalid", selectedModel, nil, nil, 0, 0, false)
@@ -319,8 +333,9 @@ func proxyModelRequestByTargets(c *gin.Context, opts Options, audit mcpgateway.M
 		}
 		lastStatus = response.StatusCode
 		if index < len(targets)-1 && (response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError) {
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 2<<20))
+			failedBody, _ := io.ReadAll(io.LimitReader(response.Body, 2<<20))
 			_ = response.Body.Close()
+			addModelProxyAuditUsage(&audit, extractModelProxyUsageBytesDetailed(failedBody))
 			if err := requestContext.Err(); err != nil {
 				if errors.Is(err, context.Canceled) {
 					finalizeModelAudit(opts, audit, mcpgateway.ModelProxyAuditClientDisconnected, http.StatusRequestTimeout, lastStatus, "client_disconnected", "client disconnected before failover", model, nil, nil, 0, 0, false)
@@ -389,7 +404,9 @@ func forwardModelProxyResponse(c *gin.Context, opts Options, audit mcpgateway.Mo
 	var captured bytes.Buffer
 	var responseBytes, responseChunks int64
 	var captureTruncated, clientDisconnected bool
-	var usageAccumulator modelProxyUsageAccumulator
+	usageAccumulator := modelProxyUsageAccumulator{
+		jsonResponse: !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream"),
+	}
 	finish := func(status mcpgateway.ModelProxyAuditStatus, gatewayStatus, upstreamStatus int, errorCode, errorMessage string, extraTruncated bool) {
 		usage := usageAccumulator.Finalize()
 		finalizeModelAuditWithUsage(opts, audit, status, gatewayStatus, upstreamStatus, errorCode, errorMessage, model, response.Header, captured.Bytes(), responseBytes, responseChunks, extraTruncated, &usage)
@@ -554,6 +571,7 @@ func finalizeModelAuditWithUsage(opts Options, record mcpgateway.ModelProxyAudit
 	if !usage.available {
 		usage = extractModelProxyUsageBytesDetailed(responseRaw)
 	}
+	addModelProxyAuditUsage(&record, usage)
 	if model == "" {
 		model = record.Model
 	}
@@ -569,15 +587,15 @@ func finalizeModelAuditWithUsage(opts Options, record mcpgateway.ModelProxyAudit
 		UpstreamStatus:      upstreamStatus,
 		ErrorCode:           errorCode,
 		ErrorMessage:        errorMessage,
-		InputTokens:         usage.inputTokens,
-		OutputTokens:        usage.outputTokens,
-		TotalTokens:         usage.totalTokens,
-		CacheReadTokens:     usage.cacheReadTokens,
-		CacheCreationTokens: usage.cacheCreationTokens,
-		ReasoningTokens:     usage.reasoningTokens,
-		UsageAvailable:      usage.available,
-		UsageStatus:         usage.status,
-		UsageSource:         usage.source,
+		InputTokens:         record.InputTokens,
+		OutputTokens:        record.OutputTokens,
+		TotalTokens:         record.TotalTokens,
+		CacheReadTokens:     record.CacheReadTokens,
+		CacheCreationTokens: record.CacheCreationTokens,
+		ReasoningTokens:     record.ReasoningTokens,
+		UsageAvailable:      record.UsageAvailable,
+		UsageStatus:         record.UsageStatus,
+		UsageSource:         record.UsageSource,
 		ResponseHeaders:     sanitizeModelProxyHeaders(responseHeaders),
 		ResponseBody:        responseBody,
 		ResponseBytes:       responseBytes,
