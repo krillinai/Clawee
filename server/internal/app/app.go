@@ -93,10 +93,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, err
 	}
 	clawAdminClient := clawadmin.NewClient(cfg.ClawAdmin.BaseURL, cfg.ClawAdmin.DeploymentCredential, clawAdminTimeout)
-	snapshotClient, err := selectSnapshotClient(cfg, clawAdminClient)
-	if err != nil {
-		return nil, err
-	}
 	dingtalkStateTTL, dingtalkTimeout, err := cfg.DingTalk.Validate()
 	if err != nil {
 		return nil, err
@@ -144,6 +140,10 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		modelUpstreamStore = store.NewModelGroupStore(pool)
 		modelGroupStore = modelUpstreamStore
 		mcpUsageStore = store.NewMCPUsagePostgresStore(pool)
+	}
+	snapshotClient, err := selectSnapshotClient(cfg, store.NewModelUsageSnapshotStore(pool))
+	if err != nil {
+		return nil, err
 	}
 	dataAccessStore := dataaccess.Store(dataaccess.NewMemoryStore())
 	if pool != nil {
@@ -370,17 +370,21 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	officeUserDashboardAPI = officeAPIs.userDashboard
 	officeManagementAPI = officeAPIs.management
 	officeUserCollectorsAPI = officeAPIs.userCollectors
-	activitySvc, err := activity.NewService(snapshotClient, officeAPIs.activityStore, mcpUsageStore, "Asia/Shanghai", func(ctx context.Context) ([]string, error) {
-		accounts, err := accountSvc.ListAccounts(ctx)
-		if err != nil {
-			return nil, err
+	var accountNames activity.AccountNameLoader
+	if cfg.ModelAccess.Mode == "enterprise_managed" {
+		accountNames = func(ctx context.Context) ([]string, error) {
+			accounts, err := accountSvc.ListAccounts(ctx)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(accounts))
+			for _, account := range accounts {
+				names = append(names, account.Name)
+			}
+			return names, nil
 		}
-		names := make([]string, 0, len(accounts))
-		for _, account := range accounts {
-			names = append(names, account.Name)
-		}
-		return names, nil
-	})
+	}
+	activitySvc, err := activity.NewService(snapshotClient, officeAPIs.activityStore, mcpUsageStore, "Asia/Shanghai", accountNames)
 	if err != nil {
 		return nil, err
 	}
@@ -619,9 +623,9 @@ func resolvedFeedbackStoragePath(path string) (string, error) {
 	}
 }
 
-func selectSnapshotClient(cfg config.Config, clawAdminClient activity.SnapshotClient) (activity.SnapshotClient, error) {
+func selectSnapshotClient(cfg config.Config, localClient activity.SnapshotClient) (activity.SnapshotClient, error) {
 	if cfg.ModelAccess.Mode != "enterprise_managed" {
-		return clawAdminClient, nil
+		return localClient, nil
 	}
 	baseURL := strings.TrimSpace(cfg.Sub2API.BaseURL)
 	apiKey := strings.TrimSpace(cfg.Sub2API.AdminAPIKey)

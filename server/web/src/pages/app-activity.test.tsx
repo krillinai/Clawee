@@ -77,6 +77,31 @@ const fixtureBilling: BillingOverview = {
 describe("AppActivityPage", () => {
   afterEach(() => vi.clearAllMocks());
 
+  it.each(["partial", "unavailable"] as const)("marks %s usage and preserves local activity", async (status) => {
+    vi.mocked(listMyDataViews).mockResolvedValue([{ view_id: "agent_activity", actions: ["read"] }]);
+    vi.mocked(getMyActivityStatistics).mockResolvedValue({
+      ...fixtureStatistics,
+      incomplete_usage_requests: 2,
+      data_status: { model_usage: status, activity: "available" },
+    });
+    vi.mocked(getBillingOverview).mockResolvedValue(fixtureBilling);
+
+    renderPage(<AppActivityPage />, "/app/activity");
+
+    expect(await screen.findByText("2 次调用未返回完整用量，Token 统计仅包含已知用量。")).toBeInTheDocument();
+    expect(screen.getByText("Hermes C03")).toBeInTheDocument();
+    expect(screen.queryByText("Token 数据正常")).not.toBeInTheDocument();
+    const metrics = screen.getByRole("region", { name: "核心指标" });
+    if (status === "partial") {
+      expect(screen.getByTitle("18,396,247")).toBeInTheDocument();
+      expect(screen.getByRole("table", { name: "Token 使用排行" })).toBeInTheDocument();
+      expect(screen.getByText("Token 数据不完整")).toBeInTheDocument();
+    } else {
+      expect(metrics).toHaveTextContent("总 Token--");
+      expect(screen.queryByRole("table", { name: "Token 使用排行" })).not.toBeInTheDocument();
+    }
+  });
+
   it("renders authorized organization activity and switches ranges", async () => {
     vi.mocked(listMyDataViews).mockResolvedValue([{ view_id: "agent_activity", actions: ["read"] }]);
     vi.mocked(getMyActivityStatistics).mockImplementation(async (range) => ({ ...fixtureStatistics, range }));
