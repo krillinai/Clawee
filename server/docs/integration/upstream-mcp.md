@@ -1,5 +1,7 @@
 # 上游 MCP Server 接入
 
+[English](../en/integration/upstream-mcp.md) · **简体中文**
+
 ## 接入模型
 
 Gateway 纳管现有 MCP Server，不要求把上游实现复制进本项目。管理员注册上游、同步能力并向用户账号授权后，该账号的 Agent 通过 Gateway 的统一 MCP endpoint 调用能力。

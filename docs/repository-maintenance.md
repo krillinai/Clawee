@@ -1,5 +1,7 @@
 # 仓库边界与维护
 
+[English](./en/repository-maintenance.md) · **简体中文**
+
 ## 源码归属
 
 aigateway 维护 Gateway、管理台、PostgreSQL 迁移及企业治理；ClaweeAgent 维护 Web 工作台、daemon、Electron、Codex Runtime 与 Web＋daemon 部署包。两仓库各自安装依赖、构建、测试、发布，不读取对方源码。

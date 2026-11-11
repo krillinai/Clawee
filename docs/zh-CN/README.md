@@ -342,7 +342,6 @@ $CLAWEE_OPS_DIR/
 - Agent 客户端：[ClaweeAgent](https://github.com/krillinai/ClaweeAgent)
 - 问题反馈：[GitHub Issues](https://github.com/krillinai/AIGateway/issues)
 - 发布版本：[GitHub Releases](https://github.com/krillinai/AIGateway/releases)
-- 企业部署：[hello@clawee.ai](mailto:hello@clawee.ai)
 
 欢迎通过 Issue、Pull Request、文档和测试改进 AI Gateway。如果这个项目对你的团队有帮助，欢迎 Star 仓库。
 

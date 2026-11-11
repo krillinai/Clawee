@@ -1,5 +1,7 @@
 # 安全报告
 
+[English](./docs/en/security.md) · **简体中文**
+
 请勿在公开 Issue、PR 或日志中提交有效密钥、账号信息或可直接攻击在线服务的细节。
 
 优先使用仓库 Security 页的 **Report a vulnerability** 私密报告入口。若该入口尚未启用，请先创建不含漏洞细节的 Issue，请求维护者开通私密报告渠道，待渠道确认后再提供复现材料。

@@ -1,5 +1,7 @@
 # 本地开发
 
+[English](../en/getting-started/development.md) · **简体中文**
+
 ## 环境要求
 
 - Go 1.25 或与 `go.mod` 一致的版本；

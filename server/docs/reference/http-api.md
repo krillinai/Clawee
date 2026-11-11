@@ -1,5 +1,7 @@
 # HTTP API 概览
 
+[English](../en/reference/http-api.md) · **简体中文**
+
 ## 基础约定
 
 - API 前缀为 `/api/v1`。

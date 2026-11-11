@@ -216,7 +216,7 @@ docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml up
 
 Open `http://127.0.0.1:1904`. The published image is `ghcr.io/krillinai/aigateway-server`.
 
-On Linux hosts, allow container UID/GID `65532` to read the external configuration. See the [production deployment guide](./server/docs/deployment/production.md) for production permissions, HTTPS, and backup procedures.
+On Linux hosts, allow container UID/GID `65532` to read the external configuration. See the [production deployment guide](./server/docs/en/deployment/production.md) for production permissions, HTTPS, and backup procedures.
 
 </details>
 
@@ -286,7 +286,7 @@ A `stdio` upstream executes commands on the Gateway host. Only configure reviewe
 
 In [ClaweeAgent](https://github.com/krillinai/ClaweeAgent), set the Gateway Origin to your deployment address. The local default is `http://127.0.0.1:1904`. Then register or sign in with a Gateway account.
 
-See [Clawee Agent integration](./server/docs/integration/clawee-agent.md) and [upstream MCP Server integration](./server/docs/integration/upstream-mcp.md) for integration details.
+See [Clawee Agent integration](./server/docs/en/integration/clawee-agent.md) and [upstream MCP Server integration](./server/docs/en/integration/upstream-mcp.md) for integration details.
 
 ## Configuration and Development
 
@@ -308,7 +308,7 @@ Bound fields can be overridden with `CLAW_GATEWAY_*` environment variables, for 
 | `CLAW_GATEWAY_MCP_PUBLIC_BASE_URL` | Public Gateway Origin |
 | `CLAW_GATEWAY_MODEL_ACCESS_MODE` | `platform_managed` or `enterprise_managed` |
 
-See the [configuration reference](./server/docs/getting-started/configuration.md) for all fields and secret requirements.
+See the [configuration reference](./server/docs/en/getting-started/configuration.md) for all fields and secret requirements.
 
 Common development commands:
 
@@ -326,15 +326,15 @@ Common development commands:
 
 Server integration tests must use isolated PostgreSQL databases. Use `CLAW_GATEWAY_TEST_DATABASE_URL` to specify a `_test` database, and never run tests against development or production databases.
 
-Before deploying to production, review the security and operations documentation and implement HTTPS, secret management, persistence, backups, migrations, and metrics access controls. Report security issues privately using the [security reporting guide](./SECURITY.md).
+Before deploying to production, review the security and operations documentation and implement HTTPS, secret management, persistence, backups, migrations, and metrics access controls. Report security issues privately using the [security reporting guide](./docs/en/security.md).
 
 ## Documentation
 
-- **Architecture and permissions:** [Project responsibilities](./docs/architecture.md) · [Gateway architecture](./server/docs/architecture/overview.md) · [Security and permissions](./server/docs/architecture/security-and-permissions.md)
-- **Installation and configuration:** [Local development](./server/docs/getting-started/development.md) · [Configuration reference](./server/docs/getting-started/configuration.md) · [Production deployment](./server/docs/deployment/production.md)
-- **Client integration:** [Clawee Agent](./server/docs/integration/clawee-agent.md) · [MCP upstreams](./server/docs/integration/upstream-mcp.md) · [HTTP API](./server/docs/reference/http-api.md)
+- **Architecture and permissions:** [Project responsibilities](./docs/en/architecture.md) · [Gateway architecture](./server/docs/en/architecture/overview.md) · [Security and permissions](./server/docs/en/architecture/security-and-permissions.md)
+- **Installation and configuration:** [Local development](./server/docs/en/getting-started/development.md) · [Configuration reference](./server/docs/en/getting-started/configuration.md) · [Production deployment](./server/docs/en/deployment/production.md)
+- **Client integration:** [Clawee Agent](./server/docs/en/integration/clawee-agent.md) · [MCP upstreams](./server/docs/en/integration/upstream-mcp.md) · [HTTP API](./server/docs/en/reference/http-api.md)
 - **Operations and development:** [Validation and operations](./docs/validation-and-operations.md) · [Operations guide](./docs/operations/operations-guide.md) · [Management console guidelines](./docs/frontend/frontend-development-guidelines.md)
-- **Project collaboration:** [Contributing guide](./CONTRIBUTING.md) · [Repository maintenance](./docs/repository-maintenance.md) · [Third-party notices](./third_party/README.md)
+- **Project collaboration:** [Contributing guide](./docs/en/contributing.md) · [Repository maintenance](./docs/en/repository-maintenance.md) · [Third-party notices](./third_party/README.md)
 
 ## Community and Support
 
@@ -342,7 +342,6 @@ Before deploying to production, review the security and operations documentation
 - Agent client: [ClaweeAgent](https://github.com/krillinai/ClaweeAgent)
 - Issue reporting: [GitHub Issues](https://github.com/krillinai/AIGateway/issues)
 - Releases: [GitHub Releases](https://github.com/krillinai/AIGateway/releases)
-- Enterprise deployment: [hello@clawee.ai](mailto:hello@clawee.ai)
 
 Contributions through issues, pull requests, documentation, and tests are welcome. If AI Gateway helps your team, please consider starring the repository.
 

@@ -1,5 +1,7 @@
 # 文档
 
+[English](./en/README.md) · **简体中文**
+
 本目录包含 MCP Gateway 后端的公开文档。项目位于 Agent Runtime 与企业系统之间，负责统一的身份认证、权限控制、MCP 能力治理、调用门禁和审计。Agent Runtime 以及 OA、ERP、CRM、知识库等业务系统不由本项目实现。
 
 ## 阅读顺序

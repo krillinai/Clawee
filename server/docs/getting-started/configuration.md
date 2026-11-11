@@ -1,5 +1,7 @@
 # 配置参考
 
+[English](../en/getting-started/configuration.md) · **简体中文**
+
 ## 配置来源
 
 服务读取 YAML，并允许已绑定的 `CLAW_GATEWAY_*` 环境变量覆盖对应字段。配置路径规则如下：

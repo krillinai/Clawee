@@ -1,5 +1,7 @@
 # Clawee Agent 接入
 
+[English](../en/integration/clawee-agent.md) · **简体中文**
+
 ## 调用边界
 
 Clawee Web 或 Desktop 负责用户交互，本地 Daemon 负责持有认证状态、调用 Gateway、下载 Skill 和执行安装。浏览器渲染进程不应保存 Bearer Token 或模型密钥。

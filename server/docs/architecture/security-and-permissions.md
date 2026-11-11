@@ -1,5 +1,7 @@
 # 安全与权限
 
+[English](../en/architecture/security-and-permissions.md) · **简体中文**
+
 ## 身份边界
 
 系统区分三类调用主体：

@@ -1,5 +1,7 @@
 # aigateway 架构
 
+[English](./en/architecture.md) · **简体中文**
+
 Go Gateway 和 server/web 管理台维护账号、Agent 身份、HTTP/MCP 接口、授权门禁、审计、Skill Hub、知识库与共享文件。数据存储使用 PostgreSQL，结构由 server/db/migrations 管理。可选企业集成按部署配置启用。
 
 管理台构建到 server/internal/server/webdist/dist，随 Go 二进制或容器分发。管理台与服务端保留同一仓库和发布版本。

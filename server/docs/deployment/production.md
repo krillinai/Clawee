@@ -1,5 +1,7 @@
 # 生产部署
 
+[English](../en/deployment/production.md) · **简体中文**
+
 ## 部署边界
 
 生产部署由一个 Gateway 后端、PostgreSQL、管理控制台静态文件和可选外部服务组成。Agent Runtime 与企业业务系统独立部署，通过 MCP 或 HTTP 与 Gateway 连接。

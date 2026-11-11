@@ -1,5 +1,7 @@
 # 架构总览
 
+[English](../en/architecture/overview.md) · **简体中文**
+
 ## 项目定位
 
 本项目是企业 Agent 与企业系统之间的 MCP 安全治理中间层。它让不同 Agent Runtime 通过统一入口访问已经存在的 MCP Server、知识库和企业能力，并集中执行认证、授权、门禁和审计。
