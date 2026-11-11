@@ -28,6 +28,40 @@ This repository includes the **Go Gateway, React management console, PostgreSQL 
 
 AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise business system. It exposes an OpenAI-compatible HTTP API for models and MCP over Streamable HTTP for tools.
 
+## System Architecture
+
+```text
+Agents / IDE / MCP Clients / Enterprise Applications
+                         |
+          OpenAI-compatible / MCP / A2A (planned) / HTTP
+                         |
++---------------------------------------------------------+
+| AI Gateway                                              |
+|                                                         |
+| Shared Governance                                       |
+| Identity / RBAC / Agent Management / Gates / Audit      |
+| Token Usage / Usage Analytics                           |
+|                                                         |
+| Gateway Core                                            |
+| Model Gateway / MCP Gateway / A2A Gateway (planned)     |
+|                                                         |
+| Foundational Extensions                                 |
+| Skill Hub / Knowledge Bases / File System               |
+|                                                         |
+| Enterprise System Extensions                            |
+| ERP / OA / MES / PLM / CRM / HR / SCM / WMS / TMS       |
+| DingTalk / Bilibili / Workflows and Approvals           |
++---------------------------------------------------------+
+          |                  |                    |
+          v                  v                    v
+ Model Upstreams       MCP Upstreams       Enterprise Systems
+ OpenAI-compatible     HTTP / stdio         Apps / IM / Data
+
+ PostgreSQL + Embedded Web Console + External Ops Config
+```
+
+Technology stack: **Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**.
+
 ## Gateway Core
 
 | Module | Capabilities |
@@ -103,31 +137,6 @@ Access over 1,100 models through OpenAI-compatible upstreams, spanning internati
 <div align="center">
   <img src="./docs/assets/supported-models.png" alt="24 model providers and platforms, including OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Ollama, vLLM, and OpenRouter" width="100%" />
 </div>
-
-## System Architecture
-
-```text
-Agents / IDE / MCP Clients / Internal Apps
-                    |
-          OpenAI HTTP / MCP / HTTP API
-                    |
-+---------------------------------------------------+
-| AI Gateway                                        |
-| Authentication -> Authorization -> Gates -> Audit |
-|                                                   |
-| Model Gateway | MCP Gateway | Resource APIs       |
-| Model Groups  | Grants      | Skills / Knowledge  |
-| Routing       | Approvals   | Shared Files        |
-+--------+--------------+-------------+-------------+
-         |              |             |
-         v              v             v
- OpenAI-compatible   MCP Servers    Enterprise Data
- Model Upstreams    HTTP / stdio    OSS / Knowledge
-
- PostgreSQL + Embedded Web Console + External Ops Config
-```
-
-Technology stack: **Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**.
 
 ## Quick Start
 

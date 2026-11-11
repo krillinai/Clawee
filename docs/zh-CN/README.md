@@ -28,6 +28,40 @@
 
 AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
 
+## 系统架构
+
+```text
+Agents / IDE / MCP Clients / Enterprise Applications
+                         |
+          OpenAI-compatible / MCP / A2A (planned) / HTTP
+                         |
++---------------------------------------------------------+
+| AI Gateway                                              |
+|                                                         |
+| Shared Governance                                       |
+| Identity / RBAC / Agent Management / Gates / Audit      |
+| Token Usage / Usage Analytics                           |
+|                                                         |
+| Gateway Core                                            |
+| Model Gateway / MCP Gateway / A2A Gateway (planned)     |
+|                                                         |
+| Foundational Extensions                                 |
+| Skill Hub / Knowledge Bases / File System               |
+|                                                         |
+| Enterprise System Extensions                            |
+| ERP / OA / MES / PLM / CRM / HR / SCM / WMS / TMS       |
+| DingTalk / Bilibili / Workflows and Approvals           |
++---------------------------------------------------------+
+          |                  |                    |
+          v                  v                    v
+ Model Upstreams       MCP Upstreams       Enterprise Systems
+ OpenAI-compatible     HTTP / stdio         Apps / IM / Data
+
+ PostgreSQL + Embedded Web Console + External Ops Config
+```
+
+技术栈：**Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**。
+
 ## 网关内核
 
 | 模块 | 能力 |
@@ -103,31 +137,6 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 <div align="center">
   <img src="../assets/supported-models.png" alt="OpenAI、Anthropic、Gemini、DeepSeek、千问、Ollama、vLLM、OpenRouter 等 24 个模型厂商与平台" width="100%" />
 </div>
-
-## 系统架构
-
-```text
-Agents / IDE / MCP Clients / Internal Apps
-                    |
-          OpenAI HTTP / MCP / HTTP API
-                    |
-+---------------------------------------------------+
-| AI Gateway                                        |
-| Authentication -> Authorization -> Gates -> Audit |
-|                                                   |
-| Model Gateway | MCP Gateway | Resource APIs       |
-| Model Groups  | Grants      | Skills / Knowledge  |
-| Routing       | Approvals   | Shared Files        |
-+--------+--------------+-------------+-------------+
-         |              |             |
-         v              v             v
- OpenAI-compatible   MCP Servers    Enterprise Data
- Model Upstreams    HTTP / stdio    OSS / Knowledge
-
- PostgreSQL + Embedded Web Console + External Ops Config
-```
-
-技术栈：**Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**。
 
 ## 快速开始
 
