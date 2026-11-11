@@ -104,29 +104,32 @@ AI Gateway 本身不是聊天 Agent，也不负责运行桌面客户端或企业
   <img src="../assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
 </div>
 
-| Agent / 平台 | 状态 | 快速接入 |
-| --- | :---: | --- |
-| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ 原生配套 | [支持一键接入](#claweeagent) |
-| [Kimi](https://github.com/MoonshotAI/kimi-cli) | ✅ 支持 | [接入指南](#客户端接入) |
-| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Cursor](https://www.cursor.com/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [OpenCode](https://opencode.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ 支持 | [接入指南](#客户端接入) |
-| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ 支持 | [接入指南](#客户端接入) |
-| [WorkBuddy](https://www.workbuddy.cn/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [千问办公](https://qwenwork.cn/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [豆包工作](https://www.doubao.com/work) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Codex](https://github.com/openai/codex) | ✅ 支持 | [接入指南](#客户端接入) |
-| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Pi](https://github.com/badlogic/pi-mono) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Kiro](https://kiro.dev/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Qwen Code](https://github.com/QwenLM/qwen-code) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Aider](https://github.com/Aider-AI/aider) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Trae](https://www.trae.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Qoder](https://qoder.com/) | ✅ 支持 | [接入指南](#客户端接入) |
+<table align="center">
+<thead><tr><th>Agent / 平台</th><th align="center">状态</th><th>快速接入</th></tr></thead>
+<tbody>
+<tr><td><a href="https://github.com/krillinai/ClaweeAgent">Clawee Agent</a></td><td align="center">✅ 原生配套</td><td><a href="#claweeagent">支持一键接入</a></td></tr>
+<tr><td><a href="https://github.com/MoonshotAI/kimi-cli">Kimi</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://www.cursor.com/">Cursor</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://opencode.ai/">OpenCode</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/features/copilot/cli">GitHub Copilot CLI</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://www.workbuddy.cn/">WorkBuddy</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://qwenwork.cn/">千问办公</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://www.doubao.com/work">豆包工作</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/openai/codex">Codex</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/openclaw/openclaw">OpenClaw</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/NousResearch/hermes-agent">Hermes</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/badlogic/pi-mono">Pi</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://kiro.dev/">Kiro</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/QwenLM/qwen-code">Qwen Code</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/Aider-AI/aider">Aider</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://github.com/Kilo-Org/kilocode">Kilo</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://www.trae.ai/">Trae</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+<tr><td><a href="https://qoder.com/">Qoder</a></td><td align="center">✅ 支持</td><td><a href="#客户端接入">接入指南</a></td></tr>
+</tbody>
+</table>
 
 ## 支持的模型
 

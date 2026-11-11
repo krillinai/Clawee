@@ -104,29 +104,32 @@ AI Gateway supports all mainstream Agents. Configure your Agent to use the Gatew
   <img src="./docs/assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
 </div>
 
-| Agent / Platform | Status | Quick Start |
-| --- | :---: | --- |
-| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ Native companion | [One-click integration](#claweeagent) |
-| [Kimi](https://github.com/MoonshotAI/kimi-cli) | ✅ Supported | [Integration guide](#client-integration) |
-| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | ✅ Supported | [Integration guide](#client-integration) |
-| [Cursor](https://www.cursor.com/) | ✅ Supported | [Integration guide](#client-integration) |
-| [OpenCode](https://opencode.ai/) | ✅ Supported | [Integration guide](#client-integration) |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ Supported | [Integration guide](#client-integration) |
-| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ Supported | [Integration guide](#client-integration) |
-| [WorkBuddy](https://www.workbuddy.cn/) | ✅ Supported | [Integration guide](#client-integration) |
-| [Qwen Workspace (千问办公)](https://qwenwork.cn/) | ✅ Supported | [Integration guide](#client-integration) |
-| [Doubao Workspace (豆包工作)](https://www.doubao.com/work) | ✅ Supported | [Integration guide](#client-integration) |
-| [Codex](https://github.com/openai/codex) | ✅ Supported | [Integration guide](#client-integration) |
-| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ Supported | [Integration guide](#client-integration) |
-| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ Supported | [Integration guide](#client-integration) |
-| [Pi](https://github.com/badlogic/pi-mono) | ✅ Supported | [Integration guide](#client-integration) |
-| [Kiro](https://kiro.dev/) | ✅ Supported | [Integration guide](#client-integration) |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ Supported | [Integration guide](#client-integration) |
-| [Qwen Code](https://github.com/QwenLM/qwen-code) | ✅ Supported | [Integration guide](#client-integration) |
-| [Aider](https://github.com/Aider-AI/aider) | ✅ Supported | [Integration guide](#client-integration) |
-| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ Supported | [Integration guide](#client-integration) |
-| [Trae](https://www.trae.ai/) | ✅ Supported | [Integration guide](#client-integration) |
-| [Qoder](https://qoder.com/) | ✅ Supported | [Integration guide](#client-integration) |
+<table align="center">
+<thead><tr><th>Agent / Platform</th><th align="center">Status</th><th>Quick Start</th></tr></thead>
+<tbody>
+<tr><td><a href="https://github.com/krillinai/ClaweeAgent">Clawee Agent</a></td><td align="center">✅ Native companion</td><td><a href="#claweeagent">One-click integration</a></td></tr>
+<tr><td><a href="https://github.com/MoonshotAI/kimi-cli">Kimi</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://www.cursor.com/">Cursor</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://opencode.ai/">OpenCode</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/features/copilot/cli">GitHub Copilot CLI</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://www.workbuddy.cn/">WorkBuddy</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://qwenwork.cn/">Qwen Workspace (千问办公)</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://www.doubao.com/work">Doubao Workspace (豆包工作)</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/openai/codex">Codex</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/openclaw/openclaw">OpenClaw</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/NousResearch/hermes-agent">Hermes</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/badlogic/pi-mono">Pi</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://kiro.dev/">Kiro</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/QwenLM/qwen-code">Qwen Code</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/Aider-AI/aider">Aider</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://github.com/Kilo-Org/kilocode">Kilo</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://www.trae.ai/">Trae</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+<tr><td><a href="https://qoder.com/">Qoder</a></td><td align="center">✅ Supported</td><td><a href="#client-integration">Integration guide</a></td></tr>
+</tbody>
+</table>
 
 ## Supported Models
 
