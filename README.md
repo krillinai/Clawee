@@ -1,13 +1,12 @@
 <div align="center">
 
-# AI Gateway
+# <img src="./docs/assets/aigateway-logo.png" alt="" width="40" height="40" align="absmiddle" /> AI Gateway
 
-**面向FDE、企业CTO、CIO和IT团队 · 由KrillinAI 团队打造**
+**For forward deployed engineers (FDEs), enterprise CTOs, CIOs, and IT teams · Built by KrillinAI**
 
-统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。<br />
-**支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
+Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics. **Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
 
-[简体中文](./README.md) · [English](./docs/en/README.md)
+[简体中文](./docs/zh-CN/README.md) · **English**
 
 [![GitHub Stars](https://img.shields.io/github/stars/krillinai/AIGateway?style=social)](https://github.com/krillinai/AIGateway/stargazers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
@@ -17,77 +16,79 @@
 </div>
 
 <div align="center">
-  <img src="./docs/assets/aigateway-overview.png" alt="AI Gateway 统一连接 Agent、模型、工具、数据与业务系统" width="100%" />
+  <img src="./docs/assets/aigateway-overview.png" alt="AI Gateway connecting Agents, models, tools, data, and business systems" width="100%" />
 </div>
 
-## 项目概览
+## Project Overview
 
-当 Agent、模型和工具不断增加，分散的密钥、权限与调用日志会迅速变得难以管理。AI Gateway 在 Agent 与企业能力之间提供统一治理入口，让每一次模型或工具调用都经过可验证的身份、明确的授权和可追溯的审计。
+As organizations adopt more Agents, models, and tools, scattered credentials, permissions, and invocation logs quickly become difficult to manage. AI Gateway provides a unified governance layer between Agents and enterprise capabilities, giving every model or tool invocation a verified identity, explicit authorization, and a traceable audit trail.
 
-本仓库包含 **Go Gateway、React 管理台、PostgreSQL 迁移和部署工具**，既可独立使用，也可作为 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 的服务端。
+This repository includes the **Go Gateway, React management console, PostgreSQL migrations, and deployment tooling**. It can run independently or serve as the backend for [ClaweeAgent](https://github.com/krillinai/ClaweeAgent).
 
-AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
+AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise business system. It exposes an OpenAI-compatible HTTP API for models and MCP over Streamable HTTP for tools.
 
-## 核心能力
+## Core Capabilities
 
-| 模块 | 能力 |
+| Module | Capabilities |
 | --- | --- |
-| 模型网关 | OpenAI 兼容接口、上游账号与模型目录、模型组、默认模型、故障转移和轮询、SSE 流式响应 |
-| MCP 网关 | 纳管 `streamable_http` / `stdio` 上游，同步 tools、resources、prompts，按授权裁剪能力 |
-| 身份与权限 | 账户 Session、稳定 Agent ID、账户 Token、控制台 RBAC、数据资源授权 |
-| 风险门禁 | MCP 用户确认与管理员审批，调用前重新校验授权、能力版本和参数快照 |
-| 审计与用量 | 记录调用主体、路由、状态、耗时、错误和 Token 用量，提供个人记录与管理端分析 |
-| Skill Hub | Skill 包、版本、空间、Git 来源、审核发布与客户端下载 |
-| 知识与文件 | 百炼知识库接入、共享空间、文件上传下载、本地或阿里云 OSS 存储 |
+| Model Gateway | OpenAI-compatible APIs, upstream accounts and model catalogs, model groups, default models, failover, round robin, and SSE streaming |
+| MCP Gateway | Manage `streamable_http` and `stdio` upstreams, synchronize tools, resources, and prompts, and filter capabilities by authorization |
+| Identity and Access | Account sessions, stable Agent IDs, account tokens, console RBAC, and data resource grants |
+| Risk Gates | User confirmation and administrator approval for MCP calls, with authorization, capability version, and parameter snapshot checks before execution |
+| Auditing and Usage | Track callers, routes, status, latency, errors, and token usage with personal history and administrator analytics |
+| Skill Hub | Skill packages, versions, spaces, Git sources, review and publishing workflows, and client downloads |
+| Knowledge and Files | Bailian knowledge base integration, shared spaces, file upload and download, and local or Alibaba Cloud OSS storage |
 
-模型与 MCP 审计会脱敏，不保存明文 API Key、Cookie 或上游凭据。
+Model and MCP audits are redacted and do not store plaintext API keys, cookies, or upstream credentials.
 
-## 企业扩展
+## Enterprise Extensions
 
-支持以下可选集成：
+The following optional integrations are available:
 
-- 工作流与审批
-- Agent 活动
-- 钉钉
-- Bilibili
-- 外部模型配置
-- 计费
+| Category | Implementation |
+| --- | --- |
+| Business processes | Workflows and approvals |
+| Agent management | Agent activity |
+| Enterprise messaging | DingTalk |
+| Social media data | Bilibili |
+| Model services | External model configuration |
+| Cost management | Billing |
 
-可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
+Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
 
-## 支持的 Agent
+## Supported Agents
 
-支持所有主流 Agent。Agent 可通过自身支持的 OpenAI 兼容 API 或 MCP 配置能力接入 AI Gateway，复用统一的身份、权限、路由、审批和审计能力。
+AI Gateway supports all mainstream Agents. Configure your Agent to use the Gateway's OpenAI-compatible API or MCP endpoint to access centralized identity, access control, routing, approvals, and auditing.
 
-| Agent / 平台 | 状态 | 快速接入 |
+| Agent / Platform | Status | Quick Start |
 | --- | :---: | --- |
-| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ 原生配套 | [支持一键接入](#claweeagent) |
-| Kimi | ✅ 支持 | [接入指南](#客户端接入) |
-| DeepSeek Harness | ✅ 支持 | [接入指南](#客户端接入) |
-| [Cursor](https://www.cursor.com/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [OpenCode](https://opencode.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ 支持 | [接入指南](#客户端接入) |
-| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ 支持 | [接入指南](#客户端接入) |
-| WorkBuddy | ✅ 支持 | [接入指南](#客户端接入) |
-| 千问办公 | ✅ 支持 | [接入指南](#客户端接入) |
-| 豆包工作 | ✅ 支持 | [接入指南](#客户端接入) |
-| [Codex](https://github.com/openai/codex) | ✅ 支持 | [接入指南](#客户端接入) |
-| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Pi](https://github.com/badlogic/pi-mono) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Kiro](https://kiro.dev/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ 支持 | [接入指南](#客户端接入) |
-| Qwen Code | ✅ 支持 | [接入指南](#客户端接入) |
-| [Aider](https://github.com/Aider-AI/aider) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Trae](https://www.trae.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
-| [Qoder](https://qoder.com/) | ✅ 支持 | [接入指南](#客户端接入) |
+| [Clawee Agent](https://github.com/krillinai/ClaweeAgent) | ✅ Native companion | [One-click integration](#claweeagent) |
+| [Kimi](https://github.com/MoonshotAI/kimi-cli) | ✅ Supported | [Integration guide](#client-integration) |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | ✅ Supported | [Integration guide](#client-integration) |
+| [Cursor](https://www.cursor.com/) | ✅ Supported | [Integration guide](#client-integration) |
+| [OpenCode](https://opencode.ai/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | ✅ Supported | [Integration guide](#client-integration) |
+| [GitHub Copilot CLI](https://github.com/features/copilot/cli) | ✅ Supported | [Integration guide](#client-integration) |
+| [WorkBuddy](https://www.workbuddy.cn/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Qwen Workspace (千问办公)](https://qwenwork.cn/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Doubao Workspace (豆包工作)](https://www.doubao.com/work) | ✅ Supported | [Integration guide](#client-integration) |
+| [Codex](https://github.com/openai/codex) | ✅ Supported | [Integration guide](#client-integration) |
+| [OpenClaw](https://github.com/openclaw/openclaw) | ✅ Supported | [Integration guide](#client-integration) |
+| [Hermes](https://github.com/NousResearch/hermes-agent) | ✅ Supported | [Integration guide](#client-integration) |
+| [Pi](https://github.com/badlogic/pi-mono) | ✅ Supported | [Integration guide](#client-integration) |
+| [Kiro](https://kiro.dev/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | ✅ Supported | [Integration guide](#client-integration) |
+| [Qwen Code](https://github.com/QwenLM/qwen-code) | ✅ Supported | [Integration guide](#client-integration) |
+| [Aider](https://github.com/Aider-AI/aider) | ✅ Supported | [Integration guide](#client-integration) |
+| [Kilo](https://github.com/Kilo-Org/kilocode) | ✅ Supported | [Integration guide](#client-integration) |
+| [Trae](https://www.trae.ai/) | ✅ Supported | [Integration guide](#client-integration) |
+| [Qoder](https://qoder.com/) | ✅ Supported | [Integration guide](#client-integration) |
 
 <div align="center">
-  <img src="./docs/assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
+  <img src="./docs/assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
 </div>
 
-## 系统架构
+## System Architecture
 
 ```text
 Agents / IDE / MCP Clients / Internal Apps
@@ -110,19 +111,19 @@ Agents / IDE / MCP Clients / Internal Apps
  PostgreSQL + Embedded Web Console + External Ops Config
 ```
 
-技术栈：**Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**。
+Technology stack: **Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**.
 
-## 快速开始
+## Quick Start
 
-### 环境要求
+### Prerequisites
 
-- Go 1.25、Node.js 24、Corepack 和仓库锁定的 pnpm 10.33.3
-- Docker 与 Docker Compose
-- Bash 与 Make；Windows 建议使用 WSL2
+- Go 1.25, Node.js 24, Corepack, and pnpm 10.33.3 as pinned by the repository
+- Docker and Docker Compose
+- Bash and Make; WSL2 is recommended on Windows
 
-### 从源码启动
+### Run from Source
 
-在仓库根目录执行：
+Run the following commands from the repository root:
 
 ```bash
 git clone https://github.com/krillinai/AIGateway.git
@@ -131,7 +132,7 @@ corepack enable pnpm
 corepack pnpm run setup
 ```
 
-初始化仓库外配置。该命令会生成随机密钥，已有配置不会被覆盖：
+Initialize configuration outside the repository. This command generates random secrets and never overwrites an existing configuration:
 
 ```bash
 export CLAWEE_OPS_DIR="$HOME/aigateway-ops"
@@ -140,7 +141,7 @@ corepack pnpm run init \
   --gateway http://127.0.0.1:1904
 ```
 
-启动一套新的本地开发数据库并执行迁移。以下密码仅用于本地开发：
+Start a fresh local development database and run migrations. The following password is for local development only:
 
 ```bash
 export CLAWEE_POSTGRES_PASSWORD="local-dev-only"
@@ -149,17 +150,17 @@ node scripts/clawee.mjs server deps-up
 corepack pnpm db:migrate
 ```
 
-启动 Gateway：
+Start the Gateway:
 
 ```bash
 corepack pnpm server:dev
 ```
 
-访问 **http://127.0.0.1:1904**。首次启动会在内嵌管理台不存在时自动构建前端。
+Open **http://127.0.0.1:1904**. On the first launch, the management console is built automatically if its embedded assets are missing.
 
-如需前端热更新，在另一个终端运行 `corepack pnpm admin:dev`，访问 **http://127.0.0.1:5904**。
+For frontend hot reloading, run `corepack pnpm admin:dev` in another terminal and open **http://127.0.0.1:5904**.
 
-验证服务：
+Verify the service:
 
 ```bash
 curl --fail http://127.0.0.1:1904/healthz
@@ -167,12 +168,12 @@ curl --fail http://127.0.0.1:1904/readyz
 curl --fail http://127.0.0.1:1904/version
 ```
 
-**系统中的首个注册账号自动成为管理员。** 请在受控网络中完成首个账号注册，再开放访问；生产环境必须使用 HTTPS。
+**The first registered account automatically becomes the administrator.** Complete this registration on a controlled network before opening access to others. Production deployments must use HTTPS.
 
 <details>
-<summary><strong>使用 Docker Compose 启动</strong></summary>
+<summary><strong>Run with Docker Compose</strong></summary>
 
-先完成 `corepack pnpm run setup`，再执行：
+Complete `corepack pnpm run setup`, then run:
 
 ```bash
 export CLAWEE_OPS_DIR="$HOME/aigateway-container-ops"
@@ -187,22 +188,22 @@ docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml ru
 docker compose --env-file "$CLAWEE_OPS_DIR/.env" -f deploy/docker-compose.yml up -d gateway
 ```
 
-访问 `http://127.0.0.1:1904`。发布镜像为 `ghcr.io/krillinai/aigateway-server`。
+Open `http://127.0.0.1:1904`. The published image is `ghcr.io/krillinai/aigateway-server`.
 
-Linux 宿主机需允许容器 UID/GID `65532` 读取外部配置。生产权限、HTTPS 和备份步骤见[生产部署指南](./server/docs/deployment/production.md)。
+On Linux hosts, allow container UID/GID `65532` to read the external configuration. See the [production deployment guide](./server/docs/deployment/production.md) for production permissions, HTTPS, and backup procedures.
 
 </details>
 
-## 客户端接入
+## Client Integration
 
-### 模型 API
+### Model API
 
-1. 在外部 `configs/config.yaml` 中设置 `model_access.mode: "platform_managed"` 并重启 Gateway。
-2. 在“模型网关 → 上游账号”添加 OpenAI 兼容 Base URL、API Key 和模型目录。
-3. 在“模型网关 → 模型组”配置成员账号、默认模型及 `failover` 或 `round_robin` 策略。
-4. 在“我的 Agent”生成平台接入 Token，使用 `http://127.0.0.1:1904/v1` 作为模型 Base URL。
+1. Set `model_access.mode: "platform_managed"` in the external `configs/config.yaml` and restart the Gateway.
+2. Under **Model Gateway → Upstream Accounts**, add an OpenAI-compatible Base URL, API key, and model catalog.
+3. Under **Model Gateway → Model Groups**, configure member accounts, a default model, and a `failover` or `round_robin` strategy.
+4. Under **My Agents**, generate a platform access token and use `http://127.0.0.1:1904/v1` as the model Base URL.
 
-验证模型目录与调用：
+Verify the model catalog and a request:
 
 ```bash
 export GATEWAY_ORIGIN="http://127.0.0.1:1904"
@@ -215,21 +216,21 @@ curl --fail "$GATEWAY_ORIGIN/v1/chat/completions" \
   -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": "你好"}],
+    "messages": [{"role": "user", "content": "Hello"}],
     "stream": false
   }'
 ```
 
-省略 `model` 时使用模型组默认模型。另支持 `POST /v1/responses` 和 SSE 流式响应，多模态能力由上游模型决定。
+If `model` is omitted, the model group's default model is used. `POST /v1/responses` and SSE streaming are also supported. Multimodal capabilities depend on the upstream model.
 
-Token 同时用于模型与 MCP，分别需要 `model:call` 和 `mcp:call` scope。轮换或吊销会影响该账户下所有 Agent。
+The same token is used for models and MCP, requiring the `model:call` and `mcp:call` scopes respectively. Rotating or revoking it affects every Agent under the account.
 
 ### MCP
 
-1. 管理员注册上游并同步能力。
-2. 在能力目录检查 Schema 与风险策略，为账户和 Agent 授予必要能力。
-3. 需要时配置用户确认或管理员审批。
-4. 在“我的 Agent”获取 Token、Agent ID 和 Endpoint，并配置 MCP Client：
+1. An administrator registers an upstream and synchronizes its capabilities.
+2. Review schemas and risk policies in the capability catalog, then grant the required capabilities to accounts and Agents.
+3. Configure user confirmation or administrator approval when required.
+4. Under **My Agents**, obtain the token, Agent ID, and endpoint, then configure the MCP client:
 
 ```json
 {
@@ -245,78 +246,78 @@ Token 同时用于模型与 MCP，分别需要 `model:call` 和 `mcp:call` scope
 }
 ```
 
-| Endpoint | 用途 |
+| Endpoint | Purpose |
 | --- | --- |
-| `/mcp` | 聚合已授权能力 |
-| `/mcp/servers/:server_id` | 指定上游的已授权能力 |
-| `/mcp/knowledge` | 知识库 MCP 能力 |
+| `/mcp` | Aggregated authorized capabilities |
+| `/mcp/servers/:server_id` | Authorized capabilities from a specific upstream |
+| `/mcp/knowledge` | Knowledge base MCP capabilities |
 
-`stdio` 上游会在 Gateway 主机执行命令，只允许配置经过审核的可执行文件，并使用低权限系统账户运行 Gateway。
+A `stdio` upstream executes commands on the Gateway host. Only configure reviewed executables and run the Gateway under a low-privilege system account.
 
 ### ClaweeAgent
 
-在 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 中将 Gateway Origin 设置为当前部署地址，本地默认为 `http://127.0.0.1:1904`，然后使用 Gateway 账户注册或登录。
+In [ClaweeAgent](https://github.com/krillinai/ClaweeAgent), set the Gateway Origin to your deployment address. The local default is `http://127.0.0.1:1904`. Then register or sign in with a Gateway account.
 
-详细约定见[Clawee Agent 接入](./server/docs/integration/clawee-agent.md)和[上游 MCP Server 接入](./server/docs/integration/upstream-mcp.md)。
+See [Clawee Agent integration](./server/docs/integration/clawee-agent.md) and [upstream MCP Server integration](./server/docs/integration/upstream-mcp.md) for integration details.
 
-## 配置与开发
+## Configuration and Development
 
-真实配置必须位于源码仓库之外，程序不会直接读取 `server/configs/config.example.yaml`：
+The real configuration must live outside the source repository. The application does not read `server/configs/config.example.yaml` directly:
 
 ```text
 $CLAWEE_OPS_DIR/
-├── configs/config.yaml   # 私有配置
-├── .env                  # 容器初始化时生成
-└── data/                 # Skill 与共享文件等数据
+├── configs/config.yaml   # Private configuration
+├── .env                  # Generated during container initialization
+└── data/                 # Skills, shared files, and other data
 ```
 
-已绑定字段可通过 `CLAW_GATEWAY_*` 环境变量覆盖，例如：
+Bound fields can be overridden with `CLAW_GATEWAY_*` environment variables, for example:
 
-| 环境变量 | 用途 |
+| Environment variable | Purpose |
 | --- | --- |
-| `CLAW_GATEWAY_SERVER_ADDR` | Gateway 监听地址 |
-| `CLAW_GATEWAY_DATABASE_URL` | PostgreSQL 连接串 |
-| `CLAW_GATEWAY_MCP_PUBLIC_BASE_URL` | 对外 Gateway Origin |
-| `CLAW_GATEWAY_MODEL_ACCESS_MODE` | `platform_managed` 或 `enterprise_managed` |
+| `CLAW_GATEWAY_SERVER_ADDR` | Gateway listen address |
+| `CLAW_GATEWAY_DATABASE_URL` | PostgreSQL connection string |
+| `CLAW_GATEWAY_MCP_PUBLIC_BASE_URL` | Public Gateway Origin |
+| `CLAW_GATEWAY_MODEL_ACCESS_MODE` | `platform_managed` or `enterprise_managed` |
 
-完整字段与 Secret 要求见[配置参考](./server/docs/getting-started/configuration.md)。
+See the [configuration reference](./server/docs/getting-started/configuration.md) for all fields and secret requirements.
 
-常用开发命令：
+Common development commands:
 
-| 命令 | 用途 |
+| Command | Purpose |
 | --- | --- |
-| `corepack pnpm run setup` | 安装根目录与管理台依赖 |
-| `corepack pnpm server:dev` | 启动 Gateway |
-| `corepack pnpm admin:dev` | 启动管理台开发服务器 |
-| `corepack pnpm test` | 根目录脚本测试 |
-| `corepack pnpm admin test` | 管理台测试 |
-| `corepack pnpm server:test` | 服务端与管理台测试 |
-| `corepack pnpm server:build` | 构建内嵌管理台的 Go 二进制 |
-| `cd server && go vet ./...` | Go 静态检查 |
-| `corepack pnpm container:smoke` | 隔离容器冒烟验证 |
+| `corepack pnpm run setup` | Install root and management console dependencies |
+| `corepack pnpm server:dev` | Start the Gateway |
+| `corepack pnpm admin:dev` | Start the management console development server |
+| `corepack pnpm test` | Run root script tests |
+| `corepack pnpm admin test` | Run management console tests |
+| `corepack pnpm server:test` | Run server and management console tests |
+| `corepack pnpm server:build` | Build the Go binary with the embedded management console |
+| `cd server && go vet ./...` | Run Go static analysis |
+| `corepack pnpm container:smoke` | Run isolated container smoke verification |
 
-服务端集成测试只使用隔离 PostgreSQL，可通过 `CLAW_GATEWAY_TEST_DATABASE_URL` 指定 `_test` 数据库。不要连接开发库或生产库执行测试。
+Server integration tests must use isolated PostgreSQL databases. Use `CLAW_GATEWAY_TEST_DATABASE_URL` to specify a `_test` database, and never run tests against development or production databases.
 
-生产部署前请阅读安全与运维文档，落实 HTTPS、Secret 管理、持久化、备份、迁移和指标访问控制。安全问题请按照[安全报告指南](./SECURITY.md)私密报告。
+Before deploying to production, review the security and operations documentation and implement HTTPS, secret management, persistence, backups, migrations, and metrics access controls. Report security issues privately using the [security reporting guide](./SECURITY.md).
 
-## 文档导航
+## Documentation
 
-- **架构与权限**：[项目职责](./docs/architecture.md) · [Gateway 架构](./server/docs/architecture/overview.md) · [安全与权限](./server/docs/architecture/security-and-permissions.md)
-- **安装与配置**：[本地开发](./server/docs/getting-started/development.md) · [配置参考](./server/docs/getting-started/configuration.md) · [生产部署](./server/docs/deployment/production.md)
-- **客户端接入**：[Clawee Agent](./server/docs/integration/clawee-agent.md) · [MCP 上游](./server/docs/integration/upstream-mcp.md) · [HTTP API](./server/docs/reference/http-api.md)
-- **运维与开发**：[验证与操作](./docs/validation-and-operations.md) · [运维手册](./docs/operations/operations-guide.md) · [管理台规范](./docs/frontend/frontend-development-guidelines.md)
-- **项目协作**：[贡献指南](./CONTRIBUTING.md) · [仓库维护约定](./docs/repository-maintenance.md) · [第三方声明](./third_party/README.md)
+- **Architecture and permissions:** [Project responsibilities](./docs/architecture.md) · [Gateway architecture](./server/docs/architecture/overview.md) · [Security and permissions](./server/docs/architecture/security-and-permissions.md)
+- **Installation and configuration:** [Local development](./server/docs/getting-started/development.md) · [Configuration reference](./server/docs/getting-started/configuration.md) · [Production deployment](./server/docs/deployment/production.md)
+- **Client integration:** [Clawee Agent](./server/docs/integration/clawee-agent.md) · [MCP upstreams](./server/docs/integration/upstream-mcp.md) · [HTTP API](./server/docs/reference/http-api.md)
+- **Operations and development:** [Validation and operations](./docs/validation-and-operations.md) · [Operations guide](./docs/operations/operations-guide.md) · [Management console guidelines](./docs/frontend/frontend-development-guidelines.md)
+- **Project collaboration:** [Contributing guide](./CONTRIBUTING.md) · [Repository maintenance](./docs/repository-maintenance.md) · [Third-party notices](./third_party/README.md)
 
-## 社区与支持
+## Community and Support
 
-- 官网：[clawee.work](https://www.clawee.work/)
-- Agent 客户端：[ClaweeAgent](https://github.com/krillinai/ClaweeAgent)
-- 问题反馈：[GitHub Issues](https://github.com/krillinai/AIGateway/issues)
-- 发布版本：[GitHub Releases](https://github.com/krillinai/AIGateway/releases)
-- 企业部署：[hello@clawee.ai](mailto:hello@clawee.ai)
+- Website: [clawee.work](https://www.clawee.work/)
+- Agent client: [ClaweeAgent](https://github.com/krillinai/ClaweeAgent)
+- Issue reporting: [GitHub Issues](https://github.com/krillinai/AIGateway/issues)
+- Releases: [GitHub Releases](https://github.com/krillinai/AIGateway/releases)
+- Enterprise deployment: [hello@clawee.ai](mailto:hello@clawee.ai)
 
-欢迎通过 Issue、Pull Request、文档和测试改进 AI Gateway。如果这个项目对你的团队有帮助，欢迎 Star 仓库。
+Contributions through issues, pull requests, documentation, and tests are welcome. If AI Gateway helps your team, please consider starring the repository.
 
 ## License
 
-AI Gateway 使用 [Apache License 2.0](./LICENSE) 开源。第三方声明见 [NOTICE](./NOTICE) 和 [third_party](./third_party/README.md)。
+AI Gateway is open source under the [Apache License 2.0](./LICENSE). See [NOTICE](./NOTICE) and [third_party](./third_party/README.md) for third-party notices.
