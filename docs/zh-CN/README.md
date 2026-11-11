@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img src="../assets/aigateway-logo.png" alt="" width="40" height="40" align="absmiddle" /> AI Gateway
+# <img src="../assets/aigateway-logo.png" alt="" width="36" height="36" align="absmiddle" /> AI Gateway
 
 **面向FDE、企业CTO、CIO和IT团队 · 由KrillinAI 团队打造**
 
@@ -28,34 +28,39 @@
 
 AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
 
-## 核心能力
+## 网关内核
 
 | 模块 | 能力 |
 | --- | --- |
 | 模型网关 | OpenAI 兼容接口、上游账号与模型目录、模型组、默认模型、故障转移和轮询、SSE 流式响应 |
 | MCP 网关 | 纳管 `streamable_http` / `stdio` 上游，同步 tools、resources、prompts，按授权裁剪能力 |
+| A2A 网关 | Agent 间协作接入（规划中） |
 | 身份与权限 | 账户 Session、稳定 Agent ID、账户 Token、控制台 RBAC、数据资源授权 |
 | 风险门禁 | MCP 用户确认与管理员审批，调用前重新校验授权、能力版本和参数快照 |
-| 审计与用量 | 记录调用主体、路由、状态、耗时、错误和 Token 用量，提供个人记录与管理端分析 |
-| Skill Hub | Skill 包、版本、空间、Git 来源、审核发布与客户端下载 |
-| 知识与文件 | 百炼知识库接入、共享空间、文件上传下载、本地或阿里云 OSS 存储 |
+| 审计 | 记录调用主体、路由、状态、耗时和错误，提供个人记录与管理端分析 |
+| Token 用量 | Token 总量、趋势、模型分布、员工排行及缺失用量提示 |
 
 模型与 MCP 审计会脱敏，不保存明文 API Key、Cookie 或上游凭据。
 
-## 企业扩展
+## 基础能力扩展
 
-支持以下可选集成：
+| 模块 | 能力 |
+| --- | --- |
+| Skill Hub | Skill 包、版本、空间、Git 来源、审核发布与客户端下载 |
+| 知识库 | 百炼、RAGFlow 知识库接入与授权访问 |
+| 文件系统 | 共享空间、文件上传下载、本地或阿里云 OSS 存储 |
+
+## 企业系统扩展
+
+按需接入企业系统与办公平台，编排业务流程：
 
 | 类目 | 具体实现 |
 | --- | --- |
-| 业务流程 | 工作流与审批 |
-| Agent 管理 | Agent 活动 |
-| 企业办公 IM | 钉钉 |
-| 社媒数据 | Bilibili |
-| 模型服务 | 外部模型配置 |
-| 费用管理 | 计费 |
+| 企业系统 | ERP、CRM、OMS 等 |
+| 企业办公 | 钉钉 |
+| 业务流程 | 工作流、审批 |
 
-可选企业集成未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
+企业系统扩展未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
 
 ## 支持的 Agent
 
@@ -87,6 +92,14 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 
 <div align="center">
   <img src="../assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
+</div>
+
+## 支持的模型
+
+通过 OpenAI 兼容上游接入 1100+ 模型，覆盖以下主要模型提供商。实际可用模型与多模态能力取决于已配置的上游。
+
+<div align="center">
+  <img src="../assets/supported-models.png" alt="OpenAI、Anthropic、Google Gemini、DeepSeek、千问、Kimi、智谱、MiniMax、豆包与 xAI" width="100%" />
 </div>
 
 ## 系统架构

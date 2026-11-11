@@ -1,10 +1,11 @@
 <div align="center">
 
-# <img src="./docs/assets/aigateway-logo.png" alt="" width="40" height="40" align="absmiddle" /> AI Gateway
+# <img src="./docs/assets/aigateway-logo.png" alt="" width="36" height="36" align="absmiddle" /> AI Gateway
 
 **For forward deployed engineers (FDEs), enterprise CTOs, CIOs, and IT teams · Built by KrillinAI**
 
-Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics. **Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
+Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics.<br />
+**Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
 
 [简体中文](./docs/zh-CN/README.md) · **English**
 
@@ -27,34 +28,39 @@ This repository includes the **Go Gateway, React management console, PostgreSQL 
 
 AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise business system. It exposes an OpenAI-compatible HTTP API for models and MCP over Streamable HTTP for tools.
 
-## Core Capabilities
+## Gateway Core
 
 | Module | Capabilities |
 | --- | --- |
 | Model Gateway | OpenAI-compatible APIs, upstream accounts and model catalogs, model groups, default models, failover, round robin, and SSE streaming |
 | MCP Gateway | Manage `streamable_http` and `stdio` upstreams, synchronize tools, resources, and prompts, and filter capabilities by authorization |
+| A2A Gateway | Agent-to-agent collaboration (planned) |
 | Identity and Access | Account sessions, stable Agent IDs, account tokens, console RBAC, and data resource grants |
 | Risk Gates | User confirmation and administrator approval for MCP calls, with authorization, capability version, and parameter snapshot checks before execution |
-| Auditing and Usage | Track callers, routes, status, latency, errors, and token usage with personal history and administrator analytics |
-| Skill Hub | Skill packages, versions, spaces, Git sources, review and publishing workflows, and client downloads |
-| Knowledge and Files | Bailian knowledge base integration, shared spaces, file upload and download, and local or Alibaba Cloud OSS storage |
+| Auditing | Track callers, routes, status, latency, and errors with personal history and administrator analytics |
+| Token Usage | Token totals, trends, model distribution, employee rankings, and missing usage indicators |
 
 Model and MCP audits are redacted and do not store plaintext API keys, cookies, or upstream credentials.
 
-## Enterprise Extensions
+## Foundational Extensions
 
-The following optional integrations are available:
+| Module | Capabilities |
+| --- | --- |
+| Skill Hub | Skill packages, versions, spaces, Git sources, review and publishing workflows, and client downloads |
+| Knowledge Bases | Bailian and RAGFlow knowledge base integration with authorized access |
+| File System | Shared spaces, file upload and download, and local or Alibaba Cloud OSS storage |
+
+## Enterprise System Extensions
+
+Connect enterprise systems and office platforms, and orchestrate business processes as needed:
 
 | Category | Implementation |
 | --- | --- |
+| Enterprise systems | ERP, CRM, OMS, and more |
+| Enterprise office | DingTalk |
 | Business processes | Workflows and approvals |
-| Agent management | Agent activity |
-| Enterprise messaging | DingTalk |
-| Social media data | Bilibili |
-| Model services | External model configuration |
-| Cost management | Billing |
 
-Optional enterprise integrations are not required for core account, RBAC, and MCP governance capabilities.
+Enterprise system extensions are not required for core account, RBAC, and MCP governance capabilities.
 
 ## Supported Agents
 
@@ -86,6 +92,14 @@ AI Gateway supports all mainstream Agents. Configure your Agent to use the Gatew
 
 <div align="center">
   <img src="./docs/assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
+</div>
+
+## Supported Models
+
+Access over 1,100 models through OpenAI-compatible upstreams, including models from the providers below. Available models and multimodal capabilities depend on the configured upstreams.
+
+<div align="center">
+  <img src="./docs/assets/supported-models.png" alt="OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen, Kimi, Zhipu, MiniMax, Doubao, and xAI" width="100%" />
 </div>
 
 ## System Architecture
