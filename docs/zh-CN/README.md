@@ -22,16 +22,15 @@
 
 ## 项目概览
 
-当 Agent、模型和工具不断增加，分散的密钥、权限与调用日志会迅速变得难以管理。AI Gateway 在 Agent 与企业能力之间提供统一治理入口，让每一次模型或工具调用都经过可验证的身份、明确的授权和可追溯的审计。
+企业里的 Agent、模型和工具越来越多时，账号密钥容易分散，权限难以统一，调用记录也很难追踪。AI Gateway 把这些连接放到同一个入口，让你可以统一管理谁能使用哪些服务，并清楚查看每一次调用的过程和结果。
 
-本仓库包含 **Go Gateway、React 管理台、PostgreSQL 迁移和部署工具**，既可独立使用，也可作为 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) 的服务端。
+这个项目包含 **Gateway 服务端、网页管理台、数据库升级脚本和部署工具**。你可以把它部署在自己的服务器上独立使用，也可以接入 [ClaweeAgent](https://github.com/krillinai/ClaweeAgent)，作为它的企业管理后端。
 
-AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统；模型侧使用 OpenAI 兼容 HTTP API，工具侧使用 MCP over Streamable HTTP。
+AI Gateway 本身不是聊天 Agent，也不负责运行桌面客户端或企业业务系统。它更像企业 AI 的统一入口：Agent 通过常见的 OpenAI 兼容接口调用模型，通过 MCP 使用工具和数据。
 
 ## 系统架构
 
-```text
-Agents / IDE / MCP Clients / Enterprise Applications
+<table align="center"><tr><td><pre><code>Agents / IDE / MCP Clients / Enterprise Applications
                          |
           OpenAI-compatible / MCP / A2A (planned) / HTTP
                          |
@@ -57,8 +56,7 @@ Agents / IDE / MCP Clients / Enterprise Applications
  Model Upstreams       MCP Upstreams       Enterprise Systems
  OpenAI-compatible     HTTP / stdio         Apps / IM / Data
 
- PostgreSQL + Embedded Web Console + External Ops Config
-```
+ PostgreSQL + Embedded Web Console + External Ops Config</code></pre></td></tr></table>
 
 技术栈：**Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**。
 

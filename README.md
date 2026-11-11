@@ -22,16 +22,15 @@ Connect models, MCP tools, knowledge bases, and shared resources through a singl
 
 ## Project Overview
 
-As organizations adopt more Agents, models, and tools, scattered credentials, permissions, and invocation logs quickly become difficult to manage. AI Gateway provides a unified governance layer between Agents and enterprise capabilities, giving every model or tool invocation a verified identity, explicit authorization, and a traceable audit trail.
+As teams adopt more Agents, models, and tools, credentials become scattered, permissions become harder to manage, and it becomes difficult to see who called what. AI Gateway brings these connections into one place, so you can control who can use each service and keep a clear record of every call.
 
-This repository includes the **Go Gateway, React management console, PostgreSQL migrations, and deployment tooling**. It can run independently or serve as the backend for [ClaweeAgent](https://github.com/krillinai/ClaweeAgent).
+This project includes the **Gateway server, web management console, database migrations, and deployment tools**. You can deploy it on your own infrastructure and use it independently, or connect it to [ClaweeAgent](https://github.com/krillinai/ClaweeAgent) as its enterprise management backend.
 
-AI Gateway does not provide a local Agent Runtime, desktop client, or enterprise business system. It exposes an OpenAI-compatible HTTP API for models and MCP over Streamable HTTP for tools.
+AI Gateway is not a chat Agent, and it does not run desktop clients or your business systems. It provides a single entry point for enterprise AI: Agents call models through a familiar OpenAI-compatible API and access tools and data through MCP.
 
 ## System Architecture
 
-```text
-Agents / IDE / MCP Clients / Enterprise Applications
+<table align="center"><tr><td><pre><code>Agents / IDE / MCP Clients / Enterprise Applications
                          |
           OpenAI-compatible / MCP / A2A (planned) / HTTP
                          |
@@ -57,8 +56,7 @@ Agents / IDE / MCP Clients / Enterprise Applications
  Model Upstreams       MCP Upstreams       Enterprise Systems
  OpenAI-compatible     HTTP / stdio         Apps / IM / Data
 
- PostgreSQL + Embedded Web Console + External Ops Config
-```
+ PostgreSQL + Embedded Web Console + External Ops Config</code></pre></td></tr></table>
 
 Technology stack: **Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreSQL 16 · MCP Go SDK · Docker**.
 
