@@ -56,7 +56,7 @@ Connect enterprise systems and office platforms, and orchestrate business proces
 
 | Category | Implementation |
 | --- | --- |
-| Enterprise systems | ERP, CRM, OMS, and more |
+| Enterprise systems | ERP, OA, MES, PLM, CRM, HR, SCM, WMS, TMS, OMS, and more |
 | Enterprise office | DingTalk |
 | Business processes | Workflows and approvals |
 
@@ -65,6 +65,10 @@ Enterprise system extensions are not required for core account, RBAC, and MCP go
 ## Supported Agents
 
 AI Gateway supports all mainstream Agents. Configure your Agent to use the Gateway's OpenAI-compatible API or MCP endpoint to access centralized identity, access control, routing, approvals, and auditing.
+
+<div align="center">
+  <img src="./docs/assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
+</div>
 
 | Agent / Platform | Status | Quick Start |
 | --- | :---: | --- |
@@ -90,16 +94,12 @@ AI Gateway supports all mainstream Agents. Configure your Agent to use the Gatew
 | [Trae](https://www.trae.ai/) | ✅ Supported | [Integration guide](#client-integration) |
 | [Qoder](https://qoder.com/) | ✅ Supported | [Integration guide](#client-integration) |
 
-<div align="center">
-  <img src="./docs/assets/supported-agents.png" alt="21 mainstream Agents and platforms supported by AI Gateway" width="100%" />
-</div>
-
 ## Supported Models
 
-Access over 1,100 models through OpenAI-compatible upstreams, including models from the providers below. Available models and multimodal capabilities depend on the configured upstreams.
+Access over 1,100 models through OpenAI-compatible upstreams, spanning international and Chinese providers, open-source runtimes, inference platforms, and model aggregators. Available models and multimodal capabilities depend on the configured upstreams.
 
 <div align="center">
-  <img src="./docs/assets/supported-models.png" alt="OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen, Kimi, Zhipu, MiniMax, Doubao, and xAI" width="100%" />
+  <img src="./docs/assets/supported-models.png" alt="24 model providers and platforms, including OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Ollama, vLLM, and OpenRouter" width="100%" />
 </div>
 
 ## System Architecture

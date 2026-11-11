@@ -56,7 +56,7 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 
 | 类目 | 具体实现 |
 | --- | --- |
-| 企业系统 | ERP、CRM、OMS 等 |
+| 企业系统 | ERP、OA、MES、PLM、CRM、HR、SCM、WMS、TMS、OMS 等 |
 | 企业办公 | 钉钉 |
 | 业务流程 | 工作流、审批 |
 
@@ -65,6 +65,10 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 ## 支持的 Agent
 
 支持所有主流 Agent。Agent 可通过自身支持的 OpenAI 兼容 API 或 MCP 配置能力接入 AI Gateway，复用统一的身份、权限、路由、审批和审计能力。
+
+<div align="center">
+  <img src="../assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
+</div>
 
 | Agent / 平台 | 状态 | 快速接入 |
 | --- | :---: | --- |
@@ -90,16 +94,12 @@ AI Gateway 不提供本地 Agent Runtime、桌面客户端或企业业务系统�
 | [Trae](https://www.trae.ai/) | ✅ 支持 | [接入指南](#客户端接入) |
 | [Qoder](https://qoder.com/) | ✅ 支持 | [接入指南](#客户端接入) |
 
-<div align="center">
-  <img src="../assets/supported-agents.png" alt="AI Gateway 支持的 21 个主流 Agent 与平台" width="100%" />
-</div>
-
 ## 支持的模型
 
-通过 OpenAI 兼容上游接入 1100+ 模型，覆盖以下主要模型提供商。实际可用模型与多模态能力取决于已配置的上游。
+通过 OpenAI 兼容上游接入 1100+ 模型，覆盖国际与国内模型厂商、开源运行时、推理平台与聚合服务。实际可用模型与多模态能力取决于已配置的上游。
 
 <div align="center">
-  <img src="../assets/supported-models.png" alt="OpenAI、Anthropic、Google Gemini、DeepSeek、千问、Kimi、智谱、MiniMax、豆包与 xAI" width="100%" />
+  <img src="../assets/supported-models.png" alt="OpenAI、Anthropic、Gemini、DeepSeek、千问、Ollama、vLLM、OpenRouter 等 24 个模型厂商与平台" width="100%" />
 </div>
 
 ## 系统架构
