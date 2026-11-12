@@ -99,7 +99,7 @@ Enterprise system extensions are not required for core account, RBAC, and MCP go
 
 ## Agent Activity
 
-Monitor adoption and usage across employees and Agents in one view. Filter by today, the last 7 days, or the last 30 days, then inspect:
+View employee and Agent usage in one place. Filter by today, the last 7 days, or the last 30 days to explore:
 
 - Token totals, active employees, active Agents, and completed turns
 - Token trends and input, cached input, and output composition
