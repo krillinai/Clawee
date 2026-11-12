@@ -5,7 +5,7 @@
 **面向FDE、企业CTO、CIO和IT团队 · 由KrillinAI 团队打造**
 
 统一接入模型、MCP 工具、知识库与共享资源，集中完成身份认证、权限控制、路由、审批、审计与用量分析。<br />
-**支持所有主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
+**支持 20+ 种主流 Agent，你正在使用的 Agent 都可以接入；支持接入 1100+ 模型。**
 
 **简体中文** · [English](../../README.md)
 
@@ -95,6 +95,20 @@ AI Gateway 本身不是聊天 Agent，也不负责运行桌面客户端或企业
 | 业务流程 | 工作流、审批 |
 
 企业系统扩展未配置时，不影响核心账户、RBAC 与 MCP 治理能力。
+
+## Agent 动态
+
+集中查看员工和 Agent 的使用情况，支持按今天、近 7 天或近 30 天筛选：
+
+- Token 总量、活跃员工、活跃 Agent 和完成轮次
+- Token 趋势及输入、缓存输入、输出构成
+- 使用方请求数与 Token 消耗排行
+- 模型和 MCP 使用分布
+- Agent 会话、轮次、状态与最近活动
+
+<div align="center">
+  <img src="../assets/agent-activity.jpg" alt="Agent 动态面板，展示 Token 趋势、使用排行、模型与 MCP 分布及 Agent 状态" width="100%" />
+</div>
 
 ## 支持的 Agent
 

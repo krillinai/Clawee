@@ -5,7 +5,7 @@
 **For forward deployed engineers (FDEs), enterprise CTOs, CIOs, and IT teams · Built by KrillinAI**
 
 Connect models, MCP tools, knowledge bases, and shared resources through a single gateway for authentication, access control, routing, approvals, auditing, and usage analytics.<br />
-**Supports all mainstream Agents, including the one you already use, and over 1,100 models.**
+**Supports 20+ mainstream Agents, including the one you already use, and over 1,100 models.**
 
 [简体中文](./docs/zh-CN/README.md) · **English**
 
@@ -95,6 +95,20 @@ Connect enterprise systems and office platforms, and orchestrate business proces
 | Business processes | Workflows and approvals |
 
 Enterprise system extensions are not required for core account, RBAC, and MCP governance capabilities.
+
+## Agent Activity
+
+Monitor adoption and usage across employees and Agents in one view. Filter by today, the last 7 days, or the last 30 days, then inspect:
+
+- Token totals, active employees, active Agents, and completed turns
+- Token trends and input, cached input, and output composition
+- Request counts and token consumption rankings by user
+- Model and MCP usage distribution
+- Agent sessions, turns, status, and latest activity
+
+<div align="center">
+  <img src="./docs/assets/agent-activity.jpg" alt="Agent Activity dashboard with token trends, usage rankings, model and MCP distribution, and Agent status" width="100%" />
+</div>
 
 ## Supported Agents
 
