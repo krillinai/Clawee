@@ -38,13 +38,14 @@ AI Gateway is not a chat Agent, and it does not run desktop clients or your busi
 | AI Gateway                                              |
 |                                                         |
 | Shared Governance                                       |
-| Identity / RBAC / Agent Management / Gates / Audit      |
+| Identity / RBAC / Gates / Audit                          |
 | Token Usage / Usage Analytics                           |
 |                                                         |
 | Gateway Core                                            |
 | Model Gateway / MCP Gateway / A2A Gateway (planned)     |
 |                                                         |
 | Foundational Extensions                                 |
+| Agent Management                                        |
 | Skill Hub / Knowledge Bases / File System               |
 |                                                         |
 | Enterprise System Extensions                            |
@@ -68,7 +69,6 @@ Technology stack: **Go 1.25 · Gin · React 19 · TypeScript · Vite · PostgreS
 | MCP Gateway | Manage `streamable_http` and `stdio` upstreams, synchronize tools, resources, and prompts, and filter capabilities by authorization |
 | A2A Gateway | Agent-to-agent collaboration (planned) |
 | Identity and Access | Account sessions, stable Agent IDs, account tokens, console RBAC, and data resource grants |
-| Agent Management | Agent activity |
 | Risk Gates | User confirmation and administrator approval for MCP calls, with authorization, capability version, and parameter snapshot checks before execution |
 | Auditing | Track callers, routes, status, latency, and errors with personal history and administrator analytics |
 | Token Usage | Token totals, trends, model distribution, employee rankings, and missing usage indicators |
@@ -79,6 +79,7 @@ Model and MCP audits are redacted and do not store plaintext API keys, cookies, 
 
 | Module | Capabilities |
 | --- | --- |
+| Agent Management | Agent activity |
 | Skill Hub | Skill packages, versions, spaces, Git sources, review and publishing workflows, and client downloads |
 | Knowledge Bases | Bailian and RAGFlow knowledge base integration with authorized access |
 | File System | Shared spaces, file upload and download, and local or Alibaba Cloud OSS storage |
